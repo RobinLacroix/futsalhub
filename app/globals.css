@@ -12,15 +12,28 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Egalise la hauteur des événements dans une case de react-big-calendar */
+.rbc-day-slot .rbc-events-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.rbc-day-slot .rbc-event {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: 100%;
+  margin-bottom: 2px;
+  overflow: hidden;
 }

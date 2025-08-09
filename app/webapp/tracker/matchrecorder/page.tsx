@@ -1,0 +1,2445 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabaseClient';
+import { 
+  Play, 
+  Pause, 
+  RotateCcw, 
+  Download,
+  Users,
+  Target,
+  Crosshair,
+  Goal,
+  AlertTriangle,
+  RefreshCw,
+  ArrowRight,
+  Calendar,
+  CheckCircle,
+  ArrowLeft,
+  Trophy,
+  Plus,
+  Clock,
+  X,
+  MapPin,
+  Save,
+  Timer,
+  Flag,
+  Zap,
+  Circle,
+  Square
+} from 'lucide-react';
+
+interface Player {
+  id: string;
+  name: string;
+  number: number;
+  position: string;
+  isStarter: boolean;
+  isOnField: boolean;
+  totalTime: number;
+  currentSequenceTime: number;
+  yellowCards: number;
+  redCards: number;
+  stats: {
+    shotsOnTarget: number;
+    shotsOffTarget: number;
+    goals: number;
+    ballLoss: number;
+    ballRecovery: number;
+    dribbleSuccess: number;
+    oneOnOneDefLost: number;
+    [key: string]: number;
+  };
+}
+
+interface Match {
+  id: string;
+  title: string;
+  date: string;
+  competition: string;
+  location?: string;
+  score_team?: number;
+  score_opponent?: number;
+  opponent_team?: string;
+}
+
+interface MatchData {
+  selectedMatch: Match | null;
+  isRunning: boolean;
+  currentSequence: number;
+  players: Player[];
+  teamScore: number;
+  opponentScore: number;
+  matchTime: number; // en secondes
+  currentHalf: 1 | 2; // 1 = première mi-temps, 2 = deuxième mi-temps
+  teamFouls: number;
+  opponentFouls: number;
+  opponentActions: {
+    shotsOnTarget: number;
+    shotsOffTarget: number;
+  };
+}
+
+const ACTIONS = [
+  { id: 'shotsOnTarget', name: 'Tir cadré', icon: Target, color: 'bg-green-500' },
+  { id: 'shotsOffTarget', name: 'Tir non cadré', icon: Crosshair, color: 'bg-yellow-500' },
+  { id: 'goals', name: 'But', icon: Goal, color: 'bg-blue-500' },
+  { id: 'ballLoss', name: 'Perte de balle', icon: AlertTriangle, color: 'bg-red-500' },
+  { id: 'ballRecovery', name: 'Récupération', icon: RefreshCw, color: 'bg-green-600' },
+  { id: 'dribbleSuccess', name: 'Dribble réussi', icon: ArrowRight, color: 'bg-purple-500' },
+  { id: 'oneOnOneDefLost', name: '1v1 déf perdu', icon: AlertTriangle, color: 'bg-red-700' },
+];
+
+export default function MatchRecorderPage() {
+  const [matchData, setMatchData] = useState<MatchData>({
+    selectedMatch: null,
+    isRunning: false,
+    currentSequence: 1,
+    players: [],
+    teamScore: 0,
+    opponentScore: 0,
+    matchTime: 0,
+    currentHalf: 1,
+    teamFouls: 0,
+    opponentFouls: 0,
+    opponentActions: {
+      shotsOnTarget: 0,
+      shotsOffTarget: 0,
+    },
+  });
+
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [currentStep, setCurrentStep] = useState<'match' | 'matchInfo' | 'recording'>('match');
+  const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
+  const [showAddMatchForm, setShowAddMatchForm] = useState(false);
+  const [newMatch, setNewMatch] = useState({
+    title: '',
+    date: new Date().toISOString().slice(0, 16), // Format datetime-local
+    location: 'Domicile',
+    competition: 'Amical',
+    opponent_team: '',
+    score_team: 0,
+    score_opponent: 0,
+    goals_by_type: {
+      offensive: 0,
+      transition: 0,
+      cpa: 0,
+      superiority: 0
+    },
+    conceded_by_type: {
+      offensive: 0,
+      transition: 0,
+      cpa: 0,
+      superiority: 0
+    }
+  });
+
+  const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
+
+  const togglePlayerSelection = (playerId: string) => {
+    setSelectedPlayers(prev => {
+      if (prev.includes(playerId)) {
+        return prev.filter(id => id !== playerId);
+      } else {
+        return [...prev, playerId];
+      }
+    });
+  };
+
+  // État pour les informations du match
+  const [matchInfo, setMatchInfo] = useState({
+    title: '',
+    date: '',
+    location: 'Domicile',
+    competition: 'Amical',
+    opponent: ''
+  });
+
+  // État pour les joueurs convoqués
+  const [convokedPlayers, setConvokedPlayers] = useState<string[]>([]);
+  const [starterPlayers, setStarterPlayers] = useState<string[]>([]);
+  
+  // États pour le drag & drop
+  const [draggedPlayer, setDraggedPlayer] = useState<string | null>(null);
+  const [dragOverPlayer, setDragOverPlayer] = useState<string | null>(null);
+  
+  // État pour la vue active (saisie ou bilan)
+  const [activeView, setActiveView] = useState<'recording' | 'summary'>('recording');
+  
+  // États pour le clic long
+  const [longPressTimers, setLongPressTimers] = useState<{ [key: string]: NodeJS.Timeout }>({});
+  const [longPressTriggered, setLongPressTriggered] = useState<{ [key: string]: boolean }>({});
+
+  // Charger les données depuis Supabase
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setLoading(true);
+        
+        // Charger les matches triés par date (plus récents en premier)
+        const { data: matchesData, error: matchesError } = await supabase
+          .from('matches')
+          .select('id, title, date, competition, location, score_team, score_opponent, opponent_team')
+          .order('date', { ascending: false });
+
+        if (matchesError) {
+          console.error('Erreur lors du chargement des matches:', matchesError);
+          setMatches([]);
+        } else {
+          setMatches(matchesData || []);
+        }
+
+        // Charger les joueurs
+        const { data: playersData, error: playersError } = await supabase
+          .from('players')
+          .select('*')
+          .order('last_name');
+
+        if (playersError) {
+          console.error('Erreur lors du chargement des joueurs:', playersError);
+          setPlayers([]);
+        } else {
+          const transformedPlayers: Player[] = (playersData || []).map((player: any) => {
+            if (!player || !player.id || !player.first_name || !player.last_name) {
+              return null;
+            }
+            
+            return {
+              id: player.id,
+              name: `${player.first_name} ${player.last_name}`,
+              number: player.number || player.age || 0,
+              position: player.position || 'Non défini',
+              isStarter: false,
+              isOnField: false,
+              totalTime: 0,
+              currentSequenceTime: 0,
+              stats: {
+                shotsOnTarget: 0,
+                shotsOffTarget: 0,
+                goals: 0,
+                ballLoss: 0,
+                ballRecovery: 0,
+                dribbleSuccess: 0,
+                oneOnOneDefLost: 0,
+              }
+            };
+          }).filter(player => player !== null) as Player[];
+
+          setPlayers(transformedPlayers);
+        }
+      } catch (error) {
+        console.error('Erreur lors du chargement des données:', error);
+        setMatches([]);
+        setPlayers([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, []);
+
+  // Timer pour mettre à jour les temps de jeu et le chronomètre du match
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    if (matchData.isRunning) {
+      interval = setInterval(() => {
+        setMatchData(prev => ({
+          ...prev,
+          matchTime: prev.matchTime + 1,
+          players: prev.players.map(player => ({
+            ...player,
+            totalTime: player.isOnField ? player.totalTime + 1 : player.totalTime,
+            currentSequenceTime: player.isOnField ? player.currentSequenceTime + 1 : player.currentSequenceTime,
+          }))
+        }));
+      }, 1000);
+    }
+
+    return () => clearInterval(interval);
+  }, [matchData.isRunning]);
+
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const formatMatchTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const formatDate = (dateString: string): string => {
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return 'Date invalide';
+      }
+      return date.toLocaleDateString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit'
+      });
+    } catch (error) {
+      console.error('Erreur lors du formatage de la date:', error);
+      return 'Date invalide';
+    }
+  };
+
+  const formatDateTime = (dateString: string): string => {
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return 'Date invalide';
+      }
+      return date.toLocaleDateString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      }) + ' ' + date.toLocaleTimeString('fr-FR', {
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      console.error('Erreur lors du formatage de la date:', error);
+      return 'Date invalide';
+    }
+  };
+
+  const toggleMatch = () => {
+    setMatchData(prev => ({
+      ...prev,
+      isRunning: !prev.isRunning,
+      players: prev.players.map(player => ({
+        ...player,
+        currentSequenceTime: 0,
+      })),
+    }));
+  };
+
+  const nextSequence = () => {
+    setMatchData(prev => ({
+      ...prev,
+      currentSequence: prev.currentSequence + 1,
+      players: prev.players.map(player => ({
+        ...player,
+        currentSequenceTime: 0,
+      })),
+    }));
+  };
+
+  const nextHalf = () => {
+    setMatchData(prev => ({
+      ...prev,
+      currentHalf: prev.currentHalf === 1 ? 2 : 1,
+      teamFouls: 0,
+      opponentFouls: 0,
+      matchTime: 0,
+      opponentActions: {
+        shotsOnTarget: 0,
+        shotsOffTarget: 0,
+      },
+    }));
+  };
+
+  const updatePlayerStat = async (playerId: string, statKey: string, increment: boolean = true) => {
+    if (!matchData.selectedMatch) return;
+
+    // Mettre à jour l'état local
+    setMatchData(prev => {
+      const updatedPlayers = prev.players.map(player => 
+        player.id === playerId 
+          ? { 
+              ...player, 
+              stats: { 
+                ...player.stats, 
+                [statKey]: (player.stats[statKey] || 0) + (increment ? 1 : -1) 
+              } 
+            }
+          : player
+      );
+
+      let newTeamScore = prev.teamScore;
+      if (statKey === 'goals') {
+        newTeamScore = prev.teamScore + (increment ? 1 : -1);
+        // Un but incrémente aussi les tirs cadrés et les tirs totaux
+        updatedPlayers.forEach(player => {
+          if (player.id === playerId) {
+            player.stats.shotsOnTarget = (player.stats.shotsOnTarget || 0) + (increment ? 1 : -1);
+            player.stats.shotsOffTarget = (player.stats.shotsOffTarget || 0) + (increment ? 1 : -1);
+          }
+        });
+      } else if (statKey === 'shotsOnTarget') {
+        // Un tir cadré incrémente aussi les tirs totaux
+        updatedPlayers.forEach(player => {
+          if (player.id === playerId) {
+            player.stats.shotsOffTarget = (player.stats.shotsOffTarget || 0) + (increment ? 1 : -1);
+          }
+        });
+      }
+
+      return {
+        ...prev,
+        players: updatedPlayers,
+        teamScore: newTeamScore,
+      };
+    });
+
+    // Enregistrer l'événement dans la base de données
+    if (increment) {
+      const eventType = statKey === 'goals' ? 'goal' : 
+                       statKey === 'shotsOnTarget' ? 'shot_on_target' :
+                       statKey === 'shotsOffTarget' ? 'shot' :
+                       statKey === 'ballRecovery' ? 'recovery' :
+                       statKey === 'dribbleSuccess' ? 'dribble' :
+                       statKey === 'ballLoss' ? 'ball_loss' : 'goal';
+
+      const playersOnField = matchData.players
+        .filter(p => p.isOnField)
+        .map(p => p.id);
+
+      const { error: insertError } = await supabase
+        .from('match_events')
+        .insert({
+          match_id: matchData.selectedMatch.id,
+          event_type: eventType,
+          match_time_seconds: matchData.matchTime,
+          half: matchData.currentHalf,
+          player_id: playerId,
+          players_on_field: playersOnField
+        });
+
+      if (insertError) {
+        console.error('Erreur lors de l\'insertion de l\'événement:', insertError);
+      }
+    } else {
+      // Supprimer le dernier événement de ce type pour ce joueur
+      const eventType = statKey === 'goals' ? 'goal' : 
+                       statKey === 'shotsOnTarget' ? 'shot_on_target' :
+                       statKey === 'shotsOffTarget' ? 'shot' :
+                       statKey === 'ballRecovery' ? 'recovery' :
+                       statKey === 'dribbleSuccess' ? 'dribble' :
+                       statKey === 'ballLoss' ? 'ball_loss' : 'goal';
+
+      const { error: deleteError } = await supabase.rpc('delete_last_event_by_type', {
+        p_match_id: matchData.selectedMatch.id,
+        p_event_type: eventType,
+        p_player_id: playerId
+      });
+
+      if (deleteError) {
+        console.error('Erreur lors de la suppression de l\'événement:', deleteError);
+      }
+    }
+  };
+
+  const updateOpponentGoal = async (increment: boolean = true) => {
+    if (!matchData.selectedMatch) return;
+
+    setMatchData(prev => ({
+      ...prev,
+      opponentScore: prev.opponentScore + (increment ? 1 : -1),
+      opponentActions: {
+        ...prev.opponentActions,
+        shotsOnTarget: prev.opponentActions.shotsOnTarget + (increment ? 1 : -1), // Un but adverse ajoute aussi un tir cadré
+      },
+    }));
+
+    // Enregistrer l'événement dans la base de données
+    if (increment) {
+      const playersOnField = matchData.players
+        .filter(p => p.isOnField)
+        .map(p => p.id);
+
+      await supabase
+        .from('match_events')
+        .insert({
+          match_id: matchData.selectedMatch.id,
+          event_type: 'opponent_goal',
+          match_time_seconds: matchData.matchTime,
+          half: matchData.currentHalf,
+          player_id: null, // NULL pour l'adversaire
+          players_on_field: playersOnField
+        });
+    } else {
+      // Supprimer le dernier événement de ce type
+      await supabase.rpc('delete_last_event_by_type', {
+        p_match_id: matchData.selectedMatch.id,
+        p_event_type: 'opponent_goal',
+        p_player_id: null
+      });
+    }
+  };
+
+  const updateOpponentAction = async (actionType: 'shotsOnTarget' | 'shotsOffTarget', increment: boolean = true) => {
+    if (!matchData.selectedMatch) return;
+
+    setMatchData(prev => ({
+      ...prev,
+      opponentActions: {
+        ...prev.opponentActions,
+        [actionType]: prev.opponentActions[actionType] + (increment ? 1 : -1),
+      },
+    }));
+
+    // Enregistrer l'événement dans la base de données
+    if (increment) {
+      const eventType = actionType === 'shotsOnTarget' ? 'opponent_shot_on_target' : 'opponent_shot';
+      const playersOnField = matchData.players
+        .filter(p => p.isOnField)
+        .map(p => p.id);
+
+      await supabase
+        .from('match_events')
+        .insert({
+          match_id: matchData.selectedMatch.id,
+          event_type: eventType,
+          match_time_seconds: matchData.matchTime,
+          half: matchData.currentHalf,
+          player_id: null, // NULL pour l'adversaire
+          players_on_field: playersOnField
+        });
+    } else {
+      // Supprimer le dernier événement de ce type
+      const eventType = actionType === 'shotsOnTarget' ? 'opponent_shot_on_target' : 'opponent_shot';
+      await supabase.rpc('delete_last_event_by_type', {
+        p_match_id: matchData.selectedMatch.id,
+        p_event_type: eventType,
+        p_player_id: null
+      });
+    }
+  };
+
+  // Fonctions pour le clic long
+  const handleLongPressStart = (playerId: string, statKey: string) => {
+    const timerKey = `${playerId}-${statKey}`;
+    
+    const timerId = setTimeout(async () => {
+      await updatePlayerStat(playerId, statKey, false); // Décrémenter
+      setLongPressTriggered(prev => ({
+        ...prev,
+        [timerKey]: true
+      }));
+    }, 500); // 500ms pour déclencher le clic long
+    
+    setLongPressTimers(prev => ({
+      ...prev,
+      [timerKey]: timerId
+    }));
+  };
+
+  const handleLongPressEnd = (playerId: string, statKey: string) => {
+    const timerKey = `${playerId}-${statKey}`;
+    const timer = longPressTimers[timerKey];
+    
+    if (timer) {
+      clearTimeout(timer);
+      setLongPressTimers(prev => {
+        const newTimers = { ...prev };
+        delete newTimers[timerKey];
+        return newTimers;
+      });
+    }
+    
+    // Réinitialiser le flag après un court délai pour éviter le double comptage
+    setTimeout(() => {
+      setLongPressTriggered(prev => {
+        const newTriggered = { ...prev };
+        delete newTriggered[timerKey];
+        return newTriggered;
+      });
+    }, 100);
+  };
+
+  const handleOpponentLongPressStart = (actionType: 'shotsOnTarget' | 'shotsOffTarget' | 'goals') => {
+    const timerKey = `opponent-${actionType}`;
+    
+    const timerId = setTimeout(async () => {
+      if (actionType === 'goals') {
+        await updateOpponentGoal(false); // Décrémenter le but adverse
+      } else {
+        await updateOpponentAction(actionType, false); // Décrémenter
+      }
+      setLongPressTriggered(prev => ({
+        ...prev,
+        [timerKey]: true
+      }));
+    }, 500);
+    
+    setLongPressTimers(prev => ({
+      ...prev,
+      [timerKey]: timerId
+    }));
+  };
+
+  const handleOpponentLongPressEnd = (actionType: 'shotsOnTarget' | 'shotsOffTarget' | 'goals') => {
+    const timerKey = `opponent-${actionType}`;
+    const timer = longPressTimers[timerKey];
+    
+    if (timer) {
+      clearTimeout(timer);
+      setLongPressTimers(prev => {
+        const newTimers = { ...prev };
+        delete newTimers[timerKey];
+        return newTimers;
+      });
+    }
+    
+    // Réinitialiser le flag après un court délai pour éviter le double comptage
+    setTimeout(() => {
+      setLongPressTriggered(prev => {
+        const newTriggered = { ...prev };
+        delete newTriggered[timerKey];
+        return newTriggered;
+      });
+    }, 100);
+  };
+
+  // Fonctions pour calculer les statistiques du bilan
+  const getTeamStats = () => {
+    const totalShots = matchData.players.reduce((sum, player) => 
+      sum + (player.stats.shotsOnTarget || 0) + (player.stats.shotsOffTarget || 0), 0
+    );
+    const totalShotsOnTarget = matchData.players.reduce((sum, player) => 
+      sum + (player.stats.shotsOnTarget || 0), 0
+    );
+    const totalShotsOffTarget = matchData.players.reduce((sum, player) => 
+      sum + (player.stats.shotsOffTarget || 0), 0
+    );
+
+    return {
+      totalShots,
+      totalShotsOnTarget,
+      totalShotsOffTarget,
+      opponentShots: matchData.opponentActions.shotsOnTarget + matchData.opponentActions.shotsOffTarget,
+      opponentShotsOnTarget: matchData.opponentActions.shotsOnTarget,
+      opponentShotsOffTarget: matchData.opponentActions.shotsOffTarget,
+    };
+  };
+
+  const getTopPlayers = (statKey: keyof Player['stats'], limit: number = 3) => {
+    return matchData.players
+      .filter(player => player.stats[statKey] > 0)
+      .sort((a, b) => (b.stats[statKey] || 0) - (a.stats[statKey] || 0))
+      .slice(0, limit);
+  };
+
+  const getTopPlayersByTime = (limit: number = 3) => {
+    return matchData.players
+      .filter(player => player.totalTime > 0)
+      .sort((a, b) => b.totalTime - a.totalTime)
+      .slice(0, limit);
+  };
+
+  const updateFouls = (isTeamFoul: boolean) => {
+    setMatchData(prev => ({
+      ...prev,
+      teamFouls: isTeamFoul ? prev.teamFouls + 1 : prev.teamFouls,
+      opponentFouls: !isTeamFoul ? prev.opponentFouls + 1 : prev.opponentFouls,
+    }));
+  };
+
+  const updatePlayerCard = async (playerId: string, cardType: 'yellow' | 'red', increment: boolean = true) => {
+    if (!matchData.selectedMatch) return;
+
+    setMatchData(prev => {
+      const updatedPlayers = prev.players.map(player => {
+        // S'assurer que tous les joueurs ont les propriétés yellowCards et redCards initialisées
+        const playerWithCards = {
+          ...player,
+          yellowCards: player.yellowCards || 0,
+          redCards: player.redCards || 0
+        };
+        
+        if (player.id === playerId) {
+          const currentValue = cardType === 'yellow' ? playerWithCards.yellowCards : playerWithCards.redCards;
+          const newValue = increment ? currentValue + 1 : Math.max(0, currentValue - 1);
+          return {
+            ...playerWithCards,
+            [cardType === 'yellow' ? 'yellowCards' : 'redCards']: newValue
+          };
+        }
+        return playerWithCards;
+      });
+
+      return {
+        ...prev,
+        players: updatedPlayers
+      };
+    });
+
+    // Enregistrer l'événement dans la base de données
+    if (increment) {
+      const eventType = cardType === 'yellow' ? 'yellow_card' : 'red_card';
+      const playersOnField = matchData.players
+        .filter(p => p.isOnField)
+        .map(p => p.id);
+
+      await supabase
+        .from('match_events')
+        .insert({
+          match_id: matchData.selectedMatch.id,
+          event_type: eventType,
+          match_time_seconds: matchData.matchTime,
+          half: matchData.currentHalf,
+          player_id: playerId,
+          players_on_field: playersOnField
+        });
+    } else {
+      // Supprimer le dernier événement de ce type pour ce joueur
+      const eventType = cardType === 'yellow' ? 'yellow_card' : 'red_card';
+      await supabase.rpc('delete_last_event_by_type', {
+        p_match_id: matchData.selectedMatch.id,
+        p_event_type: eventType,
+        p_player_id: playerId
+      });
+    }
+  };
+
+  const handleCardLongPressStart = (playerId: string, cardType: 'yellow' | 'red') => {
+    const timerKey = `${playerId}-${cardType}Card`;
+    
+    const timerId = setTimeout(() => {
+      updatePlayerCard(playerId, cardType, false); // Décrémenter
+      setLongPressTriggered(prev => ({
+        ...prev,
+        [timerKey]: true
+      }));
+    }, 500); // 500ms pour déclencher le clic long
+    
+    setLongPressTimers(prev => ({
+      ...prev,
+      [timerKey]: timerId
+    }));
+  };
+
+  const handleCardLongPressEnd = (playerId: string, cardType: 'yellow' | 'red') => {
+    const timerKey = `${playerId}-${cardType}Card`;
+    const timer = longPressTimers[timerKey];
+    
+    if (timer) {
+      clearTimeout(timer);
+      setLongPressTimers(prev => {
+        const newTimers = { ...prev };
+        delete newTimers[timerKey];
+        return newTimers;
+      });
+    }
+    
+    // Réinitialiser le flag après un court délai pour éviter le double comptage
+    setTimeout(() => {
+      setLongPressTriggered(prev => {
+        const newTriggered = { ...prev };
+        delete newTriggered[timerKey];
+        return newTriggered;
+      });
+    }, 100);
+  };
+
+  const selectMatch = (match: Match) => {
+    setSelectedMatch(match);
+    
+    // Pré-remplir les informations du match
+    let formattedDate = '';
+    if (match.date) {
+      try {
+        // Convertir la date ISO en format datetime-local
+        const date = new Date(match.date);
+        formattedDate = date.toISOString().slice(0, 16); // Format YYYY-MM-DDTHH:MM
+      } catch (error) {
+        console.error('Erreur lors du formatage de la date:', error);
+        formattedDate = '';
+      }
+    }
+    
+    setMatchInfo({
+      title: match.title || '',
+      date: formattedDate,
+      location: match.location || 'Domicile',
+      competition: match.competition || 'Amical',
+      opponent: match.opponent_team || ''
+    });
+    
+    setCurrentStep('matchInfo');
+  };
+
+  const saveMatchInfo = async () => {
+    if (!selectedMatch) return;
+
+    try {
+      // Convertir la date en format ISO
+      let dateToSave = matchInfo.date;
+      if (matchInfo.date) {
+        try {
+          // Le format datetime-local est déjà compatible avec new Date()
+          dateToSave = new Date(matchInfo.date).toISOString();
+        } catch (error) {
+          console.error('Erreur lors de la conversion de la date:', error);
+          alert('Format de date invalide');
+          return;
+        }
+      }
+
+      // Mettre à jour le match dans Supabase
+      const { error } = await supabase
+        .from('matches')
+        .update({
+          title: matchInfo.title,
+          date: dateToSave,
+          location: matchInfo.location,
+          competition: matchInfo.competition,
+          opponent_team: matchInfo.opponent || null
+        })
+        .eq('id', selectedMatch.id);
+
+      if (error) {
+        console.error('Erreur lors de la mise à jour du match:', error);
+        alert('Erreur lors de la mise à jour du match');
+        return;
+      }
+
+      // Passer directement à l'enregistrement
+      const selectedPlayers = players
+        .filter(player => convokedPlayers.includes(player.id))
+        .map((player) => ({
+          ...player,
+          isStarter: starterPlayers.includes(player.id),
+          isOnField: starterPlayers.includes(player.id),
+          totalTime: 0,
+          currentSequenceTime: 0,
+          yellowCards: 0,
+          redCards: 0,
+          stats: {
+            shotsOnTarget: 0,
+            shotsOffTarget: 0,
+            goals: 0,
+            ballLoss: 0,
+            ballRecovery: 0,
+            dribbleSuccess: 0,
+            oneOnOneDefLost: 0,
+          }
+        }));
+
+      setMatchData(prev => ({
+        ...prev,
+        selectedMatch,
+        players: selectedPlayers
+      }));
+      
+      setCurrentStep('recording');
+    } catch (error) {
+      console.error('Erreur lors de la mise à jour du match:', error);
+      alert('Erreur lors de la mise à jour du match');
+    }
+  };
+
+  const togglePlayerConvocation = (playerId: string) => {
+    setConvokedPlayers(prev => {
+      if (prev.includes(playerId)) {
+        // Retirer le joueur des convoqués
+        const newConvoked = prev.filter(id => id !== playerId);
+        setStarterPlayers(prevStarters => prevStarters.filter(id => id !== playerId));
+        return newConvoked;
+      } else {
+        // Ajouter le joueur aux convoqués
+        const newConvoked = [...prev, playerId];
+        
+        // Si c'est un des 5 premiers, le mettre en titulaire
+        if (newConvoked.length <= 5) {
+          setStarterPlayers(prevStarters => [...prevStarters, playerId]);
+        }
+        
+        return newConvoked;
+      }
+    });
+  };
+
+  // Fonctions pour le drag & drop
+  const handleDragStart = (playerId: string) => {
+    try {
+      setDraggedPlayer(playerId);
+    } catch (error) {
+      console.error('Erreur lors du début du drag:', error);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent, playerId: string) => {
+    try {
+      e.preventDefault();
+      setDragOverPlayer(playerId);
+    } catch (error) {
+      console.error('Erreur lors du drag over:', error);
+    }
+  };
+
+  const handleDragLeave = () => {
+    try {
+      setDragOverPlayer(null);
+    } catch (error) {
+      console.error('Erreur lors du drag leave:', error);
+    }
+  };
+
+  const handleDrop = (targetPlayerId: string) => {
+    try {
+      if (!draggedPlayer || draggedPlayer === targetPlayerId) {
+        setDraggedPlayer(null);
+        setDragOverPlayer(null);
+        return;
+      }
+
+      setMatchData(prev => {
+        const players = [...prev.players];
+        const draggedPlayerObj = players.find(p => p.id === draggedPlayer);
+        const targetPlayerObj = players.find(p => p.id === targetPlayerId);
+        
+        if (draggedPlayerObj && targetPlayerObj) {
+          // Si on fait glisser un remplaçant sur un titulaire, faire un changement
+          if (!draggedPlayerObj.isOnField && targetPlayerObj.isOnField) {
+            // Mettre le titulaire sur le banc et le marquer comme remplaçant
+            const updatedPlayers = players.map(p => 
+              p.id === targetPlayerId 
+                ? { ...p, isOnField: false, isStarter: false, currentSequenceTime: 0 }
+                : p
+            );
+            
+            // Mettre le remplaçant sur le terrain et le rendre titulaire
+            const finalPlayers = updatedPlayers.map(p => 
+              p.id === draggedPlayer 
+                ? { ...p, isOnField: true, isStarter: true, currentSequenceTime: 0 }
+                : p
+            );
+            
+            return { ...prev, players: finalPlayers };
+          } 
+          // Si on fait glisser un titulaire sur un remplaçant, faire un changement
+          else if (draggedPlayerObj.isOnField && !targetPlayerObj.isOnField) {
+            // Mettre le titulaire sur le banc et le marquer comme remplaçant
+            const updatedPlayers = players.map(p => 
+              p.id === draggedPlayer 
+                ? { ...p, isOnField: false, isStarter: false, currentSequenceTime: 0 }
+                : p
+            );
+            
+            // Mettre le remplaçant sur le terrain et le rendre titulaire
+            const finalPlayers = updatedPlayers.map(p => 
+              p.id === targetPlayerId 
+                ? { ...p, isOnField: true, isStarter: true, currentSequenceTime: 0 }
+                : p
+            );
+            
+            return { ...prev, players: finalPlayers };
+          }
+          // Si on fait glisser un titulaire sur un autre titulaire, échanger les positions
+          else if (draggedPlayerObj.isOnField && targetPlayerObj.isOnField) {
+            // Échanger les positions des titulaires
+            const draggedIndex = players.findIndex(p => p.id === draggedPlayer);
+            const targetIndex = players.findIndex(p => p.id === targetPlayerId);
+            
+            if (draggedIndex !== -1 && targetIndex !== -1) {
+              [players[draggedIndex], players[targetIndex]] = [players[targetIndex], players[draggedIndex]];
+            }
+            
+            return { ...prev, players };
+          }
+        }
+        
+        return prev;
+      });
+
+      setDraggedPlayer(null);
+      setDragOverPlayer(null);
+    } catch (error) {
+      console.error('Erreur lors du drag & drop:', error);
+      setDraggedPlayer(null);
+      setDragOverPlayer(null);
+    }
+  };
+
+
+
+
+
+  const resetMatchSelection = () => {
+    setMatchData(prev => ({
+      ...prev,
+      selectedMatch: null,
+      players: [],
+      isRunning: false,
+      currentSequence: 1,
+      matchTime: 0,
+      currentHalf: 1,
+      teamFouls: 0,
+      opponentFouls: 0,
+      opponentActions: {
+        shotsOnTarget: 0,
+        shotsOffTarget: 0,
+      },
+    }));
+    setCurrentStep('match');
+  };
+
+      const addNewMatch = async () => {
+      console.log('addNewMatch called with:', newMatch);
+      console.log('Date value:', newMatch.date);
+      console.log('Title value:', newMatch.title);
+      
+      if (!newMatch.title || !newMatch.date) {
+        alert('Veuillez remplir tous les champs obligatoires');
+        return;
+      }
+
+    // La sélection des joueurs est optionnelle
+
+    try {
+      // Convertir la date en format ISO si nécessaire
+      let dateToSave = newMatch.date;
+      if (newMatch.date && !newMatch.date.includes('T')) {
+        // Si c'est juste une date, ajouter l'heure
+        dateToSave = new Date(newMatch.date + 'T00:00:00').toISOString();
+      } else if (newMatch.date) {
+        // Si c'est déjà un datetime-local, convertir en ISO
+        dateToSave = new Date(newMatch.date).toISOString();
+      }
+      
+      // Préparer les données des joueurs (optionnel)
+      const playersData = selectedPlayers.length > 0 
+        ? selectedPlayers.map(playerId => ({
+            id: playerId,
+            goals: 0,
+            yellow_cards: 0,
+            red_cards: 0
+          }))
+        : [];
+
+      const matchData: any = {
+        title: newMatch.title,
+        date: dateToSave,
+        competition: newMatch.competition,
+        location: newMatch.location,
+        score_team: newMatch.score_team,
+        score_opponent: newMatch.score_opponent,
+        opponent_team: newMatch.opponent_team || null,
+        goals_by_type: newMatch.goals_by_type,
+        conceded_by_type: newMatch.conceded_by_type
+      };
+
+      // N'ajouter le champ players que s'il y a des joueurs sélectionnés
+      if (playersData.length > 0) {
+        matchData.players = playersData;
+      } else {
+        // Envoyer explicitement la valeur par défaut
+        matchData.players = [];
+      }
+      
+      console.log('Inserting match data:', matchData);
+      console.log('Selected players:', selectedPlayers);
+      console.log('Players data:', playersData);
+      
+      const { data, error } = await supabase
+        .from('matches')
+        .insert([matchData])
+        .select();
+
+      if (error) {
+        console.error('Erreur lors de la création du match:', error);
+        console.error('Error details:', error.message, error.details, error.hint);
+        alert(`Erreur lors de la création du match: ${error.message}`);
+        return;
+      }
+
+      // Recharger les matches
+      const { data: matchesData } = await supabase
+        .from('matches')
+        .select('id, title, date, competition, location, score_team, score_opponent, opponent_team')
+        .order('date', { ascending: false });
+
+      setMatches(matchesData || []);
+      setShowAddMatchForm(false);
+      setNewMatch({ 
+        title: '', 
+        date: '', 
+        location: 'Domicile',
+        competition: 'Amical', 
+        opponent_team: '',
+        score_team: 0,
+        score_opponent: 0,
+        goals_by_type: {
+          offensive: 0,
+          transition: 0,
+          cpa: 0,
+          superiority: 0
+        },
+        conceded_by_type: {
+          offensive: 0,
+          transition: 0,
+          cpa: 0,
+          superiority: 0
+        }
+      });
+      setSelectedPlayers([]);
+      
+      // Sélectionner automatiquement le nouveau match
+      if (data && data[0]) {
+        selectMatch(data[0]);
+      }
+    } catch (error) {
+      console.error('Erreur lors de la création du match:', error);
+      alert('Erreur lors de la création du match');
+    }
+  };
+
+  const exportData = () => {
+    const data = {
+      matchInfo: matchData.selectedMatch,
+      matchData,
+      exportTime: new Date().toISOString(),
+      summary: {
+        totalGoals: matchData.players.reduce((sum, player) => sum + player.stats.goals, 0),
+        teamScore: matchData.teamScore,
+        opponentScore: matchData.opponentScore,
+        matchTime: formatMatchTime(matchData.matchTime),
+        currentHalf: matchData.currentHalf,
+        teamFouls: matchData.teamFouls,
+        opponentFouls: matchData.opponentFouls,
+      }
+    };
+    
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `match_data_${matchData.selectedMatch?.title || 'unknown'}_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const finishMatch = async () => {
+    if (!matchData.selectedMatch) {
+      alert('Aucun match sélectionné');
+      return;
+    }
+
+    try {
+      // Arrêter le chronomètre si en cours
+      if (matchData.isRunning) {
+        setMatchData(prev => ({ ...prev, isRunning: false }));
+      }
+
+      // Préparer les données des joueurs pour la sauvegarde
+      const playersData = matchData.players.map(player => ({
+        id: player.id,
+        goals: player.stats.goals || 0,
+        yellow_cards: player.yellowCards || 0,
+        red_cards: player.redCards || 0
+      }));
+
+      // Calculer les statistiques globales du match
+      const totalGoals = matchData.players.reduce((sum, player) => sum + (player.stats.goals || 0), 0);
+      const totalYellowCards = matchData.players.reduce((sum, player) => sum + (player.yellowCards || 0), 0);
+      const totalRedCards = matchData.players.reduce((sum, player) => sum + (player.redCards || 0), 0);
+
+      // Mettre à jour le match dans Supabase avec les statistiques finales
+      const { error } = await supabase
+        .from('matches')
+        .update({
+          score_team: matchData.teamScore,
+          score_opponent: matchData.opponentScore,
+          players: playersData
+        })
+        .eq('id', matchData.selectedMatch.id);
+
+      if (error) {
+        console.error('Erreur lors de la finalisation du match:', error);
+        alert('Erreur lors de la finalisation du match');
+        return;
+      }
+
+      // Afficher un message de succès
+      alert(`Match terminé et enregistré avec succès !
+        
+Résumé :
+- Score final : ${matchData.teamScore} - ${matchData.opponentScore}
+- Temps de jeu : ${formatMatchTime(matchData.matchTime)}
+- Buts marqués : ${totalGoals}
+- Cartons jaunes : ${totalYellowCards}
+- Cartons rouges : ${totalRedCards}
+
+Les statistiques des joueurs ont été sauvegardées dans la base de données.`);
+
+      // Rediriger vers la page de sélection de match
+      setCurrentStep('match');
+      setMatchData({
+        selectedMatch: null,
+        isRunning: false,
+        currentSequence: 1,
+        players: [],
+        teamScore: 0,
+        opponentScore: 0,
+        matchTime: 0,
+        currentHalf: 1,
+        teamFouls: 0,
+        opponentFouls: 0,
+        opponentActions: {
+          shotsOnTarget: 0,
+          shotsOffTarget: 0,
+        },
+      });
+
+    } catch (error) {
+      console.error('Erreur lors de la finalisation du match:', error);
+      alert('Erreur lors de la finalisation du match');
+    }
+  };
+
+  const exportCSV = () => {
+    if (!matchData.selectedMatch || matchData.players.length === 0) {
+      alert('Aucune donnée à exporter');
+      return;
+    }
+
+    // En-têtes CSV
+    const headers = [
+      'Joueur',
+      'Numéro',
+      'Position',
+      'Titulaire',
+      'Sur le terrain',
+      'Temps total (s)',
+      'Temps séquence (s)',
+      'Cartons jaunes',
+      'Cartons rouges',
+      'Tirs cadrés',
+      'Tirs non cadrés',
+      'Buts',
+      'Pertes de balle',
+      'Récupérations',
+      'Dribbles réussis',
+      '1v1 déf perdu'
+    ];
+
+    // Données des joueurs
+    const playerData = matchData.players.map(player => [
+      player.name,
+      player.number,
+      player.position,
+      player.isStarter ? 'Oui' : 'Non',
+      player.isOnField ? 'Oui' : 'Non',
+      player.totalTime,
+      player.currentSequenceTime,
+      player.yellowCards || 0,
+      player.redCards || 0,
+      player.stats.shotsOnTarget || 0,
+      player.stats.shotsOffTarget || 0,
+      player.stats.goals || 0,
+      player.stats.ballLoss || 0,
+      player.stats.ballRecovery || 0,
+      player.stats.dribbleSuccess || 0,
+      player.stats.oneOnOneDefLost || 0
+    ]);
+
+    // Données du match
+    const matchSummary = [
+      [''],
+      ['RÉSUMÉ DU MATCH'],
+      ['Titre', matchData.selectedMatch.title],
+      ['Date', matchData.selectedMatch.date],
+      ['Compétition', matchData.selectedMatch.competition],
+      ['Score Équipe', matchData.teamScore],
+      ['Score Adversaire', matchData.opponentScore],
+      ['Temps de jeu', formatMatchTime(matchData.matchTime)],
+      ['Mi-temps', matchData.currentHalf],
+      ['Fautes Équipe', matchData.teamFouls],
+      ['Fautes Adversaire', matchData.opponentFouls],
+      ['Tirs cadrés adverses', matchData.opponentActions.shotsOnTarget],
+      ['Tirs adverses', matchData.opponentActions.shotsOffTarget],
+      [''],
+      ['DONNÉES DES JOUEURS']
+    ];
+
+    // Combiner toutes les données
+    const csvContent = [
+      headers.join(','),
+      ...playerData.map(row => row.join(',')),
+      ...matchSummary.map(row => row.join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `match_data_${matchData.selectedMatch.title}_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Chargement des données...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Étape 1: Sélection du match
+  if (currentStep === 'match') {
+    return (
+      <div className="min-h-screen bg-gray-50 p-6">
+        <div className="max-w-7xl mx-auto">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-8">
+            <h1 className="text-3xl font-bold text-gray-900">Choix du match</h1>
+            <button
+              onClick={() => setShowAddMatchForm(true)}
+              className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Trophy className="h-5 w-5" />
+              Ajouter un match
+            </button>
+          </div>
+
+          {/* Formulaire d'ajout de match */}
+          {showAddMatchForm && (
+            <div className="bg-white rounded-xl shadow-xl p-8 mb-8">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-gray-900">Ajouter un nouveau match</h2>
+                <button
+                  onClick={() => setShowAddMatchForm(false)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  ✕
+                </button>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Titre</label>
+                  <input
+                    type="text"
+                    value={newMatch.title}
+                    onChange={(e) => setNewMatch(prev => ({ ...prev, title: e.target.value }))}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    placeholder="Ex: Match Amical vs Team X"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Date</label>
+                  <input
+                    type="datetime-local"
+                    value={newMatch.date}
+                    onChange={(e) => setNewMatch(prev => ({ ...prev, date: e.target.value }))}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Lieu</label>
+                  <select
+                    value={newMatch.location}
+                    onChange={(e) => setNewMatch(prev => ({ ...prev, location: e.target.value }))}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  >
+                    <option value="Domicile">Domicile</option>
+                    <option value="Exterieur">Exterieur</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Type de compétition</label>
+                  <select
+                    value={newMatch.competition}
+                    onChange={(e) => setNewMatch(prev => ({ ...prev, competition: e.target.value }))}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  >
+                    <option value="Championnat">Championnat</option>
+                    <option value="Coupe">Coupe</option>
+                    <option value="Amical">Amical</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Nom de l'adversaire</label>
+                  <input
+                    type="text"
+                    value={newMatch.opponent_team}
+                    onChange={(e) => setNewMatch(prev => ({ ...prev, opponent_team: e.target.value }))}
+                    placeholder="Ex: Team X (optionnel)"
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Score équipe</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={newMatch.score_team}
+                      onChange={(e) => setNewMatch(prev => ({ ...prev, score_team: parseInt(e.target.value) || 0 }))}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Score adversaire</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={newMatch.score_opponent}
+                      onChange={(e) => setNewMatch(prev => ({ ...prev, score_opponent: parseInt(e.target.value) || 0 }))}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                {/* Répartition des buts marqués */}
+                <div className="mt-6">
+                  <h3 className="text-lg font-medium text-gray-900 mb-4">Répartition des buts marqués</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Phase Offensive</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={newMatch.goals_by_type.offensive}
+                        onChange={(e) => setNewMatch(prev => ({ 
+                          ...prev, 
+                          goals_by_type: { 
+                            ...prev.goals_by_type, 
+                            offensive: parseInt(e.target.value) || 0 
+                          } 
+                        }))}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Transition</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={newMatch.goals_by_type.transition}
+                        onChange={(e) => setNewMatch(prev => ({ 
+                          ...prev, 
+                          goals_by_type: { 
+                            ...prev.goals_by_type, 
+                            transition: parseInt(e.target.value) || 0 
+                          } 
+                        }))}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">CPA</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={newMatch.goals_by_type.cpa}
+                        onChange={(e) => setNewMatch(prev => ({ 
+                          ...prev, 
+                          goals_by_type: { 
+                            ...prev.goals_by_type, 
+                            cpa: parseInt(e.target.value) || 0 
+                          } 
+                        }))}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Supériorité</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={newMatch.goals_by_type.superiority}
+                        onChange={(e) => setNewMatch(prev => ({ 
+                          ...prev, 
+                          goals_by_type: { 
+                            ...prev.goals_by_type, 
+                            superiority: parseInt(e.target.value) || 0 
+                          } 
+                        }))}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Répartition des buts encaissés */}
+                <div className="mt-6">
+                  <h3 className="text-lg font-medium text-gray-900 mb-4">Répartition des buts encaissés</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Phase Offensive</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={newMatch.conceded_by_type.offensive}
+                        onChange={(e) => setNewMatch(prev => ({ 
+                          ...prev, 
+                          conceded_by_type: { 
+                            ...prev.conceded_by_type, 
+                            offensive: parseInt(e.target.value) || 0 
+                          } 
+                        }))}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Transition</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={newMatch.conceded_by_type.transition}
+                        onChange={(e) => setNewMatch(prev => ({ 
+                          ...prev, 
+                          conceded_by_type: { 
+                            ...prev.conceded_by_type, 
+                            transition: parseInt(e.target.value) || 0 
+                          } 
+                        }))}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">CPA</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={newMatch.conceded_by_type.cpa}
+                        onChange={(e) => setNewMatch(prev => ({ 
+                          ...prev, 
+                          conceded_by_type: { 
+                            ...prev.conceded_by_type, 
+                            cpa: parseInt(e.target.value) || 0 
+                          } 
+                        }))}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Supériorité</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={newMatch.conceded_by_type.superiority}
+                        onChange={(e) => setNewMatch(prev => ({ 
+                          ...prev, 
+                          conceded_by_type: { 
+                            ...prev.conceded_by_type, 
+                            superiority: parseInt(e.target.value) || 0 
+                          } 
+                        }))}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+
+              
+              <div className="flex gap-4 mt-6">
+                <button
+                  onClick={addNewMatch}
+                  className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                >
+                  Créer le match
+                </button>
+                <button
+                  onClick={() => setShowAddMatchForm(false)}
+                  className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                >
+                  Annuler
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Grille des matches */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {matches && matches.map((match) => (
+              <div
+                key={match.id}
+                onClick={() => selectMatch(match)}
+                className="bg-white rounded-xl shadow-lg cursor-pointer hover:shadow-xl transition-all duration-200 overflow-hidden"
+              >
+                {/* Logo adversaire (placeholder) */}
+                <div className="h-32 bg-gray-100 flex items-center justify-center">
+                  <div className="text-gray-400 text-sm">Logo adversaire</div>
+                </div>
+                
+                {/* Détails du match */}
+                <div className="p-6 bg-blue-50">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-bold text-lg text-gray-900">
+                      {match.title || 'Match sans titre'}
+                    </h3>
+                    <div className="text-sm text-gray-600">
+                      {match.date ? formatDate(match.date) : 'Date non définie'}
+                    </div>
+                  </div>
+                  
+                  <div className="text-sm text-gray-600 mb-2">
+                    {match.competition || 'Compétition non définie'}
+                  </div>
+
+                  {match.title && match.title.includes('vs') && (
+                    <div className="text-sm text-gray-600 mb-2">
+                      {match.title}
+                    </div>
+                  )}
+                  
+                  {match.score_team !== null && match.score_opponent !== null && (
+                    <div className="text-lg font-bold text-blue-600">
+                      {match.score_team} - {match.score_opponent}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {matches.length === 0 && !showAddMatchForm && (
+            <div className="text-center py-12">
+              <Trophy className="h-16 w-16 text-gray-400 mx-auto mb-6" />
+              <p className="text-xl text-gray-600">Aucun match disponible</p>
+              <p className="text-lg text-gray-500 mt-3">
+                Créez votre premier match pour commencer l&apos;enregistrement.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Étape 2: Informations du match (Modal)
+  if (currentStep === 'matchInfo') {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+          {/* Header */}
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Informations du match</h2>
+            <button
+              onClick={() => setCurrentStep('match')}
+              className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            >
+              <X className="h-6 w-6" />
+            </button>
+          </div>
+
+          {/* Informations du match */}
+          <div className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Titre
+                </label>
+                <input
+                  type="text"
+                  value={matchInfo.title}
+                  onChange={(e) => setMatchInfo(prev => ({ ...prev, title: e.target.value }))}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Date
+                </label>
+                <input
+                  type="datetime-local"
+                  value={matchInfo.date}
+                  onChange={(e) => setMatchInfo(prev => ({ ...prev, date: e.target.value }))}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Lieu
+                </label>
+                <select
+                  value={matchInfo.location}
+                  onChange={(e) => setMatchInfo(prev => ({ ...prev, location: e.target.value }))}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                >
+                  <option value="Domicile">Domicile</option>
+                  <option value="Exterieur">Exterieur</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Type de compétition
+                </label>
+                <select
+                  value={matchInfo.competition}
+                  onChange={(e) => setMatchInfo(prev => ({ ...prev, competition: e.target.value }))}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                >
+                  <option value="Amical">Amical</option>
+                  <option value="Championnat">Championnat</option>
+                  <option value="Coupe">Coupe</option>
+                  <option value="Tournoi">Tournoi</option>
+                </select>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Équipe adverse (optionnel)
+                </label>
+                <input
+                  type="text"
+                  value={matchInfo.opponent}
+                  onChange={(e) => setMatchInfo(prev => ({ ...prev, opponent: e.target.value }))}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
+                  placeholder="Ex: Team X (optionnel)"
+                />
+              </div>
+            </div>
+
+            {/* Joueurs convoqués */}
+            <div className="mb-8">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Joueurs Convoqués</h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                {players && players.map((player) => {
+                  const isConvoked = convokedPlayers.includes(player.id);
+                  const isStarter = starterPlayers.includes(player.id);
+                  
+                  let buttonClass = "px-4 py-3 rounded-lg font-medium transition-colors cursor-pointer ";
+                  if (isConvoked) {
+                    if (isStarter) {
+                      buttonClass += "bg-green-500 text-white hover:bg-green-600";
+                    } else {
+                      buttonClass += "bg-blue-500 text-white hover:bg-blue-600";
+                    }
+                  } else {
+                    buttonClass += "bg-gray-300 text-gray-700 hover:bg-gray-400";
+                  }
+
+                  return (
+                    <button
+                      key={player.id}
+                      onClick={() => togglePlayerConvocation(player.id)}
+                      className={buttonClass}
+                    >
+                      {player.name}
+                    </button>
+                  );
+                })}
+              </div>
+              
+              <div className="mt-4 text-sm text-gray-600">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-4 h-4 bg-green-500 rounded"></div>
+                  <span>Titulaires (5 premiers)</span>
+                </div>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-4 h-4 bg-blue-500 rounded"></div>
+                  <span>Remplaçants</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 bg-gray-300 rounded"></div>
+                  <span>Non convoqués</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-between p-6 border-t">
+            <button
+              onClick={() => setCurrentStep('match')}
+              className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
+            >
+              Annuler
+            </button>
+            <button
+              onClick={saveMatchInfo}
+              className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Save className="h-5 w-5" />
+              Enregistrer Match
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Étape 3: Enregistrement du match (Interface complète)
+  return (
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4">
+      <div className="max-w-7xl mx-auto">
+        {/* Section de contrôle fixe en haut */}
+        <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-xl shadow-xl p-3 mb-3 sticky top-0 z-50 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <h1 className="text-xl font-bold text-gray-900 dark:text-white">Enregistrement Match</h1>
+              {matchData.selectedMatch && (
+                <div className="text-xs text-gray-600 dark:text-gray-400">
+                  {matchData.selectedMatch.title} - {matchData.selectedMatch.competition}
+                </div>
+              )}
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setActiveView(activeView === 'recording' ? 'summary' : 'recording')}
+                className={`flex items-center gap-1 px-2 py-1 rounded transition-colors text-xs font-semibold ${
+                  activeView === 'recording' 
+                    ? 'bg-purple-600 text-gray-900 dark:text-white hover:bg-purple-700 shadow-md' 
+                    : 'bg-orange-600 text-gray-900 dark:text-white hover:bg-orange-700 shadow-md'
+                }`}
+              >
+                {activeView === 'recording' ? (
+                  <>
+                    <Target className="h-3 w-3 text-gray-900 dark:text-white" />
+                    Bilan
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-3 w-3 text-gray-900 dark:text-white" />
+                    Saisie
+                  </>
+                )}
+              </button>
+              <button
+                onClick={resetMatchSelection}
+                className="flex items-center gap-1 px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors text-xs"
+              >
+                <Calendar className="h-3 w-3" />
+                Changer
+              </button>
+              <button
+                onClick={exportData}
+                className="flex items-center gap-1 px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors text-xs"
+              >
+                <Download className="h-3 w-3" />
+                JSON
+              </button>
+              <button
+                onClick={exportCSV}
+                className="flex items-center gap-1 px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 transition-colors text-xs"
+              >
+                <Download className="h-3 w-3" />
+                CSV
+              </button>
+              <button
+                onClick={finishMatch}
+                className="flex items-center gap-1 px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors text-xs font-semibold"
+              >
+                <Square className="h-3 w-3" />
+                Fin Match
+              </button>
+            </div>
+          </div>
+
+          {/* Contrôles ultra-compacts */}
+          <div className="grid grid-cols-4 gap-3">
+            {/* Chronomètre du match */}
+            <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-2">
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-xs font-semibold text-gray-900 dark:text-white">Chronomètre</h3>
+                <div className="text-xs text-gray-600 dark:text-gray-400">
+                  MT {matchData.currentHalf}/2
+                </div>
+              </div>
+              
+              <div className="text-center mb-2">
+                <div className="text-lg font-mono font-bold text-blue-600 dark:text-blue-400">
+                  {formatMatchTime(matchData.matchTime)}
+                </div>
+              </div>
+              
+              <div className="flex gap-1">
+                <button
+                  onClick={toggleMatch}
+                  className={`flex-1 py-1 rounded text-white font-semibold transition-colors text-xs ${
+                    matchData.isRunning 
+                      ? 'bg-red-500 hover:bg-red-600' 
+                      : 'bg-green-500 hover:bg-green-600'
+                  }`}
+                >
+                  {matchData.isRunning ? <Pause className="h-3 w-3 mx-auto" /> : <Play className="h-3 w-3 mx-auto" />}
+                </button>
+                
+                <button
+                  onClick={nextHalf}
+                  className="flex-1 py-1 bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors font-semibold text-xs"
+                >
+                  <Zap className="h-3 w-3 mx-auto" />
+                </button>
+              </div>
+            </div>
+
+            {/* Score du match */}
+            <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-2">
+              <h3 className="text-xs font-semibold text-gray-900 dark:text-white mb-1">Score</h3>
+              
+              <div className="text-center mb-2">
+                <div className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                  {matchData.teamScore} - {matchData.opponentScore}
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-1">
+                <button
+                  onClick={() => setMatchData(prev => ({ ...prev, teamScore: prev.teamScore + 1 }))}
+                  className="py-1 bg-green-500 text-white rounded hover:bg-green-600 transition-colors font-semibold text-xs"
+                >
+                  +1 Éq
+                </button>
+                <button
+                                                                                             onClick={async () => await updateOpponentGoal(true)}
+                  className="py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs"
+                >
+                  +1 Adv
+                </button>
+              </div>
+            </div>
+
+            {/* Fautes */}
+            <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-2">
+              <h3 className="text-xs font-semibold text-gray-900 dark:text-white mb-1">Fautes</h3>
+              
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <div className="text-center">
+                  <div className="text-sm font-bold text-blue-600 dark:text-blue-400">{matchData.teamFouls}</div>
+                  <div className="text-xs text-gray-600 dark:text-gray-400">Équipe</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-sm font-bold text-red-600 dark:text-red-400">{matchData.opponentFouls}</div>
+                  <div className="text-xs text-gray-600 dark:text-gray-400">Adv</div>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-1">
+                <button
+                  onClick={() => updateFouls(true)}
+                  className="py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors font-semibold text-xs"
+                >
+                  Faute Éq
+                </button>
+                <button
+                  onClick={() => updateFouls(false)}
+                  className="py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs"
+                >
+                  Faute Adv
+                </button>
+              </div>
+            </div>
+
+            {/* Actions adverses */}
+            <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-2">
+              <h3 className="text-xs font-semibold text-gray-900 dark:text-white mb-1">Actions adverses</h3>
+              
+              <div className="grid grid-cols-1 gap-1">
+                <button
+                  onClick={async (e) => {
+                    const timerKey = 'opponent-goals';
+                    if (!longPressTriggered[timerKey]) {
+                      await updateOpponentGoal(true);
+                    }
+                  }}
+                  onMouseDown={() => handleOpponentLongPressStart('goals')}
+                  onMouseUp={() => handleOpponentLongPressEnd('goals')}
+                  onMouseLeave={() => handleOpponentLongPressEnd('goals')}
+                  onTouchStart={() => handleOpponentLongPressStart('goals')}
+                  onTouchEnd={() => handleOpponentLongPressEnd('goals')}
+                  className="py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs active:scale-95"
+                  title="Clic court: +1, Clic long: -1"
+                >
+                  But adverse
+                </button>
+                <button
+                  onClick={async () => {
+                    const timerKey = 'opponent-shotsOnTarget';
+                    if (!longPressTriggered[timerKey]) {
+                      await updateOpponentAction('shotsOnTarget');
+                    }
+                  }}
+                  onMouseDown={() => handleOpponentLongPressStart('shotsOnTarget')}
+                  onMouseUp={() => handleOpponentLongPressEnd('shotsOnTarget')}
+                  onMouseLeave={() => handleOpponentLongPressEnd('shotsOnTarget')}
+                  onTouchStart={() => handleOpponentLongPressStart('shotsOnTarget')}
+                  onTouchEnd={() => handleOpponentLongPressEnd('shotsOnTarget')}
+                  className="py-1 bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors font-semibold text-xs active:scale-95"
+                  title="Clic court: +1, Clic long: -1"
+                >
+                  Tir cadré
+                </button>
+                <button
+                  onClick={async () => {
+                    const timerKey = 'opponent-shotsOffTarget';
+                    if (!longPressTriggered[timerKey]) {
+                      await updateOpponentAction('shotsOffTarget');
+                    }
+                  }}
+                  onMouseDown={() => handleOpponentLongPressStart('shotsOffTarget')}
+                  onMouseUp={() => handleOpponentLongPressEnd('shotsOffTarget')}
+                  onMouseLeave={() => handleOpponentLongPressEnd('shotsOffTarget')}
+                  onTouchStart={() => handleOpponentLongPressStart('shotsOffTarget')}
+                  onTouchEnd={() => handleOpponentLongPressEnd('shotsOffTarget')}
+                  className="py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600 transition-colors font-semibold text-xs active:scale-95"
+                  title="Clic court: +1, Clic long: -1"
+                >
+                  Tir adverse
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Vue de saisie ou bilan */}
+        <div className="pt-2">
+        {activeView === 'recording' ? (
+          // Vue de saisie
+          matchData.players.length === 0 ? (
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-8 text-center">
+              <Users className="h-16 w-16 text-gray-400 mx-auto mb-6" />
+              <p className="text-xl text-gray-600 dark:text-gray-400">Aucun joueur sélectionné</p>
+              <p className="text-lg text-gray-500 dark:text-gray-500 mt-3">
+                Sélectionnez des joueurs pour commencer l&apos;enregistrement.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Titulaires */}
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                  Joueurs sur le terrain
+                </h3>
+                <div className="grid grid-cols-5 gap-3">
+                  {matchData.players
+                    .filter(player => player.isStarter && player.isOnField)
+                    .sort((a, b) => {
+                      // Gardien en premier
+                      if (a.position === 'Gardien' && b.position !== 'Gardien') return -1;
+                      if (a.position !== 'Gardien' && b.position === 'Gardien') return 1;
+                      return 0;
+                    })
+                    .map((player) => (
+                      <div
+                        key={player.id}
+                        draggable
+                        onDragStart={() => handleDragStart(player.id)}
+                        onDragOver={(e) => handleDragOver(e, player.id)}
+                        onDragLeave={handleDragLeave}
+                        onDrop={() => handleDrop(player.id)}
+                        className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 transition-all duration-200 cursor-move ${
+                          draggedPlayer === player.id ? 'opacity-50' : ''
+                        } ${
+                          dragOverPlayer === player.id ? 'ring-2 ring-blue-500' : ''
+                        } ${
+                          player.position === 'Gardien' 
+                            ? 'border-2' 
+                            : player.isOnField 
+                              ? 'border-2 border-green-500' 
+                              : 'border border-gray-200 dark:border-gray-600'
+                        }`}
+                        style={player.position === 'Gardien' ? { borderColor: '#f59e0b' } : {}}
+                      >
+                        {/* En-tête du joueur */}
+                        <div className="text-center mb-3">
+                          <div className="font-bold text-sm text-gray-900 dark:text-white">
+                            {player.position === 'Gardien' && <span className="text-amber-500 mr-2">🧤</span>}
+                            {player.name}
+                          </div>
+                          <div className="text-xs text-gray-600 dark:text-gray-400">#{player.number} - {player.position}</div>
+                        </div>
+
+                        {/* Temps de jeu */}
+                        <div className="text-center mb-3">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-gray-600 dark:text-gray-400">Total</span>
+                            <span className="text-gray-600 dark:text-gray-400">Séquence</span>
+                          </div>
+                          <div className="flex justify-between font-mono text-sm font-bold">
+                            <span className="text-gray-900 dark:text-white">{formatTime(player.totalTime)}</span>
+                            <span className="text-gray-900 dark:text-white">{formatTime(player.currentSequenceTime)}</span>
+                          </div>
+                        </div>
+
+                        {/* Actions rapides */}
+                        <div className="grid grid-cols-2 gap-1">
+                          {ACTIONS.map((action) => {
+                            const IconComponent = action.icon;
+                            return (
+                              <button
+                                key={action.id}
+                                onClick={async () => {
+                                  const timerKey = `${player.id}-${action.id}`;
+                                  if (!longPressTriggered[timerKey]) {
+                                    await updatePlayerStat(player.id, action.id);
+                                  }
+                                }}
+                                onMouseDown={() => handleLongPressStart(player.id, action.id)}
+                                onMouseUp={() => handleLongPressEnd(player.id, action.id)}
+                                onMouseLeave={() => handleLongPressEnd(player.id, action.id)}
+                                onTouchStart={() => handleLongPressStart(player.id, action.id)}
+                                onTouchEnd={() => handleLongPressEnd(player.id, action.id)}
+                                className={`flex items-center justify-center gap-1 p-1 rounded text-white font-medium transition-colors text-xs ${action.color} hover:opacity-80 active:scale-95`}
+                                title="Clic court: +1, Clic long: -1"
+                              >
+                                <IconComponent className="h-3 w-3" />
+                                <span className="text-xs">{player.stats[action.id] || 0}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* Cartons */}
+                        <div className="flex justify-center gap-2 mt-2">
+                          <button
+                            onClick={async () => {
+                              const timerKey = `${player.id}-yellowCard`;
+                              if (!longPressTriggered[timerKey]) {
+                                await updatePlayerCard(player.id, 'yellow');
+                              }
+                            }}
+                            onMouseDown={() => handleCardLongPressStart(player.id, 'yellow')}
+                            onMouseUp={() => handleCardLongPressEnd(player.id, 'yellow')}
+                            onMouseLeave={() => handleCardLongPressEnd(player.id, 'yellow')}
+                            onTouchStart={() => handleCardLongPressStart(player.id, 'yellow')}
+                            onTouchEnd={() => handleCardLongPressEnd(player.id, 'yellow')}
+                            className="flex items-center gap-1 px-2 py-1 bg-yellow-500 text-white rounded text-xs hover:bg-yellow-600 transition-colors active:scale-95"
+                            title="Clic court: +1, Clic long: -1"
+                          >
+                            <Circle className="h-3 w-3" />
+                            <span>{player.yellowCards || 0}</span>
+                          </button>
+                                                      <button
+                              onClick={async () => {
+                                const timerKey = `${player.id}-redCard`;
+                                if (!longPressTriggered[timerKey]) {
+                                  await updatePlayerCard(player.id, 'red');
+                                }
+                              }}
+                              onMouseDown={() => handleCardLongPressStart(player.id, 'red')}
+                              onMouseUp={() => handleCardLongPressEnd(player.id, 'red')}
+                              onMouseLeave={() => handleCardLongPressEnd(player.id, 'red')}
+                              onTouchStart={() => handleCardLongPressStart(player.id, 'red')}
+                              onTouchEnd={() => handleCardLongPressEnd(player.id, 'red')}
+                              className="flex items-center gap-1 px-2 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600 transition-colors active:scale-95"
+                              title="Clic court: +1, Clic long: -1"
+                            >
+                            <Circle className="h-3 w-3" />
+                            <span>{player.redCards || 0}</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+
+              {/* Remplaçants */}
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                  <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                  Remplaçants
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
+                  {matchData.players
+                    .filter(player => !player.isOnField)
+                    .sort((a, b) => {
+                      // Gardien en dernier
+                      if (a.position === 'Gardien' && b.position !== 'Gardien') return 1;
+                      if (a.position !== 'Gardien' && b.position === 'Gardien') return -1;
+                      return 0;
+                    })
+                    .map((player) => (
+                      <div
+                        key={player.id}
+                        draggable
+                        onDragStart={() => handleDragStart(player.id)}
+                        onDragOver={(e) => handleDragOver(e, player.id)}
+                        onDragLeave={handleDragLeave}
+                        onDrop={() => handleDrop(player.id)}
+                        className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-2 transition-all duration-200 cursor-move ${
+                          draggedPlayer === player.id ? 'opacity-50' : ''
+                        } ${
+                          dragOverPlayer === player.id ? 'ring-2 ring-blue-500' : ''
+                        } ${
+                          player.position === 'Gardien' 
+                            ? 'border-2' 
+                            : 'border border-gray-200 dark:border-gray-600'
+                        }`}
+                        style={player.position === 'Gardien' ? { borderColor: '#f59e0b' } : {}}
+                      >
+                        {/* En-tête du joueur */}
+                        <div className="text-center mb-2">
+                          <div className="font-bold text-xs text-gray-900 dark:text-white">
+                            {player.position === 'Gardien' && <span className="text-amber-500 mr-2">🧤</span>}
+                            {player.name}
+                          </div>
+                          <div className="text-xs text-gray-600 dark:text-gray-400">#{player.number}</div>
+                        </div>
+
+                        {/* Temps de jeu */}
+                        <div className="text-center mb-2">
+                          <div className="text-xs text-gray-600 dark:text-gray-400">Total</div>
+                          <div className="font-mono text-xs font-bold text-gray-900 dark:text-white">{formatTime(player.totalTime)}</div>
+                        </div>
+
+                        {/* Cartons */}
+                        <div className="flex justify-center gap-1">
+                          <button
+                            onClick={() => {
+                              const timerKey = `${player.id}-yellowCard`;
+                              if (!longPressTriggered[timerKey]) {
+                                updatePlayerCard(player.id, 'yellow');
+                              }
+                            }}
+                            onMouseDown={() => handleCardLongPressStart(player.id, 'yellow')}
+                            onMouseUp={() => handleCardLongPressEnd(player.id, 'yellow')}
+                            onMouseLeave={() => handleCardLongPressEnd(player.id, 'yellow')}
+                            onTouchStart={() => handleCardLongPressStart(player.id, 'yellow')}
+                            onTouchEnd={() => handleCardLongPressEnd(player.id, 'yellow')}
+                            className="flex items-center gap-1 px-1 py-0.5 bg-yellow-500 text-white rounded text-xs hover:bg-yellow-600 transition-colors active:scale-95"
+                            title="Clic court: +1, Clic long: -1"
+                          >
+                            <Circle className="h-2 w-2" />
+                            <span className="text-xs">{player.yellowCards || 0}</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              const timerKey = `${player.id}-redCard`;
+                              if (!longPressTriggered[timerKey]) {
+                                updatePlayerCard(player.id, 'red');
+                              }
+                            }}
+                            onMouseDown={() => handleCardLongPressStart(player.id, 'red')}
+                            onMouseUp={() => handleCardLongPressEnd(player.id, 'red')}
+                            onMouseLeave={() => handleCardLongPressEnd(player.id, 'red')}
+                            onTouchStart={() => handleCardLongPressStart(player.id, 'red')}
+                            onTouchEnd={() => handleCardLongPressEnd(player.id, 'red')}
+                            className="flex items-center gap-1 px-1 py-0.5 bg-red-500 text-white rounded text-xs hover:bg-red-600 transition-colors active:scale-95"
+                            title="Clic court: +1, Clic long: -1"
+                          >
+                            <Circle className="h-2 w-2" />
+                            <span className="text-xs">{player.redCards || 0}</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            </div>
+          )
+        ) : (
+          // Vue bilan
+          <div className="space-y-3">
+            {/* Statistiques générales */}
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 border border-gray-200 dark:border-gray-700">
+              <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+                <Trophy className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                Bilan du Match
+              </h2>
+              
+              {/* Statistiques des tirs */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                {/* Notre équipe */}
+                <div className="bg-blue-50 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-600 rounded p-3 shadow-sm">
+                  <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2 flex items-center gap-1">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                    Notre Équipe
+                  </h3>
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center py-1 px-2 bg-blue-100 dark:bg-blue-800/60 rounded border border-blue-200 dark:border-blue-700">
+                      <span className="text-xs font-medium text-blue-800 dark:text-blue-200">Tirs totaux</span>
+                      <span className="font-bold text-blue-950 dark:text-white text-sm">{getTeamStats().totalShots}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-1 px-2 bg-green-100 dark:bg-green-800/60 rounded border border-green-200 dark:border-green-700">
+                      <span className="text-xs font-medium text-green-800 dark:text-green-200">Tirs cadrés</span>
+                      <span className="font-bold text-green-950 dark:text-white text-sm">{getTeamStats().totalShotsOnTarget}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-1 px-2 bg-yellow-100 dark:bg-yellow-800/60 rounded border border-yellow-200 dark:border-yellow-700">
+                      <span className="text-xs font-medium text-yellow-800 dark:text-yellow-200">Tirs non cadrés</span>
+                      <span className="font-bold text-yellow-950 dark:text-white text-sm">{getTeamStats().totalShotsOffTarget}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Équipe adverse */}
+                <div className="bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-600 rounded p-3 shadow-sm">
+                  <h3 className="text-sm font-semibold text-red-900 dark:text-red-100 mb-2 flex items-center gap-1">
+                    <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                    Équipe Adverse
+                  </h3>
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center py-1 px-2 bg-red-100 dark:bg-red-800/60 rounded border border-red-200 dark:border-red-700">
+                      <span className="text-xs font-medium text-red-800 dark:text-red-200">Tirs totaux</span>
+                      <span className="font-bold text-red-950 dark:text-white text-sm">{getTeamStats().opponentShots}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-1 px-2 bg-orange-100 dark:bg-orange-800/60 rounded border border-orange-200 dark:border-orange-700">
+                      <span className="text-xs font-medium text-orange-800 dark:text-orange-200">Tirs cadrés</span>
+                      <span className="font-bold text-orange-950 dark:text-white text-sm">{getTeamStats().opponentShotsOnTarget}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-1 px-2 bg-yellow-100 dark:bg-yellow-800/60 rounded border border-yellow-200 dark:border-yellow-700">
+                      <span className="text-xs font-medium text-yellow-800 dark:text-yellow-200">Tirs non cadrés</span>
+                      <span className="font-bold text-yellow-950 dark:text-white text-sm">{getTeamStats().opponentShotsOffTarget}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Top joueurs par catégorie */}
+              <div className="grid grid-cols-2 gap-3">
+                {/* Temps de jeu */}
+                <div className="bg-green-50 dark:bg-green-900/40 border border-green-200 dark:border-green-600 rounded p-3 shadow-sm">
+                  <h3 className="text-sm font-semibold text-green-900 dark:text-green-100 mb-2 flex items-center gap-1">
+                    <Clock className="h-4 w-4" />
+                    Plus de temps de jeu
+                  </h3>
+                  <div className="space-y-1">
+                    {getTopPlayersByTime().map((player, index) => (
+                      <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-green-100 dark:bg-green-800/60 rounded border border-green-200 dark:border-green-700">
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs font-medium text-green-800 dark:text-green-200">
+                            {index + 1}. {player.name}
+                          </span>
+                        </div>
+                        <span className="font-mono text-xs font-bold text-green-950 dark:text-white">
+                          {formatTime(player.totalTime)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Tirs */}
+                <div className="bg-yellow-50 dark:bg-yellow-900/40 border border-yellow-200 dark:border-yellow-600 rounded p-3 shadow-sm">
+                  <h3 className="text-sm font-semibold text-yellow-900 dark:text-yellow-100 mb-2 flex items-center gap-1">
+                    <Target className="h-4 w-4" />
+                    Plus de tirs
+                  </h3>
+                  <div className="space-y-1">
+                    {getTopPlayers('shotsOnTarget').map((player, index) => {
+                      const totalShots = (player.stats.shotsOnTarget || 0) + (player.stats.shotsOffTarget || 0);
+                      return (
+                        <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-yellow-100 dark:bg-yellow-800/60 rounded border border-yellow-200 dark:border-yellow-700">
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs font-medium text-yellow-800 dark:text-yellow-200">
+                              {index + 1}. {player.name}
+                            </span>
+                          </div>
+                          <span className="font-mono text-xs font-bold text-yellow-950 dark:text-white">
+                            {totalShots} ({player.stats.shotsOnTarget || 0} cadrés)
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Récupérations */}
+                <div className="bg-blue-50 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-600 rounded p-3 shadow-sm">
+                  <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2 flex items-center gap-1">
+                    <RefreshCw className="h-4 w-4" />
+                    Plus de récupérations
+                  </h3>
+                  <div className="space-y-1">
+                    {getTopPlayers('ballRecovery').map((player, index) => (
+                      <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-blue-100 dark:bg-blue-800/60 rounded border border-blue-200 dark:border-blue-700">
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs font-medium text-blue-800 dark:text-blue-200">
+                            {index + 1}. {player.name}
+                          </span>
+                        </div>
+                        <span className="font-mono text-xs font-bold text-blue-950 dark:text-white">
+                          {player.stats.ballRecovery || 0}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Pertes de balle */}
+                <div className="bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-600 rounded p-3 shadow-sm">
+                  <h3 className="text-sm font-semibold text-red-900 dark:text-red-100 mb-2 flex items-center gap-1">
+                    <AlertTriangle className="h-4 w-4" />
+                    Plus de pertes de balle
+                  </h3>
+                  <div className="space-y-1">
+                    {getTopPlayers('ballLoss').map((player, index) => (
+                      <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-red-100 dark:bg-red-800/60 rounded border border-red-200 dark:border-red-700">
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs font-medium text-red-800 dark:text-red-200">
+                            {index + 1}. {player.name}
+                          </span>
+                        </div>
+                        <span className="font-mono text-xs font-bold text-red-950 dark:text-white">
+                          {player.stats.ballLoss || 0}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Dribbles */}
+                <div className="bg-purple-50 dark:bg-purple-900/40 border border-purple-200 dark:border-purple-600 rounded p-3 shadow-sm">
+                  <h3 className="text-sm font-semibold text-purple-900 dark:text-purple-100 mb-2 flex items-center gap-1">
+                    <ArrowRight className="h-4 w-4" />
+                    Plus de dribbles réussis
+                  </h3>
+                  <div className="space-y-1">
+                    {getTopPlayers('dribbleSuccess').map((player, index) => (
+                      <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-purple-100 dark:bg-purple-800/60 rounded border border-purple-200 dark:border-purple-700">
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs font-medium text-purple-800 dark:text-purple-200">
+                            {index + 1}. {player.name}
+                          </span>
+                        </div>
+                        <span className="font-mono text-xs font-bold text-purple-950 dark:text-white">
+                          {player.stats.dribbleSuccess || 0}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 1v1 perdus */}
+                <div className="bg-orange-50 dark:bg-orange-900/40 border border-orange-200 dark:border-orange-600 rounded p-3 shadow-sm">
+                  <h3 className="text-sm font-semibold text-orange-900 dark:text-orange-100 mb-2 flex items-center gap-1">
+                    <AlertTriangle className="h-4 w-4" />
+                    Plus de 1v1 perdus
+                  </h3>
+                  <div className="space-y-1">
+                    {getTopPlayers('oneOnOneDefLost').map((player, index) => (
+                      <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-orange-100 dark:bg-orange-800/60 rounded border border-orange-200 dark:border-orange-700">
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs font-medium text-orange-800 dark:text-orange-200">
+                            {index + 1}. {player.name}
+                          </span>
+                        </div>
+                        <span className="font-mono text-xs font-bold text-orange-950 dark:text-white">
+                          {player.stats.oneOnOneDefLost || 0}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        </div>
+      </div>
+    </div>
+  );
+}
