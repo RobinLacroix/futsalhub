@@ -29,9 +29,10 @@ export default function WebApp() {
             </a>
             <div className="text-center">
       
-              <p className="text-gray-600 mb-6">
+              <a href="/webapp/manager/squad" 
+              className="block text-blue-600 hover:text-blue-700">
                 → Gérer l&apos;effectif
-              </p>
+              </a>
             </div>
             <a
               href="/webapp/manager/dashboard"
