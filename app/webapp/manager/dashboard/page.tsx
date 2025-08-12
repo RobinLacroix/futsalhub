@@ -843,27 +843,36 @@ export default function DashboardPage() {
               </button>
             </div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 max-h-40 overflow-y-auto">
+          <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-2">
             {players.map(player => (
-              <label key={player.id} className="flex items-center space-x-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={filters.selectedPlayers.includes(player.id)}
-                  onChange={() => togglePlayerSelection(player.id, false)}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <span className="text-sm text-gray-700">
-                  {player.first_name} {player.last_name}
-                </span>
-              </label>
+              <button
+                key={player.id}
+                onClick={() => togglePlayerSelection(player.id, false)}
+                className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                  filters.selectedPlayers.includes(player.id)
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                {player.first_name} {player.last_name}
+              </button>
             ))}
+          </div>
+          <div className="flex items-center justify-between mt-2">
+            <p className="text-sm text-gray-500">
+              {filters.selectedPlayers.length === 0 
+                ? 'Tous les joueurs sont sélectionnés' 
+                : `${filters.selectedPlayers.length} joueur(s) sélectionné(s)`
+              }
+            </p>
+            
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           {/* Répartition par statut */}
           <div className="bg-white p-6 rounded-lg shadow">
-            <h3 className="text-lg font-semibold mb-4">Répartition par statut</h3>
+            <h3 className="text-lg text-gray-900 font-semibold mb-4">Répartition par statut</h3>
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>

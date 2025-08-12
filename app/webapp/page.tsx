@@ -27,13 +27,10 @@ export default function WebApp() {
             >
               → Voir le calendrier
             </a>
-            <div className="text-center">
-      
               <a href="/webapp/manager/squad" 
               className="block text-blue-600 hover:text-blue-700">
                 → Gérer l&apos;effectif
               </a>
-            </div>
             <a
               href="/webapp/manager/dashboard"
               className="block text-blue-600 hover:text-blue-700"
