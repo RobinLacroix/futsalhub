@@ -1862,7 +1862,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
         <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-xl shadow-xl p-3 mb-3 sticky top-0 z-50 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between mb-2">
             <div>
-              <h1 className="text-xl font-bold text-gray-900 dark:text-white">Enregistrement Match</h1>
+              <h1 className="text-lg font-bold text-gray-900 dark:text-white">Enregistrement Match</h1>
               {matchData.selectedMatch && (
                 <div className="text-xs text-gray-600 dark:text-gray-400">
                   {matchData.selectedMatch.title} - {matchData.selectedMatch.competition}
@@ -1933,30 +1933,34 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                 </div>
               </div>
               
-              <div className="text-center mb-2">
-                <div className="text-lg font-mono font-bold text-blue-600 dark:text-blue-400">
-                  {formatMatchTime(matchData.matchTime)}
+              <div className="flex items-center justify-between">
+                {/* Temps à gauche */}
+                <div className="text-center">
+                  <div className="text-lg font-mono font-bold text-blue-600 dark:text-blue-400">
+                    {formatMatchTime(matchData.matchTime)}
+                  </div>
                 </div>
-              </div>
-              
-              <div className="flex gap-1">
-                <button
-                  onClick={toggleMatch}
-                  className={`flex-1 py-1 rounded text-white font-semibold transition-colors text-xs ${
-                    matchData.isRunning 
-                      ? 'bg-red-500 hover:bg-red-600' 
-                      : 'bg-green-500 hover:bg-green-600'
-                  }`}
-                >
-                  {matchData.isRunning ? <Pause className="h-3 w-3 mx-auto" /> : <Play className="h-3 w-3 mx-auto" />}
-                </button>
                 
-                <button
-                  onClick={nextHalf}
-                  className="flex-1 py-1 bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors font-semibold text-xs"
-                >
-                  <Zap className="h-3 w-3 mx-auto" />
-                </button>
+                {/* Boutons empilés à droite */}
+                <div className="flex flex-col gap-1">
+                  <button
+                    onClick={toggleMatch}
+                    className={`py-1 px-2 rounded text-white font-semibold transition-colors text-xs ${
+                      matchData.isRunning 
+                        ? 'bg-red-500 hover:bg-red-600' 
+                        : 'bg-green-500 hover:bg-green-600'
+                    }`}
+                  >
+                    {matchData.isRunning ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                  </button>
+                  
+                  <button
+                    onClick={nextHalf}
+                    className="py-1 px-2 bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors font-semibold text-xs"
+                  >
+                    <Zap className="h-3 w-3" />
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1998,11 +2002,9 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
               <div className="grid grid-cols-2 gap-2 mb-2">
                 <div className="text-center">
                   <div className="text-sm font-bold text-blue-600 dark:text-blue-400">{matchData.teamFouls}</div>
-                  <div className="text-xs text-gray-600 dark:text-gray-400">Équipe</div>
                 </div>
                 <div className="text-center">
                   <div className="text-sm font-bold text-red-600 dark:text-red-400">{matchData.opponentFouls}</div>
-                  <div className="text-xs text-gray-600 dark:text-gray-400">Adv</div>
                 </div>
               </div>
               
@@ -2039,7 +2041,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                   onMouseLeave={() => handleOpponentLongPressEnd('goals')}
                   onTouchStart={() => handleOpponentLongPressStart('goals')}
                   onTouchEnd={() => handleOpponentLongPressEnd('goals')}
-                  className="py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs active:scale-95"
+                  className="py-3 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs active:scale-95"
                   title="Clic court: +1, Clic long: -1"
                 >
                   But adverse
@@ -2056,7 +2058,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                   onMouseLeave={() => handleOpponentLongPressEnd('shotsOnTarget')}
                   onTouchStart={() => handleOpponentLongPressStart('shotsOnTarget')}
                   onTouchEnd={() => handleOpponentLongPressEnd('shotsOnTarget')}
-                  className="py-1 bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors font-semibold text-xs active:scale-95"
+                  className="py-3 bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors font-semibold text-xs active:scale-95"
                   title="Clic court: +1, Clic long: -1"
                 >
                   Tir cadré
@@ -2073,7 +2075,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                   onMouseLeave={() => handleOpponentLongPressEnd('shotsOffTarget')}
                   onTouchStart={() => handleOpponentLongPressStart('shotsOffTarget')}
                   onTouchEnd={() => handleOpponentLongPressEnd('shotsOffTarget')}
-                  className="py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600 transition-colors font-semibold text-xs active:scale-95"
+                  className="py-3 bg-yellow-500 text-white rounded hover:bg-yellow-600 transition-colors font-semibold text-xs active:scale-95"
                   title="Clic court: +1, Clic long: -1"
                 >
                   Tir adverse
