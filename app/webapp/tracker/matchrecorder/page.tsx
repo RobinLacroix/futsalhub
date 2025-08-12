@@ -2026,7 +2026,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
             <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-2">
               <h3 className="text-xs font-semibold text-gray-900 dark:text-white mb-1">Actions adverses</h3>
               
-              <div className="grid grid-cols-1 gap-1">
+              <div className="grid grid-cols-3 gap-1">
                 <button
                   onClick={async (e) => {
                     const timerKey = 'opponent-goals';
