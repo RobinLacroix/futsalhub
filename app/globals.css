@@ -1,6 +1,42 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Egalise la hauteur des événements dans une case de react-big-calendar */
+.rbc-day-slot .rbc-events-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.rbc-day-slot .rbc-event {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: 100%;
+  margin-bottom: 2px;
+  overflow: hidden;
+}
 
 /* Styles spécifiques pour iPad/tablette */
 @media (pointer: coarse) {
