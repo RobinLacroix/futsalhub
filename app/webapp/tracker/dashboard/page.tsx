@@ -1,22 +1,14 @@
+/* eslint-disable react/no-unescaped-entities */
 'use client';
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import {
   BarChart3,
-  TrendingUp,
-  Users,
   Clock,
   Target,
-  Crosshair,
-  Goal,
-  AlertTriangle,
   RefreshCw,
-  ArrowRight,
-  Filter,
-  Download,
-  Radar,
-  Activity
+  Users
 } from 'lucide-react';
 import {
   BarChart,
@@ -27,17 +19,13 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
-  Radar as RechartsRadar,
-  LineChart,
-  Line,
-  PieChart,
-  Pie,
-  Cell
+  PieChart as RechartsPieChart,
+  Pie
 } from 'recharts';
+
+// Import the new TeamRadarChart component
+import TeamRadarChart from '@/app/webapp/components/TeamRadarChart';
+import ActionsByTypeChart from '@/app/webapp/components/ActionsByTypeChart';
 
 interface Player {
   id: string;
@@ -47,6 +35,14 @@ interface Player {
   number: number;
 }
 
+interface MatchPlayer {
+  id: string;
+  goals: number;
+  yellow_cards: number;
+  red_cards: number;
+  time_played: number;  // ← Corriger le nom du champ
+}
+
 interface Match {
   id: string;
   title: string;
@@ -54,7 +50,8 @@ interface Match {
   competition: string;
   score_team: number;
   score_opponent: number;
-  recorded_with_tracker: boolean;
+  recorded_with_tracker?: boolean;
+  players?: MatchPlayer[];
 }
 
 interface MatchEvent {
@@ -106,7 +103,7 @@ export default function TrackerDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
   const [selectedMatches, setSelectedMatches] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<'plusminus' | 'actions' | 'radar' | 'time'>('plusminus');
+  const [activeTab, setActiveTab] = useState('plus-minus');
 
   // Charger les données depuis Supabase
   useEffect(() => {
@@ -117,13 +114,19 @@ export default function TrackerDashboardPage() {
         // Charger tous les matches
         const { data: matchesData, error: matchesError } = await supabase
           .from('matches')
-          .select('id, title, date, competition, score_team, score_opponent')
+          .select('id, title, date, competition, score_team, score_opponent, players') // ← AJOUTER 'players'
           .order('date', { ascending: false });
 
         if (matchesError) {
           console.error('Erreur lors du chargement des matches:', matchesError);
           setMatches([]);
         } else {
+          console.log('Matches chargés:', matchesData);
+          // Debug: vérifier la structure des données players
+          if (matchesData && matchesData.length > 0) {
+            console.log('Premier match players:', matchesData[0]?.players);
+            console.log('Structure des données players:', JSON.stringify(matchesData[0]?.players, null, 2));
+          }
           setMatches(matchesData || []);
         }
 
@@ -171,6 +174,14 @@ export default function TrackerDashboardPage() {
 
     loadData();
   }, []);
+
+  // Debug: logger l'onglet actif
+  useEffect(() => {
+    console.log('Dashboard - Onglet actif:', activeTab);
+    if (activeTab === 'radar') {
+      console.log('Dashboard - Onglet radar actif, composant TeamRadarChart devrait être rendu');
+    }
+  }, [activeTab]);
 
   // Calculer les statistiques des joueurs basées sur les événements
   useEffect(() => {
@@ -228,8 +239,34 @@ export default function TrackerDashboardPage() {
           }
         });
 
-        // Calculer le temps de jeu (approximation basée sur le nombre d'événements)
-        const totalTime = playerEvents.length * 30; // 30 secondes par événement en moyenne
+        // Récupérer le temps de jeu depuis les données du match
+        let totalTime = 0;
+        if (selectedMatches.length > 0) {
+          // Récupérer le temps de jeu depuis les données du match
+          for (const matchId of selectedMatches) {
+            const match = matches.find(m => m.id === matchId);
+            if (match && match.players) {
+              const playerData = match.players.find((p: MatchPlayer) => p.id === player.id);
+              if (playerData && playerData.time_played) {
+                totalTime += playerData.time_played;
+                console.log(`${player.first_name} ${player.last_name} - Match ${match.title}: ${playerData.time_played}s (total: ${totalTime}s)`);
+              }
+            }
+          }
+        } else {
+          // Si aucun match sélectionné, utiliser tous les matches
+          for (const match of matches) {
+            if (match.players) {
+              const playerData = match.players.find((p: MatchPlayer) => p.id === player.id);
+              if (playerData && playerData.time_played) {
+                totalTime += playerData.time_played;
+                console.log(`${player.first_name} ${player.last_name} - Match ${match.title}: ${playerData.time_played}s (total: ${totalTime}s)`);
+              }
+            }
+          }
+        }
+
+        console.log(`${player.first_name} ${player.last_name} - Temps total calculé: ${totalTime}s`);
 
         // Trouver les matches uniques où le joueur a participé
         const uniqueMatches = new Set(playerEvents.map(event => event.match_id));
@@ -249,6 +286,21 @@ export default function TrackerDashboardPage() {
             }))
           });
         }
+
+        // Debug: afficher les détails pour tous les joueurs
+        console.log(`${player.first_name} ${player.last_name} - Debug:`, {
+          playerId: player.id,
+          playerEvents: playerEvents.length,
+          goals: totalGoals,
+          plusMinus: plusMinus,
+          shotsPlusMinus: shotsPlusMinus,
+          events: playerEvents.map(event => ({
+            type: event.event_type,
+            match: matches.find(m => m.id === event.match_id)?.title,
+            time: event.match_time_seconds,
+            playersOnField: event.players_on_field
+          }))
+        });
 
         return {
           playerId: player.id,
@@ -362,7 +414,7 @@ export default function TrackerDashboardPage() {
             </div>
             <div className="flex items-center gap-4">
               <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
-                <Download className="h-4 w-4" />
+                <RefreshCw className="h-4 w-4" />
                 Exporter
               </button>
             </div>
@@ -378,7 +430,7 @@ export default function TrackerDashboardPage() {
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              <TrendingUp className="h-4 w-4" />
+              <BarChart3 className="h-4 w-4" />
               +/- Stats
             </button>
             <button
@@ -389,8 +441,20 @@ export default function TrackerDashboardPage() {
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              <Activity className="h-4 w-4" />
+              <Users className="h-4 w-4" />
               Actions par Type
+            </button>
+
+            <button
+              onClick={() => setActiveTab('radar')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors ${
+                activeTab === 'radar'
+                  ? 'bg-white text-blue-600 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <Target className="h-4 w-4" />
+              Radar
             </button>
 
             <button
@@ -407,7 +471,6 @@ export default function TrackerDashboardPage() {
           </div>
         </div>
 
-        {/* Contenu des tabs */}
         {activeTab === 'plusminus' && (
           <div className="space-y-6">
             {/* Filtres */}
@@ -436,7 +499,7 @@ export default function TrackerDashboardPage() {
                           : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                       }`}
                     >
-                      {match.title} ({new Date(match.date).toLocaleDateString()})
+                      {match.title}
                     </button>
                   ))}
                 </div>
@@ -466,71 +529,146 @@ export default function TrackerDashboardPage() {
             </div>
 
             {/* Graphiques */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-6">
               {/* Stats +/- Buts */}
-              <div className="bg-white rounded-lg shadow-lg p-6">
+              <div className="bg-white rounded-lg shadow-lg p-4">
                 <h2 className="text-xl font-bold text-gray-900 mb-4">Statistiques +/- (Buts)</h2>
                 <ResponsiveContainer width="100%" height={400}>
-                  <BarChart data={playerStats}>
+                  <BarChart data={playerStats} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="playerName" angle={-45} textAnchor="end" height={80} />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="plusMinus" fill="#3B82F6" name="+/- Buts" />
+                    <XAxis 
+                      dataKey="playerName" 
+                      angle={-45} 
+                      textAnchor="end" 
+                      height={60}
+                      tick={{ fontSize: 10 }}
+                    />
+                    <YAxis allowDataOverflow={false} />
+                    <Tooltip 
+                      formatter={(value: number) => [
+                        `${value > 0 ? '+' : ''}${value}`,
+                        '+/- Buts'
+                      ]}
+                      labelStyle={{ color: '#374151' }}
+                    />
+                    
+                    <Bar 
+                      dataKey="plusMinus" 
+                      fill="#3B82F6"
+                      name="+/- Buts"
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
 
               {/* Stats +/- Tirs */}
-              <div className="bg-white rounded-lg shadow-lg p-6">
+              <div className="bg-white rounded-lg shadow-lg p-4">
                 <h2 className="text-xl font-bold text-gray-900 mb-4">Statistiques +/- (Tirs)</h2>
                 <ResponsiveContainer width="100%" height={400}>
-                  <BarChart data={playerStats}>
+                  <BarChart data={playerStats} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="playerName" angle={-45} textAnchor="end" height={80} />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="shotsPlusMinus" fill="#10B981" name="+/- Tirs" />
+                    <XAxis 
+                      dataKey="playerName" 
+                      angle={-45} 
+                      textAnchor="end" 
+                      height={60}
+                      tick={{ fontSize: 10 }}
+                    />
+                    <YAxis allowDataOverflow={false} />
+                    <Tooltip 
+                      formatter={(value: number) => [
+                        `${value > 0 ? '+' : ''}${value}`,
+                        '+/- Tirs'
+                      ]}
+                      labelStyle={{ color: '#374151' }}
+                    />
+                    
+                    <Bar 
+                      dataKey="shotsPlusMinus" 
+                      fill="#10B981"
+                      name="+/- Tirs"
+                    />
                   </BarChart>
                 </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Tableau des statistiques */}
+            <div className="bg-white rounded-lg shadow-lg p-6">
+              <h3 className="text-lg font-bold text-gray-900 mb-4">Statistiques détaillées des joueurs</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Joueur</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Matches</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Buts</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tirs</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tirs cadrés</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Dribbles</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Récupérations</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">+/- Buts</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">+/- Tirs</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {playerStats.map((player) => (
+                      <tr key={player.playerId} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          {player.playerName}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {player.matchesPlayed}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {player.totalGoals}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {player.totalShots}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {player.totalShotsOnTarget}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {player.totalDribbles}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {player.totalRecoveries}
+                        </td>
+                        <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${
+                          player.plusMinus > 0 ? 'text-green-600' : 
+                          player.plusMinus < 0 ? 'text-red-600' : 'text-gray-500'
+                        }`}>
+                          {player.plusMinus > 0 ? '+' : ''}{player.plusMinus}
+                        </td>
+                        <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${
+                          player.shotsPlusMinus > 0 ? 'text-green-600' : 
+                          player.shotsPlusMinus < 0 ? 'text-red-600' : 'text-gray-500'
+                        }`}>
+                          {player.shotsPlusMinus > 0 ? '+' : ''}{player.shotsPlusMinus}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
         )}
 
         {activeTab === 'actions' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Actions par type dans le temps */}
+          <div className="space-y-6">
+            {/* Actions par type - Séquences de 5 minutes */}
             <div className="bg-white rounded-lg shadow-lg p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Actions par Type dans le Temps</h2>
-              <ResponsiveContainer width="100%" height={400}>
-                <LineChart data={matchActions.slice(0, 50)}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="minute" />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  {['goal', 'shot_on_target', 'recovery', 'yellow_card', 'opponent_goal'].map((actionType, index) => (
-                    <Line
-                      key={actionType}
-                      type="monotone"
-                      dataKey="value"
-                      data={matchActions.filter(action => action.actionType === actionType)}
-                      stroke={getActionTypeColor(actionType)}
-                      name={getActionTypeLabel(actionType)}
-                    />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
+              <h2 className="text-xl font-bold text-gray-900 mb-4">Actions par Type - Séquences de 5 minutes</h2>
+              <ActionsByTypeChart events={matchEvents} selectedMatchIds={selectedMatches} />
             </div>
 
             {/* Répartition des actions */}
             <div className="bg-white rounded-lg shadow-lg p-6">
               <h2 className="text-xl font-bold text-gray-900 mb-4">Répartition des Actions</h2>
               <ResponsiveContainer width="100%" height={400}>
-                <PieChart>
+                <RechartsPieChart>
                   <Pie
                     data={Object.entries(
                       matchActions.reduce((acc, action) => {
@@ -549,13 +687,20 @@ export default function TrackerDashboardPage() {
                   />
                   <Tooltip />
                   <Legend />
-                </PieChart>
+                </RechartsPieChart>
               </ResponsiveContainer>
             </div>
           </div>
         )}
 
-
+        {activeTab === 'radar' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-lg shadow-lg p-6">
+              <h2 className="text-xl font-bold text-gray-900 mb-4">Radar des statistiques d'équipe</h2>
+              <TeamRadarChart />
+            </div>
+          </div>
+        )}
 
         {activeTab === 'time' && (
           <div className="bg-white rounded-lg shadow-lg p-6">
@@ -587,26 +732,302 @@ export default function TrackerDashboardPage() {
               <ResponsiveContainer width="100%" height={400}>
                 <BarChart data={matches.map(match => {
                   const playerId = selectedPlayers[0];
-                  const playerEvents = matchEvents.filter(event => 
-                    event.match_id === match.id && event.players_on_field.includes(playerId)
-                  );
                   const player = players.find(p => p.id === playerId);
                   
                   return {
                     match: match.title,
-                    time: playerEvents.length * 30, // 30 secondes par événement en moyenne
+                    time: (() => {
+                      // Récupérer le temps de jeu depuis les données du match
+                      if (match.players) {
+                        const playerData = match.players.find((p: MatchPlayer) => p.id === playerId);
+                        if (playerData && playerData.time_played) {
+                          return playerData.time_played;
+                        }
+                      }
+                      // Si pas de total_time enregistré, on a 0 temps de jeu
+                      return 0;
+                    })(),
                     player: `${player?.first_name} ${player?.last_name}`
                   };
                 })}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="match" angle={-45} textAnchor="end" height={80} />
+                  <XAxis 
+                    dataKey="match" 
+                    angle={-45} 
+                    textAnchor="end" 
+                    height={80}
+                    tick={{ fontSize: 9 }}
+                  />
                   <YAxis />
                   <Tooltip formatter={(value) => [formatTime(value as number), 'Temps de jeu']} />
-                  <Legend />
-                  <Bar dataKey="time" fill="#8B5CF6" name="Temps de jeu" />
+                  <Bar dataKey="time" fill="#8B5CF6" />
                 </BarChart>
               </ResponsiveContainer>
             )}
+
+            {/* Nouveau graphique : Comparaison des temps de jeu totaux par joueur */}
+            <div className="mt-8">
+              <h3 className="text-lg text-gray-900 font-semibold mb-4">Temps de jeu par joueur et par match</h3>
+              
+              {/* Sélection des matchs pour ce graphique */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Sélectionner les matchs à inclure :
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {matches.map(match => (
+                    <button
+                      key={match.id}
+                      onClick={() => {
+                        if (selectedMatches.includes(match.id)) {
+                          setSelectedMatches(prev => prev.filter(id => id !== match.id));
+                        } else {
+                          setSelectedMatches(prev => [...prev, match.id]);
+                        }
+                      }}
+                      className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                        selectedMatches.includes(match.id)
+                          ? 'bg-green-600 text-white'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                    >
+                      {match.title}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setSelectedMatches(matches.map(m => m.id))}
+                    className="px-3 py-1 rounded-full text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                  >
+                    Tous
+                  </button>
+                  <button
+                    onClick={() => setSelectedMatches([])}
+                    className="px-3 py-1 rounded-full text-sm font-medium bg-red-600 text-white hover:bg-red-700 transition-colors"
+                  >
+                    Aucun
+                  </button>
+                </div>
+              </div>
+
+              {/* Graphique de comparaison */}
+              {(() => {
+                const playerData = players.map(player => {
+                  // Calculer le temps total du joueur pour les matchs sélectionnés
+                  let totalPlayerTime = 0;
+                  let matchesCount = 0;
+                  
+                  if (selectedMatches.length > 0) {
+                    // Filtrer sur les matchs sélectionnés
+                    for (const matchId of selectedMatches) {
+                      const match = matches.find(m => m.id === matchId);
+                      if (match && match.players) {
+                        const playerData = match.players.find((p: MatchPlayer) => p.id === player.id);
+                        if (playerData && playerData.time_played) {
+                          totalPlayerTime += playerData.time_played;
+                          matchesCount++;
+                        }
+                      }
+                    }
+                  } else {
+                    // Utiliser tous les matchs si aucun n'est sélectionné
+                    for (const match of matches) {
+                      if (match.players) {
+                        const playerData = match.players.find((p: MatchPlayer) => p.id === player.id);
+                        if (playerData && playerData.time_played) {
+                          totalPlayerTime += playerData.time_played;
+                          matchesCount++;
+                        }
+                      }
+                    }
+                  }
+
+                  return {
+                    player: `${player.first_name} ${player.last_name}`,
+                    totalTime: totalPlayerTime, // Garder en secondes pour le format mm:ss
+                    matchesCount: matchesCount,
+                    averageTime: matchesCount > 0 ? totalPlayerTime / matchesCount : 0 // Garder en secondes pour le format mm:ss
+                  };
+                }).filter(playerData => playerData.totalTime > 0)
+                .sort((a, b) => b.totalTime - a.totalTime); // Trier par ordre décroissant (en secondes)
+
+                // Debug: afficher les données
+                console.log('Données du graphique temps de jeu:', playerData);
+                
+                // Si aucune donnée, afficher un message
+                if (playerData.length === 0) {
+                  console.warn('Aucun temps de jeu trouvé dans les données');
+                  console.log('Matches disponibles:', matches.map(m => ({ id: m.id, title: m.title, players: m.players })));
+                  
+                  return (
+                    <div className="flex items-center justify-center h-96">
+                      <div className="text-center">
+                        <div className="text-lg text-gray-600 mb-2">Aucun temps de jeu disponible</div>
+                        <div className="text-sm text-gray-500">
+                          {matches.length === 0 ? (
+                            'Aucun match trouvé dans la base de données'
+                          ) : (
+                            <>
+                              {matches.length} match(s) trouvé(s) mais aucun temps de jeu enregistré.
+                              <br />
+                              Assurez-vous d'avoir terminé des matchs avec le matchrecorder.
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <ResponsiveContainer width="100%" height={400}>
+                    <BarChart data={playerData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis 
+                        dataKey="player" 
+                        angle={-45} 
+                        textAnchor="end" 
+                        height={80}
+                        tick={{ fontSize: 10 }}
+                      />
+                      <YAxis 
+                        tickFormatter={(value) => {
+                          const totalSeconds = Math.round(value as number);
+                          const minutes = Math.floor(totalSeconds / 60);
+                          const seconds = totalSeconds % 60;
+                          return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                        }}
+                      />
+                      <Tooltip 
+                        formatter={(value, name) => [
+                          name === 'totalTime' ? (() => {
+                            const totalSeconds = Math.round(value as number);
+                            const minutes = Math.floor(totalSeconds / 60);
+                            const seconds = totalSeconds % 60;
+                            return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                          })() : 
+                          name === 'averageTime' ? (() => {
+                            const totalSeconds = Math.round(value as number);
+                            const minutes = Math.floor(totalSeconds / 60);
+                            const seconds = totalSeconds % 60;
+                            return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                          })() : 
+                          name === 'matchesCount' ? value : (() => {
+                            const totalSeconds = Math.round(value as number);
+                            const minutes = Math.floor(totalSeconds / 60);
+                            const seconds = totalSeconds % 60;
+                            return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                          })(),
+                          name === 'totalTime' ? 'Temps total' : 
+                          name === 'averageTime' ? 'Temps moyen' : 
+                          name === 'matchesCount' ? 'Nombre de matchs' : name
+                        ]}
+                        labelFormatter={(label) => `Joueur: ${label}`}
+                      />
+                      <Legend 
+                        wrapperStyle={{ fontSize: '12px' }}
+                      />
+                      <Bar dataKey="totalTime" fill="#8B5CF6" name="Temps total" />
+                      <Bar dataKey="averageTime" fill="#10B981" name="Temps moyen par match joué" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                );
+              })()}
+
+              {/* Statistiques résumées */}
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <div className="text-sm text-gray-600">Temps de jeu total moyen</div>
+                  <div className="text-lg font-semibold text-gray-800">
+                    {(() => {
+                      const allPlayersData = players.map(player => {
+                        let totalTime = 0;
+                        let matchesCount = 0;
+                        
+                        if (selectedMatches.length > 0) {
+                          for (const matchId of selectedMatches) {
+                            const match = matches.find(m => m.id === matchId);
+                            if (match && match.players) {
+                              const playerData = match.players.find((p: MatchPlayer) => p.id === player.id);
+                              if (playerData && playerData.time_played) {
+                                totalTime += playerData.time_played;
+                                matchesCount++;
+                              }
+                            }
+                          }
+                        } else {
+                          for (const match of matches) {
+                            if (match.players) {
+                              const playerData = match.players.find((p: MatchPlayer) => p.id === player.id);
+                              if (playerData && playerData.time_played) {
+                                totalTime += playerData.time_played;
+                                matchesCount++;
+                              }
+                            }
+                          }
+                        }
+                        
+                        return { totalTime, matchesCount };
+                      });
+                      
+                      const totalTime = allPlayersData.reduce((sum, p) => sum + p.totalTime, 0);
+                      const totalMatches = allPlayersData.reduce((sum, p) => sum + p.matchesCount, 0);
+                      
+                      return totalMatches > 0 ? (() => {
+                        const totalSeconds = Math.round(totalTime / totalMatches);
+                        const minutes = Math.floor(totalSeconds / 60);
+                        const seconds = totalSeconds % 60;
+                        return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                      })() : '00:00';
+                    })()}
+                  </div>
+                </div>
+                
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <div className="text-sm text-gray-600">Joueurs avec temps</div>
+                  <div className="text-lg font-semibold text-gray-800">
+                    {(() => {
+                      const playersWithTime = players.filter(player => {
+                        let hasTime = false;
+                        
+                        if (selectedMatches.length > 0) {
+                          for (const matchId of selectedMatches) {
+                            const match = matches.find(m => m.id === matchId);
+                            if (match && match.players) {
+                              const playerData = match.players.find((p: MatchPlayer) => p.id === player.id);
+                              if (playerData && playerData.time_played) {
+                                hasTime = true;
+                                break;
+                              }
+                            }
+                          }
+                        } else {
+                          for (const match of matches) {
+                            if (match.players) {
+                              const playerData = match.players.find((p: MatchPlayer) => p.id === player.id);
+                              if (playerData && playerData.time_played) {
+                                hasTime = true;
+                                break;
+                              }
+                            }
+                          }
+                        }
+                        
+                        return hasTime;
+                      });
+                      
+                      return playersWithTime.length;
+                    })()}
+                  </div>
+                </div>
+                
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <div className="text-sm text-gray-600">Matchs analysés</div>
+                  <div className="text-lg font-semibold text-gray-800">
+                    {selectedMatches.length > 0 ? selectedMatches.length : matches.length}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>

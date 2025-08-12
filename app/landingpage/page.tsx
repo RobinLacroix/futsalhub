@@ -58,8 +58,9 @@ export default function LandingPage() {
         setIsLoginModalOpen(false);
         router.push('/webapp'); // Redirection vers la webapp ou la page d'accueil connectée
       }
-    } catch (error: any) {
-      setError(error.message || 'Une erreur est survenue lors de la connexion');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Une erreur est survenue lors de la connexion';
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -68,7 +69,7 @@ export default function LandingPage() {
   const features = [
     {
       title: 'Manager',
-      description: 'Pilotage complet d\'une équipe (effectif, calendrier, séances, matchs)',
+      description: 'Pilotage complet d&apos;une équipe (effectif, calendrier, séances, matchs)',
       icon: Calendar
     },
     {
@@ -242,7 +243,7 @@ export default function LandingPage() {
               Donner aux coachs de futsal toute la puissance du digital
             </h1>
             <p className="text-xl sm:text-2xl mb-8">
-              Pour améliorer l'impact sur leur équipe
+              Pour améliorer l&apos;impact sur leur équipe
             </p>
             <Link
               href="/signup"

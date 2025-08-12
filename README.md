@@ -1,36 +1,70 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# FutsalHub3
 
-## Getting Started
+Application de gestion et de suivi de matchs de futsal avec analyse de données en temps réel.
 
-First, run the development server:
+## Composants Principaux
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+### EventsTimelineChart
+
+Un composant React spécialisé pour visualiser l'évolution des événements par type en fonction du temps de match.
+
+#### Fonctionnalités
+
+- **Segments de 5 minutes** : Divise le temps de match en segments de 5 minutes (0-5, 5-10, 10-15, etc.)
+- **6 types d'événements** avec couleurs distinctes :
+  - 🟢 **But** (goal) - Vert
+  - 🔵 **Tir cadré** (shot_on_target) - Bleu  
+  - ⚫ **Tir** (shot) - Gris
+  - 🔴 **But concédé** (opponent_goal) - Rouge
+  - 🟠 **Tir cadré concédé** (opponent_shot_on_target) - Orange
+  - 🟣 **Tir concédé** (opponent_shot) - Rose
+- **Données cumulatives** : Chaque segment affiche le nombre total d'événements jusqu'à ce moment
+- **Filtrage par match** : Possibilité de filtrer les données par match spécifique
+- **Responsive** : Optimisé pour tablette et desktop
+- **Tooltips informatifs** : Affiche "Segment X-Y min - [Type] : [Valeur cumulée]"
+
+#### Utilisation
+
+```tsx
+import EventsTimelineChart from '@/app/webapp/components/EventsTimelineChart'
+
+// Pour tous les matchs
+<EventsTimelineChart />
+
+// Pour des matchs spécifiques
+<EventsTimelineChart selectedMatchIds={['match-id-1', 'match-id-2']} />
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+#### Structure des données
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Le composant récupère les données depuis la table Supabase `match_events` avec les colonnes :
+- `id` : Identifiant unique
+- `match_id` : ID du match
+- `event_type` : Type d'événement
+- `match_time_seconds` : Temps du match en secondes
+- `half` : Mi-temps (1 ou 2)
+- `player_id` : ID du joueur (optionnel)
+- `players_on_field` : Array des joueurs sur le terrain
+- `created_at` : Timestamp de création
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+#### Algorithme de traitement
 
-## Learn More
+1. **Récupération** : Récupère tous les événements depuis Supabase
+2. **Segmentation** : Calcule l'index de segment = `floor(match_time_seconds / 300)`
+3. **Cumul** : Pour chaque événement, incrémente le segment actuel et tous les suivants
+4. **Visualisation** : Crée des courbes lissées avec Chart.js
 
-To learn more about Next.js, take a look at the following resources:
+## Installation et Démarrage
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm install
+npm run dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Technologies Utilisées
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Frontend** : Next.js 15, React 19, TypeScript
+- **Graphiques** : Chart.js 4, react-chartjs-2
+- **Base de données** : Supabase
+- **Styling** : Tailwind CSS
+- **Icons** : Lucide React

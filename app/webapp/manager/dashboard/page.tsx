@@ -1,3 +1,4 @@
+/* eslint-disable react/no-unescaped-entities */
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
@@ -143,9 +144,18 @@ export default function DashboardPage() {
   const [totalTrainings, setTotalTrainings] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filters, setFilters] = useState<FilterState>(initialFilters);
-  const [performanceFilters, setPerformanceFilters] = useState<PerformanceFilterState>(initialPerformanceFilters);
-  const [matchLocationFilter, setMatchLocationFilter] = useState<'Tous' | 'Domicile' | 'Exterieur'>('Tous');
+  const [filters, setFilters] = useState<FilterState>({
+    position: '',
+    strongFoot: '',
+    status: '',
+    selectedPlayers: []
+  });
+
+  const [performanceFilters, setPerformanceFilters] = useState<PerformanceFilterState>({
+    matchLocationFilter: 'Tous',
+    selectedMatches: []
+  });
+
   const [trainingStats, setTrainingStats] = useState<TrainingStats[]>([]);
   const [matchStats, setMatchStats] = useState<MatchStats[]>([]);
 
@@ -239,16 +249,16 @@ export default function DashboardPage() {
 
   const fetchTotalTrainings = async () => {
     try {
-      console.log('Récupération du nombre total d\'entraînements...');
+      console.log('Récupération du nombre total d&apos;entraînements...');
       const { count, error } = await supabase
         .from('trainings')
         .select('*', { count: 'exact', head: true });
 
       if (error) throw error;
-      console.log('Nombre total d\'entraînements:', count);
+      console.log('Nombre total d&apos;entraînements:', count);
       setTotalTrainings(count || 0);
     } catch (err) {
-      console.error('Erreur lors de la récupération du nombre total d\'entraînements:', err);
+      console.error('Erreur lors de la récupération du nombre total d&apos;entraînements:', err);
       setTotalTrainings(0);
     }
   };
@@ -265,7 +275,7 @@ export default function DashboardPage() {
       console.log('Données brutes des entraînements:', data);
 
       if (!data || data.length === 0) {
-        console.log('Aucune donnée d\'entraînement trouvée');
+        console.log('Aucune donnée d&apos;entraînement trouvée');
         setTrainingStats([]);
         return;
       }
@@ -279,7 +289,7 @@ export default function DashboardPage() {
       console.log('Stats des entraînements formatées:', stats);
       setTrainingStats(stats);
     } catch (err) {
-      console.error('Erreur lors du chargement des stats d\'entraînement:', err);
+      console.error('Erreur lors du chargement des stats d&apos;entraînement:', err);
       setTrainingStats([]);
     }
   };
@@ -359,13 +369,13 @@ export default function DashboardPage() {
       
       console.log('Récupération des joueurs...');
       // Récupération des joueurs
-      const { data: playersData, error: playersError } = await supabase
+      const { data, error } = await supabase
         .from('players')
         .select('*')
         .order('last_name');
 
-      if (playersError) throw playersError;
-      console.log('Joueurs récupérés:', playersData?.length);
+      if (error) throw error;
+      console.log('Joueurs récupérés:', data?.length);
 
       // Récupération des matchs avec leurs résultats
       const { data: matchesData, error: matchesError } = await supabase
@@ -380,13 +390,13 @@ export default function DashboardPage() {
       if (trainingsError) throw trainingsError;
 
       // Calcul dynamique des stats pour chaque joueur
-      const playersWithStats = (playersData || []).map(player => {
+      const playersWithStats = (data || []).map(player => {
         // Nombre de matchs joués
         const matchesPlayed = (matchesData || []).filter(match => {
           if (!match.players) return false;
           try {
             const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
-            return arr.some((p: any) => p.id === player.id);
+            return arr.some((p: Player) => p.id === player.id);
           } catch {
             return false;
           }
@@ -397,8 +407,8 @@ export default function DashboardPage() {
           if (!match.players) return sum;
           try {
             const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
-            const playerMatch = arr.find((p: any) => p.id === player.id);
-            return sum + (playerMatch && typeof playerMatch.goals === 'number' ? playerMatch.goals : 0);
+            const playerInMatch = arr.find((p: { id: string; goals?: number; yellow_cards?: number; red_cards?: number }) => p.id === player.id);
+            return sum + (playerInMatch && typeof playerInMatch.goals === 'number' ? playerInMatch.goals : 0);
           } catch {
             return sum;
           }
@@ -409,7 +419,7 @@ export default function DashboardPage() {
           if (!training.players) return false;
           try {
             const arr = Array.isArray(training.players) ? training.players : JSON.parse(training.players);
-            return arr.some((p: any) => p.id === player.id && p.present === true);
+            return arr.some((p: { id: string; present?: boolean }) => p.id === player.id && p.present === true);
           } catch {
             return false;
           }
@@ -424,7 +434,7 @@ export default function DashboardPage() {
           if (!match.players) return;
           try {
             const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
-            const playerInMatch = arr.find((p: any) => p.id === player.id);
+            const playerInMatch = arr.find((p: Player) => p.id === player.id);
             
             if (playerInMatch) {
               const scoreTeam = Number(match.score_team) || 0;
@@ -516,7 +526,7 @@ export default function DashboardPage() {
     console.log('Calcul de la distribution des thèmes avec les données:', trainingStats);
     
     if (!trainingStats || trainingStats.length === 0) {
-      console.log('Aucune donnée d\'entraînement disponible pour le calcul de la distribution');
+      console.log('Aucune donnée d&apos;entraînement disponible pour le calcul de la distribution');
       return [];
     }
 
@@ -529,7 +539,7 @@ export default function DashboardPage() {
 
     // Formatage des données pour le bar chart
     const distribution = Object.entries(themeCount)
-      .filter(([_, value]) => value > 0) // Filtrer les valeurs nulles ou zéro
+      .filter(([, value]) => value > 0) // Filtrer les valeurs nulles ou zéro
       .map(([name, value]) => ({
         name,
         value: Number(value) // S'assurer que la valeur est un nombre
@@ -572,7 +582,7 @@ export default function DashboardPage() {
 
     // Formatage des données pour le pie chart
     const distribution = Object.entries(resultCount)
-      .filter(([_, value]) => value > 0) // Filtrer les valeurs nulles ou zéro
+      .filter(([, value]) => value > 0) // Filtrer les valeurs nulles ou zéro
       .map(([name, value]) => ({
         name,
         value: Number(value) // S'assurer que la valeur est un nombre
@@ -773,7 +783,7 @@ export default function DashboardPage() {
               <select
                 value={filters.position}
                 onChange={(e) => handleFilterChange('position', e.target.value)}
-                className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white"
+                className="rounded-md border-gray-300 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white"
               >
                 <option value="">Tous les postes</option>
                 <option value="Meneur">Meneur</option>
@@ -784,7 +794,7 @@ export default function DashboardPage() {
               <select
                 value={filters.strongFoot}
                 onChange={(e) => handleFilterChange('strongFoot', e.target.value)}
-                className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white"
+                className="rounded-md border-gray-300 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white"
               >
                 <option value="">Tous les pieds</option>
                 <option value="Droit">Droit</option>
@@ -795,7 +805,7 @@ export default function DashboardPage() {
               <select
                 value={filters.status}
                 onChange={(e) => handleFilterChange('status', e.target.value)}
-                className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white"
+                className="rounded-md border-gray-300 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white"
               >
                 <option value="">Tous les statuts</option>
                 <option value="Non-muté">Non-muté</option>
@@ -879,7 +889,7 @@ export default function DashboardPage() {
 
           {/* Répartition par pied fort */}
           <div className="bg-white p-6 rounded-lg shadow">
-            <h3 className="text-lg font-semibold mb-4">Répartition par pied fort</h3>
+            <h3 className="text-lg text-gray-900 font-semibold mb-4">Répartition par pied fort</h3>
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -905,7 +915,7 @@ export default function DashboardPage() {
 
           {/* Moyenne de matchs par statut */}
           <div className="bg-white p-6 rounded-lg shadow">
-            <h3 className="text-lg font-semibold mb-4">Moyenne de matchs par statut</h3>
+            <h3 className="text-lg text-gray-900 font-semibold mb-4">Moyenne de matchs par statut</h3>
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData.matchesByStatus}>
@@ -922,7 +932,7 @@ export default function DashboardPage() {
 
           {/* Buts par statut */}
           <div className="bg-white p-6 rounded-lg shadow">
-            <h3 className="text-lg font-semibold mb-4">Buts marqués par statut</h3>
+            <h3 className="text-lg text-gray-900 font-semibold mb-4">Buts marqués par statut</h3>
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData.goalsByStatus}>
@@ -939,7 +949,7 @@ export default function DashboardPage() {
 
           {/* Graphique radar - Présence en séance */}
           <div className="bg-white p-6 rounded-lg shadow">
-            <h3 className="text-lg font-semibold mb-4">Présence en séance par joueur</h3>
+            <h3 className="text-lg text-gray-900 font-semibold mb-4">Présence en séance par joueur</h3>
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <RadarChart data={chartData.attendanceRadar}>
@@ -961,10 +971,10 @@ export default function DashboardPage() {
                     fillOpacity={0.6}
                   />
                   <Tooltip 
-                    contentStyle={{ fontSize: 12 }}
+                    contentStyle={{ fontSize: 12, color: '#374151', fontWeight: 'bold' }}
                   />
                   <Legend 
-                    wrapperStyle={{ fontSize: 12 }}
+                    wrapperStyle={{ fontSize: 12, fontWeight: 'bold' }}
                   />
                 </RadarChart>
               </ResponsiveContainer>
@@ -973,7 +983,7 @@ export default function DashboardPage() {
 
           {/* Graphique - Nombre de matchs par joueur */}
           <div className="bg-white p-6 rounded-lg shadow">
-            <h3 className="text-lg font-semibold mb-4">Résultats des matchs par joueur</h3>
+            <h3 className="text-lg text-gray-900 font-semibold mb-4">Résultats des matchs par joueur</h3>
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData.matchesByPlayer}>
@@ -989,7 +999,7 @@ export default function DashboardPage() {
                     tick={{ fontSize: 10 }}
                   />
                   <Tooltip 
-                    contentStyle={{ fontSize: 12 }}
+                    contentStyle={{ fontSize: 12, color: '#374151', fontWeight: 'bold' }}
                   />
                   <Legend 
                     wrapperStyle={{ fontSize: 12 }}
@@ -1010,7 +1020,7 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           {/* Présence aux entraînements */}
           <div className="bg-white p-6 rounded-lg shadow">
-            <h3 className="text-lg font-semibold mb-4">Présence aux entraînements</h3>
+            <h3 className="text-lg text-gray-900 font-semibold mb-4">Présence aux entraînements</h3>
             <div className="h-80">
               {trainingStats.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
@@ -1025,7 +1035,7 @@ export default function DashboardPage() {
                 </ResponsiveContainer>
               ) : (
                 <div className="h-full flex items-center justify-center text-gray-500">
-                  Aucune donnée d'entraînement disponible
+                  Aucune donnée d&apos;entraînement disponible
                 </div>
               )}
             </div>
@@ -1033,7 +1043,7 @@ export default function DashboardPage() {
 
           {/* Répartition des thèmes d'entraînement */}
           <div className="bg-white p-6 rounded-lg shadow">
-            <h3 className="text-lg font-semibold mb-4">Répartition des thèmes d'entraînement</h3>
+            <h3 className="text-lg text-gray-900 font-semibold mb-4">Répartition des thèmes d&apos;entraînement</h3>
             <div className="h-80">
               {pieThemeData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
@@ -1074,7 +1084,7 @@ export default function DashboardPage() {
                 </ResponsiveContainer>
               ) : (
                 <div className="h-full flex items-center justify-center text-gray-500">
-                  Aucune donnée d'entraînement disponible
+                  Aucune donnée d&apos;entraînement disponible
                 </div>
               )}
             </div>
@@ -1106,7 +1116,7 @@ export default function DashboardPage() {
               <select
                 value={performanceFilters.matchLocationFilter}
                 onChange={(e) => handlePerformanceFilterChange('matchLocationFilter', e.target.value as 'Tous' | 'Domicile' | 'Exterieur')}
-                className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                className="rounded-md border-gray-300 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-blue-500"
               >
                 <option value="Tous">Tous les matchs</option>
                 <option value="Domicile">Domicile</option>
@@ -1200,12 +1210,12 @@ export default function DashboardPage() {
         {/* Graphique de comparaison des buts par typologie */}
         <div className="mb-8">
           <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-lg font-semibold mb-4">Répartition des buts par typologie</h3>
+            <h3 className="text-lg text-gray-900 font-semibold mb-4">Répartition des buts par typologie</h3>
             <div className="h-80">
               {getFilteredMatchStats().length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
-                    data={getGoalsByTypeDistribution()}
+                    data ={getGoalsByTypeDistribution()}
                     margin={{
                       top: 20,
                       right: 30,
@@ -1222,7 +1232,13 @@ export default function DashboardPage() {
                         backgroundColor: 'white',
                         border: '1px solid #ccc',
                         borderRadius: '4px',
-                        padding: '8px'
+                        padding: '8px',
+                        color: '#1f2937',
+                        fontWeight: 'bold'
+                      }}
+                      wrapperStyle={{
+                        color: '#374151',
+                        fontWeight: 'bold'
                       }}
                     />
                     <Legend />
@@ -1252,7 +1268,7 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           {/* Graphique des buts marqués */}
           <div className="bg-white p-6 rounded-lg shadow">
-            <h3 className="text-lg font-semibold mb-4">Buts marqués par match et par type</h3>
+            <h3 className="text-lg text-gray-900 font-semibold mb-4">Buts marqués par match et par type</h3>
             <div className="h-80">
               {getFilteredMatchStats().length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
@@ -1286,7 +1302,7 @@ export default function DashboardPage() {
 
           {/* Graphique des buts encaissés */}
           <div className="bg-white p-6 rounded-lg shadow">
-            <h3 className="text-lg font-semibold mb-4">Buts encaissés par match et par type</h3>
+            <h3 className="text-lg text-gray-900 font-semibold mb-4">Buts encaissés par match et par type</h3>
             <div className="h-80">
               {getFilteredMatchStats().length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">

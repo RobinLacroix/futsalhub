@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable react/no-unescaped-entities */
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -5,7 +7,6 @@ import { supabase } from '@/lib/supabaseClient';
 import { 
   Play, 
   Pause, 
-  RotateCcw, 
   Download,
   Users,
   Target,
@@ -15,16 +16,10 @@ import {
   RefreshCw,
   ArrowRight,
   Calendar,
-  CheckCircle,
-  ArrowLeft,
   Trophy,
-  Plus,
   Clock,
   X,
-  MapPin,
   Save,
-  Timer,
-  Flag,
   Zap,
   Circle,
   Square
@@ -79,6 +74,10 @@ interface MatchData {
     shotsOnTarget: number;
     shotsOffTarget: number;
   };
+  firstHalfOpponentActions: {
+    shotsOnTarget: number;
+    shotsOffTarget: number;
+  };
 }
 
 const ACTIONS = [
@@ -104,6 +103,10 @@ export default function MatchRecorderPage() {
     teamFouls: 0,
     opponentFouls: 0,
     opponentActions: {
+      shotsOnTarget: 0,
+      shotsOffTarget: 0,
+    },
+    firstHalfOpponentActions: {
       shotsOnTarget: 0,
       shotsOffTarget: 0,
     },
@@ -138,16 +141,6 @@ export default function MatchRecorderPage() {
   });
 
   const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
-
-  const togglePlayerSelection = (playerId: string) => {
-    setSelectedPlayers(prev => {
-      if (prev.includes(playerId)) {
-        return prev.filter(id => id !== playerId);
-      } else {
-        return [...prev, playerId];
-      }
-    });
-  };
 
   // État pour les informations du match
   const [matchInfo, setMatchInfo] = useState({
@@ -202,7 +195,7 @@ export default function MatchRecorderPage() {
           console.error('Erreur lors du chargement des joueurs:', playersError);
           setPlayers([]);
         } else {
-          const transformedPlayers: Player[] = (playersData || []).map((player: any) => {
+          const transformedPlayers: Player[] = (playersData || []).map((player: { id: string; first_name: string; last_name: string; number?: number; age?: number; position?: string }) => {
             if (!player || !player.id || !player.first_name || !player.last_name) {
               return null;
             }
@@ -264,9 +257,9 @@ export default function MatchRecorderPage() {
   }, [matchData.isRunning]);
 
   const formatTime = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
   const formatMatchTime = (seconds: number): string => {
@@ -291,25 +284,7 @@ export default function MatchRecorderPage() {
     }
   };
 
-  const formatDateTime = (dateString: string): string => {
-    try {
-      const date = new Date(dateString);
-      if (isNaN(date.getTime())) {
-        return 'Date invalide';
-      }
-      return date.toLocaleDateString('fr-FR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric'
-      }) + ' ' + date.toLocaleTimeString('fr-FR', {
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    } catch (error) {
-      console.error('Erreur lors du formatage de la date:', error);
-      return 'Date invalide';
-    }
-  };
+
 
   const toggleMatch = () => {
     setMatchData(prev => ({
@@ -322,29 +297,43 @@ export default function MatchRecorderPage() {
     }));
   };
 
-  const nextSequence = () => {
-    setMatchData(prev => ({
-      ...prev,
-      currentSequence: prev.currentSequence + 1,
-      players: prev.players.map(player => ({
-        ...player,
-        currentSequenceTime: 0,
-      })),
-    }));
-  };
+
 
   const nextHalf = () => {
-    setMatchData(prev => ({
-      ...prev,
-      currentHalf: prev.currentHalf === 1 ? 2 : 1,
-      teamFouls: 0,
-      opponentFouls: 0,
-      matchTime: 0,
-      opponentActions: {
-        shotsOnTarget: 0,
-        shotsOffTarget: 0,
-      },
-    }));
+    setMatchData(prev => {
+      if (prev.currentHalf === 1) {
+        // Passer à la deuxième mi-temps : sauvegarder les stats de la première
+        return {
+          ...prev,
+          currentHalf: 2,
+          teamFouls: 0,
+          opponentFouls: 0,
+          matchTime: 0,
+          firstHalfOpponentActions: {
+            shotsOnTarget: prev.opponentActions.shotsOnTarget,
+            shotsOffTarget: prev.opponentActions.shotsOffTarget,
+          },
+          // Ne pas remettre à zéro les opponentActions, continuer à les cumuler
+        };
+      } else {
+        // Retourner à la première mi-temps (reset complet)
+        return {
+          ...prev,
+          currentHalf: 1,
+          teamFouls: 0,
+          opponentFouls: 0,
+          matchTime: 0,
+          opponentActions: {
+            shotsOnTarget: 0,
+            shotsOffTarget: 0,
+          },
+          firstHalfOpponentActions: {
+            shotsOnTarget: 0,
+            shotsOffTarget: 0,
+          },
+        };
+      }
+    });
   };
 
   const updatePlayerStat = async (playerId: string, statKey: string, increment: boolean = true) => {
@@ -367,6 +356,24 @@ export default function MatchRecorderPage() {
       let newTeamScore = prev.teamScore;
       if (statKey === 'goals') {
         newTeamScore = prev.teamScore + (increment ? 1 : -1);
+        
+        // Si c'est un but, mettre à jour le +/- de tous les joueurs sur le terrain
+        if (increment) {
+          // Incrémenter le +/- de tous les joueurs sur le terrain
+          updatedPlayers.forEach(player => {
+            if (player.isOnField) {
+              player.stats.plusMinus = (player.stats.plusMinus || 0) + 1;
+            }
+          });
+        } else {
+          // Décrémenter le +/- de tous les joueurs sur le terrain
+          updatedPlayers.forEach(player => {
+            if (player.isOnField) {
+              player.stats.plusMinus = (player.stats.plusMinus || 0) - 1;
+            }
+          });
+        }
+        
         // Un but incrémente aussi les tirs cadrés et les tirs totaux
         updatedPlayers.forEach(player => {
           if (player.id === playerId) {
@@ -386,12 +393,16 @@ export default function MatchRecorderPage() {
       return {
         ...prev,
         players: updatedPlayers,
-        teamScore: newTeamScore,
+        teamScore: newTeamScore
       };
     });
 
     // Enregistrer l'événement dans la base de données
     if (increment) {
+      const playersOnField = matchData.players
+        .filter(p => p.isOnField)
+        .map(p => p.id);
+
       const eventType = statKey === 'goals' ? 'goal' : 
                        statKey === 'shotsOnTarget' ? 'shot_on_target' :
                        statKey === 'shotsOffTarget' ? 'shot' :
@@ -399,9 +410,15 @@ export default function MatchRecorderPage() {
                        statKey === 'dribbleSuccess' ? 'dribble' :
                        statKey === 'ballLoss' ? 'ball_loss' : 'goal';
 
-      const playersOnField = matchData.players
-        .filter(p => p.isOnField)
-        .map(p => p.id);
+      // Log de débogage pour vérifier que players_on_field est correct
+      console.log(`[DEBUG] Enregistrement ${statKey}:`, {
+        matchId: matchData.selectedMatch.id,
+        eventType,
+        playerId,
+        playersOnField,
+        totalPlayersOnField: playersOnField.length,
+        allPlayers: matchData.players.map(p => ({ id: p.id, name: p.name, isOnField: p.isOnField }))
+      });
 
       const { error: insertError } = await supabase
         .from('match_events')
@@ -415,10 +432,12 @@ export default function MatchRecorderPage() {
         });
 
       if (insertError) {
-        console.error('Erreur lors de l\'insertion de l\'événement:', insertError);
+        console.error(`Erreur lors de l'insertion de l'événement ${statKey}:`, insertError);
+      } else {
+        console.log(`[DEBUG] ${statKey} enregistré avec succès`);
       }
     } else {
-      // Supprimer le dernier événement de ce type pour ce joueur
+      // Supprimer le dernier événement de ce type
       const eventType = statKey === 'goals' ? 'goal' : 
                        statKey === 'shotsOnTarget' ? 'shot_on_target' :
                        statKey === 'shotsOffTarget' ? 'shot' :
@@ -433,7 +452,9 @@ export default function MatchRecorderPage() {
       });
 
       if (deleteError) {
-        console.error('Erreur lors de la suppression de l\'événement:', deleteError);
+        console.error(`Erreur lors de la suppression de l'événement ${statKey}:`, deleteError);
+      } else {
+        console.log(`[DEBUG] ${statKey} supprimé avec succès`);
       }
     }
   };
@@ -456,7 +477,33 @@ export default function MatchRecorderPage() {
         .filter(p => p.isOnField)
         .map(p => p.id);
 
-      await supabase
+      // Log de débogage pour vérifier que players_on_field est correct
+      console.log(`[DEBUG] Enregistrement but adverse:`, {
+        matchId: matchData.selectedMatch.id,
+        eventType: 'opponent_goal',
+        playerId: null,
+        playersOnField,
+        totalPlayersOnField: playersOnField.length,
+        allPlayers: matchData.players.map(p => ({ id: p.id, name: p.name, isOnField: p.isOnField }))
+      });
+
+      // Mettre à jour les statistiques +/- de tous les joueurs sur le terrain
+      setMatchData(prev => ({
+        ...prev,
+        players: prev.players.map(player => 
+          player.isOnField 
+            ? { 
+                ...player, 
+                stats: { 
+                  ...player.stats, 
+                  plusMinus: (player.stats.plusMinus || 0) - 1 // Décrémenter le +/- de 1
+                } 
+              }
+            : player
+        )
+      }));
+
+      const { error: insertError } = await supabase
         .from('match_events')
         .insert({
           match_id: matchData.selectedMatch.id,
@@ -466,13 +513,40 @@ export default function MatchRecorderPage() {
           player_id: null, // NULL pour l'adversaire
           players_on_field: playersOnField
         });
+
+      if (insertError) {
+        console.error('Erreur lors de l\'insertion de l\'événement but adverse:', insertError);
+      } else {
+        console.log(`[DEBUG] But adverse enregistré avec succès`);
+      }
     } else {
       // Supprimer le dernier événement de ce type
-      await supabase.rpc('delete_last_event_by_type', {
+      const { error: deleteError } = await supabase.rpc('delete_last_event_by_type', {
         p_match_id: matchData.selectedMatch.id,
         p_event_type: 'opponent_goal',
         p_player_id: null
       });
+
+      if (deleteError) {
+        console.error('Erreur lors de la suppression de l\'événement but adverse:', deleteError);
+      } else {
+        // Remettre à jour les statistiques +/- de tous les joueurs sur le terrain (+1 pour annuler le -1)
+        setMatchData(prev => ({
+          ...prev,
+          players: prev.players.map(player => 
+            player.isOnField 
+              ? { 
+                  ...player, 
+                  stats: { 
+                    ...player.stats, 
+                    plusMinus: (player.stats.plusMinus || 0) + 1 // Incrémenter le +/- de 1 pour annuler
+                  } 
+                }
+              : player
+          )
+        }));
+        console.log(`[DEBUG] But adverse supprimé avec succès`);
+      }
     }
   };
 
@@ -603,13 +677,13 @@ export default function MatchRecorderPage() {
   // Fonctions pour calculer les statistiques du bilan
   const getTeamStats = () => {
     const totalShots = matchData.players.reduce((sum, player) => 
-      sum + (player.stats.shotsOnTarget || 0) + (player.stats.shotsOffTarget || 0), 0
+      sum + (player.stats.shotsOffTarget || 0), 0
     );
     const totalShotsOnTarget = matchData.players.reduce((sum, player) => 
       sum + (player.stats.shotsOnTarget || 0), 0
     );
     const totalShotsOffTarget = matchData.players.reduce((sum, player) => 
-      sum + (player.stats.shotsOffTarget || 0), 0
+      sum + (player.stats.shotsOffTarget || 0) - (player.stats.shotsOnTarget || 0), 0
     );
 
     return {
@@ -1017,7 +1091,7 @@ export default function MatchRecorderPage() {
           }))
         : [];
 
-      const matchData: any = {
+              const matchData: any = {
         title: newMatch.title,
         date: dateToSave,
         competition: newMatch.competition,
@@ -1138,7 +1212,8 @@ export default function MatchRecorderPage() {
         id: player.id,
         goals: player.stats.goals || 0,
         yellow_cards: player.yellowCards || 0,
-        red_cards: player.redCards || 0
+        red_cards: player.redCards || 0,
+        time_played: player.totalTime // ← Corriger le nom du champ
       }));
 
       // Calculer les statistiques globales du match
@@ -1188,6 +1263,10 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
         teamFouls: 0,
         opponentFouls: 0,
         opponentActions: {
+          shotsOnTarget: 0,
+          shotsOffTarget: 0,
+        },
+        firstHalfOpponentActions: {
           shotsOnTarget: 0,
           shotsOffTarget: 0,
         },
@@ -1904,7 +1983,12 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                   +1 Éq
                 </button>
                 <button
-                                                                                             onClick={async () => await updateOpponentGoal(true)}
+                  onClick={async () => {
+                    const timerKey = 'opponent-goals';
+                    if (!longPressTriggered[timerKey]) {
+                      await updateOpponentGoal(true);
+                    }
+                  }}
                   className="py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs"
                 >
                   +1 Adv
@@ -2284,15 +2368,36 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                   <div className="space-y-1">
                     <div className="flex justify-between items-center py-1 px-2 bg-red-100 dark:bg-red-800/60 rounded border border-red-200 dark:border-red-700">
                       <span className="text-xs font-medium text-red-800 dark:text-red-200">Tirs totaux</span>
-                      <span className="font-bold text-red-950 dark:text-white text-sm">{getTeamStats().opponentShots}</span>
+                      <span className="font-bold text-red-950 dark:text-white text-sm">
+                        {getTeamStats().opponentShots}
+                        {matchData.currentHalf === 2 && matchData.firstHalfOpponentActions.shotsOnTarget + matchData.firstHalfOpponentActions.shotsOffTarget > 0 && (
+                          <span className="text-xs text-red-600 dark:text-red-400 ml-1">
+                            ({matchData.firstHalfOpponentActions.shotsOnTarget + matchData.firstHalfOpponentActions.shotsOffTarget})
+                          </span>
+                        )}
+                      </span>
                     </div>
                     <div className="flex justify-between items-center py-1 px-2 bg-orange-100 dark:bg-orange-800/60 rounded border border-orange-200 dark:border-orange-700">
                       <span className="text-xs font-medium text-orange-800 dark:text-orange-200">Tirs cadrés</span>
-                      <span className="font-bold text-orange-950 dark:text-white text-sm">{getTeamStats().opponentShotsOnTarget}</span>
+                      <span className="font-bold text-orange-950 dark:text-orange-200 text-sm">
+                        {getTeamStats().opponentShotsOnTarget}
+                        {matchData.currentHalf === 2 && matchData.firstHalfOpponentActions.shotsOnTarget > 0 && (
+                          <span className="text-xs text-orange-600 dark:text-orange-400 ml-1">
+                            ({matchData.firstHalfOpponentActions.shotsOnTarget})
+                          </span>
+                        )}
+                      </span>
                     </div>
                     <div className="flex justify-between items-center py-1 px-2 bg-yellow-100 dark:bg-yellow-800/60 rounded border border-yellow-200 dark:border-yellow-700">
                       <span className="text-xs font-medium text-yellow-800 dark:text-yellow-200">Tirs non cadrés</span>
-                      <span className="font-bold text-yellow-950 dark:text-white text-sm">{getTeamStats().opponentShotsOffTarget}</span>
+                      <span className="font-bold text-yellow-950 dark:text-white text-sm">
+                        {getTeamStats().opponentShotsOffTarget}
+                        {matchData.currentHalf === 2 && matchData.firstHalfOpponentActions.shotsOffTarget > 0 && (
+                          <span className="text-xs text-yellow-600 dark:text-yellow-400 ml-1">
+                            ({matchData.firstHalfOpponentActions.shotsOffTarget})
+                          </span>
+                        )}
+                      </span>
                     </div>
                   </div>
                 </div>

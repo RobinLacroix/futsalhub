@@ -56,7 +56,7 @@ export default function Sidebar({ isExpanded, onToggle }: SidebarProps) {
       items: [
         {
           name: 'Dashboard',
-          href: '/webapp/tracker',
+          href: '/webapp/tracker/dashboard',
           icon: BarChart3
         },
         {

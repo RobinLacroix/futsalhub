@@ -1,6 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
@@ -10,35 +11,13 @@ import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
 import moment from 'moment';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
 import { supabase } from '@/lib/supabaseClient';
 import {
-  Plus,
   X,
-  Check,
   AlertCircle,
-  Users,
   Dumbbell,
-  MapPin,
-  Calendar as CalendarIcon,
-  Trophy,
-  BarChart2,
-  PieChart
+  Trophy
 } from 'lucide-react';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  Pie,
-  Cell,
-  LineChart,
-  Line
-} from 'recharts';
 
 // Types
 interface Player {
@@ -164,7 +143,7 @@ interface MatchStats {
   };
 }
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
+
 
 // Schéma de validation
 const matchSchema = yup.object().shape({
@@ -229,6 +208,7 @@ export default function CalendarPage() {
   const [isTrainingModalOpen, setIsTrainingModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
   const [success, setSuccess] = useState<string | null>(null);
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -236,6 +216,8 @@ export default function CalendarPage() {
   const [matchStats, setMatchStats] = useState<MatchStats[]>([]);
   const [matchLocationFilter, setMatchLocationFilter] = useState<'Tous' | 'Domicile' | 'Exterieur'>('Tous');
   const [currentDate, setCurrentDate] = useState(new Date());
+
+
 
   const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<MatchFormData>({
     resolver: yupResolver(matchSchema),

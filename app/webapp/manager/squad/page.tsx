@@ -2,7 +2,14 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { Plus, Pencil, Trash2, AlertCircle, X, Check, Search } from 'lucide-react';
+import {
+  Plus,
+  X,
+  Trash2,
+  AlertCircle,
+  Check,
+  Pencil
+} from 'lucide-react';
 
 interface Player {
   id: string;
@@ -93,6 +100,15 @@ export default function SquadPage() {
     }
   }, [totalTrainings, players]);
 
+  // Debug environment variables
+  useEffect(() => {
+    console.log('=== ENVIRONMENT VARIABLES CHECK ===');
+    console.log('NODE_ENV:', process.env.NODE_ENV);
+    console.log('NEXT_PUBLIC_SUPABASE_URL:', process.env.NEXT_PUBLIC_SUPABASE_URL);
+    console.log('NEXT_PUBLIC_SUPABASE_ANON_KEY:', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'SET' : 'NOT SET');
+    console.log('Supabase client:', supabase);
+  }, []);
+
   const handleFilterChange = (field: keyof FilterState, value: string) => {
     setFilters(prev => ({ ...prev, [field]: value }));
   };
@@ -143,7 +159,7 @@ export default function SquadPage() {
           if (!match.players) return false;
           try {
             const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
-            return arr.some((p: any) => p.id === player.id);
+            return arr.some((p: { id: string }) => p.id === player.id);
           } catch {
             return false;
           }
@@ -154,7 +170,7 @@ export default function SquadPage() {
           if (!match.players) return sum;
           try {
             const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
-            const playerMatch = arr.find((p: any) => p.id === player.id);
+            const playerMatch = arr.find((p: { id: string; goals?: number; yellow_cards?: number; red_cards?: number }) => p.id === player.id);
             return sum + (playerMatch && typeof playerMatch.goals === 'number' ? playerMatch.goals : 0);
           } catch {
             return sum;
@@ -166,7 +182,7 @@ export default function SquadPage() {
           if (!training.players) return false;
           try {
             const arr = Array.isArray(training.players) ? training.players : JSON.parse(training.players);
-            return arr.some((p: any) => p.id === player.id && p.present === true);
+            return arr.some((p: { id: string; present?: boolean }) => p.id === player.id && p.present === true);
           } catch {
             return false;
           }
@@ -195,36 +211,61 @@ export default function SquadPage() {
       setLoading(true);
       setError(null);
       
+      console.log('=== DÉBUT fetchPlayers ===');
+      console.log('Supabase client:', supabase);
       console.log('Récupération des joueurs...');
+      
       // Récupération des joueurs
-      const { data: playersData, error: playersError } = await supabase
+      const { data, error } = await supabase
         .from('players')
         .select('*')
         .order('last_name');
 
-      if (playersError) throw playersError;
-      console.log('Joueurs récupérés:', playersData?.length);
+      console.log('Résultat de la requête players:', { data, error });
+      
+      if (error) {
+        console.error('Erreur Supabase lors de la récupération des joueurs:', error);
+        throw error;
+      }
+      
+      console.log('Joueurs récupérés:', data?.length);
+      console.log('Données des joueurs:', data);
 
       // Récupération des matchs
+      console.log('Récupération des matchs...');
       const { data: matchesData, error: matchesError } = await supabase
         .from('matches')
         .select('players');
-      if (matchesError) throw matchesError;
+      
+      console.log('Résultat de la requête matches:', { matchesData, matchesError });
+      
+      if (matchesError) {
+        console.error('Erreur Supabase lors de la récupération des matchs:', matchesError);
+        throw matchesError;
+      }
 
       // Récupération des entraînements
+      console.log('Récupération des entraînements...');
       const { data: trainingsData, error: trainingsError } = await supabase
         .from('trainings')
         .select('players');
-      if (trainingsError) throw trainingsError;
+      
+      console.log('Résultat de la requête trainings:', { trainingsData, trainingsError });
+      
+      if (trainingsError) {
+        console.error('Erreur Supabase lors de la récupération des entraînements:', trainingsError);
+        throw trainingsError;
+      }
 
       // Calcul dynamique des stats pour chaque joueur
-      const playersWithStats = (playersData || []).map(player => {
+      console.log('Calcul des stats pour chaque joueur...');
+      const playersWithStats = (data || []).map(player => {
         // Nombre de matchs joués
         const matchesPlayed = (matchesData || []).filter(match => {
           if (!match.players) return false;
           try {
             const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
-            return arr.some((p: any) => p.id === player.id);
+            return arr.some((p: { id: string }) => p.id === player.id);
           } catch {
             return false;
           }
@@ -235,7 +276,7 @@ export default function SquadPage() {
           if (!match.players) return sum;
           try {
             const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
-            const playerMatch = arr.find((p: any) => p.id === player.id);
+            const playerMatch = arr.find((p: { id: string; goals?: number; yellow_cards?: number; red_cards?: number }) => p.id === player.id);
             return sum + (playerMatch && typeof playerMatch.goals === 'number' ? playerMatch.goals : 0);
           } catch {
             return sum;
@@ -247,7 +288,7 @@ export default function SquadPage() {
           if (!training.players) return false;
           try {
             const arr = Array.isArray(training.players) ? training.players : JSON.parse(training.players);
-            return arr.some((p: any) => p.id === player.id && p.present === true);
+            return arr.some((p: { id: string; present?: boolean }) => p.id === player.id && p.present === true);
           } catch {
             return false;
           }
@@ -262,7 +303,9 @@ export default function SquadPage() {
         };
       });
 
+      console.log('Joueurs avec stats calculées:', playersWithStats);
       setPlayers(playersWithStats);
+      console.log('=== FIN fetchPlayers ===');
 
     } catch (err) {
       console.error('Erreur lors du chargement des joueurs:', err);
@@ -380,6 +423,14 @@ export default function SquadPage() {
     );
   }
 
+  console.log('=== RENDER SECTION ===');
+  console.log('loading:', loading);
+  console.log('error:', error);
+  console.log('players.length:', players.length);
+  console.log('filteredPlayers.length:', filteredPlayers.length);
+  console.log('players data:', players);
+  console.log('filteredPlayers data:', filteredPlayers);
+
   return (
     <div className="p-8">
       {error && (
@@ -398,13 +449,34 @@ export default function SquadPage() {
 
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Effectif</h1>
-        <button
-          onClick={() => handleOpenModal()}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="h-5 w-5" />
-          Ajouter un joueur
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={async () => {
+              console.log('=== TEST SUPABASE CONNECTION ===');
+              try {
+                const { data, error } = await supabase
+                  .from('players')
+                  .select('*')
+                  .limit(1);
+                console.log('Test query result:', { data, error });
+                alert(`Test query: ${error ? 'ERROR: ' + error.message : 'SUCCESS - Found ' + (data?.length || 0) + ' players'}`);
+              } catch (err) {
+                console.error('Test query failed:', err);
+                alert('Test query failed: ' + err);
+              }
+            }}
+            className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+          >
+            Test DB
+          </button>
+          <button
+            onClick={() => handleOpenModal()}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="h-5 w-5" />
+            Ajouter un joueur
+          </button>
+        </div>
       </div>
 
       {/* Filtres */}
@@ -484,6 +556,20 @@ export default function SquadPage() {
         </div>
       </div>
 
+      {/* Debug section */}
+      <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+        <h3 className="text-lg font-semibold text-yellow-800 mb-2">Debug Info</h3>
+        <div className="text-sm text-yellow-700 space-y-1">
+          <div>Loading: {loading ? 'true' : 'false'}</div>
+          <div>Error: {error || 'none'}</div>
+          <div>Total Players: {players.length}</div>
+          <div>Filtered Players: {filteredPlayers.length}</div>
+          <div>Environment: {process.env.NODE_ENV}</div>
+          <div>Supabase URL Set: {process.env.NEXT_PUBLIC_SUPABASE_URL ? 'Yes' : 'No'}</div>
+          <div>Supabase Key Set: {process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'Yes' : 'No'}</div>
+        </div>
+      </div>
+
       <div className="bg-white rounded-lg shadow overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
@@ -525,56 +611,77 @@ export default function SquadPage() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {filteredPlayers.map((player) => (
-                <tr key={player.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {player.number || '-'}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {player.first_name} {player.last_name}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {player.age}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {player.position}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {player.strong_foot}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {player.status}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {player.matches_played || 0}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {player.goals || 0}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {player.training_attendance || 0}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {player.attendance_percentage}%
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <div className="flex justify-end gap-2">
-                      <button
-                        onClick={() => handleOpenModal(player)}
-                        className="text-blue-600 hover:text-blue-900"
-                      >
-                        <Pencil className="h-5 w-5" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(player.id)}
-                        className="text-red-600 hover:text-red-900"
-                      >
-                        <Trash2 className="h-5 w-5" />
-                      </button>
-                    </div>
+              {filteredPlayers.length === 0 ? (
+                <tr>
+                  <td colSpan={11} className="px-6 py-8 text-center text-gray-500">
+                    {players.length === 0 ? (
+                      <div>
+                        <p className="text-lg font-medium mb-2">Aucun joueur trouvé</p>
+                        <p className="text-sm">Vérifiez la connexion à la base de données et les permissions.</p>
+                        <p className="text-sm mt-1">Players count: {players.length}</p>
+                        <p className="text-sm">Error: {error || 'none'}</p>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-lg font-medium mb-2">Aucun joueur ne correspond aux filtres</p>
+                        <p className="text-sm">Essayez de modifier vos critères de recherche.</p>
+                        <p className="text-sm mt-1">Total players: {players.length}</p>
+                      </div>
+                    )}
                   </td>
                 </tr>
-              ))}
+              ) : (
+                filteredPlayers.map((player) => (
+                  <tr key={player.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {player.number || '-'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {player.first_name} {player.last_name}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {player.age}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {player.position}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {player.strong_foot}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {player.status}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {player.matches_played || 0}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {player.goals || 0}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {player.training_attendance || 0}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {player.attendance_percentage}%
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          onClick={() => handleOpenModal(player)}
+                          className="text-blue-600 hover:text-blue-900"
+                        >
+                          <Pencil className="h-5 w-5" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(player.id)}
+                          className="text-red-600 hover:text-red-900"
+                        >
+                          <Trash2 className="h-5 w-5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
             <tfoot className="bg-gray-100 font-semibold">
               <tr>

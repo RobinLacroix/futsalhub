@@ -91,8 +91,9 @@ export default function SignUp() {
           router.push('/login');
         }, 2000);
       }
-    } catch (error: any) {
-      setError(error.message || 'Une erreur est survenue lors de l\'inscription');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Une erreur est survenue lors de l\'inscription';
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }

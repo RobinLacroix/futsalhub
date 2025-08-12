@@ -107,7 +107,7 @@ function Sidebar({ isExpanded, onToggle }: { isExpanded: boolean; onToggle: () =
       items: [
         {
           name: 'Dashboard',
-          href: '/webapp/tracker',
+          href: '/webapp/tracker/dashboard',
           icon: BarChart3
         },
         {
