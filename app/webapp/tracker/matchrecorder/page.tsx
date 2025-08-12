@@ -155,9 +155,7 @@ export default function MatchRecorderPage() {
   const [convokedPlayers, setConvokedPlayers] = useState<string[]>([]);
   const [starterPlayers, setStarterPlayers] = useState<string[]>([]);
   
-  // États pour le drag & drop
-  const [draggedPlayer, setDraggedPlayer] = useState<string | null>(null);
-  const [dragOverPlayer, setDragOverPlayer] = useState<string | null>(null);
+
   
   // État pour la vue active (saisie ou bilan)
   const [activeView, setActiveView] = useState<'recording' | 'summary'>('recording');
@@ -933,121 +931,62 @@ export default function MatchRecorderPage() {
     });
   };
 
-  // Fonctions pour le drag & drop optimisées pour iPad/tablette
-  const handleDragStart = (playerId: string) => {
+  // Fonctions pour le changement de joueurs (remplace le drag & drop)
+  const handlePlayerSubstitution = (playerOutId: string, playerInId: string) => {
     try {
-      setDraggedPlayer(playerId);
-      // Ajouter une classe CSS pour le feedback visuel
-      document.body.style.cursor = 'grabbing';
-    } catch (error) {
-      console.error('Erreur lors du début du drag:', error);
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent, playerId: string) => {
-    try {
-      e.preventDefault();
-      e.stopPropagation();
-      setDragOverPlayer(playerId);
-    } catch (error) {
-      console.error('Erreur lors du drag over:', error);
-    }
-  };
-
-  const handleDragLeave = () => {
-    try {
-      setDragOverPlayer(null);
-    } catch (error) {
-      console.error('Erreur lors du drag leave:', error);
-    }
-  };
-
-  const handleDragEnd = () => {
-    try {
-      setDraggedPlayer(null);
-      setDragOverPlayer(null);
-      document.body.style.cursor = '';
-    } catch (error) {
-      console.error('Erreur lors du drag end:', error);
-    }
-  };
-
-  const handleDrop = (targetPlayerId: string) => {
-    try {
-      if (!draggedPlayer || draggedPlayer === targetPlayerId) {
-        setDraggedPlayer(null);
-        setDragOverPlayer(null);
-        document.body.style.cursor = '';
-        return;
-      }
-
       setMatchData(prev => {
         const players = [...prev.players];
-        const draggedPlayerObj = players.find(p => p.id === draggedPlayer);
-        const targetPlayerObj = players.find(p => p.id === targetPlayerId);
+        const playerOut = players.find(p => p.id === playerOutId);
+        const playerIn = players.find(p => p.id === playerInId);
         
-        if (draggedPlayerObj && targetPlayerObj) {
-          // Si on fait glisser un remplaçant sur un titulaire, faire un changement
-          if (!draggedPlayerObj.isOnField && targetPlayerObj.isOnField) {
-            // Mettre le titulaire sur le banc et le marquer comme remplaçant
-            const updatedPlayers = players.map(p => 
-              p.id === targetPlayerId 
-                ? { ...p, isOnField: false, isStarter: false, currentSequenceTime: 0 }
-                : p
-            );
-            
-            // Mettre le remplaçant sur le terrain et le rendre titulaire
-            const finalPlayers = updatedPlayers.map(p => 
-              p.id === draggedPlayer 
-                ? { ...p, isOnField: true, isStarter: true, currentSequenceTime: 0 }
-                : p
-            );
-            
-            return { ...prev, players: finalPlayers };
-          } 
-          // Si on fait glisser un titulaire sur un remplaçant, faire un changement
-          else if (draggedPlayerObj.isOnField && !targetPlayerObj.isOnField) {
-            // Mettre le titulaire sur le banc et le marquer comme remplaçant
-            const updatedPlayers = players.map(p => 
-              p.id === draggedPlayer 
-                ? { ...p, isOnField: false, isStarter: false, currentSequenceTime: 0 }
-                : p
-            );
-            
-            // Mettre le remplaçant sur le terrain et le rendre titulaire
-            const finalPlayers = updatedPlayers.map(p => 
-              p.id === targetPlayerId 
-                ? { ...p, isOnField: true, isStarter: true, currentSequenceTime: 0 }
-                : p
-            );
-            
-            return { ...prev, players: finalPlayers };
-          }
-          // Si on fait glisser un titulaire sur un autre titulaire, échanger les positions
-          else if (draggedPlayerObj.isOnField && targetPlayerObj.isOnField) {
-            // Échanger les positions des titulaires
-            const draggedIndex = players.findIndex(p => p.id === draggedPlayer);
-            const targetIndex = players.findIndex(p => p.id === targetPlayerId);
-            
-            if (draggedIndex !== -1 && targetIndex !== -1) {
-              [players[draggedIndex], players[targetIndex]] = [players[targetIndex], players[draggedIndex]];
-            }
-            
-            return { ...prev, players };
-          }
+        if (playerOut && playerIn) {
+          // Mettre le joueur sortant sur le banc
+          const updatedPlayers = players.map(p => 
+            p.id === playerOutId 
+              ? { ...p, isOnField: false, isStarter: false, currentSequenceTime: 0 }
+              : p
+          );
+          
+          // Mettre le joueur entrant sur le terrain
+          const finalPlayers = updatedPlayers.map(p => 
+            p.id === playerInId 
+              ? { ...p, isOnField: true, isStarter: true, currentSequenceTime: 0 }
+              : p
+          );
+          
+          return { ...prev, players: finalPlayers };
         }
         
         return prev;
       });
-
-      setDraggedPlayer(null);
-      setDragOverPlayer(null);
-      document.body.style.cursor = '';
     } catch (error) {
-      console.error('Erreur lors du drop:', error);
-      setDraggedPlayer(null);
-      setDragOverPlayer(null);
-      document.body.style.cursor = '';
+      console.error('Erreur lors du changement:', error);
+    }
+  };
+
+  const handlePlayerSwap = (player1Id: string, player2Id: string) => {
+    try {
+      setMatchData(prev => {
+        const players = [...prev.players];
+        const player1 = players.find(p => p.id === player1Id);
+        const player2 = players.find(p => p.id === player2Id);
+        
+        if (player1 && player2 && player1.isOnField && player2.isOnField) {
+          // Échanger les positions des titulaires
+          const player1Index = players.findIndex(p => p.id === player1Id);
+          const player2Index = players.findIndex(p => p.id === player2Id);
+          
+          if (player1Index !== -1 && player2Index !== -1) {
+            [players[player1Index], players[player2Index]] = [players[player2Index], players[player1Index]];
+          }
+          
+          return { ...prev, players };
+        }
+        
+        return prev;
+      });
+    } catch (error) {
+      console.error('Erreur lors de l\'échange:', error);
     }
   };
 
@@ -1070,15 +1009,15 @@ export default function MatchRecorderPage() {
     setCurrentStep('match');
   };
 
-      const addNewMatch = async () => {
-      console.log('addNewMatch called with:', newMatch);
-      console.log('Date value:', newMatch.date);
-      console.log('Title value:', newMatch.title);
-      
-      if (!newMatch.title || !newMatch.date) {
-        alert('Veuillez remplir tous les champs obligatoires');
-        return;
-      }
+  const addNewMatch = async () => {
+    console.log('addNewMatch called with:', newMatch);
+    console.log('Date value:', newMatch.date);
+    console.log('Title value:', newMatch.title);
+    
+    if (!newMatch.title || !newMatch.date) {
+      alert('Veuillez remplir tous les champs obligatoires');
+      return;
+    }
 
     // La sélection des joueurs est optionnelle
 
@@ -1103,7 +1042,7 @@ export default function MatchRecorderPage() {
           }))
         : [];
 
-              const matchData: any = {
+      const matchData: any = {
         title: newMatch.title,
         date: dateToSave,
         competition: newMatch.competition,
@@ -2132,17 +2071,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                     .map((player) => (
                       <div
                         key={player.id}
-                        draggable
-                        onDragStart={() => handleDragStart(player.id)}
-                        onDragOver={(e) => handleDragOver(e, player.id)}
-                        onDragLeave={handleDragLeave}
-                        onDragEnd={handleDragEnd}
-                        onDrop={() => handleDrop(player.id)}
-                        className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 transition-all duration-200 cursor-move touch-manipulation ${
-                          draggedPlayer === player.id ? 'opacity-50 scale-95' : ''
-                        } ${
-                          dragOverPlayer === player.id ? 'ring-2 ring-blue-500' : ''
-                        } ${
+                        className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 transition-all duration-200 ${
                           player.position === 'Gardien' 
                             ? 'border-2' 
                             : player.isOnField 
@@ -2221,23 +2150,56 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                             <Circle className="h-3 w-3" />
                             <span>{player.yellowCards || 0}</span>
                           </button>
-                                                      <button
-                              onClick={async () => {
-                                const timerKey = `${player.id}-redCard`;
-                                if (!longPressTriggered[timerKey]) {
-                                  await updatePlayerCard(player.id, 'red');
-                                }
-                              }}
-                              onMouseDown={() => handleCardLongPressStart(player.id, 'red')}
-                              onMouseUp={() => handleCardLongPressEnd(player.id, 'red')}
-                              onMouseLeave={() => handleCardLongPressEnd(player.id, 'red')}
-                              onTouchStart={() => handleCardLongPressStart(player.id, 'red')}
-                              onTouchEnd={() => handleCardLongPressEnd(player.id, 'red')}
-                              className="flex items-center gap-1 px-2 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600 transition-colors active:scale-95"
-                              title="Clic court: +1, Clic long: -1"
-                            >
+                          <button
+                            onClick={async () => {
+                              const timerKey = `${player.id}-redCard`;
+                              if (!longPressTriggered[timerKey]) {
+                                await updatePlayerCard(player.id, 'red');
+                              }
+                            }}
+                            onMouseDown={() => handleCardLongPressStart(player.id, 'red')}
+                            onMouseUp={() => handleCardLongPressEnd(player.id, 'red')}
+                            onMouseLeave={() => handleCardLongPressEnd(player.id, 'red')}
+                            onTouchStart={() => handleCardLongPressStart(player.id, 'red')}
+                            onTouchEnd={() => handleCardLongPressEnd(player.id, 'red')}
+                            className="flex items-center gap-1 px-2 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600 transition-colors active:scale-95"
+                            title="Clic court: +1, Clic long: -1"
+                          >
                             <Circle className="h-3 w-3" />
                             <span>{player.redCards || 0}</span>
+                          </button>
+                        </div>
+
+                        {/* Boutons de changement tactile */}
+                        <div className="mt-3 space-y-2">
+                          {/* Bouton pour sortir le joueur */}
+                          <button
+                            onClick={() => {
+                              // Trouver un remplaçant disponible
+                              const availableSub = matchData.players.find(p => !p.isOnField);
+                              if (availableSub) {
+                                handlePlayerSubstitution(player.id, availableSub.id);
+                              }
+                            }}
+                            className="w-full px-2 py-1 bg-orange-500 text-white rounded text-xs hover:bg-orange-600 transition-colors active:scale-95"
+                            title="Sortir le joueur (remplacement automatique)"
+                          >
+                            🔄 Sortir
+                          </button>
+                          
+                          {/* Bouton pour échanger avec un autre titulaire */}
+                          <button
+                            onClick={() => {
+                              // Trouver un autre titulaire pour l'échange
+                              const otherStarter = matchData.players.find(p => p.isOnField && p.id !== player.id && p.position !== 'Gardien');
+                              if (otherStarter) {
+                                handlePlayerSwap(player.id, otherStarter.id);
+                              }
+                            }}
+                            className="w-full px-2 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 transition-colors active:scale-95"
+                            title="Échanger avec un autre titulaire"
+                          >
+                            ↔️ Échanger
                           </button>
                         </div>
                       </div>
@@ -2263,17 +2225,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                     .map((player) => (
                       <div
                         key={player.id}
-                        draggable
-                        onDragStart={() => handleDragStart(player.id)}
-                        onDragOver={(e) => handleDragOver(e, player.id)}
-                        onDragLeave={handleDragLeave}
-                        onDragEnd={handleDragEnd}
-                        onDrop={() => handleDrop(player.id)}
-                        className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-2 transition-all duration-200 cursor-move touch-manipulation ${
-                          draggedPlayer === player.id ? 'opacity-50 scale-95' : ''
-                        } ${
-                          dragOverPlayer === player.id ? 'ring-2 ring-blue-500' : ''
-                        } ${
+                        className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-2 transition-all duration-200 ${
                           player.position === 'Gardien' 
                             ? 'border-2' 
                             : 'border border-gray-200 dark:border-gray-600'
@@ -2332,6 +2284,23 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                           >
                             <Circle className="h-2 w-2" />
                             <span className="text-xs">{player.redCards || 0}</span>
+                          </button>
+                        </div>
+
+                        {/* Bouton pour entrer le joueur */}
+                        <div className="mt-2">
+                          <button
+                            onClick={() => {
+                              // Trouver un titulaire à remplacer (pas le gardien)
+                              const starterToReplace = matchData.players.find(p => p.isOnField && p.position !== 'Gardien');
+                              if (starterToReplace) {
+                                handlePlayerSubstitution(starterToReplace.id, player.id);
+                              }
+                            }}
+                            className="w-full px-2 py-1 bg-green-500 text-white rounded text-xs hover:bg-green-600 transition-colors active:scale-95"
+                            title="Entrer le joueur (remplacement automatique)"
+                          >
+                            ⬆️ Entrer
                           </button>
                         </div>
                       </div>
