@@ -79,10 +79,8 @@ export default function SquadPage() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        console.log('Début du chargement des données...');
         await fetchTotalTrainings();
         await fetchPlayers();
-        console.log('Chargement des données terminé');
       } catch (err) {
         console.error('Erreur lors du chargement des données:', err);
       }
@@ -93,21 +91,10 @@ export default function SquadPage() {
 
   // Recalculer les stats quand totalTrainings change
   useEffect(() => {
-    console.log('useEffect totalTrainings:', totalTrainings, 'players.length:', players.length);
     if (totalTrainings > 0 && players.length > 0) {
-      console.log('Appel de recalculatePlayerStats...');
       recalculatePlayerStats();
     }
   }, [totalTrainings, players]);
-
-  // Debug environment variables
-  useEffect(() => {
-    console.log('=== ENVIRONMENT VARIABLES CHECK ===');
-    console.log('NODE_ENV:', process.env.NODE_ENV);
-    console.log('NEXT_PUBLIC_SUPABASE_URL:', process.env.NEXT_PUBLIC_SUPABASE_URL);
-    console.log('NEXT_PUBLIC_SUPABASE_ANON_KEY:', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'SET' : 'NOT SET');
-    console.log('Supabase client:', supabase);
-  }, []);
 
   const handleFilterChange = (field: keyof FilterState, value: string) => {
     setFilters(prev => ({ ...prev, [field]: value }));
@@ -119,15 +106,12 @@ export default function SquadPage() {
 
   const fetchTotalTrainings = async () => {
     try {
-      console.log('Récupération du nombre total d\'entraînements...');
       const { count, error } = await supabase
         .from('trainings')
         .select('*', { count: 'exact', head: true });
 
       if (error) throw error;
-      console.log('Nombre total d\'entraînements:', count);
       setTotalTrainings(count || 0);
-      console.log('totalTrainings mis à jour:', count || 0);
     } catch (err) {
       console.error('Erreur lors de la récupération du nombre total d\'entraînements:', err);
       setTotalTrainings(0);
@@ -136,8 +120,6 @@ export default function SquadPage() {
 
   const recalculatePlayerStats = async () => {
     try {
-      console.log('Recalcul des stats avec totalTrainings:', totalTrainings);
-      
       // Récupération des matchs
       const { data: matchesData, error: matchesError } = await supabase
         .from('matches')
@@ -149,8 +131,6 @@ export default function SquadPage() {
         .from('trainings')
         .select('players');
       if (trainingsError) throw trainingsError;
-
-      console.log('Données récupérées - matchs:', matchesData?.length, 'entraînements:', trainingsData?.length);
 
       // Recalcul des stats pour chaque joueur
       const playersWithUpdatedStats = players.map(player => {
@@ -189,7 +169,6 @@ export default function SquadPage() {
         }).length;
 
         const attendance_percentage = totalTrainings > 0 ? Math.round((trainingAttendance / totalTrainings) * 100) : 0;
-        console.log(`Joueur ${player.first_name} ${player.last_name}: ${trainingAttendance}/${totalTrainings} = ${attendance_percentage}%`);
 
         return {
           ...player,
@@ -211,54 +190,27 @@ export default function SquadPage() {
       setLoading(true);
       setError(null);
       
-      console.log('=== DÉBUT fetchPlayers ===');
-      console.log('Supabase client:', supabase);
-      console.log('Récupération des joueurs...');
-      
       // Récupération des joueurs
       const { data, error } = await supabase
         .from('players')
         .select('*')
         .order('last_name');
 
-      console.log('Résultat de la requête players:', { data, error });
-      
-      if (error) {
-        console.error('Erreur Supabase lors de la récupération des joueurs:', error);
-        throw error;
-      }
-      
-      console.log('Joueurs récupérés:', data?.length);
-      console.log('Données des joueurs:', data);
+      if (error) throw error;
 
       // Récupération des matchs
-      console.log('Récupération des matchs...');
       const { data: matchesData, error: matchesError } = await supabase
         .from('matches')
         .select('players');
-      
-      console.log('Résultat de la requête matches:', { matchesData, matchesError });
-      
-      if (matchesError) {
-        console.error('Erreur Supabase lors de la récupération des matchs:', matchesError);
-        throw matchesError;
-      }
+      if (matchesError) throw matchesError;
 
       // Récupération des entraînements
-      console.log('Récupération des entraînements...');
       const { data: trainingsData, error: trainingsError } = await supabase
         .from('trainings')
         .select('players');
-      
-      console.log('Résultat de la requête trainings:', { trainingsData, trainingsError });
-      
-      if (trainingsError) {
-        console.error('Erreur Supabase lors de la récupération des entraînements:', trainingsError);
-        throw trainingsError;
-      }
+      if (trainingsError) throw trainingsError;
 
       // Calcul dynamique des stats pour chaque joueur
-      console.log('Calcul des stats pour chaque joueur...');
       const playersWithStats = (data || []).map(player => {
         // Nombre de matchs joués
         const matchesPlayed = (matchesData || []).filter(match => {
@@ -303,9 +255,7 @@ export default function SquadPage() {
         };
       });
 
-      console.log('Joueurs avec stats calculées:', playersWithStats);
       setPlayers(playersWithStats);
-      console.log('=== FIN fetchPlayers ===');
 
     } catch (err) {
       console.error('Erreur lors du chargement des joueurs:', err);
@@ -423,14 +373,6 @@ export default function SquadPage() {
     );
   }
 
-  console.log('=== RENDER SECTION ===');
-  console.log('loading:', loading);
-  console.log('error:', error);
-  console.log('players.length:', players.length);
-  console.log('filteredPlayers.length:', filteredPlayers.length);
-  console.log('players data:', players);
-  console.log('filteredPlayers data:', filteredPlayers);
-
   return (
     <div className="p-8">
       {error && (
@@ -449,34 +391,13 @@ export default function SquadPage() {
 
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Effectif</h1>
-        <div className="flex gap-2">
-          <button
-            onClick={async () => {
-              console.log('=== TEST SUPABASE CONNECTION ===');
-              try {
-                const { data, error } = await supabase
-                  .from('players')
-                  .select('*')
-                  .limit(1);
-                console.log('Test query result:', { data, error });
-                alert(`Test query: ${error ? 'ERROR: ' + error.message : 'SUCCESS - Found ' + (data?.length || 0) + ' players'}`);
-              } catch (err) {
-                console.error('Test query failed:', err);
-                alert('Test query failed: ' + err);
-              }
-            }}
-            className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-          >
-            Test DB
-          </button>
-          <button
-            onClick={() => handleOpenModal()}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-          >
-            <Plus className="h-5 w-5" />
-            Ajouter un joueur
-          </button>
-        </div>
+        <button
+          onClick={() => handleOpenModal()}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+        >
+          <Plus className="h-5 w-5" />
+          Ajouter un joueur
+        </button>
       </div>
 
       {/* Filtres */}
@@ -553,20 +474,6 @@ export default function SquadPage() {
               <option value="Muté HP">Muté HP</option>
             </select>
           </div>
-        </div>
-      </div>
-
-      {/* Debug section */}
-      <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-        <h3 className="text-lg font-semibold text-yellow-800 mb-2">Debug Info</h3>
-        <div className="text-sm text-yellow-700 space-y-1">
-          <div>Loading: {loading ? 'true' : 'false'}</div>
-          <div>Error: {error || 'none'}</div>
-          <div>Total Players: {players.length}</div>
-          <div>Filtered Players: {filteredPlayers.length}</div>
-          <div>Environment: {process.env.NODE_ENV}</div>
-          <div>Supabase URL Set: {process.env.NEXT_PUBLIC_SUPABASE_URL ? 'Yes' : 'No'}</div>
-          <div>Supabase Key Set: {process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'Yes' : 'No'}</div>
         </div>
       </div>
 
