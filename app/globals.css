@@ -1,39 +1,55 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* Styles spécifiques pour iPad/tablette */
+@media (pointer: coarse) {
+  /* Améliorer la zone de drag & drop sur écrans tactiles */
+  [draggable="true"] {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Feedback visuel amélioré pour le drag & drop */
+  [draggable="true"]:active {
+    transform: scale(0.95);
+    transition: transform 0.1s ease;
+  }
+
+  /* Améliorer les boutons tactiles */
+  button {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  /* Optimiser les interactions tactiles */
+  .touch-manipulation {
+    touch-action: manipulation;
+  }
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* Styles pour le drag & drop */
+.dragging {
+  opacity: 0.5;
+  transform: scale(0.95);
+  transition: all 0.2s ease;
 }
 
-.dark {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+.drag-over {
+  ring: 2px;
+  ring-color: #3b82f6;
+  transform: scale(1.02);
+  transition: all 0.2s ease;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
-}
-
-/* Egalise la hauteur des événements dans une case de react-big-calendar */
-.rbc-day-slot .rbc-events-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.rbc-day-slot .rbc-event {
-  flex: 1 1 0;
-  min-height: 0;
-  max-height: 100%;
-  margin-bottom: 2px;
-  overflow: hidden;
+/* Améliorer la visibilité des acronymes */
+.action-acronym {
+  font-weight: 700;
+  font-size: 0.75rem;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }

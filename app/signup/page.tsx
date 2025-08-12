@@ -107,7 +107,7 @@ export default function SignUp() {
         </h2>
         <p className="mt-2 text-center text-sm text-gray-600">
           Ou{' '}
-          <Link href="/login" className="font-medium text-blue-600 hover:text-blue-500">
+          <Link href="/signin" className="font-medium text-blue-600 hover:text-blue-500">
             connectez-vous à votre compte existant
           </Link>
         </p>

@@ -81,13 +81,13 @@ interface MatchData {
 }
 
 const ACTIONS = [
-  { id: 'shotsOnTarget', name: 'Tir cadré', icon: Target, color: 'bg-green-500' },
-  { id: 'shotsOffTarget', name: 'Tir non cadré', icon: Crosshair, color: 'bg-yellow-500' },
-  { id: 'goals', name: 'But', icon: Goal, color: 'bg-blue-500' },
-  { id: 'ballLoss', name: 'Perte de balle', icon: AlertTriangle, color: 'bg-red-500' },
-  { id: 'ballRecovery', name: 'Récupération', icon: RefreshCw, color: 'bg-green-600' },
-  { id: 'dribbleSuccess', name: 'Dribble réussi', icon: ArrowRight, color: 'bg-purple-500' },
-  { id: 'oneOnOneDefLost', name: '1v1 déf perdu', icon: AlertTriangle, color: 'bg-red-700' },
+  { id: 'shotsOnTarget', name: 'Tir cadré', acronym: 'TC', icon: Target, color: 'bg-green-500' },
+  { id: 'shotsOffTarget', name: 'Tir non cadré', acronym: 'TnC', icon: Crosshair, color: 'bg-yellow-500' },
+  { id: 'goals', name: 'But', acronym: 'B', icon: Goal, color: 'bg-blue-500' },
+  { id: 'ballLoss', name: 'Perte de balle', acronym: 'PdB', icon: AlertTriangle, color: 'bg-red-500' },
+  { id: 'ballRecovery', name: 'Récupération', acronym: 'R', icon: RefreshCw, color: 'bg-green-600' },
+  { id: 'dribbleSuccess', name: 'Dribble réussi', acronym: 'D', icon: ArrowRight, color: 'bg-purple-500' },
+  { id: 'oneOnOneDefLost', name: '1v1 déf perdu', acronym: 'E', icon: AlertTriangle, color: 'bg-red-700' },
 ];
 
 export default function MatchRecorderPage() {
@@ -933,10 +933,12 @@ export default function MatchRecorderPage() {
     });
   };
 
-  // Fonctions pour le drag & drop
+  // Fonctions pour le drag & drop optimisées pour iPad/tablette
   const handleDragStart = (playerId: string) => {
     try {
       setDraggedPlayer(playerId);
+      // Ajouter une classe CSS pour le feedback visuel
+      document.body.style.cursor = 'grabbing';
     } catch (error) {
       console.error('Erreur lors du début du drag:', error);
     }
@@ -945,6 +947,7 @@ export default function MatchRecorderPage() {
   const handleDragOver = (e: React.DragEvent, playerId: string) => {
     try {
       e.preventDefault();
+      e.stopPropagation();
       setDragOverPlayer(playerId);
     } catch (error) {
       console.error('Erreur lors du drag over:', error);
@@ -959,11 +962,22 @@ export default function MatchRecorderPage() {
     }
   };
 
+  const handleDragEnd = () => {
+    try {
+      setDraggedPlayer(null);
+      setDragOverPlayer(null);
+      document.body.style.cursor = '';
+    } catch (error) {
+      console.error('Erreur lors du drag end:', error);
+    }
+  };
+
   const handleDrop = (targetPlayerId: string) => {
     try {
       if (!draggedPlayer || draggedPlayer === targetPlayerId) {
         setDraggedPlayer(null);
         setDragOverPlayer(null);
+        document.body.style.cursor = '';
         return;
       }
 
@@ -1028,16 +1042,14 @@ export default function MatchRecorderPage() {
 
       setDraggedPlayer(null);
       setDragOverPlayer(null);
+      document.body.style.cursor = '';
     } catch (error) {
-      console.error('Erreur lors du drag & drop:', error);
+      console.error('Erreur lors du drop:', error);
       setDraggedPlayer(null);
       setDragOverPlayer(null);
+      document.body.style.cursor = '';
     }
   };
-
-
-
-
 
   const resetMatchSelection = () => {
     setMatchData(prev => ({
@@ -2124,9 +2136,10 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                         onDragStart={() => handleDragStart(player.id)}
                         onDragOver={(e) => handleDragOver(e, player.id)}
                         onDragLeave={handleDragLeave}
+                        onDragEnd={handleDragEnd}
                         onDrop={() => handleDrop(player.id)}
-                        className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 transition-all duration-200 cursor-move ${
-                          draggedPlayer === player.id ? 'opacity-50' : ''
+                        className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 transition-all duration-200 cursor-move touch-manipulation ${
+                          draggedPlayer === player.id ? 'opacity-50 scale-95' : ''
                         } ${
                           dragOverPlayer === player.id ? 'ring-2 ring-blue-500' : ''
                         } ${
@@ -2178,9 +2191,10 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                                 onTouchStart={() => handleLongPressStart(player.id, action.id)}
                                 onTouchEnd={() => handleLongPressEnd(player.id, action.id)}
                                 className={`flex items-center justify-center gap-1 p-1 rounded text-white font-medium transition-colors text-xs ${action.color} hover:opacity-80 active:scale-95`}
-                                title="Clic court: +1, Clic long: -1"
+                                title={`${action.name} - Clic court: +1, Clic long: -1`}
                               >
                                 <IconComponent className="h-3 w-3" />
+                                <span className="text-xs font-bold action-acronym">{action.acronym}</span>
                                 <span className="text-xs">{player.stats[action.id] || 0}</span>
                               </button>
                             );
@@ -2253,9 +2267,10 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                         onDragStart={() => handleDragStart(player.id)}
                         onDragOver={(e) => handleDragOver(e, player.id)}
                         onDragLeave={handleDragLeave}
+                        onDragEnd={handleDragEnd}
                         onDrop={() => handleDrop(player.id)}
-                        className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-2 transition-all duration-200 cursor-move ${
-                          draggedPlayer === player.id ? 'opacity-50' : ''
+                        className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-2 transition-all duration-200 cursor-move touch-manipulation ${
+                          draggedPlayer === player.id ? 'opacity-50 scale-95' : ''
                         } ${
                           dragOverPlayer === player.id ? 'ring-2 ring-blue-500' : ''
                         } ${
