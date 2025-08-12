@@ -164,6 +164,10 @@ export default function MatchRecorderPage() {
   const [longPressTimers, setLongPressTimers] = useState<{ [key: string]: NodeJS.Timeout }>({});
   const [longPressTriggered, setLongPressTriggered] = useState<{ [key: string]: boolean }>({});
 
+  // États pour la sélection tactile des joueurs
+  const [selectedPlayerForChange, setSelectedPlayerForChange] = useState<string | null>(null);
+  const [changeType, setChangeType] = useState<'substitution' | 'swap' | null>(null);
+
   // Charger les données depuis Supabase
   useEffect(() => {
     const loadData = async () => {
@@ -1312,6 +1316,46 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
     URL.revokeObjectURL(url);
   };
 
+  // Fonction pour gérer la sélection d'un joueur pour changement
+  const handlePlayerSelection = (playerId: string, playerIsOnField: boolean) => {
+    if (!selectedPlayerForChange) {
+      // Premier joueur sélectionné
+      setSelectedPlayerForChange(playerId);
+      setChangeType(playerIsOnField ? 'substitution' : 'substitution');
+    } else if (selectedPlayerForChange === playerId) {
+      // Désélectionner le même joueur
+      setSelectedPlayerForChange(null);
+      setChangeType(null);
+    } else {
+      // Deuxième joueur sélectionné - effectuer le changement
+      const firstPlayer = matchData.players.find(p => p.id === selectedPlayerForChange);
+      const secondPlayer = matchData.players.find(p => p.id === playerId);
+      
+      if (firstPlayer && secondPlayer) {
+        if (firstPlayer.isOnField && !secondPlayer.isOnField) {
+          // Titulaire -> Remplaçant
+          handlePlayerSubstitution(firstPlayer.id, secondPlayer.id);
+        } else if (!firstPlayer.isOnField && secondPlayer.isOnField) {
+          // Remplaçant -> Titulaire
+          handlePlayerSubstitution(secondPlayer.id, firstPlayer.id);
+        } else if (firstPlayer.isOnField && secondPlayer.isOnField && firstPlayer.position !== 'Gardien' && secondPlayer.position !== 'Gardien') {
+          // Échange entre titulaires (pas le gardien)
+          handlePlayerSwap(firstPlayer.id, secondPlayer.id);
+        }
+      }
+      
+      // Réinitialiser la sélection
+      setSelectedPlayerForChange(null);
+      setChangeType(null);
+    }
+  };
+
+  // Fonction pour réinitialiser la sélection
+  const resetPlayerSelection = () => {
+    setSelectedPlayerForChange(null);
+    setChangeType(null);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -2055,10 +2099,29 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
             <div className="space-y-6">
               {/* Titulaires */}
               <div>
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                  Joueurs sur le terrain
-                </h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                    Joueurs sur le terrain
+                  </h3>
+                  
+                  {/* Indicateur de sélection et bouton d'annulation */}
+                  {selectedPlayerForChange && (
+                    <div className="flex items-center gap-3">
+                      <div className="text-sm text-blue-600 font-semibold flex items-center gap-2">
+                        <span className="animate-pulse">🎯</span>
+                        Joueur sélectionné pour changement
+                      </div>
+                      <button
+                        onClick={resetPlayerSelection}
+                        className="px-3 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600 transition-colors active:scale-95"
+                        title="Annuler la sélection"
+                      >
+                        ❌ Annuler
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <div className="grid grid-cols-5 gap-3">
                   {matchData.players
                     .filter(player => player.isStarter && player.isOnField)
@@ -2072,11 +2135,13 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                       <div
                         key={player.id}
                         className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 transition-all duration-200 ${
-                          player.position === 'Gardien' 
-                            ? 'border-2' 
-                            : player.isOnField 
-                              ? 'border-2 border-green-500' 
-                              : 'border border-gray-200 dark:border-gray-600'
+                          selectedPlayerForChange === player.id 
+                            ? 'ring-4 ring-blue-500 scale-105 shadow-xl' 
+                            : player.position === 'Gardien' 
+                              ? 'border-2' 
+                              : player.isOnField 
+                                ? 'border-2 border-green-500' 
+                                : 'border border-gray-200 dark:border-gray-600'
                         }`}
                         style={player.position === 'Gardien' ? { borderColor: '#f59e0b' } : {}}
                       >
@@ -2087,6 +2152,11 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                             {player.name}
                           </div>
                           <div className="text-xs text-gray-600 dark:text-gray-400">#{player.number} - {player.position}</div>
+                          {selectedPlayerForChange === player.id && (
+                            <div className="text-xs text-blue-600 font-bold mt-1">
+                              {changeType === 'substitution' ? '🔄 Sélectionné pour changement' : '↔️ Sélectionné pour échange'}
+                            </div>
+                          )}
                         </div>
 
                         {/* Temps de jeu */}
@@ -2170,36 +2240,19 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                           </button>
                         </div>
 
-                        {/* Boutons de changement tactile */}
-                        <div className="mt-3 space-y-2">
-                          {/* Bouton pour sortir le joueur */}
+                        {/* Instructions tactiles */}
+                        <div className="mt-3 text-center">
                           <button
-                            onClick={() => {
-                              // Trouver un remplaçant disponible
-                              const availableSub = matchData.players.find(p => !p.isOnField);
-                              if (availableSub) {
-                                handlePlayerSubstitution(player.id, availableSub.id);
-                              }
-                            }}
-                            className="w-full px-2 py-1 bg-orange-500 text-white rounded text-xs hover:bg-orange-600 transition-colors active:scale-95"
-                            title="Sortir le joueur (remplacement automatique)"
+                            onTouchStart={() => handlePlayerSelection(player.id, player.isOnField)}
+                            onMouseDown={() => handlePlayerSelection(player.id, player.isOnField)}
+                            className={`w-full px-2 py-1 rounded text-xs transition-colors ${
+                              selectedPlayerForChange === player.id
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                            title="Appui long pour sélectionner ce joueur pour un changement"
                           >
-                            🔄 Sortir
-                          </button>
-                          
-                          {/* Bouton pour échanger avec un autre titulaire */}
-                          <button
-                            onClick={() => {
-                              // Trouver un autre titulaire pour l'échange
-                              const otherStarter = matchData.players.find(p => p.isOnField && p.id !== player.id && p.position !== 'Gardien');
-                              if (otherStarter) {
-                                handlePlayerSwap(player.id, otherStarter.id);
-                              }
-                            }}
-                            className="w-full px-2 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 transition-colors active:scale-95"
-                            title="Échanger avec un autre titulaire"
-                          >
-                            ↔️ Échanger
+                            {selectedPlayerForChange === player.id ? '✅ Sélectionné' : '👆 Appui long pour changer'}
                           </button>
                         </div>
                       </div>
@@ -2226,9 +2279,11 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                       <div
                         key={player.id}
                         className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-2 transition-all duration-200 ${
-                          player.position === 'Gardien' 
-                            ? 'border-2' 
-                            : 'border border-gray-200 dark:border-gray-600'
+                          selectedPlayerForChange === player.id 
+                            ? 'ring-4 ring-blue-500 scale-105 shadow-xl' 
+                            : player.position === 'Gardien' 
+                              ? 'border-2' 
+                              : 'border border-gray-200 dark:border-gray-600'
                         }`}
                         style={player.position === 'Gardien' ? { borderColor: '#f59e0b' } : {}}
                       >
@@ -2239,6 +2294,11 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                             {player.name}
                           </div>
                           <div className="text-xs text-gray-600 dark:text-gray-400">#{player.number}</div>
+                          {selectedPlayerForChange === player.id && (
+                            <div className="text-xs text-blue-600 font-bold mt-1">
+                              🔄 Sélectionné pour entrer
+                            </div>
+                          )}
                         </div>
 
                         {/* Temps de jeu */}
@@ -2287,20 +2347,19 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                           </button>
                         </div>
 
-                        {/* Bouton pour entrer le joueur */}
-                        <div className="mt-2">
+                        {/* Instructions tactiles */}
+                        <div className="mt-2 text-center">
                           <button
-                            onClick={() => {
-                              // Trouver un titulaire à remplacer (pas le gardien)
-                              const starterToReplace = matchData.players.find(p => p.isOnField && p.position !== 'Gardien');
-                              if (starterToReplace) {
-                                handlePlayerSubstitution(starterToReplace.id, player.id);
-                              }
-                            }}
-                            className="w-full px-2 py-1 bg-green-500 text-white rounded text-xs hover:bg-green-600 transition-colors active:scale-95"
-                            title="Entrer le joueur (remplacement automatique)"
+                            onTouchStart={() => handlePlayerSelection(player.id, player.isOnField)}
+                            onMouseDown={() => handlePlayerSelection(player.id, player.isOnField)}
+                            className={`w-full px-2 py-1 rounded text-xs transition-colors ${
+                              selectedPlayerForChange === player.id
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                            title="Appui long pour sélectionner ce joueur pour un changement"
                           >
-                            ⬆️ Entrer
+                            {selectedPlayerForChange === player.id ? '✅ Sélectionné' : '👆 Appui long pour entrer'}
                           </button>
                         </div>
                       </div>
