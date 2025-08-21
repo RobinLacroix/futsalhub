@@ -159,6 +159,7 @@ export default function DashboardPage() {
   });
 
   const [trainingStats, setTrainingStats] = useState<TrainingStats[]>([]);
+  const [rawTrainingsData, setRawTrainingsData] = useState<any[]>([]);
   const [matchStats, setMatchStats] = useState<MatchStats[]>([]);
   const [detailedAttendanceStats, setDetailedAttendanceStats] = useState<any[]>([]);
 
@@ -319,6 +320,9 @@ export default function DashboardPage() {
 
       console.log('Stats des entraînements formatées:', stats);
       setTrainingStats(stats);
+      
+      // Sauvegarder aussi les données brutes pour le radar chart
+      setRawTrainingsData(data);
     } catch (err) {
       console.error('Erreur lors du chargement des stats d&apos;entraînement:', err);
       setTrainingStats([]);
@@ -638,8 +642,8 @@ export default function DashboardPage() {
 
   // Calcul des données pour les graphiques à partir des joueurs filtrés
   const chartData = useMemo(() => {
-    // Calculer les stats de présence pour le radar chart
-    const detailedAttendanceStats = calculateTrainingAttendanceStats(trainingStats || []);
+    // Calculer les stats de présence pour le radar chart en utilisant les données brutes des entraînements
+    const detailedAttendanceStats = calculateTrainingAttendanceStats(rawTrainingsData || []);
     
     return {
       statusDistribution: aggregateByField(filteredPlayers, 'status'),
@@ -664,7 +668,7 @@ export default function DashboardPage() {
         'Total': player.matches_played || 0
       }))
     };
-  }, [filteredPlayers, trainingStats]);
+  }, [filteredPlayers, rawTrainingsData]);
 
   // Calcul des données pour les graphiques de performance
   const getTrainingThemeDistribution = () => {
@@ -1232,6 +1236,7 @@ export default function DashboardPage() {
           {/* Présence en séance par joueur (Radar Chart) */}
           <div className="bg-white p-6 rounded-lg shadow">
             <h3 className="text-lg text-gray-900 font-semibold mb-4">Présence en séance par joueur</h3>
+
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <RadarChart data={chartData.attendanceRadar}>
