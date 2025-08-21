@@ -189,7 +189,6 @@ export default function TrackerDashboardPage() {
             setMatchEvents(eventsData || []);
           }
         }
-
       } catch (error) {
         console.error('🏆 Tracker Dashboard - Erreur lors du chargement des données:', error);
       } finally {
@@ -198,6 +197,7 @@ export default function TrackerDashboardPage() {
     };
 
     loadData();
+    }
   }, [activeTeam]);
 
   // Debug: logger l'onglet actif

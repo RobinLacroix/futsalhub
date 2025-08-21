@@ -240,6 +240,7 @@ export default function MatchRecorderPage() {
     };
 
     loadData();
+    }
   }, [activeTeam]);
 
   // Timer pour mettre à jour les temps de jeu et le chronomètre du match
