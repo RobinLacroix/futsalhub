@@ -638,15 +638,24 @@ export default function DashboardPage() {
 
   // Calcul des données pour les graphiques à partir des joueurs filtrés
   const chartData = useMemo(() => {
+    // Calculer les stats de présence pour le radar chart
+    const detailedAttendanceStats = calculateTrainingAttendanceStats(trainingStats || []);
+    
     return {
       statusDistribution: aggregateByField(filteredPlayers, 'status'),
       footDistribution: aggregateByField(filteredPlayers, 'strong_foot'),
       matchesByStatus: calculateAverageByField(filteredPlayers, 'status', 'matches_played'),
       goalsByStatus: calculateAverageByField(filteredPlayers, 'status', 'goals'),
-      attendanceRadar: filteredPlayers.map(player => ({
-        joueur: `${player.first_name} ${player.last_name}`,
-        'Présence (%)': player.attendance_percentage || 0
-      })),
+      attendanceRadar: detailedAttendanceStats.map(stats => {
+        // Trouver le nom du joueur
+        const player = filteredPlayers.find(p => p.id === stats.player_id);
+        const playerName = player ? `${player.first_name} ${player.last_name}` : `Joueur ${stats.player_id}`;
+        
+        return {
+          joueur: playerName,
+          'Présence (%)': stats.attendance_rate || 0
+        };
+      }),
       matchesByPlayer: filteredPlayers.map(player => ({
         joueur: `${player.first_name} ${player.last_name}`,
         'Victoires': player.victories || 0,
@@ -655,7 +664,7 @@ export default function DashboardPage() {
         'Total': player.matches_played || 0
       }))
     };
-  }, [filteredPlayers]);
+  }, [filteredPlayers, trainingStats]);
 
   // Calcul des données pour les graphiques de performance
   const getTrainingThemeDistribution = () => {
@@ -1239,8 +1248,8 @@ export default function DashboardPage() {
                   <Radar
                     name="Présence (%)"
                     dataKey="Présence (%)"
-                    stroke="#8884d8"
-                    fill="#8884d8"
+                    stroke="#8B5CF6"
+                    fill="#8B5CF6"
                     fillOpacity={0.6}
                   />
                   <Tooltip 
