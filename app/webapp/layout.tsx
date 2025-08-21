@@ -3,6 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import SimpleTeamSelector from './components/SimpleTeamSelector';
+import DebugTeamSelector from './components/DebugTeamSelector';
+import TeamChangeTester from './components/TeamChangeTester';
 import {
   Home,
   Calendar,
@@ -16,7 +19,8 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
-  PieChart
+  PieChart,
+  Shield
 } from 'lucide-react';
 
 // Composant UserMenu pour la sidebar
@@ -99,6 +103,11 @@ function Sidebar({ isExpanded, onToggle }: { isExpanded: boolean; onToggle: () =
           name: 'Dashboard',
           href: '/webapp/manager/dashboard',
           icon: PieChart
+        },
+        {
+          name: 'Équipes',
+          href: '/webapp/manager/teams',
+          icon: Shield
         }
       ]
     },
@@ -165,6 +174,17 @@ function Sidebar({ isExpanded, onToggle }: { isExpanded: boolean; onToggle: () =
           <ChevronRight className="h-4 w-4" />
         )}
       </button>
+
+      {/* Sélecteur d'équipe */}
+      <div className="px-3 py-2 border-b border-gray-200">
+        {isExpanded ? (
+          <SimpleTeamSelector />
+        ) : (
+          <div className="text-center">
+            <div className="text-blue-600 text-lg">🏆</div>
+          </div>
+        )}
+      </div>
 
       <nav className="flex-1 py-4 overflow-y-auto">
         <div className="px-3 space-y-1 h-full">

@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { useActiveTeam } from '../../hooks/useActiveTeam';
 import { RefreshCw } from 'lucide-react';
 import {
   PieChart,
@@ -140,6 +141,7 @@ const calculateAverageByField = (
 };
 
 export default function DashboardPage() {
+  const { activeTeam } = useActiveTeam();
   const [players, setPlayers] = useState<Player[]>([]);
   const [totalTrainings, setTotalTrainings] = useState<number>(0);
   const [loading, setLoading] = useState(true);
@@ -158,24 +160,27 @@ export default function DashboardPage() {
 
   const [trainingStats, setTrainingStats] = useState<TrainingStats[]>([]);
   const [matchStats, setMatchStats] = useState<MatchStats[]>([]);
+  const [detailedAttendanceStats, setDetailedAttendanceStats] = useState<any[]>([]);
 
   // Récupération des données initiales
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        console.log('Début du chargement des données...');
-        await fetchTotalTrainings();
-        await fetchPlayers();
-        await fetchTrainingStats();
-        await fetchMatchStats();
-        console.log('Chargement des données terminé');
-      } catch (err) {
-        console.error('Erreur lors du chargement des données:', err);
-      }
-    };
+    if (activeTeam) {
+      const loadData = async () => {
+        try {
+          console.log('🏆 Dashboard - Chargement des données pour l\'équipe:', activeTeam.name);
+          await fetchTotalTrainings();
+          await fetchPlayers();
+          await fetchTrainingStats();
+          await fetchMatchStats();
+          console.log('🏆 Dashboard - Chargement des données terminé');
+        } catch (err) {
+          console.error('🏆 Dashboard - Erreur lors du chargement des données:', err);
+        }
+      };
 
-    loadData();
-  }, [totalTrainings]);
+      loadData();
+    }
+  }, [activeTeam]);
 
   const handleFilterChange = (field: keyof FilterState, value: string | string[]) => {
     setFilters(prev => ({ ...prev, [field]: value }));
@@ -249,30 +254,46 @@ export default function DashboardPage() {
 
   const fetchTotalTrainings = async () => {
     try {
-      console.log('Récupération du nombre total d&apos;entraînements...');
+      if (!activeTeam) {
+        console.log('🏆 Dashboard - Aucune équipe active, chargement des entraînements impossible');
+        setTotalTrainings(0);
+        return;
+      }
+
+      console.log('🏆 Dashboard - Récupération du nombre total d\'entraînements pour l\'équipe:', activeTeam.name);
       const { count, error } = await supabase
         .from('trainings')
-        .select('*', { count: 'exact', head: true });
+        .select('*', { count: 'exact', head: true })
+        .eq('team_id', activeTeam.id);
 
       if (error) throw error;
-      console.log('Nombre total d&apos;entraînements:', count);
+      console.log('🏆 Dashboard - Nombre total d\'entraînements:', count);
       setTotalTrainings(count || 0);
     } catch (err) {
-      console.error('Erreur lors de la récupération du nombre total d&apos;entraînements:', err);
+      console.error('🏆 Dashboard - Erreur lors de la récupération du nombre total d\'entraînements:', err);
       setTotalTrainings(0);
     }
   };
 
   const fetchTrainingStats = async () => {
     try {
+      if (!activeTeam) {
+        console.log('🏆 Dashboard - Aucune équipe active, chargement des stats d\'entraînement impossible');
+        setTrainingStats([]);
+        return;
+      }
+
+      console.log('🏆 Dashboard - Chargement des stats d\'entraînement pour l\'équipe:', activeTeam.name);
+      
       const { data, error } = await supabase
         .from('trainings')
         .select('*')
+        .eq('team_id', activeTeam.id)
         .order('date', { ascending: true });
 
       if (error) throw error;
 
-      console.log('Données brutes des entraînements:', data);
+      console.log('🏆 Dashboard - Stats d\'entraînement récupérées:', data?.length || 0);
 
       if (!data || data.length === 0) {
         console.log('Aucune donnée d&apos;entraînement trouvée');
@@ -280,11 +301,21 @@ export default function DashboardPage() {
         return;
       }
 
-      const stats = data.map(training => ({
-        date: format(new Date(training.date), 'dd/MM/yyyy'),
-        attendance: Array.isArray(training.players) ? training.players.length : 0,
-        theme: training.theme || 'Non spécifié'
-      }));
+      const stats = data.map(training => {
+        const attendance = training.attendance || {};
+        const presentCount = Object.values(attendance).filter(status => status === 'present').length;
+        const absentCount = Object.values(attendance).filter(status => status === 'absent').length;
+        const injuredCount = Object.values(attendance).filter(status => status === 'injured').length;
+        
+        return {
+          date: format(new Date(training.date), 'dd/MM/yyyy'),
+          attendance: Object.keys(attendance).length, // Total des joueurs
+          present: presentCount,
+          absent: absentCount,
+          injured: injuredCount,
+          theme: training.theme || 'Non spécifié'
+        };
+      });
 
       console.log('Stats des entraînements formatées:', stats);
       setTrainingStats(stats);
@@ -294,16 +325,105 @@ export default function DashboardPage() {
     }
   };
 
+  // Fonction pour calculer les statistiques détaillées de présence aux entraînements
+  const calculateTrainingAttendanceStats = (trainingsData: any[]) => {
+    if (!trainingsData || trainingsData.length === 0) return [];
+
+    const playerStats: Record<string, {
+      player_id: string;
+      total_sessions: number;
+      present_count: number;
+      absent_count: number;
+      injured_count: number;
+      attendance_rate: number;
+      present_percentage: number;
+      absent_percentage: number;
+      injured_percentage: number;
+      absent_cumulative: number;
+      injured_cumulative: number;
+    }> = {};
+
+    // Initialiser les stats pour tous les joueurs
+    trainingsData.forEach(training => {
+      if (training.attendance && typeof training.attendance === 'object') {
+        Object.entries(training.attendance).forEach(([playerId, status]) => {
+          if (!playerStats[playerId]) {
+            playerStats[playerId] = {
+              player_id: playerId,
+              total_sessions: 0,
+              present_count: 0,
+              absent_count: 0,
+              injured_count: 0,
+              attendance_rate: 0,
+              present_percentage: 0,
+              absent_percentage: 0,
+              injured_percentage: 0,
+              absent_cumulative: 0,
+              injured_cumulative: 0
+            };
+          }
+          
+          playerStats[playerId].total_sessions++;
+          
+          switch (status) {
+            case 'present':
+              playerStats[playerId].present_count++;
+              break;
+            case 'absent':
+              playerStats[playerId].absent_count++;
+              break;
+            case 'injured':
+              playerStats[playerId].injured_count++;
+              break;
+          }
+        });
+      }
+    });
+
+    // Calculer les pourcentages pour chaque joueur
+    Object.values(playerStats).forEach(stats => {
+      if (stats.total_sessions > 0) {
+        stats.attendance_rate = Math.round((stats.present_count / stats.total_sessions) * 100);
+        stats.present_percentage = Math.round((stats.present_count / stats.total_sessions) * 100);
+        stats.absent_percentage = Math.round((stats.absent_count / stats.total_sessions) * 100);
+        stats.injured_percentage = Math.round((stats.injured_count / stats.total_sessions) * 100);
+        
+        // Calcul correct pour l'empilement radar
+        // Chaque courbe doit être cumulative pour créer l'effet d'escalier
+        stats.absent_cumulative = stats.present_percentage + stats.absent_percentage;
+        stats.injured_cumulative = stats.present_percentage + stats.absent_percentage + stats.injured_percentage;
+      } else {
+        stats.attendance_rate = 0;
+        stats.present_percentage = 0;
+        stats.absent_percentage = 0;
+        stats.injured_percentage = 0;
+        stats.absent_cumulative = 0;
+        stats.injured_cumulative = 0;
+      }
+    });
+
+    return Object.values(playerStats);
+  };
+
   const fetchMatchStats = async () => {
     try {
+      if (!activeTeam) {
+        console.log('🏆 Dashboard - Aucune équipe active, chargement des stats de match impossible');
+        setMatchStats([]);
+        return;
+      }
+
+      console.log('🏆 Dashboard - Chargement des stats de match pour l\'équipe:', activeTeam.name);
+      
       const { data, error } = await supabase
         .from('matches')
         .select('*')
+        .eq('team_id', activeTeam.id)
         .order('date', { ascending: true });
 
       if (error) throw error;
 
-      console.log('Données brutes des matchs:', data);
+      console.log('🏆 Dashboard - Stats de match récupérées:', data?.length || 0);
 
       if (!data || data.length === 0) {
         console.log('Aucune donnée de match trouvée');
@@ -364,30 +484,46 @@ export default function DashboardPage() {
 
   const fetchPlayers = async () => {
     try {
+      if (!activeTeam) {
+        console.log('🏆 Dashboard - Aucune équipe active, chargement des joueurs impossible');
+        setPlayers([]);
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       setError(null);
       
-      console.log('Récupération des joueurs...');
+      console.log('🏆 Dashboard - Récupération des joueurs pour l\'équipe:', activeTeam.name);
       // Récupération des joueurs
       const { data, error } = await supabase
         .from('players')
         .select('*')
+        .eq('team_id', activeTeam.id)
         .order('last_name');
 
       if (error) throw error;
       console.log('Joueurs récupérés:', data?.length);
 
-      // Récupération des matchs avec leurs résultats
+      // Récupération des matchs avec leurs résultats (filtrés par équipe)
       const { data: matchesData, error: matchesError } = await supabase
         .from('matches')
-        .select('players, score_team, score_opponent');
+        .select('players, score_team, score_opponent')
+        .eq('team_id', activeTeam.id);
       if (matchesError) throw matchesError;
 
-      // Récupération des entraînements
+      // Récupération des entraînements avec le champ attendance (filtrés par équipe)
       const { data: trainingsData, error: trainingsError } = await supabase
         .from('trainings')
-        .select('players');
+        .select('attendance')
+        .eq('team_id', activeTeam.id);
       if (trainingsError) throw trainingsError;
+
+      // Calculer les stats détaillées de présence
+      const detailedAttendanceStats = calculateTrainingAttendanceStats(trainingsData || []);
+      
+      // Stocker les stats détaillées dans l'état
+      setDetailedAttendanceStats(detailedAttendanceStats);
 
       // Calcul dynamique des stats pour chaque joueur
       const playersWithStats = (data || []).map(player => {
@@ -414,12 +550,12 @@ export default function DashboardPage() {
           }
         }, 0);
 
-        // Nombre de présences à l'entraînement
+        // Nombre de présences à l'entraînement (utilise le nouveau champ attendance JSONB)
         const trainingAttendance = (trainingsData || []).filter(training => {
-          if (!training.players) return false;
+          if (!training.attendance) return false;
           try {
-            const arr = Array.isArray(training.players) ? training.players : JSON.parse(training.players);
-            return arr.some((p: { id: string; present?: boolean }) => p.id === player.id && p.present === true);
+            // Vérifier si le joueur est présent dans le champ attendance
+            return training.attendance[player.id] === 'present';
           } catch {
             return false;
           }
@@ -762,6 +898,25 @@ export default function DashboardPage() {
     );
   }
 
+  if (!activeTeam) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="text-6xl mb-4">🏆</div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">Aucune équipe sélectionnée</h1>
+          <p className="text-gray-600 mb-6">
+            Veuillez sélectionner une équipe dans la sidebar pour afficher le dashboard.
+          </p>
+          <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+            <p className="text-blue-800 text-sm">
+              Utilisez le sélecteur d'équipe dans la sidebar gauche pour commencer.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-8">
       {error && (
@@ -771,7 +926,20 @@ export default function DashboardPage() {
       )}
 
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+          {activeTeam && (
+            <div className="flex items-center gap-2 mt-2">
+              <div 
+                className="w-4 h-4 rounded-full"
+                style={{ backgroundColor: activeTeam.color }}
+              ></div>
+              <span className="text-sm text-gray-600">
+                Équipe active : <strong>{activeTeam.name}</strong> ({activeTeam.category} - Niveau {activeTeam.level})
+              </span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Section Analyse de l'effectif */}
@@ -956,39 +1124,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Graphique radar - Présence en séance */}
-          <div className="bg-white p-6 rounded-lg shadow">
-            <h3 className="text-lg text-gray-900 font-semibold mb-4">Présence en séance par joueur</h3>
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <RadarChart data={chartData.attendanceRadar}>
-                  <PolarGrid />
-                  <PolarAngleAxis 
-                    dataKey="joueur" 
-                    tick={{ fontSize: 10 }}
-                  />
-                  <PolarRadiusAxis 
-                    angle={90} 
-                    domain={[0, 100]} 
-                    tick={{ fontSize: 10 }}
-                  />
-                  <Radar
-                    name="Présence (%)"
-                    dataKey="Présence (%)"
-                    stroke="#8884d8"
-                    fill="#8884d8"
-                    fillOpacity={0.6}
-                  />
-                  <Tooltip 
-                    contentStyle={{ fontSize: 12, color: '#374151', fontWeight: 'bold' }}
-                  />
-                  <Legend 
-                    wrapperStyle={{ fontSize: 12, fontWeight: 'bold' }}
-                  />
-                </RadarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
+
 
           {/* Graphique - Nombre de matchs par joueur */}
           <div className="bg-white p-6 rounded-lg shadow">
@@ -1026,25 +1162,165 @@ export default function DashboardPage() {
       {/* Section Analyse de l'entraînement */}
       <div className="mt-12">
         <h2 className="text-xl font-bold text-gray-900 mb-6">Analyse de l'entraînement</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {/* Présence aux entraînements */}
+        
+        {/* Graphiques d'analyse de l'entraînement */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          {/* Statistiques de présence détaillées */}
           <div className="bg-white p-6 rounded-lg shadow">
-            <h3 className="text-lg text-gray-900 font-semibold mb-4">Présence aux entraînements</h3>
+            <h3 className="text-lg text-gray-900 font-semibold mb-4">Statistiques de présence détaillées</h3>
+            <div className="h-80">
+              {detailedAttendanceStats.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={detailedAttendanceStats}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis 
+                      dataKey="player_id" 
+                      angle={-45} 
+                      textAnchor="end" 
+                      height={80}
+                      tick={{ fontSize: 10 }}
+                      tickFormatter={(label) => {
+                        const player = players.find(p => p.id === label);
+                        return player ? `${player.first_name} ${player.last_name}` : label;
+                      }}
+                    />
+                    <YAxis />
+                    <Tooltip 
+                      formatter={(value: number, name: string) => [
+                        value, 
+                        name === 'present_count' ? 'Présences' : 
+                        name === 'absent_count' ? 'Absences' : 
+                        name === 'injured_count' ? 'Blessés' : name
+                      ]}
+                      labelFormatter={(label) => {
+                        const player = players.find(p => p.id === label);
+                        return player ? `${player.first_name} ${player.last_name}` : label;
+                      }}
+                    />
+                    <Legend 
+                      formatter={(value) => {
+                        switch(value) {
+                          case 'present_count': return 'Présences';
+                          case 'absent_count': return 'Absences';
+                          case 'injured_count': return 'Blessés';
+                          default: return value;
+                        }
+                      }}
+                    />
+                    <Bar dataKey="present_count" stackId="a" fill="#4CAF50" name="Présences" />
+                    <Bar dataKey="absent_count" stackId="a" fill="#F44336" name="Absences" />
+                    <Bar dataKey="injured_count" stackId="a" fill="#FF9800" name="Blessés" />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center text-gray-500">
+                  Aucune donnée de présence disponible
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Présence en séance par joueur (Radar Chart) */}
+          <div className="bg-white p-6 rounded-lg shadow">
+            <h3 className="text-lg text-gray-900 font-semibold mb-4">Présence en séance par joueur</h3>
+            <div className="h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadarChart data={chartData.attendanceRadar}>
+                  <PolarGrid />
+                  <PolarAngleAxis 
+                    dataKey="joueur" 
+                    tick={{ fontSize: 10 }}
+                  />
+                  <PolarRadiusAxis 
+                    angle={90} 
+                    domain={[0, 100]} 
+                    tick={{ fontSize: 10 }}
+                  />
+                  <Radar
+                    name="Présence (%)"
+                    dataKey="Présence (%)"
+                    stroke="#8884d8"
+                    fill="#8884d8"
+                    fillOpacity={0.6}
+                  />
+                  <Tooltip 
+                    contentStyle={{ fontSize: 12, color: '#374151', fontWeight: 'bold' }}
+                  />
+                  <Legend 
+                    wrapperStyle={{ fontSize: 12, fontWeight: 'bold' }}
+                  />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        {/* Deuxième ligne : Nombre de joueurs présents et thèmes */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          {/* Nombre de joueurs présents par séance d'entraînement */}
+          <div className="bg-white p-6 rounded-lg shadow">
+            <h3 className="text-lg text-gray-900 font-semibold mb-4">Nombre de joueurs présents par séance d'entraînement</h3>
             <div className="h-80">
               {trainingStats.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={trainingStats}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    <Line type="monotone" dataKey="attendance" stroke="#8884d8" name="Nombre de joueurs" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis 
+                      dataKey="date" 
+                      angle={-45} 
+                      textAnchor="end" 
+                      height={80}
+                      tick={{ fontSize: 10, fill: '#6b7280' }}
+                      axisLine={{ stroke: '#d1d5db' }}
+                    />
+                    <YAxis 
+                      tick={{ fontSize: 10, fill: '#6b7280' }}
+                      axisLine={{ stroke: '#d1d5db' }}
+                      domain={[0, 'dataMax + 2']}
+                    />
+                    <Tooltip 
+                      formatter={(value: number, name: string) => {
+                        if (name === 'present') {
+                          return [`${value} joueurs présents`, 'Joueurs présents'];
+                        }
+                        return [value, name];
+                      }}
+                      labelFormatter={(label) => `Séance du ${label}`}
+                      contentStyle={{
+                        backgroundColor: 'white',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '8px',
+                        padding: '12px',
+                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                      }}
+                    />
+                    <Legend 
+                      wrapperStyle={{ fontSize: 12, fontWeight: 'bold' }}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="present" 
+                      stroke="#10B981" 
+                      strokeWidth={3}
+                      dot={{ 
+                        fill: '#10B981', 
+                        strokeWidth: 2, 
+                        r: 4,
+                        stroke: '#fff'
+                      }}
+                      activeDot={{ 
+                        r: 6, 
+                        stroke: '#10B981', 
+                        strokeWidth: 2, 
+                        fill: '#fff' 
+                      }}
+                      name="Nombre de joueurs présents" 
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               ) : (
                 <div className="h-full flex items-center justify-center text-gray-500">
-                  Aucune donnée d&apos;entraînement disponible
+                  Aucune donnée d'entraînement disponible
                 </div>
               )}
             </div>
@@ -1052,7 +1328,7 @@ export default function DashboardPage() {
 
           {/* Répartition des thèmes d'entraînement */}
           <div className="bg-white p-6 rounded-lg shadow">
-            <h3 className="text-lg text-gray-900 font-semibold mb-4">Répartition des thèmes d&apos;entraînement</h3>
+            <h3 className="text-lg text-gray-900 font-semibold mb-4">Répartition des thèmes d'entraînement</h3>
             <div className="h-80">
               {pieThemeData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
@@ -1068,37 +1344,21 @@ export default function DashboardPage() {
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="name" />
                     <YAxis />
-                    <Tooltip 
-                      formatter={(value: number) => [`${value} séances`, 'Nombre de séances']}
-                      contentStyle={{
-                        backgroundColor: 'white',
-                        border: '1px solid #ccc',
-                        borderRadius: '4px',
-                        padding: '8px'
-                      }}
-                    />
-                    <Bar 
-                      dataKey="value" 
-                      fill="#8884d8"
-                      radius={[4, 4, 0, 0]}
-                    >
-                      {pieThemeData.map((entry, index) => (
-                        <Cell 
-                          key={`cell-${index}`} 
-                          fill={COLORS[index % COLORS.length]} 
-                        />
-                      ))}
-                    </Bar>
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="value" fill="#8884d8" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
                 <div className="h-full flex items-center justify-center text-gray-500">
-                  Aucune donnée d&apos;entraînement disponible
+                  Aucune donnée disponible
                 </div>
               )}
             </div>
           </div>
         </div>
+
+
       </div>
 
       {/* Section d'analyse des performances */}

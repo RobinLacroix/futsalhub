@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { Settings, LogOut } from 'lucide-react';
+import ActiveTeamIndicator from './ActiveTeamIndicator';
 
 export default function Header() {
   const router = useRouter();
@@ -28,7 +29,11 @@ export default function Header() {
 
   return (
     <header className="fixed top-0 right-0 left-0 h-16 bg-white border-b border-gray-200 z-30">
-      <div className="h-full px-4 flex items-center justify-end">
+      <div className="h-full px-4 flex items-center justify-between">
+        {/* Indicateur d'équipe active */}
+        <ActiveTeamIndicator />
+        
+        {/* Menu utilisateur */}
         <div className="relative">
           <button
             onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}

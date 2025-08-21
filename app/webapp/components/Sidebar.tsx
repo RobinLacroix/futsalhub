@@ -2,6 +2,9 @@
 
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
+import TeamSelector from './TeamSelector';
+import SimpleTeamSelector from './SimpleTeamSelector';
+import { useActiveTeam } from '../hooks/useActiveTeam';
 import {
   Home,
   Calendar,
@@ -14,7 +17,8 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  PieChart
+  PieChart,
+  Shield
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -24,6 +28,11 @@ interface SidebarProps {
 
 export default function Sidebar({ isExpanded, onToggle }: SidebarProps) {
   const pathname = usePathname();
+  const { activeTeamId, changeActiveTeam, teams, loading } = useActiveTeam();
+  
+  console.log('Sidebar: activeTeamId:', activeTeamId);
+  console.log('Sidebar: teams:', teams);
+  console.log('Sidebar: loading:', loading);
 
   const navigation = [
     {
@@ -48,6 +57,11 @@ export default function Sidebar({ isExpanded, onToggle }: SidebarProps) {
           name: 'Dashboard',
           href: '/webapp/manager/dashboard',
           icon: PieChart
+        },
+        {
+          name: 'Équipes',
+          href: '/webapp/manager/teams',
+          icon: Shield
         }
       ]
     },
@@ -121,6 +135,11 @@ export default function Sidebar({ isExpanded, onToggle }: SidebarProps) {
           <ChevronRight className="h-4 w-4" />
         )}
       </button>
+
+      {/* Sélecteur d'équipe */}
+      <div className="px-3 py-4 border-b border-gray-200">
+        <SimpleTeamSelector />
+      </div>
 
       <nav className="h-full py-4 overflow-y-auto">
         <div className="px-3 space-y-1">

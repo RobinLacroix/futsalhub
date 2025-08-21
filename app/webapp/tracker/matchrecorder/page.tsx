@@ -4,6 +4,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { useActiveTeam } from '../../hooks/useActiveTeam';
 import { 
   Play, 
   Pause, 
@@ -91,6 +92,7 @@ const ACTIONS = [
 ];
 
 export default function MatchRecorderPage() {
+  const { activeTeam } = useActiveTeam();
   const [matchData, setMatchData] = useState<MatchData>({
     selectedMatch: null,
     isRunning: false,
@@ -170,15 +172,18 @@ export default function MatchRecorderPage() {
 
   // Charger les données depuis Supabase
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        
-        // Charger les matches triés par date (plus récents en premier)
-        const { data: matchesData, error: matchesError } = await supabase
-          .from('matches')
-          .select('id, title, date, competition, location, score_team, score_opponent, opponent_team')
-          .order('date', { ascending: false });
+    if (activeTeam) {
+      const loadData = async () => {
+        try {
+          setLoading(true);
+          console.log('🏆 MatchRecorder - Chargement des données pour l\'équipe:', activeTeam.name);
+          
+          // Charger les matches triés par date (plus récents en premier, filtrés par équipe)
+          const { data: matchesData, error: matchesError } = await supabase
+            .from('matches')
+            .select('id, title, date, competition, location, score_team, score_opponent, opponent_team')
+            .eq('team_id', activeTeam.id)
+            .order('date', { ascending: false });
 
         if (matchesError) {
           console.error('Erreur lors du chargement des matches:', matchesError);
@@ -235,7 +240,7 @@ export default function MatchRecorderPage() {
     };
 
     loadData();
-  }, []);
+  }, [activeTeam]);
 
   // Timer pour mettre à jour les temps de jeu et le chronomètre du match
   useEffect(() => {
@@ -1861,10 +1866,10 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
         {/* Section de contrôle fixe en haut */}
         <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-xl shadow-xl p-3 mb-3 sticky top-0 z-50 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between mb-2">
-            <div>
+            <div className="flex items-center gap-3">
               <h1 className="text-lg font-bold text-gray-900 dark:text-white">Enregistrement Match</h1>
               {matchData.selectedMatch && (
-                <div className="text-xs text-gray-600 dark:text-gray-400">
+                <div className="text-sm text-gray-600 dark:text-gray-400 font-medium">
                   {matchData.selectedMatch.title} - {matchData.selectedMatch.competition}
                 </div>
               )}
@@ -1935,17 +1940,17 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
               
               <div className="flex items-center justify-between">
                 {/* Temps à gauche */}
-                <div className="text-center">
+                <div className="text-center flex-1">
                   <div className="text-lg font-mono font-bold text-blue-600 dark:text-blue-400">
                     {formatMatchTime(matchData.matchTime)}
                   </div>
                 </div>
                 
                 {/* Boutons empilés à droite */}
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-1 ml-2">
                   <button
                     onClick={toggleMatch}
-                    className={`py-1 px-2 rounded text-white font-semibold transition-colors text-xs ${
+                    className={`py-2 px-4 rounded text-white font-semibold transition-colors text-xs min-w-[60px] ${
                       matchData.isRunning 
                         ? 'bg-red-500 hover:bg-red-600' 
                         : 'bg-green-500 hover:bg-green-600'
@@ -1956,7 +1961,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                   
                   <button
                     onClick={nextHalf}
-                    className="py-1 px-2 bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors font-semibold text-xs"
+                    className="py-2 px-4 bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors font-semibold text-xs min-w-[60px]"
                   >
                     <Zap className="h-3 w-3" />
                   </button>
@@ -1968,30 +1973,34 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
             <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-2">
               <h3 className="text-xs font-semibold text-gray-900 dark:text-white mb-1">Score</h3>
               
-              <div className="text-center mb-2">
-                <div className="text-lg font-bold text-blue-600 dark:text-blue-400">
-                  {matchData.teamScore} - {matchData.opponentScore}
+              <div className="flex items-center justify-between">
+                {/* Score au centre */}
+                <div className="text-center flex-1">
+                  <div className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                    {matchData.teamScore} - {matchData.opponentScore}
+                  </div>
                 </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-1">
-                <button
-                  onClick={() => setMatchData(prev => ({ ...prev, teamScore: prev.teamScore + 1 }))}
-                  className="py-1 bg-green-500 text-white rounded hover:bg-green-600 transition-colors font-semibold text-xs"
-                >
-                  +1 Éq
-                </button>
-                <button
-                  onClick={async () => {
-                    const timerKey = 'opponent-goals';
-                    if (!longPressTriggered[timerKey]) {
-                      await updateOpponentGoal(true);
-                    }
-                  }}
-                  className="py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs"
-                >
-                  +1 Adv
-                </button>
+                
+                {/* Boutons à droite */}
+                <div className="flex flex-col gap-1 ml-1">
+                  <button
+                    onClick={() => setMatchData(prev => ({ ...prev, teamScore: prev.teamScore + 1 }))}
+                    className="py-2 px-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors font-semibold text-xs min-w-[60px]"
+                  >
+                    +1 Éq
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const timerKey = 'opponent-goals';
+                      if (!longPressTriggered[timerKey]) {
+                        await updateOpponentGoal(true);
+                      }
+                    }}
+                    className="py-2 px-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs min-w-[45px]"
+                  >
+                    +1 Adv
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1999,28 +2008,34 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
             <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-2">
               <h3 className="text-xs font-semibold text-gray-900 dark:text-white mb-1">Fautes</h3>
               
-              <div className="grid grid-cols-2 gap-2 mb-2">
-                <div className="text-center">
-                  <div className="text-sm font-bold text-blue-600 dark:text-blue-400">{matchData.teamFouls}</div>
+              <div className="flex items-center justify-between">
+                {/* Compteurs de fautes au centre */}
+                <div className="flex items-center gap-3 flex-1 justify-center">
+                  <div className="text-center">
+                    <div className="text-base font-bold text-blue-600 dark:text-blue-400">{matchData.teamFouls}</div>
+                    <div className="text-xs text-gray-500">Équipe</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-base font-bold text-red-600 dark:text-red-400">{matchData.opponentFouls}</div>
+                    <div className="text-xs text-gray-500">Adversaire</div>
+                  </div>
                 </div>
-                <div className="text-center">
-                  <div className="text-sm font-bold text-red-600 dark:text-red-400">{matchData.opponentFouls}</div>
+                
+                {/* Boutons à droite */}
+                <div className="flex flex-col gap-1 ml-2">
+                  <button
+                    onClick={() => updateFouls(true)}
+                    className="py-2 px-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors font-semibold text-xs min-w-[45px]"
+                  >
+                    Faute Éq
+                  </button>
+                  <button
+                    onClick={() => updateFouls(false)}
+                    className="py-2 px-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs min-w-[45px]"
+                  >
+                    Faute Adv
+                  </button>
                 </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-1">
-                <button
-                  onClick={() => updateFouls(true)}
-                  className="py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors font-semibold text-xs"
-                >
-                  Faute Éq
-                </button>
-                <button
-                  onClick={() => updateFouls(false)}
-                  className="py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs"
-                >
-                  Faute Adv
-                </button>
               </div>
             </div>
 
@@ -2028,7 +2043,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
             <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-2">
               <h3 className="text-xs font-semibold text-gray-900 dark:text-white mb-1">Actions adverses</h3>
               
-              <div className="grid grid-cols-3 gap-1">
+              <div className="grid grid-cols-3 gap-2">
                 <button
                   onClick={async (e) => {
                     const timerKey = 'opponent-goals';
@@ -2058,7 +2073,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                   onMouseLeave={() => handleOpponentLongPressEnd('shotsOnTarget')}
                   onTouchStart={() => handleOpponentLongPressStart('shotsOnTarget')}
                   onTouchEnd={() => handleOpponentLongPressEnd('shotsOnTarget')}
-                  className="py-3 bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors font-semibold text-xs active:scale-95"
+                  className="py-2 bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors font-semibold text-xs active:scale-95"
                   title="Clic court: +1, Clic long: -1"
                 >
                   Tir cadré
@@ -2075,7 +2090,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                   onMouseLeave={() => handleOpponentLongPressEnd('shotsOffTarget')}
                   onTouchStart={() => handleOpponentLongPressStart('shotsOffTarget')}
                   onTouchEnd={() => handleOpponentLongPressEnd('shotsOffTarget')}
-                  className="py-3 bg-yellow-500 text-white rounded hover:bg-yellow-600 transition-colors font-semibold text-xs active:scale-95"
+                  className="py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600 transition-colors font-semibold text-xs active:scale-95"
                   title="Clic court: +1, Clic long: -1"
                 >
                   Tir adverse

@@ -10,6 +10,7 @@ import {
   Check,
   Pencil
 } from 'lucide-react';
+import { useActiveTeam } from '../../hooks/useActiveTeam';
 
 interface Player {
   id: string;
@@ -63,6 +64,7 @@ const initialFilters: FilterState = {
 };
 
 export default function SquadPage() {
+  const { activeTeam } = useActiveTeam();
   const [players, setPlayers] = useState<Player[]>([]);
   const [totalTrainings, setTotalTrainings] = useState<number>(0);
   const [loading, setLoading] = useState(true);
@@ -75,26 +77,47 @@ export default function SquadPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [filters, setFilters] = useState<FilterState>(initialFilters);
 
-  // Récupération des données initiales
+  // Recharger les données quand l'équipe active change OU au chargement initial
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        await fetchTotalTrainings();
-        await fetchPlayers();
-      } catch (err) {
-        console.error('Erreur lors du chargement des données:', err);
-      }
-    };
+    if (activeTeam) {
+      console.log('🏆 Équipe active détectée, chargement des données pour:', activeTeam.name);
+      console.log('🏆 ID de l\'équipe:', activeTeam.id);
+      
+      // Vider d'abord les données existantes
+      setPlayers([]);
+      setTotalTrainings(0);
+      setLoading(true);
+      
+      // Puis recharger les nouvelles données
+      const loadData = async () => {
+        try {
+          console.log('🏆 Début du chargement des données...');
+          await fetchTotalTrainings();
+          await fetchPlayers();
+          console.log('🏆 Chargement des données terminé');
+        } catch (err) {
+          console.error('🏆 Erreur lors du chargement des données:', err);
+        } finally {
+          setLoading(false);
+        }
+      };
+      
+      loadData();
+    } else {
+      console.log('🏆 Aucune équipe active, attente...');
+      setPlayers([]);
+      setTotalTrainings(0);
+      setLoading(false);
+    }
+  }, [activeTeam]);
 
-    loadData();
-  }, []);
-
-  // Recalculer les stats quand totalTrainings change
+  // Recalculer les stats quand totalTrainings ou players changent
   useEffect(() => {
-    if (totalTrainings > 0 && players.length > 0) {
+    if (totalTrainings > 0 && players.length > 0 && activeTeam) {
+      console.log('🏆 Recalcul des stats pour l\'équipe:', activeTeam.name);
       recalculatePlayerStats();
     }
-  }, [totalTrainings, players]);
+  }, [totalTrainings, players, activeTeam]);
 
   const handleFilterChange = (field: keyof FilterState, value: string) => {
     setFilters(prev => ({ ...prev, [field]: value }));
@@ -106,79 +129,125 @@ export default function SquadPage() {
 
   const fetchTotalTrainings = async () => {
     try {
+      // Vérifier qu'une équipe est sélectionnée
+      if (!activeTeam) {
+        console.log('🏆 Aucune équipe active, chargement des entraînements impossible');
+        setTotalTrainings(0);
+        return;
+      }
+      
+      console.log('🏆 Chargement des entraînements pour l\'équipe:', activeTeam.name);
+      console.log('🏆 Requête Supabase avec team_id:', activeTeam.id);
+      
       const { count, error } = await supabase
         .from('trainings')
-        .select('*', { count: 'exact', head: true });
+        .select('*', { count: 'exact', head: true })
+        .eq('team_id', activeTeam.id);
 
-      if (error) throw error;
+      if (error) {
+        console.error('🏆 Erreur Supabase:', error);
+        throw error;
+      }
+      
+      console.log('🏆 Nombre d\'entraînements trouvés:', count);
       setTotalTrainings(count || 0);
     } catch (err) {
-      console.error('Erreur lors de la récupération du nombre total d\'entraînements:', err);
+      console.error('🏆 Erreur lors de la récupération du nombre total d\'entraînements:', err);
       setTotalTrainings(0);
     }
   };
 
   const recalculatePlayerStats = async () => {
     try {
-      // Récupération des matchs
+      // Vérifier qu'une équipe est sélectionnée
+      if (!activeTeam) {
+        console.log('Aucune équipe active, recalcul des stats impossible');
+        return;
+      }
+      
+      console.log('Recalcul des stats pour l\'équipe:', activeTeam.name);
+      
+      // Récupération des matchs filtrés par équipe
       const { data: matchesData, error: matchesError } = await supabase
         .from('matches')
-        .select('players');
+        .select('players')
+        .eq('team_id', activeTeam.id);
       if (matchesError) throw matchesError;
 
-      // Récupération des entraînements
+      // Récupération des entraînements filtrés par équipe avec le nouveau champ attendance
       const { data: trainingsData, error: trainingsError } = await supabase
         .from('trainings')
-        .select('players');
+        .select('attendance')
+        .eq('team_id', activeTeam.id);
       if (trainingsError) throw trainingsError;
+      
+      console.log('Trainings data récupérée:', trainingsData);
 
       // Recalcul des stats pour chaque joueur
       const playersWithUpdatedStats = players.map(player => {
-        // Nombre de matchs joués
-        const matchesPlayed = (matchesData || []).filter(match => {
-          if (!match.players) return false;
-          try {
-            const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
-            return arr.some((p: { id: string }) => p.id === player.id);
-          } catch {
-            return false;
-          }
-        }).length;
+        try {
+          // Nombre de matchs joués
+          const matchesPlayed = (matchesData || []).filter(match => {
+            if (!match.players) return false;
+            try {
+              const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
+              return arr.some((p: { id: string }) => p.id === player.id);
+            } catch {
+              return false;
+            }
+          }).length;
 
-        // Nombre de buts marqués
-        const goals = (matchesData || []).reduce((sum, match) => {
-          if (!match.players) return sum;
-          try {
-            const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
-            const playerMatch = arr.find((p: { id: string; goals?: number; yellow_cards?: number; red_cards?: number }) => p.id === player.id);
-            return sum + (playerMatch && typeof playerMatch.goals === 'number' ? playerMatch.goals : 0);
-          } catch {
-            return sum;
-          }
-        }, 0);
+          // Nombre de buts marqués
+          const goals = (matchesData || []).reduce((sum, match) => {
+            if (!match.players) return sum;
+            try {
+              const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
+              const playerMatch = arr.find((p: { id: string; goals?: number; yellow_cards?: number; red_cards?: number }) => p.id === player.id);
+              return sum + (playerMatch && typeof playerMatch.goals === 'number' ? playerMatch.goals : 0);
+            } catch {
+              return sum;
+            }
+          }, 0);
 
-        // Nombre de présences à l'entraînement
-        const trainingAttendance = (trainingsData || []).filter(training => {
-          if (!training.players) return false;
-          try {
-            const arr = Array.isArray(training.players) ? training.players : JSON.parse(training.players);
-            return arr.some((p: { id: string; present?: boolean }) => p.id === player.id && p.present === true);
-          } catch {
-            return false;
-          }
-        }).length;
+          // Nombre de présences à l'entraînement (nouveau système avec attendance JSONB)
+          const trainingAttendance = (trainingsData || []).filter(training => {
+            try {
+              // Debug: vérifier la structure de chaque training
+              if (!training.attendance || typeof training.attendance !== 'object') {
+                console.log('Training sans attendance valide:', training);
+                return false;
+              }
+              
+              // Vérifier si le joueur est présent dans ce training
+              const isPresent = training.attendance[player.id] === 'present';
+              console.log('Vérification présence:', { 
+                playerId: player.id, 
+                attendance: training.attendance[player.id],
+                isPresent 
+              });
+              return isPresent;
+            } catch (error) {
+              console.error('Erreur lors de la vérification de présence:', error, training);
+              return false;
+            }
+          }).length;
 
-        const attendance_percentage = totalTrainings > 0 ? Math.round((trainingAttendance / totalTrainings) * 100) : 0;
+          const attendance_percentage = totalTrainings > 0 ? Math.round((trainingAttendance / totalTrainings) * 100) : 0;
 
-        return {
-          ...player,
-          matches_played: matchesPlayed,
-          goals,
-          training_attendance: trainingAttendance,
-          attendance_percentage
-        };
+          return {
+            ...player,
+            matches_played: matchesPlayed,
+            goals,
+            training_attendance: trainingAttendance,
+            attendance_percentage
+          };
+        } catch (playerError) {
+          console.error('Erreur lors du traitement du joueur:', player.id, playerError);
+          return player; // Retourner le joueur sans modification en cas d'erreur
+        }
       });
 
+      console.log('Stats recalculées avec succès');
       setPlayers(playersWithUpdatedStats);
     } catch (err) {
       console.error('Erreur lors du recalcul des stats:', err);
@@ -190,13 +259,32 @@ export default function SquadPage() {
       setLoading(true);
       setError(null);
       
-      // Récupération des joueurs
+      // Vérifier qu'une équipe est sélectionnée
+      if (!activeTeam) {
+        console.log('❌ Aucune équipe active, chargement des joueurs impossible');
+        setPlayers([]);
+        return;
+      }
+      
+      console.log('🏆 Chargement des joueurs pour l\'équipe:', activeTeam.name, 'ID:', activeTeam.id);
+      
+      // Récupération des joueurs filtrés par équipe
       const { data, error } = await supabase
         .from('players')
         .select('*')
+        .eq('team_id', activeTeam.id)
         .order('last_name');
 
       if (error) throw error;
+
+      console.log('📊 Joueurs récupérés de Supabase:', data?.length || 0);
+      if (data && data.length > 0) {
+        console.log('📋 Premier joueur (exemple):', data[0]);
+        console.log('🔍 Vérification team_id du premier joueur:', data[0].team_id);
+      } else {
+        console.log('⚠️ Aucun joueur trouvé pour l\'équipe:', activeTeam.name);
+        console.log('⚠️ Vérifiez que l\'équipe a des joueurs dans la base de données');
+      }
 
       // Récupération des matchs
       const { data: matchesData, error: matchesError } = await supabase
@@ -204,10 +292,10 @@ export default function SquadPage() {
         .select('players');
       if (matchesError) throw matchesError;
 
-      // Récupération des entraînements
+      // Récupération des entraînements avec le nouveau champ attendance
       const { data: trainingsData, error: trainingsError } = await supabase
         .from('trainings')
-        .select('players');
+        .select('attendance');
       if (trainingsError) throw trainingsError;
 
       // Calcul dynamique des stats pour chaque joueur
@@ -235,12 +323,12 @@ export default function SquadPage() {
           }
         }, 0);
 
-        // Nombre de présences à l'entraînement
+        // Nombre de présences à l'entraînement (nouveau système avec attendance JSONB)
         const trainingAttendance = (trainingsData || []).filter(training => {
-          if (!training.players) return false;
+          if (!training.attendance) return false;
           try {
-            const arr = Array.isArray(training.players) ? training.players : JSON.parse(training.players);
-            return arr.some((p: { id: string; present?: boolean }) => p.id === player.id && p.present === true);
+            // Vérifier si le joueur est présent dans ce training
+            return training.attendance[player.id] === 'present';
           } catch {
             return false;
           }
@@ -281,6 +369,14 @@ export default function SquadPage() {
   }, [players, filters]);
 
   const handleOpenModal = (player?: Player) => {
+    // Vérifier qu'une équipe est active
+    if (!activeTeam) {
+      setError('Aucune équipe active sélectionnée. Veuillez sélectionner une équipe dans la sidebar.');
+      return;
+    }
+
+    console.log('🏆 Ouverture du modal pour l\'équipe:', activeTeam.name);
+
     if (player) {
       setIsEditing(true);
       setCurrentPlayer(player);
@@ -314,11 +410,22 @@ export default function SquadPage() {
     setSuccess(null);
 
     try {
+      // Vérifier qu'une équipe est active
+      if (!activeTeam) {
+        setError('Aucune équipe active sélectionnée. Veuillez sélectionner une équipe dans la sidebar.');
+        return;
+      }
+
+      console.log('🏆 Ajout/modification de joueur pour l\'équipe:', activeTeam.name, 'ID:', activeTeam.id);
+
       const playerData = {
         ...formData,
         age: parseInt(formData.age),
-        number: formData.number ? parseInt(formData.number) : null
+        number: formData.number ? parseInt(formData.number) : null,
+        team_id: activeTeam.id // Ajouter automatiquement le team_id
       };
+
+      console.log('🏆 Données du joueur à enregistrer:', playerData);
 
       if (isEditing && currentPlayer) {
         const { error } = await supabase
@@ -327,19 +434,20 @@ export default function SquadPage() {
           .eq('id', currentPlayer.id);
 
         if (error) throw error;
-        setSuccess('Joueur modifié avec succès');
+        setSuccess(`Joueur modifié avec succès dans l'équipe ${activeTeam.name}`);
       } else {
         const { error } = await supabase
           .from('players')
           .insert([playerData]);
 
         if (error) throw error;
-        setSuccess('Joueur ajouté avec succès');
+        setSuccess(`Joueur ajouté avec succès dans l'équipe ${activeTeam.name}`);
       }
 
       handleCloseModal();
       fetchPlayers();
     } catch (err) {
+      console.error('🏆 Erreur lors de l\'ajout/modification du joueur:', err);
       setError(err instanceof Error ? err.message : 'Une erreur est survenue');
     } finally {
       setIsSubmitting(false);
@@ -375,6 +483,26 @@ export default function SquadPage() {
 
   return (
     <div className="p-8">
+      {/* Indicateur d'équipe active */}
+      <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+        <div className="flex items-center gap-3">
+          <div className="text-lg">🏆</div>
+          <div>
+            <div className="font-semibold text-blue-800">
+              Équipe active : {activeTeam ? activeTeam.name : 'Aucune équipe sélectionnée'}
+            </div>
+            <div className="text-sm text-blue-600">
+              {activeTeam ? `${activeTeam.category} - Niveau ${activeTeam.level}` : 'Sélectionnez une équipe dans la sidebar'}
+            </div>
+            {activeTeam && (
+              <div className="text-xs text-blue-500 mt-1">
+                ID: {activeTeam.id} | Couleur: {activeTeam.color}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       {error && (
         <div className="mb-4 p-4 bg-red-50 text-red-600 rounded-md flex items-center gap-2">
           <AlertCircle className="h-5 w-5" />
@@ -390,13 +518,31 @@ export default function SquadPage() {
       )}
 
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Effectif</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Effectif</h1>
+          {activeTeam && (
+            <div className="flex items-center gap-2 mt-2">
+              <div 
+                className="w-4 h-4 rounded-full"
+                style={{ backgroundColor: activeTeam.color }}
+              ></div>
+              <span className="text-sm text-gray-600">
+                Équipe active : <strong>{activeTeam.name}</strong> ({activeTeam.category} - Niveau {activeTeam.level})
+              </span>
+            </div>
+          )}
+        </div>
         <button
           onClick={() => handleOpenModal()}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+          disabled={!activeTeam}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors ${
+            activeTeam 
+              ? 'bg-blue-600 text-white hover:bg-blue-700' 
+              : 'bg-gray-400 text-gray-200 cursor-not-allowed'
+          }`}
         >
           <Plus className="h-5 w-5" />
-          Ajouter un joueur
+          {activeTeam ? `Ajouter un joueur à ${activeTeam.name}` : 'Sélectionnez une équipe'}
         </button>
       </div>
 

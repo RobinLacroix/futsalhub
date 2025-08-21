@@ -12,6 +12,7 @@ import moment from 'moment';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import { format } from 'date-fns';
 import { supabase } from '@/lib/supabaseClient';
+import { useActiveTeam } from '../../hooks/useActiveTeam';
 import {
   X,
   AlertCircle,
@@ -50,6 +51,8 @@ interface Match {
   type: 'match';
 }
 
+type PlayerStatus = 'present' | 'absent' | 'injured';
+
 interface Training {
   id: string;
   date: Date;
@@ -58,7 +61,7 @@ interface Training {
   key_principle: string;
   players: {
     id: string;
-    present: boolean;
+    status: PlayerStatus;
   }[];
   type: 'training';
 }
@@ -112,7 +115,7 @@ interface TrainingFormData {
   players: {
     [key: string]: {
       id: string;
-      present: boolean;
+      status: PlayerStatus;
     };
   };
 }
@@ -160,13 +163,13 @@ const matchSchema = yup.object().shape({
     transition: yup.number().min(0).default(0),
     cpa: yup.number().min(0).default(0),
     superiority: yup.number().min(0).default(0)
-  }),
+  }).required(),
   conceded_by_type: yup.object().shape({
     offensive: yup.number().min(0).default(0),
     transition: yup.number().min(0).default(0),
     cpa: yup.number().min(0).default(0),
     superiority: yup.number().min(0).default(0)
-  })
+  }).required()
 });
 
 // Schéma de validation pour l'entraînement
@@ -181,7 +184,7 @@ const trainingSchema = yup.object().shape({
     (value) => {
       if (!value) return false;
       return Object.values(value).some(player => 
-        player && typeof player === 'object' && 'present' in player && player.present === true
+        player && typeof player === 'object' && 'status' in player && player.status === 'present'
       );
     }
   )
@@ -201,6 +204,7 @@ type RBCalendarEvent = {
 const DragAndDropCalendar = withDragAndDrop<RBCalendarEvent>(ReactBigCalendar);
 
 export default function CalendarPage() {
+  const { activeTeam } = useActiveTeam();
   const [matches, setMatches] = useState<Match[]>([]);
   const [trainings, setTrainings] = useState<Training[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -220,7 +224,7 @@ export default function CalendarPage() {
 
 
   const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<MatchFormData>({
-    resolver: yupResolver(matchSchema),
+    resolver: yupResolver(matchSchema) as any,
     defaultValues: {
       title: '',
       date: new Date(),
@@ -258,21 +262,35 @@ export default function CalendarPage() {
 
   // Chargement des données
   useEffect(() => {
-    fetchMatches();
-    fetchTrainings();
-    fetchPlayers();
-    fetchTrainingStats();
-    fetchMatchStats();
-  }, []);
+    if (activeTeam) {
+      console.log('🏆 Calendar - Chargement des données pour l\'équipe:', activeTeam.name);
+      fetchMatches();
+      fetchTrainings();
+      fetchPlayers();
+      fetchTrainingStats();
+      fetchMatchStats();
+    }
+  }, [activeTeam]);
 
   const fetchMatches = async () => {
     try {
+      if (!activeTeam) {
+        console.log('🏆 Calendar - Aucune équipe active, chargement des matchs impossible');
+        setMatches([]);
+        return;
+      }
+
+      console.log('🏆 Calendar - Chargement des matchs pour l\'équipe:', activeTeam.name);
+      
       const { data, error } = await supabase
         .from('matches')
         .select('*')
+        .eq('team_id', activeTeam.id)
         .order('date', { ascending: true });
 
       if (error) throw error;
+
+      console.log('🏆 Calendar - Matchs récupérés:', data?.length || 0);
 
       setMatches(data.map(match => ({
         ...match,
@@ -289,17 +307,32 @@ export default function CalendarPage() {
 
   const fetchTrainings = async () => {
     try {
+      if (!activeTeam) {
+        console.log('🏆 Calendar - Aucune équipe active, chargement des entraînements impossible');
+        setTrainings([]);
+        return;
+      }
+
+      console.log('🏆 Calendar - Chargement des entraînements pour l\'équipe:', activeTeam.name);
+      
       const { data, error } = await supabase
         .from('trainings')
         .select('*')
+        .eq('team_id', activeTeam.id)
         .order('date', { ascending: true });
 
       if (error) throw error;
 
+      console.log('🏆 Calendar - Entraînements récupérés:', data?.length || 0);
+
       setTrainings(data.map(training => ({
         ...training,
         date: new Date(training.date),
-        players: training.players || [],
+        // Convertir le champ attendance JSONB en format players pour la compatibilité
+        players: training.attendance ? Object.entries(training.attendance).map(([playerId, status]) => ({
+          id: playerId,
+          status: status as PlayerStatus
+        })) : [],
         type: 'training' as const
       })));
     } catch (err) {
@@ -309,9 +342,18 @@ export default function CalendarPage() {
 
   const fetchPlayers = async () => {
     try {
+      if (!activeTeam) {
+        console.log('🏆 Calendar - Aucune équipe active, chargement des joueurs impossible');
+        setPlayers([]);
+        return;
+      }
+
+      console.log('🏆 Calendar - Chargement des joueurs pour l\'équipe:', activeTeam.name);
+      
       const { data, error } = await supabase
         .from('players')
         .select('id, first_name, last_name')
+        .eq('team_id', activeTeam.id)
         .order('last_name');
 
       if (error) throw error;
@@ -344,14 +386,23 @@ export default function CalendarPage() {
 
   const fetchTrainingStats = async () => {
     try {
+      if (!activeTeam) {
+        console.log('🏆 Calendar - Aucune équipe active, chargement des stats d\'entraînement impossible');
+        setTrainingStats([]);
+        return;
+      }
+
+      console.log('🏆 Calendar - Chargement des stats d\'entraînement pour l\'équipe:', activeTeam.name);
+      
       const { data, error } = await supabase
         .from('trainings')
         .select('*')
+        .eq('team_id', activeTeam.id)
         .order('date', { ascending: true });
 
       if (error) throw error;
 
-      console.log('Données brutes des entraînements:', data);
+      console.log('🏆 Calendar - Stats d\'entraînement récupérées:', data?.length || 0);
 
       if (!data || data.length === 0) {
         console.log('Aucune donnée d\'entraînement trouvée');
@@ -361,7 +412,7 @@ export default function CalendarPage() {
 
       const stats = data.map(training => ({
         date: format(new Date(training.date), 'dd/MM/yyyy'),
-        attendance: Array.isArray(training.players) ? training.players.length : 0,
+        attendance: training.attendance ? Object.keys(training.attendance).length : 0,
         theme: training.theme || 'Non spécifié'
       }));
 
@@ -375,14 +426,23 @@ export default function CalendarPage() {
 
   const fetchMatchStats = async () => {
     try {
+      if (!activeTeam) {
+        console.log('🏆 Calendar - Aucune équipe active, chargement des stats de match impossible');
+        setMatchStats([]);
+        return;
+      }
+
+      console.log('🏆 Calendar - Chargement des stats de match pour l\'équipe:', activeTeam.name);
+      
       const { data, error } = await supabase
         .from('matches')
         .select('*')
+        .eq('team_id', activeTeam.id)
         .order('date', { ascending: true });
 
       if (error) throw error;
 
-      console.log('Données brutes des matchs:', data);
+      console.log('🏆 Calendar - Stats de match récupérées:', data?.length || 0);
 
       if (!data || data.length === 0) {
         console.log('Aucune donnée de match trouvée');
@@ -527,7 +587,7 @@ export default function CalendarPage() {
     }
   };
 
-  const updateTrainingAttendance = async (players: { id: string; present: boolean }[]) => {
+  const updateTrainingAttendance = async (players: { id: string; status: PlayerStatus }[]) => {
     try {
       console.log('Mise à jour de la présence aux entraînements pour les joueurs:', players);
 
@@ -630,15 +690,37 @@ export default function CalendarPage() {
       console.log('Pré-remplissage du formulaire d\'entraînement');
       console.log('Joueurs de l\'événement:', event.players);
 
-      // Pré-remplir le formulaire d'entraînement avec les joueurs présents
-      const playersData = event.players.reduce((acc, player) => {
-        console.log('Traitement du joueur:', player);
-        acc[player.id] = {
-          id: player.id,
-          present: player.present
-        };
-        return acc;
-      }, {} as { [key: string]: { id: string; present: boolean } });
+      // Pré-remplir le formulaire d'entraînement avec les joueurs
+      // Si l'événement a un champ attendance JSONB, l'utiliser
+      let playersData: { [key: string]: { id: string; status: PlayerStatus } } = {};
+      
+      if ((event as any).attendance && typeof (event as any).attendance === 'object') {
+        // Utiliser le champ attendance JSONB s'il existe
+        Object.entries((event as any).attendance).forEach(([playerId, status]) => {
+          playersData[playerId] = {
+            id: playerId,
+            status: status as PlayerStatus
+          };
+        });
+      } else if (Array.isArray(event.players)) {
+        // Fallback sur l'ancien format si nécessaire
+        event.players.forEach((player: any) => {
+          playersData[player.id] = {
+            id: player.id,
+            status: player.status || 'present'
+          };
+        });
+      }
+
+      // S'assurer que tous les joueurs ont un statut
+      players.forEach(player => {
+        if (!playersData[player.id]) {
+          playersData[player.id] = {
+            id: player.id,
+            status: 'present' // Par défaut
+          };
+        }
+      });
 
       console.log('Données des joueurs préparées:', playersData);
 
@@ -717,30 +799,25 @@ export default function CalendarPage() {
       setError(null);
       if (!editingEvent || editingEvent.type !== 'training') return;
 
-      // Nettoyer et formater les données des joueurs
-      const cleanedPlayers = Object.entries(data.players)
-        .filter(([playerId, player]) => {
-          if (!player || typeof player !== 'object' || !player.present) return false;
-          if (!playerId) {
-            console.error('ID de joueur manquant:', player);
-            return false;
-          }
-          return true;
-        })
-        .map(([playerId, player]) => ({
-          id: playerId,
-          present: true
-        }));
+      // Préparer les données de présence au format JSONB
+      const attendanceData: Record<string, string> = {};
+      Object.entries(data.players).forEach(([playerId, player]) => {
+        if (player && typeof player === 'object' && player.status) {
+          attendanceData[playerId] = player.status;
+        }
+      });
 
       const trainingData = {
         date: data.date.toISOString(),
         location: data.location,
         theme: data.theme,
         key_principle: data.key_principle,
-        players: cleanedPlayers
+        attendance: attendanceData // Mise à jour du champ JSONB
       };
 
-      // Mise à jour de l'entraînement
+      console.log('Données de l\'entraînement à mettre à jour:', trainingData);
+
+      // Mise à jour de l'entraînement avec les présences
       const { error: trainingError } = await supabase
         .from('trainings')
         .update(trainingData)
@@ -748,10 +825,8 @@ export default function CalendarPage() {
 
       if (trainingError) throw trainingError;
 
-      // Mise à jour de la présence aux entraînements
-      await updateTrainingAttendance(cleanedPlayers);
-
       handleCloseTrainingModal();
+      fetchMatches();
       fetchTrainings();
       fetchPlayers();
       setSuccess('Entraînement modifié avec succès');
@@ -924,6 +999,14 @@ export default function CalendarPage() {
       // Code existant pour l'ajout d'un match
       try {
         setError(null);
+        
+        // Vérifier qu'une équipe est active
+        if (!activeTeam) {
+          setError('Aucune équipe active sélectionnée. Veuillez sélectionner une équipe dans la sidebar.');
+          return;
+        }
+        
+        console.log('🏆 Calendar - Ajout de match pour l\'équipe:', activeTeam.name);
         console.log('Données du formulaire:', data);
 
         // Nettoyer et formater les données des joueurs (optionnel)
@@ -955,7 +1038,8 @@ export default function CalendarPage() {
           opponent_team: data.opponent_team || null,
           players: cleanedPlayers,
           goals_by_type: data.goals_by_type,
-          conceded_by_type: data.conceded_by_type
+          conceded_by_type: data.conceded_by_type,
+          team_id: activeTeam.id // Ajouter automatiquement le team_id
         };
 
         console.log('Données du match à enregistrer:', matchData);
@@ -991,29 +1075,34 @@ export default function CalendarPage() {
       // Code existant pour l'ajout d'un entraînement
       try {
         setError(null);
+        
+        // Vérifier qu'une équipe est active
+        if (!activeTeam) {
+          setError('Aucune équipe active sélectionnée. Veuillez sélectionner une équipe dans la sidebar.');
+          return;
+        }
+        
+        console.log('🏆 Calendar - Ajout d\'entraînement pour l\'équipe:', activeTeam.name);
 
-        // Nettoyer et formater les données des joueurs
-        const cleanedPlayers = Object.entries(data.players)
-          .filter(([playerId, player]) => {
-            if (!player || typeof player !== 'object' || !player.present) return false;
-            if (!playerId) {
-              console.error('ID de joueur manquant:', player);
-              return false;
-            }
-            return true;
-          })
-          .map(([playerId, player]) => ({
-            id: playerId,
-            present: true
-          }));
+        // Préparer les données de présence au format JSONB
+        const attendanceData: Record<string, string> = {};
+        Object.entries(data.players).forEach(([playerId, player]) => {
+          if (player && typeof player === 'object' && player.status) {
+            attendanceData[playerId] = player.status;
+          }
+        });
 
+        // Créer l'entraînement avec les présences directement dans le JSONB
         const trainingData = {
           date: data.date.toISOString(),
           location: data.location,
           theme: data.theme,
           key_principle: data.key_principle,
-          players: cleanedPlayers
+          attendance: attendanceData, // Stockage direct dans le JSONB
+          team_id: activeTeam.id // Ajouter automatiquement le team_id
         };
+
+        console.log('Données de l\'entraînement à enregistrer:', trainingData);
 
         // Enregistrement de l'entraînement
         const { error: trainingError } = await supabase
@@ -1025,12 +1114,11 @@ export default function CalendarPage() {
           throw trainingError;
         }
 
-        // Mise à jour de la présence aux entraînements
-        await updateTrainingAttendance(cleanedPlayers);
-
         handleCloseTrainingModal();
         fetchMatches();
+        fetchTrainings();
         fetchPlayers();
+        setSuccess('Entraînement ajouté avec succès');
       } catch (err) {
         console.error('Erreur lors de l\'enregistrement:', err);
         setError(err instanceof Error ? err.message : 'Erreur lors de l\'enregistrement');
@@ -1384,6 +1472,10 @@ export default function CalendarPage() {
     </div>
   );
 
+
+
+
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -1402,21 +1494,44 @@ export default function CalendarPage() {
       )}
 
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Calendrier</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Calendrier</h1>
+          {activeTeam && (
+            <div className="flex items-center gap-2 mt-2">
+              <div 
+                className="w-4 h-4 rounded-full"
+                style={{ backgroundColor: activeTeam.color }}
+              ></div>
+              <span className="text-sm text-gray-600">
+                Équipe active : <strong>{activeTeam.name}</strong> ({activeTeam.category} - Niveau {activeTeam.level})
+              </span>
+            </div>
+          )}
+        </div>
         <div className="flex gap-4">
           <button
             onClick={handleOpenTrainingModal}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+            disabled={!activeTeam}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors ${
+              activeTeam 
+                ? 'bg-green-600 text-white hover:bg-green-700' 
+                : 'bg-gray-400 text-gray-200 cursor-not-allowed'
+            }`}
           >
             <Dumbbell className="h-5 w-5" />
-            Ajouter un entraînement
+            {activeTeam ? `Ajouter un entraînement à ${activeTeam.name}` : 'Sélectionnez une équipe'}
           </button>
           <button
             onClick={handleOpenModal}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+            disabled={!activeTeam}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors ${
+              activeTeam 
+                ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                : 'bg-gray-400 text-gray-200 cursor-not-allowed'
+            }`}
           >
             <Trophy className="h-5 w-5" />
-            Ajouter un match
+            {activeTeam ? `Ajouter un match à ${activeTeam.name}` : 'Sélectionnez une équipe'}
           </button>
         </div>
       </div>
@@ -1975,30 +2090,64 @@ export default function CalendarPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Joueurs présents</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Statut des joueurs</label>
                   <div className="border rounded-md overflow-hidden">
                     <div className="max-h-[300px] overflow-y-auto">
                       {players.map(player => (
                         <div 
                           key={player.id} 
-                          className="flex items-center gap-2 p-3 border-b last:border-b-0 hover:bg-gray-50"
+                          className="flex items-center gap-3 p-3 border-b last:border-b-0 hover:bg-gray-50"
                         >
-                          <Controller
-                            name={`players.${player.id}.present`}
-                            control={trainingControl}
-                            defaultValue={false}
-                            render={({ field: { value, onChange } }) => (
-                              <input
-                                type="checkbox"
-                                checked={value ?? false}
-                                onChange={(e) => onChange(e.target.checked)}
-                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                              />
-                            )}
-                          />
-                          <span className="text-sm text-gray-900">
+                          <span className="text-sm text-gray-900 flex-1">
                             {player.first_name} {player.last_name}
                           </span>
+                          
+                          <div className="flex items-center gap-3">
+                            <Controller
+                              name={`players.${player.id}.status`}
+                              control={trainingControl}
+                              defaultValue="present"
+                              render={({ field: { value, onChange } }) => (
+                                <div className="flex items-center gap-2">
+                                  <label className="flex items-center gap-1 text-xs">
+                                    <input
+                                      type="radio"
+                                      name={`status-${player.id}`}
+                                      value="present"
+                                      checked={value === "present"}
+                                      onChange={(e) => onChange(e.target.value as PlayerStatus)}
+                                      className="text-green-600 focus:ring-green-500"
+                                    />
+                                    <span className="text-green-700">✅</span>
+                                  </label>
+                                  
+                                  <label className="flex items-center gap-1 text-xs">
+                                    <input
+                                      type="radio"
+                                      name={`status-${player.id}`}
+                                      value="absent"
+                                      checked={value === "absent"}
+                                      onChange={(e) => onChange(e.target.value as PlayerStatus)}
+                                      className="text-red-600 focus:ring-red-500"
+                                    />
+                                    <span className="text-red-700">❌</span>
+                                  </label>
+                                  
+                                  <label className="flex items-center gap-1 text-xs">
+                                    <input
+                                      type="radio"
+                                      name={`status-${player.id}`}
+                                      value="injured"
+                                      checked={value === "injured"}
+                                      onChange={(e) => onChange(e.target.value as PlayerStatus)}
+                                      className="text-orange-600 focus:ring-orange-500"
+                                    />
+                                    <span className="text-orange-700">🩹</span>
+                                  </label>
+                                </div>
+                              )}
+                            />
+                          </div>
                         </div>
                       ))}
                     </div>

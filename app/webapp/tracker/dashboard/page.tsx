@@ -3,6 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { useActiveTeam } from '../../hooks/useActiveTeam';
 import {
   BarChart3,
   Clock,
@@ -95,6 +96,7 @@ interface MatchAction {
 }
 
 export default function TrackerDashboardPage() {
+  const { activeTeam } = useActiveTeam();
   const [matches, setMatches] = useState<Match[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
   const [matchEvents, setMatchEvents] = useState<MatchEvent[]>([]);
@@ -107,15 +109,18 @@ export default function TrackerDashboardPage() {
 
   // Charger les données depuis Supabase
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        
-        // Charger tous les matches
-        const { data: matchesData, error: matchesError } = await supabase
-          .from('matches')
-          .select('id, title, date, competition, score_team, score_opponent, players') // ← AJOUTER 'players'
-          .order('date', { ascending: false });
+    if (activeTeam) {
+      const loadData = async () => {
+        try {
+          setLoading(true);
+          console.log('🏆 Tracker Dashboard - Chargement des données pour l\'équipe:', activeTeam.name);
+          
+          // Charger tous les matches (filtrés par équipe)
+          const { data: matchesData, error: matchesError } = await supabase
+            .from('matches')
+            .select('id, title, date, competition, score_team, score_opponent, players')
+            .eq('team_id', activeTeam.id)
+            .order('date', { ascending: false });
 
         if (matchesError) {
           console.error('Erreur lors du chargement des matches:', matchesError);
@@ -152,28 +157,48 @@ export default function TrackerDashboardPage() {
           setMatches(matchesWithEvents);
         }
 
-        // Charger les joueurs
+        // Charger les joueurs (filtrés par équipe)
         const { data: playersData, error: playersError } = await supabase
           .from('players')
           .select('id, first_name, last_name, position, number')
+          .eq('team_id', activeTeam.id)
           .order('last_name');
 
         if (playersError) {
-          console.error('Erreur lors du chargement des joueurs:', playersError);
+          console.error('🏆 Tracker Dashboard - Erreur lors du chargement des joueurs:', playersError);
           setPlayers([]);
         } else {
+          console.log('🏆 Tracker Dashboard - Joueurs récupérés:', playersData?.length || 0);
           setPlayers(playersData || []);
         }
 
+        // Charger les événements de match (filtrés par équipe via les matches)
+        const matchIds = matchesData?.map(m => m.id) || [];
+        if (matchIds.length > 0) {
+          const { data: eventsData, error: eventsError } = await supabase
+            .from('match_events')
+            .select('*')
+            .in('match_id', matchIds)
+            .order('created_at', { ascending: true });
+
+          if (eventsError) {
+            console.error('🏆 Tracker Dashboard - Erreur lors du chargement des événements:', eventsError);
+            setMatchEvents([]);
+          } else {
+            console.log('🏆 Tracker Dashboard - Événements récupérés:', eventsData?.length || 0);
+            setMatchEvents(eventsData || []);
+          }
+        }
+
       } catch (error) {
-        console.error('Erreur lors du chargement des données:', error);
+        console.error('🏆 Tracker Dashboard - Erreur lors du chargement des données:', error);
       } finally {
         setLoading(false);
       }
     };
 
     loadData();
-  }, []);
+  }, [activeTeam]);
 
   // Debug: logger l'onglet actif
   useEffect(() => {
@@ -397,6 +422,25 @@ export default function TrackerDashboardPage() {
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-gray-600">Chargement des données...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!activeTeam) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-6xl mb-4">🏆</div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">Aucune équipe sélectionnée</h1>
+          <p className="text-gray-600 mb-6">
+            Veuillez sélectionner une équipe dans la sidebar pour afficher le dashboard tracker.
+          </p>
+          <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+            <p className="text-blue-800 text-sm">
+              Utilisez le sélecteur d'équipe dans la sidebar gauche pour commencer.
+            </p>
+          </div>
         </div>
       </div>
     );
