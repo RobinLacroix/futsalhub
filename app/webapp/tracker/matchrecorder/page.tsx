@@ -298,10 +298,7 @@ export default function MatchRecorderPage() {
     setMatchData(prev => ({
       ...prev,
       isRunning: !prev.isRunning,
-      players: prev.players.map(player => ({
-        ...player,
-        currentSequenceTime: 0,
-      })),
+      // Ne pas remettre à zéro le currentSequenceTime des joueurs
     }));
   };
 
@@ -476,6 +473,7 @@ export default function MatchRecorderPage() {
       opponentActions: {
         ...prev.opponentActions,
         shotsOnTarget: prev.opponentActions.shotsOnTarget + (increment ? 1 : -1), // Un but adverse ajoute aussi un tir cadré
+        shotsOffTarget: prev.opponentActions.shotsOffTarget + (increment ? 1 : -1), // Un but adverse ajoute aussi un tir total
       },
     }));
 
@@ -1029,6 +1027,11 @@ export default function MatchRecorderPage() {
       return;
     }
 
+    if (!activeTeam) {
+      alert('Aucune équipe active sélectionnée. Veuillez sélectionner une équipe dans la sidebar.');
+      return;
+    }
+
     // La sélection des joueurs est optionnelle
 
     try {
@@ -1061,7 +1064,8 @@ export default function MatchRecorderPage() {
         score_opponent: newMatch.score_opponent,
         opponent_team: newMatch.opponent_team || null,
         goals_by_type: newMatch.goals_by_type,
-        conceded_by_type: newMatch.conceded_by_type
+        conceded_by_type: newMatch.conceded_by_type,
+        team_id: activeTeam.id // Ajouter l'ID de l'équipe active
       };
 
       // N'ajouter le champ players que s'il y a des joueurs sélectionnés
@@ -1320,6 +1324,91 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  // Fonction pour exporter les événements de match au format CSV
+  const exportMatchEventsCSV = async () => {
+    if (!matchData.selectedMatch) {
+      alert('Aucun match sélectionné');
+      return;
+    }
+
+    try {
+      // Récupérer tous les événements du match depuis la base de données
+      const { data: events, error } = await supabase
+        .from('match_events')
+        .select('*')
+        .eq('match_id', matchData.selectedMatch.id)
+        .order('match_time_seconds', { ascending: true });
+
+      if (error) {
+        console.error('Erreur lors de la récupération des événements:', error);
+        alert('Erreur lors de la récupération des événements');
+        return;
+      }
+
+      if (!events || events.length === 0) {
+        alert('Aucun événement trouvé pour ce match');
+        return;
+      }
+
+      // En-têtes CSV pour les événements
+      const headers = [
+        'ID Événement',
+        'Type d\'événement',
+        'Temps de match (secondes)',
+        'Mi-temps',
+        'ID Joueur',
+        'Joueurs sur le terrain',
+        'Date de création'
+      ];
+
+      // Données des événements
+      const eventData = events.map(event => [
+        event.id,
+        event.event_type,
+        event.match_time_seconds || 0,
+        event.half || 1,
+        event.player_id || 'N/A',
+        event.players_on_field ? event.players_on_field.join(';') : 'N/A',
+        new Date(event.created_at).toLocaleString('fr-FR')
+      ]);
+
+      // Informations du match
+      const matchInfo = [
+        [''],
+        ['INFORMATIONS DU MATCH'],
+        ['Titre', matchData.selectedMatch.title],
+        ['Date', matchData.selectedMatch.date],
+        ['Compétition', matchData.selectedMatch.competition],
+        ['Score Équipe', matchData.teamScore],
+        ['Score Adversaire', matchData.opponentScore],
+        [''],
+        ['ÉVÉNEMENTS DU MATCH']
+      ];
+
+      // Combiner toutes les données
+      const csvContent = [
+        headers.join(','),
+        ...eventData.map(row => row.join(',')),
+        ...matchInfo.map(row => row.join(','))
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `match_events_${matchData.selectedMatch.title}_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      console.log(`Export CSV des événements réussi: ${events.length} événements exportés`);
+    } catch (error) {
+      console.error('Erreur lors de l\'export CSV des événements:', error);
+      alert('Erreur lors de l\'export CSV des événements');
+    }
   };
 
   // Fonction pour gérer la sélection d'un joueur pour changement
@@ -1917,6 +2006,14 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
               >
                 <Download className="h-3 w-3" />
                 CSV
+              </button>
+              <button
+                onClick={exportMatchEventsCSV}
+                className="flex items-center gap-1 px-2 py-1 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors text-xs"
+                title="Exporter les événements du match au format CSV"
+              >
+                <Download className="h-3 w-3" />
+                Événements
               </button>
               <button
                 onClick={finishMatch}

@@ -157,20 +157,49 @@ export default function TrackerDashboardPage() {
           setMatches(matchesWithEvents);
         }
 
-        // Charger les joueurs (filtrés par équipe)
-        const { data: playersData, error: playersError } = await supabase
-          .from('players')
-          .select('id, first_name, last_name, position, number')
-          .eq('team_id', activeTeam.id)
-          .order('last_name');
+        // Charger les joueurs qui ont participé aux matchs de l'équipe active
+        // (pas seulement ceux qui appartiennent à l'équipe)
+        let playersData: any[] = [];
+        if (matchesData && matchesData.length > 0) {
+          const matchIds = matchesData.map(m => m.id);
+          
+          // Récupérer tous les événements de ces matchs pour identifier les joueurs participants
+          const { data: eventsForPlayers, error: eventsError } = await supabase
+            .from('match_events')
+            .select('player_id, players_on_field')
+            .in('match_id', matchIds);
 
-        if (playersError) {
-          console.error('🏆 Tracker Dashboard - Erreur lors du chargement des joueurs:', playersError);
-          setPlayers([]);
-        } else {
-          console.log('🏆 Tracker Dashboard - Joueurs récupérés:', playersData?.length || 0);
-          setPlayers(playersData || []);
+          if (eventsError) {
+            console.error('🏆 Tracker Dashboard - Erreur lors du chargement des événements pour les joueurs:', eventsError);
+          } else {
+            // Extraire tous les IDs de joueurs uniques qui ont participé
+            const playerIds = new Set<string>();
+            eventsForPlayers?.forEach(event => {
+              if (event.player_id) playerIds.add(event.player_id);
+              if (event.players_on_field) {
+                event.players_on_field.forEach((id: string) => playerIds.add(id));
+              }
+            });
+
+            // Récupérer les informations de tous ces joueurs
+            if (playerIds.size > 0) {
+              const { data: playersFromEvents, error: playersError } = await supabase
+                .from('players')
+                .select('id, first_name, last_name, position, number')
+                .in('id', Array.from(playerIds))
+                .order('last_name');
+
+              if (playersError) {
+                console.error('🏆 Tracker Dashboard - Erreur lors du chargement des joueurs:', playersError);
+              } else {
+                playersData = playersFromEvents || [];
+              }
+            }
+          }
         }
+
+        console.log('🏆 Tracker Dashboard - Joueurs récupérés:', playersData?.length || 0);
+        setPlayers(playersData || []);
 
         // Charger les événements de match (filtrés par équipe via les matches)
         const matchIds = matchesData?.map(m => m.id) || [];
