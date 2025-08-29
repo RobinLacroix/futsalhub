@@ -1085,11 +1085,31 @@ export default function MatchRecorderPage() {
       // par la deuxième mise à jour plus bas. On garde seulement les données
       // pour la deuxième mise à jour qui sera la finale.
 
-      // Analyser les événements pour les statistiques
+      // ÉTAPE 1: Initialiser TOUS les joueurs dans playerStatsMap avec +/- à 0
+      allPlayersWithStats.forEach(player => {
+        playerStatsMap.set(player.id, {
+          shotsOnTarget: 0,
+          shotsOffTarget: 0,
+          goals: 0,
+          ballLoss: 0,
+          ballRecovery: 0,
+          dribbleSuccess: 0,
+          oneOnOneDefLost: 0,
+          yellowCards: 0,
+          redCards: 0,
+          totalTime: 0,
+          plusMinus: 0 // Initialiser le +/- à 0 pour TOUS les joueurs
+        });
+      });
+
+      console.log('🔍 Initialisation: Tous les joueurs ont été initialisés avec +/- = 0');
+
+      // ÉTAPE 2: Analyser les événements pour les statistiques
       events.forEach(event => {
         if (event.player_id) {
           // Statistiques des joueurs
           if (!playerStatsMap.has(event.player_id)) {
+            console.warn('⚠️ Joueur non initialisé trouvé dans les événements:', event.player_id);
             playerStatsMap.set(event.player_id, {
               shotsOnTarget: 0,
               shotsOffTarget: 0,
@@ -1101,7 +1121,7 @@ export default function MatchRecorderPage() {
               yellowCards: 0,
               redCards: 0,
               totalTime: 0,
-              plusMinus: 0 // Initialiser le +/- à 0
+              plusMinus: 0
             });
           }
 
@@ -1112,14 +1132,23 @@ export default function MatchRecorderPage() {
               playerStats.goals++;
               teamScore++;
               
+              console.log('⚽ BUT MARQUÉ par notre équipe!');
+              console.log('🔍 Joueurs sur le terrain:', event.players_on_field);
+              
               // Incrémenter le +/- de +1 pour tous les joueurs présents sur le terrain
               if (event.players_on_field && Array.isArray(event.players_on_field)) {
                 event.players_on_field.forEach((playerId: string) => {
                   if (playerStatsMap.has(playerId)) {
                     const playerStats = playerStatsMap.get(playerId);
+                    const oldPlusMinus = playerStats.plusMinus;
                     playerStats.plusMinus = (playerStats.plusMinus || 0) + 1;
+                    console.log(`📈 ${playerId}: +/- ${oldPlusMinus} → ${playerStats.plusMinus} (+1)`);
+                  } else {
+                    console.warn(`⚠️ Joueur ${playerId} non trouvé dans playerStatsMap pour le but marqué`);
                   }
                 });
+              } else {
+                console.warn('⚠️ Pas de players_on_field pour le but marqué');
               }
               break;
             case 'shot_on_target':
@@ -1155,14 +1184,23 @@ export default function MatchRecorderPage() {
               opponentActions.shotsOnTarget++;
               opponentActions.shotsOffTarget++;
               
+              console.log('🥅 BUT ENCAISSÉ par notre équipe!');
+              console.log('🔍 Joueurs sur le terrain:', event.players_on_field);
+              
               // Décrémenter le +/- de -1 pour tous les joueurs présents sur le terrain
               if (event.players_on_field && Array.isArray(event.players_on_field)) {
                 event.players_on_field.forEach((playerId: string) => {
                   if (playerStatsMap.has(playerId)) {
                     const playerStats = playerStatsMap.get(playerId);
+                    const oldPlusMinus = playerStats.plusMinus;
                     playerStats.plusMinus = (playerStats.plusMinus || 0) - 1;
+                    console.log(`📉 ${playerId}: +/- ${oldPlusMinus} → ${playerStats.plusMinus} (-1)`);
+                  } else {
+                    console.warn(`⚠️ Joueur ${playerId} non trouvé dans playerStatsMap pour le but encaissé`);
                   }
                 });
+              } else {
+                console.warn('⚠️ Pas de players_on_field pour le but encaissé');
               }
               break;
             case 'opponent_shot_on_target':
@@ -1173,6 +1211,15 @@ export default function MatchRecorderPage() {
               opponentActions.shotsOffTarget++;
               break;
           }
+        }
+      });
+
+      // Log final des +/- calculés
+      console.log('🔍 RÉSUMÉ FINAL des +/- calculés:');
+      allPlayersWithStats.forEach(player => {
+        const stats = playerStatsMap.get(player.id);
+        if (stats) {
+          console.log(`📊 ${player.name}: +/- ${stats.plusMinus}`);
         }
       });
 
