@@ -1019,6 +1019,50 @@ export default function MatchRecorderPage() {
         console.log(`🔍 ${player.first_name} ${player.last_name}: ${time}s`);
       });
 
+      // IMPORTANT: Mettre à jour matchData.players avec TOUS les joueurs qui ont participé
+      // pour qu'ils soient visibles dans le tableau des statistiques
+      const allPlayersWithStats = teamPlayers.map(player => {
+        const time = playerTimeMap.get(player.id) || 0;
+        const stats = playerStatsMap.get(player.id) || {
+          shotsOnTarget: 0,
+          shotsOffTarget: 0,
+          goals: 0,
+          ballLoss: 0,
+          ballRecovery: 0,
+          dribbleSuccess: 0,
+          oneOnOneDefLost: 0,
+        };
+        
+        return {
+          id: player.id,
+          name: `${player.first_name} ${player.last_name}`,
+          number: player.number || 0,
+          position: player.position || '',
+          isStarter: false,
+          isOnField: false,
+          totalTime: time, // Temps de jeu depuis matchDetails.players
+          currentSequenceTime: 0,
+          yellowCards: 0,
+          redCards: 0,
+          stats: stats
+        };
+      });
+
+      console.log('🔍 Mise à jour de matchData.players avec', allPlayersWithStats.length, 'joueurs');
+      
+      // Mettre à jour matchData avec tous les joueurs
+      setMatchData(prev => ({
+        ...prev,
+        players: allPlayersWithStats,
+        teamScore,
+        opponentScore,
+        opponentActions,
+        firstHalfOpponentActions: {
+          shotsOnTarget: opponentActions.shotsOnTarget,
+          shotsOffTarget: opponentActions.shotsOffTarget
+        }
+      }));
+
       // Analyser les événements pour les statistiques
       events.forEach(event => {
         if (event.player_id) {
@@ -2365,16 +2409,10 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                 <tbody>
                   {matchData.players
                     .filter(player => 
-                      // Afficher tous les joueurs qui ont des statistiques OU du temps de jeu
-                      player.stats.goals > 0 || 
-                      player.stats.shotsOnTarget > 0 || 
-                      player.stats.ballRecovery > 0 || 
-                      player.stats.ballLoss > 0 || 
-                      player.totalTime > 0 ||
-                      player.yellowCards > 0 ||
-                      player.redCards > 0
+                      // Afficher TOUS les joueurs qui ont du temps de jeu (critère principal)
+                      player.totalTime > 0
                     )
-                    .sort((a, b) => b.stats.goals - a.stats.goals || b.stats.shotsOnTarget - a.stats.shotsOnTarget || b.totalTime - a.totalTime)
+                    .sort((a, b) => b.totalTime - a.totalTime) // Trier par temps de jeu décroissant
                     .map((player) => (
                       <tr key={player.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                         <td className="p-3">
