@@ -1005,15 +1005,24 @@ export default function MatchRecorderPage() {
         playerTimeMap.set(player.id, 0);
       });
 
-      // Récupérer le temps de jeu depuis matchDetails.players (même logique que tracker/dashboard)
+      // Récupérer le temps de jeu depuis matchDetails.players (même logique exacte que tracker/dashboard)
       if (matchDetails.players && Array.isArray(matchDetails.players)) {
+        console.log('🔍 Match details.players:', matchDetails.players);
         matchDetails.players.forEach((playerData: any) => {
           if (playerData.id && playerData.time_played) {
-            playerTimeMap.set(playerData.id, playerData.time_played);
-            console.log(`Joueur ${playerData.id}: temps de jeu = ${playerData.time_played}s`);
+            const currentTime = playerTimeMap.get(playerData.id) || 0;
+            playerTimeMap.set(playerData.id, currentTime + playerData.time_played);
+            console.log(`🔍 Joueur ${playerData.id}: temps de jeu = ${playerData.time_played}s (total: ${currentTime + playerData.time_played}s)`);
           }
         });
       }
+
+      // Debug: afficher le temps de jeu de chaque joueur
+      console.log('🔍 Temps de jeu calculé pour chaque joueur:');
+      teamPlayers.forEach(player => {
+        const time = playerTimeMap.get(player.id) || 0;
+        console.log(`🔍 ${player.first_name} ${player.last_name}: ${time}s`);
+      });
 
       // Analyser les événements pour les statistiques
       events.forEach(event => {
