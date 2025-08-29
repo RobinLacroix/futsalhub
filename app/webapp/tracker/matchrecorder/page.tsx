@@ -2415,13 +2415,17 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                   {(() => {
                     console.log('🔍 RENDU - matchData.players contient', matchData.players.length, 'joueurs');
                     console.log('🔍 RENDU - Joueurs avec temps > 0:', matchData.players.filter(p => p.totalTime > 0).length);
+                    console.log('🔍 RENDU - Joueurs sans temps:', matchData.players.filter(p => p.totalTime === 0 || !p.totalTime).length);
                     
+                    // Afficher TOUS les joueurs qui ont participé au match
+                    // (pas seulement ceux avec du temps de jeu > 0)
                     return matchData.players
                       .filter(player => 
-                        // Afficher TOUS les joueurs qui ont du temps de jeu (critère principal)
-                        player.totalTime > 0
+                        // Critère principal : joueur présent dans matchData.players
+                        // (ce qui signifie qu'il a participé au match)
+                        true
                       )
-                      .sort((a, b) => b.totalTime - a.totalTime) // Trier par temps de jeu décroissant
+                      .sort((a, b) => (b.totalTime || 0) - (a.totalTime || 0)) // Trier par temps de jeu décroissant
                       .map((player) => (
                       <tr key={player.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                         <td className="p-3">
