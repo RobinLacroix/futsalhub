@@ -1049,19 +1049,24 @@ export default function MatchRecorderPage() {
       });
 
       console.log('🔍 Mise à jour de matchData.players avec', allPlayersWithStats.length, 'joueurs');
+      console.log('🔍 Détail des joueurs:', allPlayersWithStats.map(p => ({ name: p.name, time: p.totalTime })));
       
       // Mettre à jour matchData avec tous les joueurs
-      setMatchData(prev => ({
-        ...prev,
-        players: allPlayersWithStats,
-        teamScore,
-        opponentScore,
-        opponentActions,
-        firstHalfOpponentActions: {
-          shotsOnTarget: opponentActions.shotsOnTarget,
-          shotsOffTarget: opponentActions.shotsOffTarget
-        }
-      }));
+      setMatchData(prev => {
+        const newData = {
+          ...prev,
+          players: allPlayersWithStats,
+          teamScore,
+          opponentScore,
+          opponentActions,
+          firstHalfOpponentActions: {
+            shotsOnTarget: opponentActions.shotsOnTarget,
+            shotsOffTarget: opponentActions.shotsOffTarget
+          }
+        };
+        console.log('🔍 Nouveau matchData.players:', newData.players.length, 'joueurs');
+        return newData;
+      });
 
       // Analyser les événements pour les statistiques
       events.forEach(event => {
@@ -2407,13 +2412,17 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                   </tr>
                 </thead>
                 <tbody>
-                  {matchData.players
-                    .filter(player => 
-                      // Afficher TOUS les joueurs qui ont du temps de jeu (critère principal)
-                      player.totalTime > 0
-                    )
-                    .sort((a, b) => b.totalTime - a.totalTime) // Trier par temps de jeu décroissant
-                    .map((player) => (
+                  {(() => {
+                    console.log('🔍 RENDU - matchData.players contient', matchData.players.length, 'joueurs');
+                    console.log('🔍 RENDU - Joueurs avec temps > 0:', matchData.players.filter(p => p.totalTime > 0).length);
+                    
+                    return matchData.players
+                      .filter(player => 
+                        // Afficher TOUS les joueurs qui ont du temps de jeu (critère principal)
+                        player.totalTime > 0
+                      )
+                      .sort((a, b) => b.totalTime - a.totalTime) // Trier par temps de jeu décroissant
+                      .map((player) => (
                       <tr key={player.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                         <td className="p-3">
                           <div className="flex items-center gap-3">
@@ -2476,7 +2485,8 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                           )}
                         </td>
                       </tr>
-                    ))}
+                    ));
+                  })()}
                 </tbody>
               </table>
             </div>
