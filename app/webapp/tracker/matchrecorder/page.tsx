@@ -174,17 +174,17 @@ export default function MatchRecorderPage() {
   // Charger les données depuis Supabase
   useEffect(() => {
     if (activeTeam) {
-      const loadData = async () => {
-        try {
-          setLoading(true);
+    const loadData = async () => {
+      try {
+        setLoading(true);
           console.log('🏆 MatchRecorder - Chargement des données pour l\'équipe:', activeTeam.name);
-          
+        
           // Charger les matches triés par date (plus récents en premier, filtrés par équipe)
-          const { data: matchesData, error: matchesError } = await supabase
-            .from('matches')
-            .select('id, title, date, competition, location, score_team, score_opponent, opponent_team')
+        const { data: matchesData, error: matchesError } = await supabase
+          .from('matches')
+          .select('id, title, date, competition, location, score_team, score_opponent, opponent_team')
             .eq('team_id', activeTeam.id)
-            .order('date', { ascending: false });
+          .order('date', { ascending: false });
 
         if (matchesError) {
           console.error('Erreur lors du chargement des matches:', matchesError);
@@ -310,7 +310,7 @@ export default function MatchRecorderPage() {
       if (prev.currentHalf === 1) {
         // Passer à la deuxième mi-temps : sauvegarder les stats de la première
         return {
-          ...prev,
+      ...prev,
           currentHalf: 2,
           teamFouls: 0,
           opponentFouls: 0,
@@ -326,13 +326,13 @@ export default function MatchRecorderPage() {
         return {
           ...prev,
           currentHalf: 1,
-          teamFouls: 0,
-          opponentFouls: 0,
-          matchTime: 0,
-          opponentActions: {
-            shotsOnTarget: 0,
-            shotsOffTarget: 0,
-          },
+      teamFouls: 0,
+      opponentFouls: 0,
+      matchTime: 0,
+      opponentActions: {
+        shotsOnTarget: 0,
+        shotsOffTarget: 0,
+      },
           firstHalfOpponentActions: {
             shotsOnTarget: 0,
             shotsOffTarget: 0,
@@ -845,7 +845,7 @@ export default function MatchRecorderPage() {
       competition: match.competition || 'Amical',
       opponent: match.opponent_team || ''
     });
-
+    
     // Vérifier si le match a déjà des données (score final, événements, etc.)
     try {
       // Récupérer les événements existants du match
@@ -885,7 +885,7 @@ export default function MatchRecorderPage() {
           setCurrentStep('summary');
         } else {
         // Match nouveau ou en cours, passer à la configuration
-        setCurrentStep('matchInfo');
+    setCurrentStep('matchInfo');
       }
     } catch (error) {
       console.error('Erreur lors de la vérification du statut du match:', error);
@@ -930,8 +930,24 @@ export default function MatchRecorderPage() {
         });
       }
 
+      // Récupérer les informations de tous ces joueurs
+      if (allPlayerIds.size > 0) {
+        console.log('🔍 Récupération des joueurs depuis IDs:', Array.from(allPlayerIds));
+        const { data: playersData, error: playersError } = await supabase
+          .from('players')
+          .select('*')
+          .in('id', Array.from(allPlayerIds))
+          .order('last_name');
+
+        if (playersError) {
+          console.error('Erreur lors de la récupération des joueurs:', playersError);
+          return;
+        }
+        teamPlayers = playersData || [];
+      }
+      
       // Si aucun joueur trouvé via les événements, essayer de récupérer depuis l'équipe active
-      if (allPlayerIds.size === 0 && activeTeam) {
+      if (teamPlayers.length === 0 && activeTeam) {
         console.log('🔍 Aucun joueur trouvé via événements, récupération depuis équipe active:', activeTeam.name);
         const { data: activeTeamPlayers, error: activeTeamError } = await supabase
           .from('players')
@@ -944,22 +960,6 @@ export default function MatchRecorderPage() {
         } else {
           teamPlayers = activeTeamPlayers || [];
           console.log('🔍 Joueurs de l\'équipe active récupérés:', teamPlayers.length);
-        }
-      } else {
-        // Récupérer les informations de tous ces joueurs
-        if (allPlayerIds.size > 0) {
-          console.log('🔍 Récupération des joueurs depuis IDs:', Array.from(allPlayerIds));
-          const { data: playersData, error: playersError } = await supabase
-            .from('players')
-            .select('*')
-            .in('id', Array.from(allPlayerIds))
-            .order('last_name');
-
-          if (playersError) {
-            console.error('Erreur lors de la récupération des joueurs:', playersError);
-            return;
-          }
-          teamPlayers = playersData || [];
         }
       }
 
@@ -1247,21 +1247,21 @@ export default function MatchRecorderPage() {
         
         if (playerOut && playerIn) {
           // Mettre le joueur sortant sur le banc
-          const updatedPlayers = players.map(p => 
+            const updatedPlayers = players.map(p => 
             p.id === playerOutId 
-              ? { ...p, isOnField: false, isStarter: false, currentSequenceTime: 0 }
-              : p
-          );
-          
+                ? { ...p, isOnField: false, isStarter: false, currentSequenceTime: 0 }
+                : p
+            );
+            
           // Mettre le joueur entrant sur le terrain
-          const finalPlayers = updatedPlayers.map(p => 
+            const finalPlayers = updatedPlayers.map(p => 
             p.id === playerInId 
-              ? { ...p, isOnField: true, isStarter: true, currentSequenceTime: 0 }
-              : p
-          );
-          
-          return { ...prev, players: finalPlayers };
-        }
+                ? { ...p, isOnField: true, isStarter: true, currentSequenceTime: 0 }
+                : p
+            );
+            
+            return { ...prev, players: finalPlayers };
+          } 
         
         return prev;
       });
@@ -1278,15 +1278,15 @@ export default function MatchRecorderPage() {
         const player2 = players.find(p => p.id === player2Id);
         
         if (player1 && player2 && player1.isOnField && player2.isOnField) {
-          // Échanger les positions des titulaires
+            // Échanger les positions des titulaires
           const player1Index = players.findIndex(p => p.id === player1Id);
           const player2Index = players.findIndex(p => p.id === player2Id);
-          
+            
           if (player1Index !== -1 && player2Index !== -1) {
             [players[player1Index], players[player2Index]] = [players[player2Index], players[player1Index]];
-          }
-          
-          return { ...prev, players };
+            }
+            
+            return { ...prev, players };
         }
         
         return prev;
@@ -1315,15 +1315,15 @@ export default function MatchRecorderPage() {
     setCurrentStep('match');
   };
 
-  const addNewMatch = async () => {
-    console.log('addNewMatch called with:', newMatch);
-    console.log('Date value:', newMatch.date);
-    console.log('Title value:', newMatch.title);
-    
-    if (!newMatch.title || !newMatch.date) {
-      alert('Veuillez remplir tous les champs obligatoires');
-      return;
-    }
+      const addNewMatch = async () => {
+      console.log('addNewMatch called with:', newMatch);
+      console.log('Date value:', newMatch.date);
+      console.log('Title value:', newMatch.title);
+      
+      if (!newMatch.title || !newMatch.date) {
+        alert('Veuillez remplir tous les champs obligatoires');
+        return;
+      }
 
     if (!activeTeam) {
       alert('Aucune équipe active sélectionnée. Veuillez sélectionner une équipe dans la sidebar.');
@@ -2568,30 +2568,30 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
               <div className="flex items-center justify-between">
                 {/* Temps à gauche */}
                 <div className="text-center flex-1">
-                  <div className="text-lg font-mono font-bold text-blue-600 dark:text-blue-400">
-                    {formatMatchTime(matchData.matchTime)}
-                  </div>
+                <div className="text-lg font-mono font-bold text-blue-600 dark:text-blue-400">
+                  {formatMatchTime(matchData.matchTime)}
                 </div>
-                
+              </div>
+              
                 {/* Boutons empilés à droite */}
                 <div className="flex flex-col gap-1 ml-2">
-                  <button
-                    onClick={toggleMatch}
+                <button
+                  onClick={toggleMatch}
                     className={`py-2 px-4 rounded text-white font-semibold transition-colors text-xs min-w-[60px] ${
-                      matchData.isRunning 
-                        ? 'bg-red-500 hover:bg-red-600' 
-                        : 'bg-green-500 hover:bg-green-600'
-                    }`}
-                  >
+                    matchData.isRunning 
+                      ? 'bg-red-500 hover:bg-red-600' 
+                      : 'bg-green-500 hover:bg-green-600'
+                  }`}
+                >
                     {matchData.isRunning ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                  </button>
-                  
-                  <button
-                    onClick={nextHalf}
+                </button>
+                
+                <button
+                  onClick={nextHalf}
                     className="py-2 px-4 bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors font-semibold text-xs min-w-[60px]"
-                  >
+                >
                     <Zap className="h-3 w-3" />
-                  </button>
+                </button>
                 </div>
               </div>
             </div>
@@ -2603,20 +2603,20 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
               <div className="flex items-center justify-between">
                 {/* Score au centre */}
                 <div className="text-center flex-1">
-                  <div className="text-lg font-bold text-blue-600 dark:text-blue-400">
-                    {matchData.teamScore} - {matchData.opponentScore}
-                  </div>
+                <div className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                  {matchData.teamScore} - {matchData.opponentScore}
                 </div>
-                
+              </div>
+              
                 {/* Boutons à droite */}
                 <div className="flex flex-col gap-1 ml-1">
-                  <button
-                    onClick={() => setMatchData(prev => ({ ...prev, teamScore: prev.teamScore + 1 }))}
+                <button
+                  onClick={() => setMatchData(prev => ({ ...prev, teamScore: prev.teamScore + 1 }))}
                     className="py-2 px-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors font-semibold text-xs min-w-[60px]"
-                  >
-                    +1 Éq
-                  </button>
-                  <button
+                >
+                  +1 Éq
+                </button>
+                <button
                     onClick={async () => {
                       const timerKey = 'opponent-goals';
                       if (!longPressTriggered[timerKey]) {
@@ -2624,9 +2624,9 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                       }
                     }}
                     className="py-2 px-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs min-w-[45px]"
-                  >
-                    +1 Adv
-                  </button>
+                >
+                  +1 Adv
+                </button>
                 </div>
               </div>
             </div>
@@ -2638,30 +2638,30 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
               <div className="flex items-center justify-between">
                 {/* Compteurs de fautes au centre */}
                 <div className="flex items-center gap-3 flex-1 justify-center">
-                  <div className="text-center">
+                <div className="text-center">
                     <div className="text-base font-bold text-blue-600 dark:text-blue-400">{matchData.teamFouls}</div>
                     <div className="text-xs text-gray-500">Équipe</div>
-                  </div>
-                  <div className="text-center">
+                </div>
+                <div className="text-center">
                     <div className="text-base font-bold text-red-600 dark:text-red-400">{matchData.opponentFouls}</div>
                     <div className="text-xs text-gray-500">Adversaire</div>
-                  </div>
                 </div>
-                
+              </div>
+              
                 {/* Boutons à droite */}
                 <div className="flex flex-col gap-1 ml-2">
-                  <button
-                    onClick={() => updateFouls(true)}
+                <button
+                  onClick={() => updateFouls(true)}
                     className="py-2 px-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors font-semibold text-xs min-w-[45px]"
-                  >
-                    Faute Éq
-                  </button>
-                  <button
-                    onClick={() => updateFouls(false)}
+                >
+                  Faute Éq
+                </button>
+                <button
+                  onClick={() => updateFouls(false)}
                     className="py-2 px-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs min-w-[45px]"
-                  >
-                    Faute Adv
-                  </button>
+                >
+                  Faute Adv
+                </button>
                 </div>
               </div>
             </div>
@@ -2745,9 +2745,9 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
               <div>
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                    <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                    Joueurs sur le terrain
-                  </h3>
+                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                  Joueurs sur le terrain
+                </h3>
                   
                   {/* Indicateur de sélection et bouton d'annulation */}
                   {selectedPlayerForChange && (
@@ -2782,10 +2782,10 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                           selectedPlayerForChange === player.id 
                             ? 'ring-4 ring-blue-500 scale-105 shadow-xl' 
                             : player.position === 'Gardien' 
-                              ? 'border-2' 
-                              : player.isOnField 
-                                ? 'border-2 border-green-500' 
-                                : 'border border-gray-200 dark:border-gray-600'
+                            ? 'border-2' 
+                            : player.isOnField 
+                              ? 'border-2 border-green-500' 
+                              : 'border border-gray-200 dark:border-gray-600'
                         }`}
                         style={player.position === 'Gardien' ? { borderColor: '#f59e0b' } : {}}
                       >
@@ -2864,21 +2864,21 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                             <Circle className="h-3 w-3" />
                             <span>{player.yellowCards || 0}</span>
                           </button>
-                          <button
-                            onClick={async () => {
-                              const timerKey = `${player.id}-redCard`;
-                              if (!longPressTriggered[timerKey]) {
-                                await updatePlayerCard(player.id, 'red');
-                              }
-                            }}
-                            onMouseDown={() => handleCardLongPressStart(player.id, 'red')}
-                            onMouseUp={() => handleCardLongPressEnd(player.id, 'red')}
-                            onMouseLeave={() => handleCardLongPressEnd(player.id, 'red')}
-                            onTouchStart={() => handleCardLongPressStart(player.id, 'red')}
-                            onTouchEnd={() => handleCardLongPressEnd(player.id, 'red')}
-                            className="flex items-center gap-1 px-2 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600 transition-colors active:scale-95"
-                            title="Clic court: +1, Clic long: -1"
-                          >
+                                                      <button
+                              onClick={async () => {
+                                const timerKey = `${player.id}-redCard`;
+                                if (!longPressTriggered[timerKey]) {
+                                  await updatePlayerCard(player.id, 'red');
+                                }
+                              }}
+                              onMouseDown={() => handleCardLongPressStart(player.id, 'red')}
+                              onMouseUp={() => handleCardLongPressEnd(player.id, 'red')}
+                              onMouseLeave={() => handleCardLongPressEnd(player.id, 'red')}
+                              onTouchStart={() => handleCardLongPressStart(player.id, 'red')}
+                              onTouchEnd={() => handleCardLongPressEnd(player.id, 'red')}
+                              className="flex items-center gap-1 px-2 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600 transition-colors active:scale-95"
+                              title="Clic court: +1, Clic long: -1"
+                            >
                             <Circle className="h-3 w-3" />
                             <span>{player.redCards || 0}</span>
                           </button>
@@ -2926,8 +2926,8 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                           selectedPlayerForChange === player.id 
                             ? 'ring-4 ring-blue-500 scale-105 shadow-xl' 
                             : player.position === 'Gardien' 
-                              ? 'border-2' 
-                              : 'border border-gray-200 dark:border-gray-600'
+                            ? 'border-2' 
+                            : 'border border-gray-200 dark:border-gray-600'
                         }`}
                         style={player.position === 'Gardien' ? { borderColor: '#f59e0b' } : {}}
                       >
