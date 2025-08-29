@@ -310,7 +310,7 @@ export default function MatchRecorderPage() {
       if (prev.currentHalf === 1) {
         // Passer à la deuxième mi-temps : sauvegarder les stats de la première
         return {
-      ...prev,
+          ...prev,
           currentHalf: 2,
           teamFouls: 0,
           opponentFouls: 0,
@@ -320,23 +320,33 @@ export default function MatchRecorderPage() {
             shotsOffTarget: prev.opponentActions.shotsOffTarget,
           },
           // Ne pas remettre à zéro les opponentActions, continuer à les cumuler
+          // Réinitialiser currentSequenceTime pour tous les joueurs
+          players: prev.players.map(player => ({
+            ...player,
+            currentSequenceTime: 0
+          }))
         };
       } else {
         // Retourner à la première mi-temps (reset complet)
         return {
           ...prev,
           currentHalf: 1,
-      teamFouls: 0,
-      opponentFouls: 0,
-      matchTime: 0,
-      opponentActions: {
-        shotsOnTarget: 0,
-        shotsOffTarget: 0,
-      },
+          teamFouls: 0,
+          opponentFouls: 0,
+          matchTime: 0,
+          opponentActions: {
+            shotsOnTarget: 0,
+            shotsOffTarget: 0,
+          },
           firstHalfOpponentActions: {
             shotsOnTarget: 0,
             shotsOffTarget: 0,
           },
+          // Réinitialiser currentSequenceTime pour tous les joueurs
+          players: prev.players.map(player => ({
+            ...player,
+            currentSequenceTime: 0
+          }))
         };
       }
     });
