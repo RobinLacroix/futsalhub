@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   RefreshCw,
   ArrowRight,
+  ArrowLeft,
   Calendar,
   Trophy,
   Clock,
@@ -117,7 +118,7 @@ export default function MatchRecorderPage() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
-  const [currentStep, setCurrentStep] = useState<'match' | 'matchInfo' | 'recording'>('match');
+  const [currentStep, setCurrentStep] = useState<'match' | 'matchInfo' | 'recording' | 'summary'>('match');
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [showAddMatchForm, setShowAddMatchForm] = useState(false);
   const [newMatch, setNewMatch] = useState({
@@ -821,7 +822,7 @@ export default function MatchRecorderPage() {
     }, 100);
   };
 
-  const selectMatch = (match: Match) => {
+  const selectMatch = async (match: Match) => {
     setSelectedMatch(match);
     
     // Pré-remplir les informations du match
@@ -844,8 +845,217 @@ export default function MatchRecorderPage() {
       competition: match.competition || 'Amical',
       opponent: match.opponent_team || ''
     });
-    
-    setCurrentStep('matchInfo');
+
+    // Vérifier si le match a déjà des données (score final, événements, etc.)
+    try {
+      // Récupérer les événements existants du match
+      const { data: existingEvents, error: eventsError } = await supabase
+        .from('match_events')
+        .select('*')
+        .eq('match_id', match.id)
+        .order('match_time_seconds', { ascending: true });
+
+      if (eventsError) {
+        console.error('Erreur lors de la récupération des événements:', eventsError);
+      }
+
+      // Récupérer les informations complètes du match
+      const { data: matchDetails, error: matchError } = await supabase
+        .from('matches')
+        .select('*')
+        .eq('id', match.id)
+        .single();
+
+      if (matchError) {
+        console.error('Erreur lors de la récupération des détails du match:', matchError);
+      }
+
+      // Si le match a des événements ou un score final, c'est un match terminé
+      const isMatchFinished = existingEvents && existingEvents.length > 0 && 
+                             matchDetails && (matchDetails.score_team !== null || matchDetails.score_opponent !== null);
+
+      if (isMatchFinished) {
+        console.log('Match terminé détecté, chargement de la vue bilan...');
+        
+        // Charger les données du match terminé
+        await loadFinishedMatchData(match.id, existingEvents, matchDetails);
+        
+        // Passer directement à la vue bilan
+        setCurrentStep('summary');
+      } else {
+        // Match nouveau ou en cours, passer à la configuration
+        setCurrentStep('matchInfo');
+      }
+    } catch (error) {
+      console.error('Erreur lors de la vérification du statut du match:', error);
+      // En cas d'erreur, passer à la configuration par défaut
+      setCurrentStep('matchInfo');
+    }
+  };
+
+  // Nouvelle fonction pour charger les données d'un match terminé
+  const loadFinishedMatchData = async (matchId: string, events: any[], matchDetails: any) => {
+    try {
+      // Récupérer tous les joueurs de l'équipe active
+      const { data: teamPlayers, error: playersError } = await supabase
+        .from('players')
+        .select('*')
+        .eq('team_id', activeTeam?.id)
+        .order('last_name');
+
+      if (playersError) {
+        console.error('Erreur lors de la récupération des joueurs:', playersError);
+        return;
+      }
+
+      // Initialiser les joueurs avec leurs statistiques
+      const playersWithStats = teamPlayers.map(player => ({
+        id: player.id,
+        name: `${player.first_name} ${player.last_name}`,
+        number: player.number || 0,
+        position: player.position || '',
+        isStarter: false,
+        isOnField: false,
+        totalTime: 0,
+        currentSequenceTime: 0,
+        yellowCards: 0,
+        redCards: 0,
+        stats: {
+          shotsOnTarget: 0,
+          shotsOffTarget: 0,
+          goals: 0,
+          ballLoss: 0,
+          ballRecovery: 0,
+          dribbleSuccess: 0,
+          oneOnOneDefLost: 0,
+        }
+      }));
+
+      // Reconstituer les statistiques des joueurs à partir des événements
+      const playerStatsMap = new Map();
+      let teamScore = 0;
+      let opponentScore = 0;
+      let opponentActions = {
+        shotsOnTarget: 0,
+        shotsOffTarget: 0
+      };
+
+      events.forEach(event => {
+        if (event.player_id) {
+          // Statistiques des joueurs
+          if (!playerStatsMap.has(event.player_id)) {
+            playerStatsMap.set(event.player_id, {
+              shotsOnTarget: 0,
+              shotsOffTarget: 0,
+              goals: 0,
+              ballLoss: 0,
+              ballRecovery: 0,
+              dribbleSuccess: 0,
+              oneOnOneDefLost: 0,
+              yellowCards: 0,
+              redCards: 0,
+              totalTime: 0
+            });
+          }
+
+          const playerStats = playerStatsMap.get(event.player_id);
+          
+          switch (event.event_type) {
+            case 'goal':
+              playerStats.goals++;
+              teamScore++;
+              break;
+            case 'shot_on_target':
+              playerStats.shotsOnTarget++;
+              break;
+            case 'shot':
+              playerStats.shotsOffTarget++;
+              break;
+            case 'ball_loss':
+              playerStats.ballLoss++;
+              break;
+            case 'recovery':
+              playerStats.ballRecovery++;
+              break;
+            case 'dribble':
+              playerStats.dribbleSuccess++;
+              break;
+            case 'one_on_one_def_lost':
+              playerStats.oneOnOneDefLost++;
+              break;
+            case 'yellow_card':
+              playerStats.yellowCards++;
+              break;
+            case 'red_card':
+              playerStats.redCards++;
+              break;
+          }
+        } else if (event.event_type.startsWith('opponent_')) {
+          // Actions de l'adversaire
+          switch (event.event_type) {
+            case 'opponent_goal':
+              opponentScore++;
+              opponentActions.shotsOnTarget++;
+              opponentActions.shotsOffTarget++;
+              break;
+            case 'opponent_shot_on_target':
+              opponentActions.shotsOnTarget++;
+              opponentActions.shotsOffTarget++;
+              break;
+            case 'opponent_shot':
+              opponentActions.shotsOffTarget++;
+              break;
+          }
+        }
+      });
+
+      // Mettre à jour les joueurs avec leurs statistiques
+      const updatedPlayers = playersWithStats.map(player => {
+        const stats = playerStatsMap.get(player.id);
+        if (stats) {
+          return {
+            ...player,
+            stats: {
+              shotsOnTarget: stats.shotsOnTarget,
+              shotsOffTarget: stats.shotsOffTarget,
+              goals: stats.goals,
+              ballLoss: stats.ballLoss,
+              ballRecovery: stats.ballRecovery,
+              dribbleSuccess: stats.dribbleSuccess,
+              oneOnOneDefLost: stats.oneOnOneDefLost,
+            },
+            yellowCards: stats.yellowCards,
+            redCards: stats.redCards,
+            totalTime: stats.totalTime
+          };
+        }
+        return player;
+      });
+
+      // Mettre à jour le state avec les données du match terminé
+      setMatchData(prev => ({
+        ...prev,
+        selectedMatch: matchDetails,
+        players: updatedPlayers,
+        teamScore: teamScore,
+        opponentScore: opponentScore,
+        opponentActions: opponentActions,
+        isRunning: false
+      }));
+
+      // Mettre à jour les informations du match
+      setMatchInfo({
+        title: matchDetails.title || '',
+        date: matchDetails.date ? new Date(matchDetails.date).toISOString().slice(0, 16) : '',
+        location: matchDetails.location || 'Domicile',
+        competition: matchDetails.competition || 'Amical',
+        opponent: matchDetails.opponent_team || ''
+      });
+
+      console.log('Données du match terminé chargées avec succès');
+    } catch (error) {
+      console.error('Erreur lors du chargement des données du match terminé:', error);
+    }
   };
 
   const saveMatchInfo = async () => {
@@ -1949,7 +2159,211 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
     );
   }
 
-  // Étape 3: Enregistrement du match (Interface complète)
+  // Étape 3: Vue bilan du match terminé
+  if (currentStep === 'summary') {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4">
+        <div className="max-w-7xl mx-auto">
+          {/* Header avec bouton retour */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Bilan du Match</h1>
+                {matchData.selectedMatch && (
+                  <div className="text-lg text-gray-600 dark:text-gray-400 mt-2">
+                    {matchData.selectedMatch.title} - {matchData.selectedMatch.competition}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => setCurrentStep('match')}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              >
+                <ArrowLeft className="h-5 w-5" />
+                Retour aux matchs
+              </button>
+            </div>
+
+            {/* Score final */}
+            <div className="bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg p-6 text-white text-center">
+              <div className="text-2xl font-bold mb-2">Score Final</div>
+              <div className="text-4xl font-bold">
+                {matchData.teamScore} - {matchData.opponentScore}
+              </div>
+              <div className="text-lg mt-2">
+                {matchData.teamScore > matchData.opponentScore ? 'Victoire' : 
+                 matchData.teamScore < matchData.opponentScore ? 'Défaite' : 'Match nul'}
+              </div>
+            </div>
+          </div>
+
+          {/* Statistiques détaillées */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            {/* Statistiques de l'équipe */}
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6">
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Statistiques de l'équipe</h2>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+                    <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{matchData.teamScore}</div>
+                    <div className="text-sm text-blue-600 dark:text-blue-400">Buts marqués</div>
+                  </div>
+                  <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
+                    <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                      {matchData.players.reduce((sum, player) => sum + player.stats.shotsOnTarget, 0)}
+                    </div>
+                    <div className="text-sm text-green-600 dark:text-green-400">Tirs cadrés</div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg">
+                    <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">
+                      {matchData.players.reduce((sum, player) => sum + player.stats.ballRecovery, 0)}
+                    </div>
+                    <div className="text-sm text-purple-600 dark:text-purple-400">Récupérations</div>
+                  </div>
+                  <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg">
+                    <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">
+                      {matchData.players.reduce((sum, player) => sum + player.stats.dribbleSuccess, 0)}
+                    </div>
+                    <div className="text-sm text-orange-600 dark:text-orange-400">Dribbles réussis</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Statistiques de l'adversaire */}
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6">
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Statistiques de l'adversaire</h2>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg">
+                    <div className="text-2xl font-bold text-red-600 dark:text-red-400">{matchData.opponentScore}</div>
+                    <div className="text-sm text-red-600 dark:text-red-400">Buts encaissés</div>
+                  </div>
+                  <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg">
+                    <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
+                      {matchData.opponentActions.shotsOnTarget}
+                    </div>
+                    <div className="text-sm text-yellow-600 dark:text-yellow-400">Tirs cadrés concédés</div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
+                    <div className="text-2xl font-bold text-gray-600 dark:text-gray-300">
+                      {matchData.opponentActions.shotsOffTarget}
+                    </div>
+                    <div className="text-sm text-gray-600 dark:text-gray-300">Tirs non cadrés concédés</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Statistiques des joueurs */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Statistiques des joueurs</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-200 dark:border-gray-700">
+                    <th className="text-left p-3 font-semibold text-gray-900 dark:text-white">Joueur</th>
+                    <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Buts</th>
+                    <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Tirs cadrés</th>
+                    <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Récupérations</th>
+                    <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Dribbles</th>
+                    <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Cartons J</th>
+                    <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Cartons R</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {matchData.players
+                    .filter(player => player.stats.goals > 0 || player.stats.shotsOnTarget > 0 || player.stats.ballRecovery > 0)
+                    .sort((a, b) => b.stats.goals - a.stats.goals || b.stats.shotsOnTarget - a.stats.shotsOnTarget)
+                    .map((player) => (
+                      <tr key={player.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
+                        <td className="p-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center text-sm font-bold text-blue-600 dark:text-blue-400">
+                              {player.number}
+                            </div>
+                            <div>
+                              <div className="font-medium text-gray-900 dark:text-white">{player.name}</div>
+                              <div className="text-sm text-gray-500 dark:text-gray-400">{player.position}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="text-center p-3">
+                          <span className="inline-flex items-center justify-center w-8 h-8 bg-blue-500 text-white rounded-full font-bold">
+                            {player.stats.goals}
+                          </span>
+                        </td>
+                        <td className="text-center p-3">
+                          <span className="inline-flex items-center justify-center w-8 h-8 bg-green-500 text-white rounded-full font-bold">
+                            {player.stats.shotsOnTarget}
+                          </span>
+                        </td>
+                        <td className="text-center p-3">
+                          <span className="inline-flex items-center justify-center w-8 h-8 bg-purple-500 text-white rounded-full font-bold">
+                            {player.stats.ballRecovery}
+                          </span>
+                        </td>
+                        <td className="text-center p-3">
+                          <span className="inline-flex items-center justify-center w-8 h-8 bg-orange-500 text-white rounded-full font-bold">
+                            {player.stats.dribbleSuccess}
+                          </span>
+                        </td>
+                        <td className="text-center p-3">
+                          {player.yellowCards > 0 && (
+                            <span className="inline-flex items-center justify-center w-8 h-8 bg-yellow-500 text-white rounded-full font-bold">
+                              {player.yellowCards}
+                            </span>
+                          )}
+                        </td>
+                        <td className="text-center p-3">
+                          {player.redCards > 0 && (
+                            <span className="inline-flex items-center justify-center w-8 h-8 bg-red-500 text-white rounded-full font-bold">
+                              {player.redCards}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Boutons d'action */}
+          <div className="flex justify-center gap-4 mt-6">
+            <button
+              onClick={exportData}
+              className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Download className="h-5 w-5" />
+              Exporter JSON
+            </button>
+            <button
+              onClick={exportCSV}
+              className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+            >
+              <Download className="h-5 w-5" />
+              Exporter CSV
+            </button>
+            <button
+              onClick={exportMatchEventsCSV}
+              className="flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+            >
+              <Download className="h-5 w-5" />
+              Exporter Événements
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Étape 4: Enregistrement du match (Interface complète)
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4">
       <div className="max-w-7xl mx-auto">
