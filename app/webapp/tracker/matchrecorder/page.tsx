@@ -1077,25 +1077,12 @@ export default function MatchRecorderPage() {
         };
       });
 
-      console.log('🔍 Mise à jour de matchData.players avec', allPlayersWithStats.length, 'joueurs');
+      console.log('🔍 PREMIÈRE mise à jour de matchData.players avec', allPlayersWithStats.length, 'joueurs');
       console.log('🔍 Détail des joueurs:', allPlayersWithStats.map(p => ({ name: p.name, time: p.totalTime })));
       
-      // Mettre à jour matchData avec tous les joueurs
-      setMatchData(prev => {
-        const newData = {
-          ...prev,
-          players: allPlayersWithStats,
-          teamScore,
-          opponentScore,
-          opponentActions,
-          firstHalfOpponentActions: {
-            shotsOnTarget: opponentActions.shotsOnTarget,
-            shotsOffTarget: opponentActions.shotsOffTarget
-          }
-        };
-        console.log('🔍 Nouveau matchData.players:', newData.players.length, 'joueurs');
-        return newData;
-      });
+      // ATTENTION: Ne pas faire cette première mise à jour car elle sera écrasée
+      // par la deuxième mise à jour plus bas. On garde seulement les données
+      // pour la deuxième mise à jour qui sera la finale.
 
       // Analyser les événements pour les statistiques
       events.forEach(event => {
