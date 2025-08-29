@@ -390,20 +390,16 @@ export default function MatchRecorderPage() {
           });
         }
         
-        // Un but incrémente aussi les tirs cadrés et les tirs totaux
+        // Un but incrémente aussi les tirs cadrés (mais PAS les tirs totaux pour éviter la double comptabilisation)
         updatedPlayers.forEach(player => {
           if (player.id === playerId) {
             player.stats.shotsOnTarget = (player.stats.shotsOnTarget || 0) + (increment ? 1 : -1);
-            player.stats.shotsOffTarget = (player.stats.shotsOffTarget || 0) + (increment ? 1 : -1);
+            // Note: On n'incrémente PAS shotsOffTarget car un but est déjà un tir cadré
           }
         });
       } else if (statKey === 'shotsOnTarget') {
-        // Un tir cadré incrémente aussi les tirs totaux
-        updatedPlayers.forEach(player => {
-          if (player.id === playerId) {
-            player.stats.shotsOffTarget = (player.stats.shotsOffTarget || 0) + (increment ? 1 : -1);
-          }
-        });
+        // Un tir cadré est déjà compté dans shotsOnTarget, pas besoin d'incrémenter shotsOffTarget
+        // Note: shotsOffTarget représente les tirs non cadrés uniquement
       }
 
       return {
@@ -2462,7 +2458,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg">
                     <div className="text-xl font-bold text-gray-600 dark:text-gray-300">
-                      {matchData.players.reduce((sum, player) => sum + player.stats.shotsOnTarget + player.stats.shotsOffTarget + player.stats.goals, 0)}
+                      {matchData.players.reduce((sum, player) => sum + player.stats.shotsOnTarget + player.stats.shotsOffTarget, 0)}
                     </div>
                     <div className="text-xs text-gray-600 dark:text-gray-300">Tirs totaux</div>
                   </div>
