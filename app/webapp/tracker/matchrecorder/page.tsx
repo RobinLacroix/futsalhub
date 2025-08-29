@@ -900,40 +900,72 @@ export default function MatchRecorderPage() {
       // Récupérer tous les joueurs qui ont participé à ce match spécifique
       // (pas seulement ceux de l'équipe active)
       let allPlayerIds = new Set<string>();
+      let teamPlayers: any[] = [];
+      
+      console.log('🔍 Debug - Événements reçus:', events.length);
+      console.log('🔍 Debug - Match details:', matchDetails);
       
       // Ajouter les joueurs qui ont des événements
       events.forEach(event => {
-        if (event.player_id) allPlayerIds.add(event.player_id);
+        if (event.player_id) {
+          allPlayerIds.add(event.player_id);
+          console.log('🔍 Ajout joueur depuis événement:', event.player_id);
+        }
         if (event.players_on_field) {
-          event.players_on_field.forEach((id: string) => allPlayerIds.add(id));
+          event.players_on_field.forEach((id: string) => {
+            allPlayerIds.add(id);
+            console.log('🔍 Ajout joueur depuis players_on_field:', id);
+          });
         }
       });
 
       // Ajouter les joueurs du match depuis matchDetails.players si disponible
       if (matchDetails.players && Array.isArray(matchDetails.players)) {
+        console.log('🔍 Match details.players:', matchDetails.players);
         matchDetails.players.forEach((player: any) => {
-          if (player.id) allPlayerIds.add(player.id);
+          if (player.id) {
+            allPlayerIds.add(player.id);
+            console.log('🔍 Ajout joueur depuis matchDetails.players:', player.id);
+          }
         });
       }
 
-      // Récupérer les informations de tous ces joueurs
-      let teamPlayers: any[] = [];
-      if (allPlayerIds.size > 0) {
-        const { data: playersData, error: playersError } = await supabase
+      // Si aucun joueur trouvé via les événements, essayer de récupérer depuis l'équipe active
+      if (allPlayerIds.size === 0 && activeTeam) {
+        console.log('🔍 Aucun joueur trouvé via événements, récupération depuis équipe active:', activeTeam.name);
+        const { data: activeTeamPlayers, error: activeTeamError } = await supabase
           .from('players')
           .select('*')
-          .in('id', Array.from(allPlayerIds))
+          .eq('team_id', activeTeam.id)
           .order('last_name');
-
-        if (playersError) {
-          console.error('Erreur lors de la récupération des joueurs:', playersError);
-          return;
+        
+        if (activeTeamError) {
+          console.error('Erreur lors de la récupération des joueurs de l\'équipe active:', activeTeamError);
+        } else {
+          teamPlayers = activeTeamPlayers || [];
+          console.log('🔍 Joueurs de l\'équipe active récupérés:', teamPlayers.length);
         }
-        teamPlayers = playersData || [];
+      } else {
+        // Récupérer les informations de tous ces joueurs
+        if (allPlayerIds.size > 0) {
+          console.log('🔍 Récupération des joueurs depuis IDs:', Array.from(allPlayerIds));
+          const { data: playersData, error: playersError } = await supabase
+            .from('players')
+            .select('*')
+            .in('id', Array.from(allPlayerIds))
+            .order('last_name');
+
+          if (playersError) {
+            console.error('Erreur lors de la récupération des joueurs:', playersError);
+            return;
+          }
+          teamPlayers = playersData || [];
+        }
       }
 
-      console.log('Joueurs participants au match:', teamPlayers.length);
-      console.log('IDs des joueurs:', Array.from(allPlayerIds));
+      console.log('🔍 Joueurs participants au match:', teamPlayers.length);
+      console.log('🔍 IDs des joueurs:', Array.from(allPlayerIds));
+      console.log('🔍 Détails des joueurs récupérés:', teamPlayers);
 
       // Initialiser les joueurs avec leurs statistiques
       const playersWithStats = teamPlayers.map(player => ({
@@ -2328,7 +2360,16 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                 </thead>
                 <tbody>
                   {matchData.players
-                    .filter(player => player.totalTime > 0) // Afficher tous les joueurs qui ont du temps de jeu
+                    .filter(player => 
+                      // Afficher tous les joueurs qui ont des statistiques OU du temps de jeu
+                      player.stats.goals > 0 || 
+                      player.stats.shotsOnTarget > 0 || 
+                      player.stats.ballRecovery > 0 || 
+                      player.stats.ballLoss > 0 || 
+                      player.totalTime > 0 ||
+                      player.yellowCards > 0 ||
+                      player.redCards > 0
+                    )
                     .sort((a, b) => b.stats.goals - a.stats.goals || b.stats.shotsOnTarget - a.stats.shotsOnTarget || b.totalTime - a.totalTime)
                     .map((player) => (
                       <tr key={player.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
