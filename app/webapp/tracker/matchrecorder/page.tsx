@@ -897,8 +897,8 @@ export default function MatchRecorderPage() {
   // Nouvelle fonction pour charger les données d'un match terminé
   const loadFinishedMatchData = async (matchId: string, events: any[], matchDetails: any) => {
     try {
-      // Récupérer tous les joueurs qui ont participé à ce match spécifique
-      // (pas seulement ceux de l'équipe active)
+      // Récupérer TOUS les joueurs qui ont participé à ce match
+      // (équipe A, équipe B, ou autres équipes)
       let allPlayerIds = new Set<string>();
       let teamPlayers: any[] = [];
       
@@ -930,38 +930,33 @@ export default function MatchRecorderPage() {
         });
       }
 
-      // Récupérer les informations de tous ces joueurs
-      if (allPlayerIds.size > 0) {
-        console.log('🔍 Récupération des joueurs depuis IDs:', Array.from(allPlayerIds));
-        const { data: playersData, error: playersError } = await supabase
-          .from('players')
-          .select('*')
-          .in('id', Array.from(allPlayerIds))
-          .order('last_name');
+      // IMPORTANT: Charger TOUS les joueurs de la base, pas seulement ceux de l'équipe active
+      // car les joueurs de l'équipe B peuvent être dans d'autres équipes
+      console.log('🔍 Chargement de TOUS les joueurs de la base pour trouver tous les participants...');
+      const { data: allPlayersData, error: allPlayersError } = await supabase
+        .from('players')
+        .select('*')
+        .order('last_name');
 
-        if (playersError) {
-          console.error('Erreur lors de la récupération des joueurs:', playersError);
-          return;
-        }
-        teamPlayers = playersData || [];
+      if (allPlayersError) {
+        console.error('Erreur lors de la récupération de tous les joueurs:', allPlayersError);
+        return;
       }
+
+      console.log('🔍 Tous les joueurs de la base récupérés:', allPlayersData?.length || 0);
       
-      // Si aucun joueur trouvé via les événements, essayer de récupérer depuis l'équipe active
-      if (teamPlayers.length === 0 && activeTeam) {
-        console.log('🔍 Aucun joueur trouvé via événements, récupération depuis équipe active:', activeTeam.name);
-        const { data: activeTeamPlayers, error: activeTeamError } = await supabase
-          .from('players')
-          .select('*')
-          .eq('team_id', activeTeam.id)
-          .order('last_name');
-        
-        if (activeTeamError) {
-          console.error('Erreur lors de la récupération des joueurs de l\'équipe active:', activeTeamError);
-        } else {
-          teamPlayers = activeTeamPlayers || [];
-          console.log('🔍 Joueurs de l\'équipe active récupérés:', teamPlayers.length);
-        }
+      // Filtrer pour ne garder que ceux qui ont participé au match
+      if (allPlayersData && allPlayerIds.size > 0) {
+        teamPlayers = allPlayersData.filter(player => allPlayerIds.has(player.id));
+        console.log('🔍 Joueurs filtrés qui ont participé au match:', teamPlayers.length);
+      } else if (allPlayersData) {
+        // Si pas d'IDs spécifiques, prendre tous les joueurs (fallback)
+        teamPlayers = allPlayersData;
+        console.log('🔍 Utilisation de tous les joueurs (fallback):', teamPlayers.length);
       }
+
+      // Les joueurs sont déjà chargés et filtrés ci-dessus
+      console.log('🔍 Joueurs finaux pour le match:', teamPlayers.length);
 
       console.log('🔍 Joueurs participants au match:', teamPlayers.length);
       console.log('🔍 IDs des joueurs:', Array.from(allPlayerIds));
