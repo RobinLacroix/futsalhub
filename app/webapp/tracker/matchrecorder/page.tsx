@@ -1019,13 +1019,26 @@ export default function MatchRecorderPage() {
       // Récupérer le temps de jeu depuis matchDetails.players (même logique exacte que tracker/dashboard)
       if (matchDetails.players && Array.isArray(matchDetails.players)) {
         console.log('🔍 Match details.players:', matchDetails.players);
+        console.log('🔍 Structure de matchDetails.players[0]:', matchDetails.players[0]);
+        
         matchDetails.players.forEach((playerData: any) => {
+          console.log(`🔍 Traitement joueur ${playerData.id}:`, {
+            hasId: !!playerData.id,
+            hasTimePlayed: !!playerData.time_played,
+            timePlayed: playerData.time_played,
+            allFields: Object.keys(playerData)
+          });
+          
           if (playerData.id && playerData.time_played) {
             const currentTime = playerTimeMap.get(playerData.id) || 0;
             playerTimeMap.set(playerData.id, currentTime + playerData.time_played);
             console.log(`🔍 Joueur ${playerData.id}: temps de jeu = ${playerData.time_played}s (total: ${currentTime + playerData.time_played}s)`);
+          } else if (playerData.id) {
+            console.log(`🔍 Joueur ${playerData.id}: PAS de temps de jeu (time_played: ${playerData.time_played})`);
           }
         });
+      } else {
+        console.log('🔍 PAS de matchDetails.players ou pas un array:', matchDetails.players);
       }
 
       // Debug: afficher le temps de jeu de chaque joueur
@@ -1154,10 +1167,15 @@ export default function MatchRecorderPage() {
         }
       });
 
-      // Mettre à jour les joueurs avec leurs statistiques
+      // Mettre à jour les joueurs avec leurs statistiques ET le temps de jeu
       const updatedPlayers = playersWithStats.map(player => {
         const stats = playerStatsMap.get(player.id);
-        const calculatedTime = playerTimeMap.get(player.id) || 0;
+        const timeFromMatchDetails = playerTimeMap.get(player.id) || 0;
+        
+        console.log(`🔍 Mise à jour joueur ${player.name}:`, {
+          timeFromMatchDetails,
+          stats: stats || 'aucune'
+        });
         
         if (stats) {
           return {
@@ -1173,7 +1191,7 @@ export default function MatchRecorderPage() {
             },
             yellowCards: stats.yellowCards,
             redCards: stats.redCards,
-            totalTime: calculatedTime // Utiliser le temps calculé
+            totalTime: timeFromMatchDetails // IMPORTANT: Garder le temps depuis matchDetails.players
           };
         }
         return player;
