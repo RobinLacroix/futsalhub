@@ -870,19 +870,20 @@ export default function MatchRecorderPage() {
         console.error('Erreur lors de la récupération des détails du match:', matchError);
       }
 
-      // Si le match a des événements ou un score final, c'est un match terminé
-      const isMatchFinished = existingEvents && existingEvents.length > 0 && 
-                             matchDetails && (matchDetails.score_team !== null || matchDetails.score_opponent !== null);
+      // Si le match a un score final, c'est un match terminé (même sans événements)
+      const isMatchFinished = matchDetails && 
+                             (matchDetails.score_team !== null && matchDetails.score_team !== undefined) && 
+                             (matchDetails.score_opponent !== null && matchDetails.score_opponent !== undefined);
 
-      if (isMatchFinished) {
-        console.log('Match terminé détecté, chargement de la vue bilan...');
-        
-        // Charger les données du match terminé
-        await loadFinishedMatchData(match.id, existingEvents, matchDetails);
-        
-        // Passer directement à la vue bilan
-        setCurrentStep('summary');
-      } else {
+              if (isMatchFinished) {
+          console.log('Match terminé détecté, chargement de la vue bilan...');
+          
+          // Charger les données du match terminé
+          await loadFinishedMatchData(match.id, existingEvents || [], matchDetails);
+          
+          // Passer directement à la vue bilan
+          setCurrentStep('summary');
+        } else {
         // Match nouveau ou en cours, passer à la configuration
         setCurrentStep('matchInfo');
       }
@@ -1033,12 +1034,13 @@ export default function MatchRecorderPage() {
       });
 
       // Mettre à jour le state avec les données du match terminé
+      // Utiliser le score réel du match depuis la base de données
       setMatchData(prev => ({
         ...prev,
         selectedMatch: matchDetails,
         players: updatedPlayers,
-        teamScore: teamScore,
-        opponentScore: opponentScore,
+        teamScore: matchDetails.score_team || 0,
+        opponentScore: matchDetails.score_opponent || 0,
         opponentActions: opponentActions,
         isRunning: false
       }));
