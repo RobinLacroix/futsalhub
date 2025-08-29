@@ -1515,13 +1515,30 @@ export default function MatchRecorderPage() {
       }
 
       // Préparer les données des joueurs pour la sauvegarde
-      const playersData = matchData.players.map(player => ({
-        id: player.id,
-        goals: player.stats.goals || 0,
-        yellow_cards: player.yellowCards || 0,
-        red_cards: player.redCards || 0,
-        time_played: player.totalTime // ← Corriger le nom du champ
-      }));
+      console.log('🔍 FINISH MATCH - Préparation des données des joueurs:');
+      console.log('🔍 FINISH MATCH - matchData.players:', matchData.players);
+      
+      const playersData = matchData.players.map(player => {
+        const playerData = {
+          id: player.id,
+          goals: player.stats.goals || 0,
+          yellow_cards: player.yellowCards || 0,
+          red_cards: player.redCards || 0,
+          time_played: player.totalTime || 0
+        };
+        
+        console.log(`🔍 FINISH MATCH - Joueur ${player.name || player.id}:`, {
+          totalTime: player.totalTime,
+          time_played: playerData.time_played,
+          goals: playerData.goals,
+          yellow_cards: playerData.yellow_cards,
+          red_cards: playerData.red_cards
+        });
+        
+        return playerData;
+      });
+      
+      console.log('🔍 FINISH MATCH - playersData final:', playersData);
 
       // Calculer les statistiques globales du match
       const totalGoals = matchData.players.reduce((sum, player) => sum + (player.stats.goals || 0), 0);
@@ -1529,6 +1546,13 @@ export default function MatchRecorderPage() {
       const totalRedCards = matchData.players.reduce((sum, player) => sum + (player.redCards || 0), 0);
 
       // Mettre à jour le match dans Supabase avec les statistiques finales
+      console.log('🔍 FINISH MATCH - Données à sauvegarder en base:', {
+        score_team: matchData.teamScore,
+        score_opponent: matchData.opponentScore,
+        players: playersData,
+        match_id: matchData.selectedMatch.id
+      });
+      
       const { error } = await supabase
         .from('matches')
         .update({
