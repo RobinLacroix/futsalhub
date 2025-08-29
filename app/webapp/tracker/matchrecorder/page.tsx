@@ -967,13 +967,23 @@ export default function MatchRecorderPage() {
         shotsOffTarget: 0
       };
 
-      // Calculer le temps de jeu de chaque joueur
+      // Calculer le temps de jeu de chaque joueur depuis les données du match
       const playerTimeMap = new Map<string, number>();
       teamPlayers.forEach(player => {
         playerTimeMap.set(player.id, 0);
       });
 
-      // Analyser les événements pour calculer le temps de jeu
+      // Récupérer le temps de jeu depuis matchDetails.players (même logique que tracker/dashboard)
+      if (matchDetails.players && Array.isArray(matchDetails.players)) {
+        matchDetails.players.forEach((playerData: any) => {
+          if (playerData.id && playerData.time_played) {
+            playerTimeMap.set(playerData.id, playerData.time_played);
+            console.log(`Joueur ${playerData.id}: temps de jeu = ${playerData.time_played}s`);
+          }
+        });
+      }
+
+      // Analyser les événements pour les statistiques
       events.forEach(event => {
         if (event.player_id) {
           // Statistiques des joueurs
@@ -993,14 +1003,6 @@ export default function MatchRecorderPage() {
           }
 
           const playerStats = playerStatsMap.get(event.player_id);
-          
-          // Calculer le temps de jeu approximatif basé sur le match_time_seconds
-          if (event.match_time_seconds) {
-            const currentTime = playerTimeMap.get(event.player_id) || 0;
-            // Ajouter 1 minute (60 secondes) pour chaque événement du joueur
-            // C'est une approximation, mais donne une idée du temps de jeu
-            playerTimeMap.set(event.player_id, currentTime + 60);
-          }
           
           switch (event.event_type) {
             case 'goal':
