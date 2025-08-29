@@ -1100,7 +1100,8 @@ export default function MatchRecorderPage() {
               oneOnOneDefLost: 0,
               yellowCards: 0,
               redCards: 0,
-              totalTime: 0
+              totalTime: 0,
+              plusMinus: 0 // Initialiser le +/- à 0
             });
           }
 
@@ -1110,6 +1111,16 @@ export default function MatchRecorderPage() {
             case 'goal':
               playerStats.goals++;
               teamScore++;
+              
+              // Incrémenter le +/- de +1 pour tous les joueurs présents sur le terrain
+              if (event.players_on_field && Array.isArray(event.players_on_field)) {
+                event.players_on_field.forEach((playerId: string) => {
+                  if (playerStatsMap.has(playerId)) {
+                    const playerStats = playerStatsMap.get(playerId);
+                    playerStats.plusMinus = (playerStats.plusMinus || 0) + 1;
+                  }
+                });
+              }
               break;
             case 'shot_on_target':
               playerStats.shotsOnTarget++;
@@ -1143,6 +1154,16 @@ export default function MatchRecorderPage() {
               opponentScore++;
               opponentActions.shotsOnTarget++;
               opponentActions.shotsOffTarget++;
+              
+              // Décrémenter le +/- de -1 pour tous les joueurs présents sur le terrain
+              if (event.players_on_field && Array.isArray(event.players_on_field)) {
+                event.players_on_field.forEach((playerId: string) => {
+                  if (playerStatsMap.has(playerId)) {
+                    const playerStats = playerStatsMap.get(playerId);
+                    playerStats.plusMinus = (playerStats.plusMinus || 0) - 1;
+                  }
+                });
+              }
               break;
             case 'opponent_shot_on_target':
               opponentActions.shotsOnTarget++;
@@ -1175,6 +1196,7 @@ export default function MatchRecorderPage() {
               ballRecovery: stats.ballRecovery,
               dribbleSuccess: stats.dribbleSuccess,
               oneOnOneDefLost: stats.oneOnOneDefLost,
+              plusMinus: stats.plusMinus || 0, // Ajouter le +/- calculé
             },
             yellowCards: stats.yellowCards,
             redCards: stats.redCards,
