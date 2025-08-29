@@ -897,17 +897,43 @@ export default function MatchRecorderPage() {
   // Nouvelle fonction pour charger les données d'un match terminé
   const loadFinishedMatchData = async (matchId: string, events: any[], matchDetails: any) => {
     try {
-      // Récupérer tous les joueurs de l'équipe active
-      const { data: teamPlayers, error: playersError } = await supabase
-        .from('players')
-        .select('*')
-        .eq('team_id', activeTeam?.id)
-        .order('last_name');
+      // Récupérer tous les joueurs qui ont participé à ce match spécifique
+      // (pas seulement ceux de l'équipe active)
+      let allPlayerIds = new Set<string>();
+      
+      // Ajouter les joueurs qui ont des événements
+      events.forEach(event => {
+        if (event.player_id) allPlayerIds.add(event.player_id);
+        if (event.players_on_field) {
+          event.players_on_field.forEach((id: string) => allPlayerIds.add(id));
+        }
+      });
 
-      if (playersError) {
-        console.error('Erreur lors de la récupération des joueurs:', playersError);
-        return;
+      // Ajouter les joueurs du match depuis matchDetails.players si disponible
+      if (matchDetails.players && Array.isArray(matchDetails.players)) {
+        matchDetails.players.forEach((player: any) => {
+          if (player.id) allPlayerIds.add(player.id);
+        });
       }
+
+      // Récupérer les informations de tous ces joueurs
+      let teamPlayers: any[] = [];
+      if (allPlayerIds.size > 0) {
+        const { data: playersData, error: playersError } = await supabase
+          .from('players')
+          .select('*')
+          .in('id', Array.from(allPlayerIds))
+          .order('last_name');
+
+        if (playersError) {
+          console.error('Erreur lors de la récupération des joueurs:', playersError);
+          return;
+        }
+        teamPlayers = playersData || [];
+      }
+
+      console.log('Joueurs participants au match:', teamPlayers.length);
+      console.log('IDs des joueurs:', Array.from(allPlayerIds));
 
       // Initialiser les joueurs avec leurs statistiques
       const playersWithStats = teamPlayers.map(player => ({
@@ -941,6 +967,13 @@ export default function MatchRecorderPage() {
         shotsOffTarget: 0
       };
 
+      // Calculer le temps de jeu de chaque joueur
+      const playerTimeMap = new Map<string, number>();
+      teamPlayers.forEach(player => {
+        playerTimeMap.set(player.id, 0);
+      });
+
+      // Analyser les événements pour calculer le temps de jeu
       events.forEach(event => {
         if (event.player_id) {
           // Statistiques des joueurs
@@ -960,6 +993,14 @@ export default function MatchRecorderPage() {
           }
 
           const playerStats = playerStatsMap.get(event.player_id);
+          
+          // Calculer le temps de jeu approximatif basé sur le match_time_seconds
+          if (event.match_time_seconds) {
+            const currentTime = playerTimeMap.get(event.player_id) || 0;
+            // Ajouter 1 minute (60 secondes) pour chaque événement du joueur
+            // C'est une approximation, mais donne une idée du temps de jeu
+            playerTimeMap.set(event.player_id, currentTime + 60);
+          }
           
           switch (event.event_type) {
             case 'goal':
@@ -1013,6 +1054,8 @@ export default function MatchRecorderPage() {
       // Mettre à jour les joueurs avec leurs statistiques
       const updatedPlayers = playersWithStats.map(player => {
         const stats = playerStatsMap.get(player.id);
+        const calculatedTime = playerTimeMap.get(player.id) || 0;
+        
         if (stats) {
           return {
             ...player,
@@ -1027,7 +1070,7 @@ export default function MatchRecorderPage() {
             },
             yellowCards: stats.yellowCards,
             redCards: stats.redCards,
-            totalTime: stats.totalTime
+            totalTime: calculatedTime // Utiliser le temps calculé
           };
         }
         return player;
@@ -2283,7 +2326,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                 </thead>
                 <tbody>
                   {matchData.players
-                    .filter(player => player.stats.goals > 0 || player.stats.shotsOnTarget > 0 || player.stats.ballRecovery > 0 || player.stats.ballLoss > 0 || player.totalTime > 0)
+                    .filter(player => player.totalTime > 0) // Afficher tous les joueurs qui ont du temps de jeu
                     .sort((a, b) => b.stats.goals - a.stats.goals || b.stats.shotsOnTarget - a.stats.shotsOnTarget || b.totalTime - a.totalTime)
                     .map((player) => (
                       <tr key={player.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
@@ -2309,7 +2352,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                           </span>
                         </td>
                         <td className="text-center p-3">
-                          <span className="inline-flex items-center justify-center w-8 h-8 bg-indigo-500 text-white rounded-full font-bold">
+                          <span className="inline-flex items-center justify-center w-8 h-8 bg-gray-800 text-white rounded-full font-bold">
                             {player.stats.shotsOnTarget + player.stats.shotsOffTarget + player.stats.goals}
                           </span>
                         </td>
