@@ -2515,7 +2515,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                           </span>
                         </td>
                         <td className="text-center p-2">
-                          <span className="inline-flex items-center justify-center w-6 h-6 bg-gray-500 text-white rounded-full font-bold text-xs">
+                          <span className="inline-flex items-center justify-center px-3 py-1 bg-gray-500 text-white rounded-lg font-bold text-xs min-w-[3rem]">
                             {formatTime(player.totalTime)}
                           </span>
                         </td>
@@ -3146,7 +3146,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                   </h3>
                   <div className="space-y-1">
                     <div className="flex justify-between items-center py-1 px-2 bg-red-100 dark:bg-red-800/60 rounded border border-red-200 dark:border-red-700">
-                      <span className="text-xs font-medium text-red-800 dark:text-red-200">Tirs totaux</span>
+                      <span className="text-xs font-medium text-red-800 dark:text-red-200">ok</span>
                       <span className="font-bold text-red-950 dark:text-white text-sm">
                         {getTeamStats().opponentShots}
                         {matchData.currentHalf === 2 && matchData.firstHalfOpponentActions.shotsOnTarget + matchData.firstHalfOpponentActions.shotsOffTarget > 0 && (
