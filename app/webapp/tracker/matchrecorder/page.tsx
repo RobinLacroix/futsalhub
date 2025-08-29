@@ -1019,6 +1019,7 @@ export default function MatchRecorderPage() {
       // Récupérer le temps de jeu depuis matchDetails.players (même logique exacte que tracker/dashboard)
       if (matchDetails.players && Array.isArray(matchDetails.players)) {
         console.log('🔍 Match details.players:', matchDetails.players);
+
         console.log('🔍 Structure de matchDetails.players[0]:', matchDetails.players[0]);
         
         matchDetails.players.forEach((playerData: any) => {
@@ -2374,62 +2375,62 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
           </div>
 
           {/* Statistiques détaillées */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
             {/* Statistiques de l'équipe */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6">
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Statistiques de l'équipe</h2>
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
-                    <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{matchData.teamScore}</div>
-                    <div className="text-sm text-blue-600 dark:text-blue-400">Buts marqués</div>
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-3">Statistiques de l'équipe</h2>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
+                    <div className="text-xl font-bold text-blue-600 dark:text-blue-400">{matchData.teamScore}</div>
+                    <div className="text-xs text-blue-600 dark:text-blue-400">Buts marqués</div>
                   </div>
-                  <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
+                  <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg">
                     <div className="text-2xl font-bold text-green-600 dark:text-green-400">
                       {matchData.players.reduce((sum, player) => sum + player.stats.shotsOnTarget, 0)}
                     </div>
-                    <div className="text-sm text-green-600 dark:text-green-400">Tirs cadrés</div>
+                    <div className="text-xs text-green-600 dark:text-green-400">Tirs cadrés</div>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg">
-                    <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-lg">
+                    <div className="text-xl font-bold text-purple-600 dark:text-purple-400">
                       {matchData.players.reduce((sum, player) => sum + player.stats.ballRecovery, 0)}
                     </div>
-                    <div className="text-sm text-purple-600 dark:text-purple-400">Récupérations</div>
+                    <div className="text-xs text-purple-600 dark:text-purple-400">Récupérations</div>
                   </div>
-                  <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg">
-                    <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">
+                  <div className="bg-orange-50 dark:bg-orange-900/20 p-3 rounded-lg">
+                    <div className="text-xl font-bold text-orange-600 dark:text-orange-400">
                       {matchData.players.reduce((sum, player) => sum + player.stats.dribbleSuccess, 0)}
                     </div>
-                    <div className="text-sm text-orange-600 dark:text-orange-400">Dribbles réussis</div>
+                    <div className="text-xs text-orange-600 dark:text-orange-400">Dribbles réussis</div>
                   </div>
                 </div>
               </div>
             </div>
 
             {/* Statistiques de l'adversaire */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6">
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Statistiques de l'adversaire</h2>
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg">
-                    <div className="text-2xl font-bold text-red-600 dark:text-red-400">{matchData.opponentScore}</div>
-                    <div className="text-sm text-red-600 dark:text-red-400">Buts encaissés</div>
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-3">Statistiques de l'adversaire</h2>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-red-50 dark:bg-red-900/20 p-3 rounded-lg">
+                    <div className="text-xl font-bold text-red-600 dark:text-red-400">{matchData.opponentScore}</div>
+                    <div className="text-xs text-red-600 dark:text-red-400">Buts encaissés</div>
                   </div>
-                  <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg">
-                    <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
+                  <div className="bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded-lg">
+                    <div className="text-xl font-bold text-yellow-600 dark:text-yellow-400">
                       {matchData.opponentActions.shotsOnTarget}
                     </div>
-                    <div className="text-sm text-yellow-600 dark:text-yellow-400">Tirs cadrés concédés</div>
+                    <div className="text-xs text-yellow-600 dark:text-yellow-400">Tirs cadrés concédés</div>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
-                    <div className="text-2xl font-bold text-gray-600 dark:text-gray-300">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg">
+                    <div className="text-xl font-bold text-gray-600 dark:text-gray-300">
                       {matchData.opponentActions.shotsOffTarget}
                     </div>
-                    <div className="text-sm text-gray-600 dark:text-gray-300">Tirs non cadrés concédés</div>
+                    <div className="text-xs text-gray-600 dark:text-gray-300">Tirs non cadrés concédés</div>
                   </div>
                 </div>
               </div>
@@ -2437,22 +2438,22 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
           </div>
 
           {/* Statistiques des joueurs */}
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6">
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Statistiques des joueurs</h2>
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-3">Statistiques des joueurs</h2>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-gray-200 dark:border-gray-700">
-                    <th className="text-left p-3 font-semibold text-gray-900 dark:text-white">Joueur</th>
-                    <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Buts</th>
-                    <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Tirs cadrés</th>
-                    <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Tirs totaux</th>
-                    <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Pertes</th>
-                    <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Récupérations</th>
-                    <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Dribbles</th>
-                    <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Temps</th>
-                    <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Cartons J</th>
-                    <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Cartons R</th>
+                    <th className="text-left p-2 font-semibold text-gray-900 dark:text-white text-sm">Joueur</th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Buts</th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Tirs cadrés</th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Tirs totaux</th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Pertes</th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Récupérations</th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Dribbles</th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Temps</th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Cartons J</th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Cartons R</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2472,62 +2473,62 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                       .sort((a, b) => (b.totalTime || 0) - (a.totalTime || 0)) // Trier par temps de jeu décroissant
                       .map((player) => (
                       <tr key={player.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
-                        <td className="p-3">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center text-sm font-bold text-blue-600 dark:text-blue-400">
+                        <td className="p-2">
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center text-xs font-bold text-blue-600 dark:text-blue-400">
                               {player.number}
                             </div>
                             <div>
-                              <div className="font-medium text-gray-900 dark:text-white">{player.name}</div>
-                              <div className="text-sm text-gray-500 dark:text-gray-400">{player.position}</div>
+                              <div className="font-medium text-gray-900 dark:text-white text-sm">{player.name}</div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400">{player.position}</div>
                             </div>
                           </div>
                         </td>
-                        <td className="text-center p-3">
-                          <span className="inline-flex items-center justify-center w-8 h-8 bg-blue-500 text-white rounded-full font-bold">
+                        <td className="text-center p-2">
+                          <span className="inline-flex items-center justify-center w-6 h-6 bg-blue-500 text-white rounded-full font-bold text-xs">
                             {player.stats.goals}
                           </span>
                         </td>
-                        <td className="text-center p-3">
-                          <span className="inline-flex items-center justify-center w-8 h-8 bg-green-500 text-white rounded-full font-bold">
+                        <td className="text-center p-2">
+                          <span className="inline-flex items-center justify-center w-6 h-6 bg-green-500 text-white rounded-full font-bold text-xs">
                             {player.stats.shotsOnTarget}
                           </span>
                         </td>
-                        <td className="text-center p-3">
-                          <span className="inline-flex items-center justify-center w-8 h-8 bg-gray-800 text-white rounded-full font-bold">
+                        <td className="text-center p-2">
+                          <span className="inline-flex items-center justify-center w-6 h-6 bg-gray-800 text-white rounded-full font-bold text-xs">
                             {player.stats.shotsOnTarget + player.stats.shotsOffTarget + player.stats.goals}
                           </span>
                         </td>
-                        <td className="text-center p-3">
-                          <span className="inline-flex items-center justify-center w-8 h-8 bg-red-500 text-white rounded-full font-bold">
+                        <td className="text-center p-2">
+                          <span className="inline-flex items-center justify-center w-6 h-6 bg-red-500 text-white rounded-full font-bold text-xs">
                             {player.stats.ballLoss}
                           </span>
                         </td>
-                        <td className="text-center p-3">
-                          <span className="inline-flex items-center justify-center w-8 h-8 bg-purple-500 text-white rounded-full font-bold">
+                        <td className="text-center p-2">
+                          <span className="inline-flex items-center justify-center w-6 h-6 bg-purple-500 text-white rounded-full font-bold text-xs">
                             {player.stats.ballRecovery}
                           </span>
                         </td>
-                        <td className="text-center p-3">
-                          <span className="inline-flex items-center justify-center w-8 h-8 bg-orange-500 text-white rounded-full font-bold">
+                                                <td className="text-center p-2">
+                          <span className="inline-flex items-center justify-center w-6 h-6 bg-orange-500 text-white rounded-full font-bold text-xs">
                             {player.stats.dribbleSuccess}
                           </span>
                         </td>
-                        <td className="text-center p-3">
-                          <span className="inline-flex items-center justify-center w-8 h-8 bg-gray-500 text-white rounded-full font-bold text-xs">
+                        <td className="text-center p-2">
+                          <span className="inline-flex items-center justify-center w-6 h-6 bg-gray-500 text-white rounded-full font-bold text-xs">
                             {formatTime(player.totalTime)}
                           </span>
                         </td>
-                        <td className="text-center p-3">
+                        <td className="text-center p-2">
                           {player.yellowCards > 0 && (
-                            <span className="inline-flex items-center justify-center w-8 h-8 bg-yellow-500 text-white rounded-full font-bold">
+                            <span className="inline-flex items-center justify-center w-6 h-6 bg-yellow-500 text-white rounded-full font-bold text-xs">
                               {player.yellowCards}
                             </span>
                           )}
                         </td>
-                        <td className="text-center p-3">
+                        <td className="text-center p-2">
                           {player.redCards > 0 && (
-                            <span className="inline-flex items-center justify-center w-8 h-8 bg-red-500 text-white rounded-full font-bold">
+                            <span className="inline-flex items-center justify-center w-6 h-6 bg-red-500 text-white rounded-full font-bold text-xs">
                               {player.redCards}
                             </span>
                           )}
@@ -2541,7 +2542,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
           </div>
 
           {/* Boutons d'action */}
-          <div className="flex justify-center gap-4 mt-6">
+          <div className="flex justify-center gap-4 mt-4">
             <button
               onClick={exportData}
               className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
