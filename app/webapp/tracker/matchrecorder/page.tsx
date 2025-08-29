@@ -2389,7 +2389,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                   </div>
                   <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg">
                     <div className="text-xl font-bold text-green-600 dark:text-green-400">
-                      {matchData.players.reduce((sum, player) => sum + player.stats.shotsOnTarget, 0)}
+                      {matchData.players.reduce((sum, player) => sum + player.stats.shotsOnTarget + player.stats.goals, 0)}
                     </div>
                     <div className="text-xs text-green-600 dark:text-green-400">Tirs cadrés</div>
                   </div>
