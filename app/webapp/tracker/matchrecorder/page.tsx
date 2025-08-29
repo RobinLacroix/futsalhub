@@ -2272,16 +2272,19 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                     <th className="text-left p-3 font-semibold text-gray-900 dark:text-white">Joueur</th>
                     <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Buts</th>
                     <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Tirs cadrés</th>
+                    <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Tirs totaux</th>
+                    <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Pertes</th>
                     <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Récupérations</th>
                     <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Dribbles</th>
+                    <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Temps</th>
                     <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Cartons J</th>
                     <th className="text-center p-3 font-semibold text-gray-900 dark:text-white">Cartons R</th>
                   </tr>
                 </thead>
                 <tbody>
                   {matchData.players
-                    .filter(player => player.stats.goals > 0 || player.stats.shotsOnTarget > 0 || player.stats.ballRecovery > 0)
-                    .sort((a, b) => b.stats.goals - a.stats.goals || b.stats.shotsOnTarget - a.stats.shotsOnTarget)
+                    .filter(player => player.stats.goals > 0 || player.stats.shotsOnTarget > 0 || player.stats.ballRecovery > 0 || player.stats.ballLoss > 0 || player.totalTime > 0)
+                    .sort((a, b) => b.stats.goals - a.stats.goals || b.stats.shotsOnTarget - a.stats.shotsOnTarget || b.totalTime - a.totalTime)
                     .map((player) => (
                       <tr key={player.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                         <td className="p-3">
@@ -2306,6 +2309,16 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                           </span>
                         </td>
                         <td className="text-center p-3">
+                          <span className="inline-flex items-center justify-center w-8 h-8 bg-indigo-500 text-white rounded-full font-bold">
+                            {player.stats.shotsOnTarget + player.stats.shotsOffTarget + player.stats.goals}
+                          </span>
+                        </td>
+                        <td className="text-center p-3">
+                          <span className="inline-flex items-center justify-center w-8 h-8 bg-red-500 text-white rounded-full font-bold">
+                            {player.stats.ballLoss}
+                          </span>
+                        </td>
+                        <td className="text-center p-3">
                           <span className="inline-flex items-center justify-center w-8 h-8 bg-purple-500 text-white rounded-full font-bold">
                             {player.stats.ballRecovery}
                           </span>
@@ -2313,6 +2326,11 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                         <td className="text-center p-3">
                           <span className="inline-flex items-center justify-center w-8 h-8 bg-orange-500 text-white rounded-full font-bold">
                             {player.stats.dribbleSuccess}
+                          </span>
+                        </td>
+                        <td className="text-center p-3">
+                          <span className="inline-flex items-center justify-center w-8 h-8 bg-gray-500 text-white rounded-full font-bold text-xs">
+                            {formatTime(player.totalTime)}
                           </span>
                         </td>
                         <td className="text-center p-3">
