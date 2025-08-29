@@ -1155,12 +1155,11 @@ export default function MatchRecorderPage() {
       });
 
       // Mettre à jour les joueurs avec leurs statistiques ET le temps de jeu
-      const updatedPlayers = playersWithStats.map(player => {
+      const updatedPlayers = allPlayersWithStats.map(player => {
         const stats = playerStatsMap.get(player.id);
-        const timeFromMatchDetails = playerTimeMap.get(player.id) || 0;
         
         console.log(`🔍 Mise à jour joueur ${player.name}:`, {
-          timeFromMatchDetails,
+          timeFromMatchDetails: player.totalTime,
           stats: stats || 'aucune'
         });
         
@@ -1178,7 +1177,7 @@ export default function MatchRecorderPage() {
             },
             yellowCards: stats.yellowCards,
             redCards: stats.redCards,
-            totalTime: timeFromMatchDetails // IMPORTANT: Garder le temps depuis matchDetails.players
+            totalTime: player.totalTime // IMPORTANT: Garder le temps depuis allPlayersWithStats
           };
         }
         return player;
