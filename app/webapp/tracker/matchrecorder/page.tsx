@@ -870,10 +870,26 @@ export default function MatchRecorderPage() {
         console.error('Erreur lors de la récupération des détails du match:', matchError);
       }
 
-      // Si le match a un score final, c'est un match terminé (même sans événements)
-      const isMatchFinished = matchDetails && 
-                             (matchDetails.score_team !== null && matchDetails.score_team !== undefined) && 
-                             (matchDetails.score_opponent !== null && matchDetails.score_opponent !== undefined);
+      // Un match est considéré comme terminé seulement s'il a un score différent de 0-0
+      // ou s'il a des événements enregistrés
+      const hasScore = matchDetails && 
+                      (matchDetails.score_team !== null && matchDetails.score_team !== undefined) && 
+                      (matchDetails.score_opponent !== null && matchDetails.score_opponent !== undefined);
+      
+      const hasNonZeroScore = hasScore && (matchDetails.score_team > 0 || matchDetails.score_opponent > 0);
+      const hasEvents = existingEvents && existingEvents.length > 0;
+      
+      const isMatchFinished = hasNonZeroScore || hasEvents;
+      
+      console.log('🔍 Statut du match:', {
+        hasScore,
+        score_team: matchDetails?.score_team,
+        score_opponent: matchDetails?.score_opponent,
+        hasNonZeroScore,
+        hasEvents,
+        eventsCount: existingEvents?.length || 0,
+        isMatchFinished
+      });
 
               if (isMatchFinished) {
           console.log('Match terminé détecté, chargement de la vue bilan...');
