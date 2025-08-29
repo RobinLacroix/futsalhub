@@ -2381,12 +2381,14 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
               <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-3">Statistiques de l'équipe</h2>
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
-                    <div className="text-xl font-bold text-blue-600 dark:text-blue-400">{matchData.teamScore}</div>
-                    <div className="text-xs text-blue-600 dark:text-blue-400">Buts marqués</div>
+                  <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg">
+                    <div className="text-xl font-bold text-gray-600 dark:text-gray-300">
+                      {matchData.players.reduce((sum, player) => sum + player.stats.shotsOnTarget + player.stats.shotsOffTarget + player.stats.goals, 0)}
+                    </div>
+                    <div className="text-xs text-gray-600 dark:text-gray-300">Tirs totaux</div>
                   </div>
                   <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg">
-                    <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                    <div className="text-xl font-bold text-green-600 dark:text-green-400">
                       {matchData.players.reduce((sum, player) => sum + player.stats.shotsOnTarget, 0)}
                     </div>
                     <div className="text-xs text-green-600 dark:text-green-400">Tirs cadrés</div>
@@ -2399,11 +2401,11 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                     </div>
                     <div className="text-xs text-purple-600 dark:text-purple-400">Récupérations</div>
                   </div>
-                  <div className="bg-orange-50 dark:bg-orange-900/20 p-3 rounded-lg">
-                    <div className="text-xl font-bold text-orange-600 dark:text-orange-400">
-                      {matchData.players.reduce((sum, player) => sum + player.stats.dribbleSuccess, 0)}
+                  <div className="bg-red-50 dark:bg-red-900/20 p-3 rounded-lg">
+                    <div className="text-xl font-bold text-red-600 dark:text-red-400">
+                      {matchData.players.reduce((sum, player) => sum + player.stats.ballLoss, 0)}
                     </div>
-                    <div className="text-xs text-orange-600 dark:text-orange-400">Dribbles réussis</div>
+                    <div className="text-xs text-red-600 dark:text-red-400">Pertes de balles</div>
                   </div>
                 </div>
               </div>
@@ -2414,23 +2416,17 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
               <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-3">Statistiques de l'adversaire</h2>
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-red-50 dark:bg-red-900/20 p-3 rounded-lg">
-                    <div className="text-xl font-bold text-red-600 dark:text-red-400">{matchData.opponentScore}</div>
-                    <div className="text-xs text-red-600 dark:text-red-400">Buts encaissés</div>
+                  <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg">
+                    <div className="text-xl font-bold text-gray-600 dark:text-gray-300">
+                      {matchData.opponentActions.shotsOffTarget}
+                    </div>
+                    <div className="text-xs text-gray-600 dark:text-gray-300">Nombre de tirs concédés</div>
                   </div>
                   <div className="bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded-lg">
                     <div className="text-xl font-bold text-yellow-600 dark:text-yellow-400">
                       {matchData.opponentActions.shotsOnTarget}
                     </div>
-                    <div className="text-xs text-yellow-600 dark:text-yellow-400">Tirs cadrés concédés</div>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg">
-                    <div className="text-xl font-bold text-gray-600 dark:text-gray-300">
-                      {matchData.opponentActions.shotsOffTarget}
-                    </div>
-                    <div className="text-xs text-gray-600 dark:text-gray-300">Tirs non cadrés concédés</div>
+                    <div className="text-xs text-yellow-600 dark:text-yellow-400">Nombre tirs cadrés concédés</div>
                   </div>
                 </div>
               </div>
