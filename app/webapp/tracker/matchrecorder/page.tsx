@@ -2405,7 +2405,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                     <div className="text-xl font-bold text-red-600 dark:text-red-400">
                       {matchData.players.reduce((sum, player) => sum + player.stats.ballLoss, 0)}
                     </div>
-                    <div className="text-xs text-red-600 dark:text-red-400">Pertes de balles</div>
+                    <div className="text-xs text-red-600 dark:text-red-400">Pertes de balles amenant une transition</div>
                   </div>
                 </div>
               </div>
@@ -2444,10 +2444,11 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                     <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Buts</th>
                     <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Tirs cadrés</th>
                     <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Tirs totaux</th>
-                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Pertes</th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Pertes de balle</th>
                     <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Récupérations</th>
                     <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Dribbles</th>
                     <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Temps</th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">+/-</th>
                     <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Cartons J</th>
                     <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Cartons R</th>
                   </tr>
@@ -2487,7 +2488,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                         </td>
                         <td className="text-center p-2">
                           <span className="inline-flex items-center justify-center w-6 h-6 bg-green-500 text-white rounded-full font-bold text-xs">
-                            {player.stats.shotsOnTarget}
+                            {player.stats.shotsOnTarget + player.stats.goals}
                           </span>
                         </td>
                         <td className="text-center p-2">
@@ -2513,6 +2514,14 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                         <td className="text-center p-2">
                           <span className="inline-flex items-center justify-center px-3 py-1 bg-gray-500 text-white rounded-lg font-bold text-xs min-w-[3rem]">
                             {formatTime(player.totalTime)}
+                          </span>
+                        </td>
+                        <td className="text-center p-2">
+                          <span className={`inline-flex items-center justify-center px-3 py-1 rounded-lg font-bold text-xs min-w-[2.5rem] ${
+                            (player.stats.plusMinus || 0) > 0 ? 'bg-green-500 text-white' :
+                            (player.stats.plusMinus || 0) < 0 ? 'bg-red-500 text-white' : 'bg-gray-300 text-gray-700'
+                          }`}>
+                            {(player.stats.plusMinus || 0) > 0 ? '+' : ''}{(player.stats.plusMinus || 0)}
                           </span>
                         </td>
                         <td className="text-center p-2">
