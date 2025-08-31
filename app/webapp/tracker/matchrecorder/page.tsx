@@ -689,15 +689,19 @@ export default function MatchRecorderPage() {
 
   // Fonctions pour calculer les statistiques du bilan
   const getTeamStats = () => {
-    const totalShots = matchData.players.reduce((sum, player) => 
+    // Tirs non cadrés uniquement
+    const totalShotsOffTarget = matchData.players.reduce((sum, player) => 
       sum + (player.stats.shotsOffTarget || 0), 0
     );
+    
+    // Tirs cadrés (sans les buts pour éviter la double comptabilisation)
     const totalShotsOnTarget = matchData.players.reduce((sum, player) => 
       sum + (player.stats.shotsOnTarget || 0), 0
     );
-    const totalShotsOffTarget = matchData.players.reduce((sum, player) => 
-      sum + (player.stats.shotsOffTarget || 0) - (player.stats.shotsOnTarget || 0), 0
-    );
+    
+    // Tirs totaux = Tirs cadrés + Tirs non cadrés + Buts
+    const totalShots = totalShotsOnTarget + totalShotsOffTarget + 
+      matchData.players.reduce((sum, player) => sum + (player.stats.goals || 0), 0);
 
     return {
       totalShots,
