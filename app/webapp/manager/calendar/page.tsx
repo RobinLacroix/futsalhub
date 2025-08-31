@@ -743,6 +743,20 @@ export default function CalendarPage() {
       setError(null);
       if (!editingEvent || editingEvent.type !== 'match') return;
 
+      // Récupérer les données existantes du match pour préserver le time_played
+      const { data: existingMatch, error: fetchError } = await supabase
+        .from('matches')
+        .select('players')
+        .eq('id', editingEvent.id)
+        .single();
+
+      if (fetchError) {
+        console.error('Erreur lors de la récupération des données existantes:', fetchError);
+        throw fetchError;
+      }
+
+      console.log('🔍 Données existantes du match:', existingMatch);
+
       // Nettoyer et formater les données des joueurs (optionnel)
       const cleanedPlayers = data.players ? Object.entries(data.players)
         .filter(([playerId, player]) => {
@@ -760,6 +774,20 @@ export default function CalendarPage() {
           red_cards: Number(player.red_cards) || 0
         })) : [];
 
+      // Fusionner les nouvelles données avec les données existantes (time_played)
+      const mergedPlayers = cleanedPlayers.map(newPlayer => {
+        const existingPlayer = existingMatch.players?.find((p: any) => p.id === newPlayer.id);
+        if (existingPlayer) {
+          return {
+            ...newPlayer,
+            time_played: existingPlayer.time_played || 0 // Préserver le time_played existant
+          };
+        }
+        return newPlayer;
+      });
+
+      console.log('🔍 Joueurs fusionnés avec time_played préservé:', mergedPlayers);
+
       const matchData = {
         title: data.title,
         date: data.date.toISOString(),
@@ -768,7 +796,7 @@ export default function CalendarPage() {
         score_team: data.score_team,
         score_opponent: data.score_opponent,
         opponent_team: data.opponent_team || null,
-        players: cleanedPlayers,
+        players: mergedPlayers, // Utiliser les joueurs fusionnés
         goals_by_type: data.goals_by_type,
         conceded_by_type: data.conceded_by_type
       };
