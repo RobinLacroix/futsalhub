@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import RadarChartWrapper from './RadarChartWrapper'
+import { useActiveTeam } from '../hooks/useActiveTeam'
 import type { ChartOptions } from 'chart.js'
 import {
   Chart as ChartJS,
@@ -101,6 +102,7 @@ type Props = {
 }
 
 export default function TeamRadarChart({ matchId, selectedMatchIds: initialSelectedMatchIds = [] }: Props) {
+  const { activeTeam } = useActiveTeam();
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [events, setEvents] = useState<EventRow[]>([])
@@ -116,26 +118,43 @@ export default function TeamRadarChart({ matchId, selectedMatchIds: initialSelec
         setLoading(true)
         setError(null)
 
-        // Fetch matches
+        // Vérifier qu'une équipe est active
+        if (!activeTeam) {
+          console.log('TeamRadarChart - Aucune équipe active, chargement impossible');
+          setMatches([]);
+          setEvents([]);
+          return;
+        }
+
+        console.log('TeamRadarChart - Chargement des données pour l\'équipe:', activeTeam.name);
+
+        // Fetch matches filtrés par équipe active
         const { data: matchesData, error: matchesError } = await supabase
           .from('matches')
           .select('id, title, date')
+          .eq('team_id', activeTeam.id)
           .order('date', { ascending: false })
 
         if (matchesError) throw matchesError
 
-        // Fetch all events for calculations
-        const { data: eventsData, error: eventsError } = await supabase
-          .from('match_events')
-          .select('*')
-          .order('created_at', { ascending: true })
+        // Fetch events uniquement pour les matchs de l'équipe active
+        let eventsData = [];
+        if (matchesData && matchesData.length > 0) {
+          const matchIds = matchesData.map(m => m.id);
+          const { data: eventsForTeam, error: eventsError } = await supabase
+            .from('match_events')
+            .select('*')
+            .in('match_id', matchIds)
+            .order('created_at', { ascending: true })
 
-        if (eventsError) throw eventsError
+          if (eventsError) throw eventsError
+          eventsData = eventsForTeam || [];
+        }
 
         if (!isMounted) return
 
-        console.log('TeamRadarChart - Matches chargés:', matchesData);
-        console.log('TeamRadarChart - Événements chargés:', eventsData?.length);
+        console.log('TeamRadarChart - Matches chargés pour l\'équipe', activeTeam.name, ':', matchesData);
+        console.log('TeamRadarChart - Événements chargés pour l\'équipe:', eventsData?.length);
         console.log('TeamRadarChart - Premier événement:', eventsData?.[0]);
 
         setMatches(matchesData || [])
@@ -166,7 +185,7 @@ export default function TeamRadarChart({ matchId, selectedMatchIds: initialSelec
     return () => {
       isMounted = false
     }
-  }, [selectedMatchIds])
+  }, [selectedMatchIds, activeTeam])
 
   // Calculate team stats by match
   const teamStatsByMatch = useMemo(() => {
@@ -470,6 +489,18 @@ export default function TeamRadarChart({ matchId, selectedMatchIds: initialSelec
       }
       return prev
     })
+  }
+
+  if (!activeTeam) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <div className="text-blue-500 text-6xl mb-4">🏆</div>
+          <div className="text-lg text-gray-600 mb-2">Aucune équipe sélectionnée</div>
+          <div className="text-sm text-gray-500">Veuillez sélectionner une équipe dans la sidebar pour voir les statistiques</div>
+        </div>
+      </div>
+    )
   }
 
   if (loading) {
