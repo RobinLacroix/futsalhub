@@ -1153,6 +1153,7 @@ export default function MatchRecorderPage() {
           switch (event.event_type) {
             case 'goal':
               playerStats.goals++;
+              playerStats.shotsOnTarget++; // Un but est aussi un tir cadré
               teamScore++;
               
               console.log('⚽ BUT MARQUÉ par notre équipe!');
