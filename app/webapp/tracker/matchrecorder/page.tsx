@@ -694,14 +694,13 @@ export default function MatchRecorderPage() {
       sum + (player.stats.shotsOffTarget || 0), 0
     );
     
-    // Tirs cadrés (sans les buts pour éviter la double comptabilisation)
+    // Tirs cadrés (incluant les buts car un but est un tir cadré)
     const totalShotsOnTarget = matchData.players.reduce((sum, player) => 
       sum + (player.stats.shotsOnTarget || 0), 0
     );
     
-    // Tirs totaux = Tirs cadrés + Tirs non cadrés + Buts
-    const totalShots = totalShotsOnTarget + totalShotsOffTarget + 
-      matchData.players.reduce((sum, player) => sum + (player.stats.goals || 0), 0);
+    // Tirs totaux = Tirs cadrés + Tirs non cadrés (les buts sont déjà inclus dans les tirs cadrés)
+    const totalShots = totalShotsOnTarget + totalShotsOffTarget;
 
     return {
       totalShots,
@@ -723,12 +722,12 @@ export default function MatchRecorderPage() {
   const getTopPlayersByTotalShots = (limit: number = 3) => {
     return matchData.players
       .filter(player => {
-        const totalShots = (player.stats.shotsOnTarget || 0) + (player.stats.shotsOffTarget || 0) + (player.stats.goals || 0);
+        const totalShots = (player.stats.shotsOnTarget || 0) + (player.stats.shotsOffTarget || 0);
         return totalShots > 0;
       })
       .sort((a, b) => {
-        const totalShotsA = (a.stats.shotsOnTarget || 0) + (a.stats.shotsOffTarget || 0) + (a.stats.goals || 0);
-        const totalShotsB = (b.stats.shotsOnTarget || 0) + (b.stats.shotsOffTarget || 0) + (b.stats.goals || 0);
+        const totalShotsA = (a.stats.shotsOnTarget || 0) + (a.stats.shotsOffTarget || 0);
+        const totalShotsB = (b.stats.shotsOnTarget || 0) + (b.stats.shotsOffTarget || 0);
         return totalShotsB - totalShotsA;
       })
       .slice(0, limit);
@@ -2476,7 +2475,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg">
                     <div className="text-xl font-bold text-gray-600 dark:text-gray-300">
-                      {matchData.players.reduce((sum, player) => sum + player.stats.shotsOnTarget + player.stats.shotsOffTarget + player.stats.goals, 0)}
+                      {matchData.players.reduce((sum, player) => sum + player.stats.shotsOnTarget + player.stats.shotsOffTarget, 0)}
                     </div>
                     <div className="text-xs text-gray-600 dark:text-gray-300">Tirs totaux</div>
                   </div>
@@ -2586,7 +2585,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                         </td>
                         <td className="text-center p-2">
                           <span className="inline-flex items-center justify-center w-6 h-6 bg-gray-800 text-white rounded-full font-bold text-xs">
-                            {player.stats.shotsOnTarget + player.stats.shotsOffTarget + player.stats.goals}
+                            {player.stats.shotsOnTarget + player.stats.shotsOffTarget}
                           </span>
                         </td>
                         <td className="text-center p-2">
@@ -3312,7 +3311,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                   </h3>
                   <div className="space-y-1">
                     {getTopPlayersByTotalShots().map((player, index) => {
-                      const totalShots = (player.stats.shotsOnTarget || 0) + (player.stats.shotsOffTarget || 0) + (player.stats.goals || 0);
+                      const totalShots = (player.stats.shotsOnTarget || 0) + (player.stats.shotsOffTarget || 0);
                       return (
                         <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-yellow-100 dark:bg-yellow-800/60 rounded border border-yellow-200 dark:border-yellow-700">
                           <div className="flex items-center gap-1">
