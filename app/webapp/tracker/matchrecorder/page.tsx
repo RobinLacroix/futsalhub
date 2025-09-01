@@ -2481,7 +2481,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                   </div>
                   <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg">
                     <div className="text-xl font-bold text-green-600 dark:text-green-400">
-                      {matchData.players.reduce((sum, player) => sum + player.stats.shotsOnTarget + player.stats.goals, 0)}
+                      {matchData.players.reduce((sum, player) => sum + player.stats.shotsOnTarget, 0)}
                     </div>
                     <div className="text-xs text-green-600 dark:text-green-400">Tirs cadrés</div>
                   </div>
@@ -2580,7 +2580,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                         </td>
                         <td className="text-center p-2">
                           <span className="inline-flex items-center justify-center w-6 h-6 bg-green-500 text-white rounded-full font-bold text-xs">
-                            {player.stats.shotsOnTarget + player.stats.goals}
+                            {player.stats.shotsOnTarget}
                           </span>
                         </td>
                         <td className="text-center p-2">
