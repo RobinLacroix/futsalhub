@@ -720,6 +720,20 @@ export default function MatchRecorderPage() {
       .slice(0, limit);
   };
 
+  const getTopPlayersByTotalShots = (limit: number = 3) => {
+    return matchData.players
+      .filter(player => {
+        const totalShots = (player.stats.shotsOnTarget || 0) + (player.stats.shotsOffTarget || 0) + (player.stats.goals || 0);
+        return totalShots > 0;
+      })
+      .sort((a, b) => {
+        const totalShotsA = (a.stats.shotsOnTarget || 0) + (a.stats.shotsOffTarget || 0) + (a.stats.goals || 0);
+        const totalShotsB = (b.stats.shotsOnTarget || 0) + (b.stats.shotsOffTarget || 0) + (b.stats.goals || 0);
+        return totalShotsB - totalShotsA;
+      })
+      .slice(0, limit);
+  };
+
   const getTopPlayersByTime = (limit: number = 3) => {
     return matchData.players
       .filter(player => player.totalTime > 0)
@@ -3230,7 +3244,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                   </h3>
                   <div className="space-y-1">
                     <div className="flex justify-between items-center py-1 px-2 bg-red-100 dark:bg-red-800/60 rounded border border-red-200 dark:border-red-700">
-                      <span className="text-xs font-medium text-red-800 dark:text-red-200">ok</span>
+                      <span className="text-xs font-medium text-red-800 dark:text-red-200">Total tirs</span>
                       <span className="font-bold text-red-950 dark:text-white text-sm">
                         {getTeamStats().opponentShots}
                         {matchData.currentHalf === 2 && matchData.firstHalfOpponentActions.shotsOnTarget + matchData.firstHalfOpponentActions.shotsOffTarget > 0 && (
@@ -3297,8 +3311,8 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                     Plus de tirs
                   </h3>
                   <div className="space-y-1">
-                    {getTopPlayers('shotsOnTarget').map((player, index) => {
-                      const totalShots = (player.stats.shotsOnTarget || 0) + (player.stats.shotsOffTarget || 0);
+                    {getTopPlayersByTotalShots().map((player, index) => {
+                      const totalShots = (player.stats.shotsOnTarget || 0) + (player.stats.shotsOffTarget || 0) + (player.stats.goals || 0);
                       return (
                         <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-yellow-100 dark:bg-yellow-800/60 rounded border border-yellow-200 dark:border-yellow-700">
                           <div className="flex items-center gap-1">
