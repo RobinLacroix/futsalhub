@@ -766,7 +766,7 @@ export default function DashboardPage() {
 
     // Formater les données pour les graphiques
     const scoredData = filteredStats.map(match => ({
-      name: match.date,
+      name: match.title,
       'Phase Offensive': match.goals_by_type.offensive,
       'Transition': match.goals_by_type.transition,
       'CPA': match.goals_by_type.cpa,
@@ -774,7 +774,7 @@ export default function DashboardPage() {
     }));
 
     const concededData = filteredStats.map(match => ({
-      name: match.date,
+      name: match.title,
       'Phase Offensive': match.conceded_by_type.offensive,
       'Transition': match.conceded_by_type.transition,
       'CPA': match.conceded_by_type.cpa,
