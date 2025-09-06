@@ -5,7 +5,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
-import { 
+import {
   Play, 
   Pause, 
   Download,
@@ -24,7 +24,10 @@ import {
   Save,
   Zap,
   Circle,
-  Square
+  Square,
+  ChevronUp,
+  ChevronDown,
+  ChevronsUpDown
 } from 'lucide-react';
 
 interface Player {
@@ -166,6 +169,12 @@ export default function MatchRecorderPage() {
   // États pour le clic long
   const [longPressTimers, setLongPressTimers] = useState<{ [key: string]: NodeJS.Timeout }>({});
   const [longPressTriggered, setLongPressTriggered] = useState<{ [key: string]: boolean }>({});
+  
+  // État pour le tri des statistiques des joueurs
+  const [sortConfig, setSortConfig] = useState<{
+    key: string | null;
+    direction: 'asc' | 'desc' | null;
+  }>({ key: 'totalTime', direction: 'desc' }); // Tri par défaut par temps de jeu décroissant
 
   // États pour la sélection tactile des joueurs
   const [selectedPlayerForChange, setSelectedPlayerForChange] = useState<string | null>(null);
@@ -271,6 +280,116 @@ export default function MatchRecorderPage() {
     return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
+  // Fonction pour gérer le tri
+  const handleSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'desc';
+    
+    if (sortConfig.key === key) {
+      // Si on clique sur la même colonne, inverser la direction
+      if (sortConfig.direction === 'desc') {
+        direction = 'asc';
+      } else if (sortConfig.direction === 'asc') {
+        direction = 'desc';
+      }
+    }
+    
+    setSortConfig({ key, direction });
+  };
+
+  // Fonction pour obtenir l'icône de tri
+  const getSortIcon = (key: string) => {
+    if (sortConfig.key !== key) {
+      return <ChevronsUpDown className="h-4 w-4 text-gray-400" />;
+    }
+    
+    if (sortConfig.direction === 'desc') {
+      return <ChevronDown className="h-4 w-4 text-blue-600" />;
+    } else {
+      return <ChevronUp className="h-4 w-4 text-blue-600" />;
+    }
+  };
+
+  // Fonction pour trier les joueurs
+  const getSortedPlayers = () => {
+    if (!sortConfig.key || !sortConfig.direction) {
+      return matchData.players.sort((a, b) => (b.totalTime || 0) - (a.totalTime || 0));
+    }
+
+    return [...matchData.players].sort((a, b) => {
+      let aValue, bValue;
+
+      switch (sortConfig.key) {
+        case 'name':
+          aValue = a.name;
+          bValue = b.name;
+          break;
+        case 'number':
+          aValue = a.number;
+          bValue = b.number;
+          break;
+        case 'goals':
+          aValue = a.stats.goals;
+          bValue = b.stats.goals;
+          break;
+        case 'shotsOnTarget':
+          aValue = a.stats.shotsOnTarget;
+          bValue = b.stats.shotsOnTarget;
+          break;
+        case 'totalShots':
+          aValue = a.stats.shotsOnTarget + a.stats.shotsOffTarget;
+          bValue = b.stats.shotsOnTarget + b.stats.shotsOffTarget;
+          break;
+        case 'ballLoss':
+          aValue = a.stats.ballLoss;
+          bValue = b.stats.ballLoss;
+          break;
+        case 'ballRecovery':
+          aValue = a.stats.ballRecovery;
+          bValue = b.stats.ballRecovery;
+          break;
+        case 'dribbleSuccess':
+          aValue = a.stats.dribbleSuccess;
+          bValue = b.stats.dribbleSuccess;
+          break;
+        case 'totalTime':
+          aValue = a.totalTime || 0;
+          bValue = b.totalTime || 0;
+          break;
+        case 'plusMinus':
+          aValue = a.stats.plusMinus || 0;
+          bValue = b.stats.plusMinus || 0;
+          break;
+        case 'yellowCards':
+          aValue = a.yellowCards || 0;
+          bValue = b.yellowCards || 0;
+          break;
+        case 'redCards':
+          aValue = a.redCards || 0;
+          bValue = b.redCards || 0;
+          break;
+        default:
+          aValue = a.totalTime || 0;
+          bValue = b.totalTime || 0;
+      }
+
+      // Gestion du tri pour les chaînes de caractères
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
+        if (sortConfig.direction === 'asc') {
+          return aValue.localeCompare(bValue);
+        } else {
+          return bValue.localeCompare(aValue);
+        }
+      }
+
+      // Gestion du tri pour les nombres
+      if (sortConfig.direction === 'asc') {
+        return (aValue as number) - (bValue as number);
+      } else {
+        return (bValue as number) - (aValue as number);
+      }
+    });
+  };
+
   const formatMatchTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -353,6 +472,8 @@ export default function MatchRecorderPage() {
   };
 
   const updatePlayerStat = async (playerId: string, statKey: string, increment: boolean = true) => {
+    console.log('🚨 DEBUGGING - updatePlayerStat appelé:', { playerId, statKey, increment, matchId: matchData.selectedMatch?.id });
+    
     if (!matchData.selectedMatch) return;
 
     // Mettre à jour l'état local
@@ -749,6 +870,8 @@ export default function MatchRecorderPage() {
   };
 
   const updatePlayerCard = async (playerId: string, cardType: 'yellow' | 'red', increment: boolean = true) => {
+    console.log('🚨 DEBUGGING - updatePlayerCard appelé:', { playerId, cardType, increment, matchId: matchData.selectedMatch?.id });
+    
     if (!matchData.selectedMatch) return;
 
     setMatchData(prev => {
@@ -1623,6 +1746,25 @@ export default function MatchRecorderPage() {
     }
 
     try {
+      console.log('🚨 DEBUGGING - DÉBUT DE finishMatch()');
+      console.log('🚨 DEBUGGING - Match ID:', matchData.selectedMatch.id);
+      
+      // VÉRIFIER LES ÉVÉNEMENTS EXISTANTS AVANT LA FINALISATION
+      const { data: existingEventsBefore, error: eventsError } = await supabase
+        .from('match_events')
+        .select('*')
+        .eq('match_id', matchData.selectedMatch.id)
+        .order('created_at', { ascending: true });
+
+      if (eventsError) {
+        console.error('🚨 DEBUGGING - Erreur lors de la récupération des événements existants:', eventsError);
+      } else {
+        console.log('🚨 DEBUGGING - Événements DÉJÀ EXISTANTS avant finalisation:', existingEventsBefore?.length || 0);
+        if (existingEventsBefore && existingEventsBefore.length > 0) {
+          console.log('🚨 DEBUGGING - Détail des événements existants:', existingEventsBefore);
+        }
+      }
+
       // Arrêter le chronomètre si en cours
       if (matchData.isRunning) {
         setMatchData(prev => ({ ...prev, isRunning: false }));
@@ -1682,6 +1824,22 @@ export default function MatchRecorderPage() {
         return;
       }
 
+      // VÉRIFIER LES ÉVÉNEMENTS APRÈS LA FINALISATION
+      const { data: existingEventsAfter, error: eventsAfterError } = await supabase
+        .from('match_events')
+        .select('*')
+        .eq('match_id', matchData.selectedMatch.id)
+        .order('created_at', { ascending: true });
+
+      if (eventsAfterError) {
+        console.error('🚨 DEBUGGING - Erreur lors de la récupération des événements après finalisation:', eventsAfterError);
+      } else {
+        console.log('🚨 DEBUGGING - Événements APRÈS finalisation:', existingEventsAfter?.length || 0);
+        if (existingEventsAfter && existingEventsAfter.length > 0) {
+          console.log('🚨 DEBUGGING - Détail des événements après finalisation:', existingEventsAfter);
+        }
+      }
+
       // Afficher un message de succès
       alert(`Match terminé et enregistré avec succès !
         
@@ -1692,7 +1850,9 @@ Résumé :
 - Cartons jaunes : ${totalYellowCards}
 - Cartons rouges : ${totalRedCards}
 
-Les statistiques des joueurs ont été sauvegardées dans la base de données.`);
+Les statistiques des joueurs ont été sauvegardées dans la base de données.
+
+🚨 DEBUGGING - Vérifiez la console pour les logs de débogage des événements !`);
 
       // Rediriger vers la page de sélection de match
       setCurrentStep('match');
@@ -2533,17 +2693,105 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-gray-200 dark:border-gray-700">
-                    <th className="text-left p-2 font-semibold text-gray-900 dark:text-white text-sm">Joueur</th>
-                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Buts</th>
-                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Tirs cadrés</th>
-                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Tirs totaux</th>
-                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Pertes de balle</th>
-                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Récupérations</th>
-                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Dribbles</th>
-                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Temps</th>
-                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">+/-</th>
-                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Cartons J</th>
-                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">Cartons R</th>
+                    <th className="text-left p-2 font-semibold text-gray-900 dark:text-white text-sm">
+                      <button
+                        onClick={() => handleSort('name')}
+                        className="flex items-center gap-1 hover:text-blue-600 transition-colors"
+                      >
+                        Joueur
+                        {getSortIcon('name')}
+                      </button>
+                    </th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">
+                      <button
+                        onClick={() => handleSort('goals')}
+                        className="flex items-center gap-1 hover:text-blue-600 transition-colors mx-auto"
+                      >
+                        Buts
+                        {getSortIcon('goals')}
+                      </button>
+                    </th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">
+                      <button
+                        onClick={() => handleSort('shotsOnTarget')}
+                        className="flex items-center gap-1 hover:text-blue-600 transition-colors mx-auto"
+                      >
+                        Tirs cadrés
+                        {getSortIcon('shotsOnTarget')}
+                      </button>
+                    </th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">
+                      <button
+                        onClick={() => handleSort('totalShots')}
+                        className="flex items-center gap-1 hover:text-blue-600 transition-colors mx-auto"
+                      >
+                        Tirs totaux
+                        {getSortIcon('totalShots')}
+                      </button>
+                    </th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">
+                      <button
+                        onClick={() => handleSort('ballLoss')}
+                        className="flex items-center gap-1 hover:text-blue-600 transition-colors mx-auto"
+                      >
+                        Pertes de balle
+                        {getSortIcon('ballLoss')}
+                      </button>
+                    </th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">
+                      <button
+                        onClick={() => handleSort('ballRecovery')}
+                        className="flex items-center gap-1 hover:text-blue-600 transition-colors mx-auto"
+                      >
+                        Récupérations
+                        {getSortIcon('ballRecovery')}
+                      </button>
+                    </th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">
+                      <button
+                        onClick={() => handleSort('dribbleSuccess')}
+                        className="flex items-center gap-1 hover:text-blue-600 transition-colors mx-auto"
+                      >
+                        Dribbles
+                        {getSortIcon('dribbleSuccess')}
+                      </button>
+                    </th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">
+                      <button
+                        onClick={() => handleSort('totalTime')}
+                        className="flex items-center gap-1 hover:text-blue-600 transition-colors mx-auto"
+                      >
+                        Temps
+                        {getSortIcon('totalTime')}
+                      </button>
+                    </th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">
+                      <button
+                        onClick={() => handleSort('plusMinus')}
+                        className="flex items-center gap-1 hover:text-blue-600 transition-colors mx-auto"
+                      >
+                        +/-
+                        {getSortIcon('plusMinus')}
+                      </button>
+                    </th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">
+                      <button
+                        onClick={() => handleSort('yellowCards')}
+                        className="flex items-center gap-1 hover:text-blue-600 transition-colors mx-auto"
+                      >
+                        Cartons J
+                        {getSortIcon('yellowCards')}
+                      </button>
+                    </th>
+                    <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">
+                      <button
+                        onClick={() => handleSort('redCards')}
+                        className="flex items-center gap-1 hover:text-blue-600 transition-colors mx-auto"
+                      >
+                        Cartons R
+                        {getSortIcon('redCards')}
+                      </button>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2552,15 +2800,13 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.`)
                     console.log('🔍 RENDU - Joueurs avec temps > 0:', matchData.players.filter(p => p.totalTime > 0).length);
                     console.log('🔍 RENDU - Joueurs sans temps:', matchData.players.filter(p => p.totalTime === 0 || !p.totalTime).length);
                     
-                    // Afficher TOUS les joueurs qui ont participé au match
-                    // (pas seulement ceux avec du temps de jeu > 0)
-                    return matchData.players
+                    // Afficher TOUS les joueurs qui ont participé au match avec tri
+                    return getSortedPlayers()
                       .filter(player => 
                         // Critère principal : joueur présent dans matchData.players
                         // (ce qui signifie qu'il a participé au match)
                         true
                       )
-                      .sort((a, b) => (b.totalTime || 0) - (a.totalTime || 0)) // Trier par temps de jeu décroissant
                       .map((player) => (
                       <tr key={player.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                         <td className="p-2">
