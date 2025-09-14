@@ -414,18 +414,31 @@ export default function TrackerDashboardPage() {
         // Calculer toutes les statistiques détaillées
         const totalGoals = playerCreatedEvents.filter(event => event.event_type === 'goal').length;
         const totalShotsOnTarget = playerCreatedEvents.filter(event => event.event_type === 'shot_on_target').length;
-        const totalShots = playerCreatedEvents.filter(event => event.event_type === 'shot').length;
+        const totalShotsOffTarget = playerCreatedEvents.filter(event => event.event_type === 'shot').length;
         const totalDribbles = playerCreatedEvents.filter(event => event.event_type === 'dribble').length;
         const totalBallLoss = playerCreatedEvents.filter(event => event.event_type === 'ball_loss').length;
         const totalRecoveries = playerCreatedEvents.filter(event => event.event_type === 'recovery').length;
         const totalYellowCards = playerCreatedEvents.filter(event => event.event_type === 'yellow_card').length;
         const totalRedCards = playerCreatedEvents.filter(event => event.event_type === 'red_card').length;
 
-        // Ajuster les statistiques pour qu'elles soient cohérentes
-        // Si un joueur marque un but, il doit aussi avoir un tir cadré et un tir
+        // Calculer les statistiques ajustées selon la logique :
+        // - Tirs cadrés = tirs cadrés + buts (les buts sont des tirs cadrés)
+        // - Tirs totaux = tirs cadrés + tirs non cadrés
         const adjustedGoals = totalGoals;
-        const adjustedShotsOnTarget = Math.max(totalShotsOnTarget, totalGoals); // Au moins autant de tirs cadrés que de buts
-        const adjustedShots = Math.max(totalShots, adjustedShotsOnTarget); // Au moins autant de tirs que de tirs cadrés
+        const adjustedShotsOnTarget = totalShotsOnTarget + totalGoals; // Tirs cadrés + buts
+        const adjustedShots = adjustedShotsOnTarget + totalShotsOffTarget; // Tirs cadrés + tirs non cadrés
+
+        // Debug pour vérifier les calculs
+        if (player.first_name === 'Jordan' || player.last_name === 'Jordan') {
+          console.log(`🏀 DEBUG Jordan - Événements:`, {
+            goals: totalGoals,
+            shotsOnTarget: totalShotsOnTarget,
+            shotsOffTarget: totalShotsOffTarget,
+            adjustedShotsOnTarget,
+            adjustedShots,
+            events: playerCreatedEvents.map(e => e.event_type)
+          });
+        }
 
         // Calculer le +/- basé sur les événements réels
         let plusMinus = 0;
