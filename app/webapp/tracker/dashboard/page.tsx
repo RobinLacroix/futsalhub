@@ -9,7 +9,10 @@ import {
   Clock,
   Target,
   RefreshCw,
-  Users
+  Users,
+  ChevronUp,
+  ChevronDown,
+  ChevronsUpDown
 } from 'lucide-react';
 import {
   BarChart,
@@ -117,6 +120,12 @@ export default function TrackerDashboardPage() {
     Coupe: true,
     Championnat: true
   });
+
+  // État pour le tri des statistiques des joueurs
+  const [playerStatsSortConfig, setPlayerStatsSortConfig] = useState<{
+    key: string | null;
+    direction: 'asc' | 'desc' | null;
+  }>({ key: 'plusMinus', direction: 'desc' }); // Tri par défaut par +/- buts décroissant
 
   // Charger les données depuis Supabase
   useEffect(() => {
@@ -275,6 +284,112 @@ export default function TrackerDashboardPage() {
     const filteredMatchIds = new Set(filteredMatches.map(match => match.id));
     
     return matchEvents.filter(event => filteredMatchIds.has(event.match_id));
+  };
+
+  // Fonction pour gérer le tri des statistiques des joueurs
+  const handlePlayerStatsSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'desc';
+    
+    if (playerStatsSortConfig.key === key) {
+      // Si on clique sur la même colonne, inverser la direction
+      if (playerStatsSortConfig.direction === 'desc') {
+        direction = 'asc';
+      } else if (playerStatsSortConfig.direction === 'asc') {
+        direction = 'desc';
+      }
+    }
+    
+    setPlayerStatsSortConfig({ key, direction });
+  };
+
+  // Fonction pour obtenir l'icône de tri des statistiques des joueurs
+  const getPlayerStatsSortIcon = (key: string) => {
+    if (playerStatsSortConfig.key !== key) {
+      return <ChevronsUpDown className="h-4 w-4 text-gray-400" />;
+    }
+    
+    if (playerStatsSortConfig.direction === 'desc') {
+      return <ChevronDown className="h-4 w-4 text-blue-600" />;
+    } else {
+      return <ChevronUp className="h-4 w-4 text-blue-600" />;
+    }
+  };
+
+  // Fonction pour trier les statistiques des joueurs
+  const getSortedPlayerStats = () => {
+    if (!playerStatsSortConfig.key || !playerStatsSortConfig.direction) {
+      return playerStats.sort((a, b) => b.plusMinus - a.plusMinus);
+    }
+
+    return [...playerStats].sort((a, b) => {
+      let aValue, bValue;
+
+      switch (playerStatsSortConfig.key) {
+        case 'playerName':
+          aValue = a.playerName;
+          bValue = b.playerName;
+          break;
+        case 'matchesPlayed':
+          aValue = a.matchesPlayed;
+          bValue = b.matchesPlayed;
+          break;
+        case 'totalGoals':
+          aValue = a.totalGoals;
+          bValue = b.totalGoals;
+          break;
+        case 'totalShots':
+          aValue = a.totalShots;
+          bValue = b.totalShots;
+          break;
+        case 'totalShotsOnTarget':
+          aValue = a.totalShotsOnTarget;
+          bValue = b.totalShotsOnTarget;
+          break;
+        case 'totalDribbles':
+          aValue = a.totalDribbles;
+          bValue = b.totalDribbles;
+          break;
+        case 'totalBallLoss':
+          aValue = a.totalBallLoss;
+          bValue = b.totalBallLoss;
+          break;
+        case 'totalRecoveries':
+          aValue = a.totalRecoveries;
+          bValue = b.totalRecoveries;
+          break;
+        case 'totalTime':
+          aValue = a.totalTime;
+          bValue = b.totalTime;
+          break;
+        case 'plusMinus':
+          aValue = a.plusMinus;
+          bValue = b.plusMinus;
+          break;
+        case 'shotsPlusMinus':
+          aValue = a.shotsPlusMinus;
+          bValue = b.shotsPlusMinus;
+          break;
+        default:
+          aValue = a.plusMinus;
+          bValue = b.plusMinus;
+      }
+
+      // Gestion du tri pour les chaînes de caractères
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
+        if (playerStatsSortConfig.direction === 'asc') {
+          return aValue.localeCompare(bValue);
+        } else {
+          return bValue.localeCompare(aValue);
+        }
+      }
+
+      // Gestion du tri pour les nombres
+      if (playerStatsSortConfig.direction === 'asc') {
+        return (aValue as number) - (bValue as number);
+      } else {
+        return (bValue as number) - (aValue as number);
+      }
+    });
   };
 
   // Calculer les statistiques des joueurs basées sur les événements
@@ -734,52 +849,164 @@ export default function TrackerDashboardPage() {
             {/* Tableau des statistiques */}
             <div className="bg-white rounded-lg shadow-lg p-6">
               <h3 className="text-lg font-bold text-gray-900 mb-4">Statistiques détaillées des joueurs</h3>
+              
+              {/* Légende des abréviations */}
+              <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                <div className="text-sm text-gray-600 mb-2 font-medium">Légende des colonnes :</div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-gray-500">
+                  <div><span className="font-semibold">M</span> = Matches</div>
+                  <div><span className="font-semibold">B</span> = Buts</div>
+                  <div><span className="font-semibold">T</span> = Tirs totaux</div>
+                  <div><span className="font-semibold">TC</span> = Tirs cadrés</div>
+                  <div><span className="font-semibold">D</span> = Dribbles</div>
+                  <div><span className="font-semibold">PB</span> = Pertes de balle</div>
+                  <div><span className="font-semibold">R</span> = Récupérations</div>
+                  <div><span className="font-semibold">+/-</span> = Différence buts</div>
+                  <div><span className="font-semibold">+/-T</span> = Différence tirs</div>
+                </div>
+              </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Joueur</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Matches</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Buts</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tirs</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tirs cadrés</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Dribbles</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Récupérations</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">+/- Buts</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">+/- Tirs</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
+                        <button
+                          onClick={() => handlePlayerStatsSort('playerName')}
+                          className="flex items-center gap-1 hover:text-blue-600 transition-colors"
+                        >
+                          Joueur
+                          {getPlayerStatsSortIcon('playerName')}
+                        </button>
+                      </th>
+                      <th className="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                        <button
+                          onClick={() => handlePlayerStatsSort('matchesPlayed')}
+                          className="flex items-center justify-center gap-1 hover:text-blue-600 transition-colors"
+                        >
+                          M
+                          {getPlayerStatsSortIcon('matchesPlayed')}
+                        </button>
+                      </th>
+                      <th className="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                        <button
+                          onClick={() => handlePlayerStatsSort('totalGoals')}
+                          className="flex items-center justify-center gap-1 hover:text-blue-600 transition-colors"
+                        >
+                          B
+                          {getPlayerStatsSortIcon('totalGoals')}
+                        </button>
+                      </th>
+                      <th className="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                        <button
+                          onClick={() => handlePlayerStatsSort('totalShots')}
+                          className="flex items-center justify-center gap-1 hover:text-blue-600 transition-colors"
+                        >
+                          T
+                          {getPlayerStatsSortIcon('totalShots')}
+                        </button>
+                      </th>
+                      <th className="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                        <button
+                          onClick={() => handlePlayerStatsSort('totalShotsOnTarget')}
+                          className="flex items-center justify-center gap-1 hover:text-blue-600 transition-colors"
+                        >
+                          TC
+                          {getPlayerStatsSortIcon('totalShotsOnTarget')}
+                        </button>
+                      </th>
+                      <th className="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                        <button
+                          onClick={() => handlePlayerStatsSort('totalDribbles')}
+                          className="flex items-center justify-center gap-1 hover:text-blue-600 transition-colors"
+                        >
+                          D
+                          {getPlayerStatsSortIcon('totalDribbles')}
+                        </button>
+                      </th>
+                      <th className="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                        <button
+                          onClick={() => handlePlayerStatsSort('totalBallLoss')}
+                          className="flex items-center justify-center gap-1 hover:text-blue-600 transition-colors"
+                        >
+                          PB
+                          {getPlayerStatsSortIcon('totalBallLoss')}
+                        </button>
+                      </th>
+                      <th className="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                        <button
+                          onClick={() => handlePlayerStatsSort('totalRecoveries')}
+                          className="flex items-center justify-center gap-1 hover:text-blue-600 transition-colors"
+                        >
+                          R
+                          {getPlayerStatsSortIcon('totalRecoveries')}
+                        </button>
+                      </th>
+                      <th className="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-20">
+                        <button
+                          onClick={() => handlePlayerStatsSort('totalTime')}
+                          className="flex items-center justify-center gap-1 hover:text-blue-600 transition-colors"
+                        >
+                          Temps
+                          {getPlayerStatsSortIcon('totalTime')}
+                        </button>
+                      </th>
+                      <th className="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                        <button
+                          onClick={() => handlePlayerStatsSort('plusMinus')}
+                          className="flex items-center justify-center gap-1 hover:text-blue-600 transition-colors"
+                        >
+                          +/-
+                          {getPlayerStatsSortIcon('plusMinus')}
+                        </button>
+                      </th>
+                      <th className="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                        <button
+                          onClick={() => handlePlayerStatsSort('shotsPlusMinus')}
+                          className="flex items-center justify-center gap-1 hover:text-blue-600 transition-colors"
+                        >
+                          +/-T
+                          {getPlayerStatsSortIcon('shotsPlusMinus')}
+                        </button>
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {playerStats.map((player) => (
+                    {getSortedPlayerStats().map((player) => (
                       <tr key={player.playerId} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        <td className="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
                           {player.playerName}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
                           {player.matchesPlayed}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
                           {player.totalGoals}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
                           {player.totalShots}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
                           {player.totalShotsOnTarget}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
                           {player.totalDribbles}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
+                          {player.totalBallLoss}
+                        </td>
+                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
                           {player.totalRecoveries}
                         </td>
-                        <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${
+                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
+                          {Math.floor(player.totalTime / 60)}:{(player.totalTime % 60).toString().padStart(2, '0')}
+                        </td>
+                        <td className={`px-2 py-3 whitespace-nowrap text-sm font-medium text-center ${
                           player.plusMinus > 0 ? 'text-green-600' : 
                           player.plusMinus < 0 ? 'text-red-600' : 'text-gray-500'
                         }`}>
                           {player.plusMinus > 0 ? '+' : ''}{player.plusMinus}
                         </td>
-                        <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${
+                        <td className={`px-2 py-3 whitespace-nowrap text-sm font-medium text-center ${
                           player.shotsPlusMinus > 0 ? 'text-green-600' : 
                           player.shotsPlusMinus < 0 ? 'text-red-600' : 'text-gray-500'
                         }`}>
