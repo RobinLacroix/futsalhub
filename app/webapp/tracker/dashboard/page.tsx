@@ -106,6 +106,17 @@ export default function TrackerDashboardPage() {
   const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
   const [selectedMatches, setSelectedMatches] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState('plus-minus');
+  
+  // Filtres par type de compétition
+  const [competitionFilters, setCompetitionFilters] = useState<{
+    Amical: boolean;
+    Coupe: boolean;
+    Championnat: boolean;
+  }>({
+    Amical: true,
+    Coupe: true,
+    Championnat: true
+  });
 
   // Charger les données depuis Supabase
   useEffect(() => {
@@ -236,6 +247,35 @@ export default function TrackerDashboardPage() {
       console.log('Dashboard - Onglet radar actif, composant TeamRadarChart devrait être rendu');
     }
   }, [activeTab]);
+
+  // Fonction pour gérer les filtres de compétition
+  const handleCompetitionFilterChange = (competition: 'Amical' | 'Coupe' | 'Championnat') => {
+    setCompetitionFilters(prev => ({
+      ...prev,
+      [competition]: !prev[competition]
+    }));
+  };
+
+  // Fonction pour obtenir les matches filtrés par compétition
+  const getFilteredMatches = () => {
+    const activeFilters = Object.entries(competitionFilters)
+      .filter(([_, isActive]) => isActive)
+      .map(([competition, _]) => competition);
+    
+    if (activeFilters.length === 0) {
+      return []; // Si aucun filtre n'est actif, ne rien afficher
+    }
+    
+    return matches.filter(match => activeFilters.includes(match.competition));
+  };
+
+  // Fonction pour obtenir les événements filtrés par compétition
+  const getFilteredEvents = () => {
+    const filteredMatches = getFilteredMatches();
+    const filteredMatchIds = new Set(filteredMatches.map(match => match.id));
+    
+    return matchEvents.filter(event => filteredMatchIds.has(event.match_id));
+  };
 
   // Calculer les statistiques des joueurs basées sur les événements
   useEffect(() => {
@@ -493,6 +533,31 @@ export default function TrackerDashboardPage() {
             </div>
           </div>
 
+          {/* Filtres de compétition */}
+          <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">Filtrer par type de compétition :</h3>
+            <div className="flex gap-6">
+              {(['Amical', 'Coupe', 'Championnat'] as const).map((competition) => (
+                <label key={competition} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={competitionFilters[competition]}
+                    onChange={() => handleCompetitionFilterChange(competition)}
+                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                  />
+                  <span className="text-sm text-gray-700 font-medium">{competition}</span>
+                </label>
+              ))}
+            </div>
+            <div className="mt-2 text-xs text-gray-500">
+              {(() => {
+                const activeFilters = Object.entries(competitionFilters).filter(([_, isActive]) => isActive);
+                const filteredMatches = getFilteredMatches();
+                return `${activeFilters.length} type(s) sélectionné(s) • ${filteredMatches.length} match(es) affiché(s)`;
+              })()}
+            </div>
+          </div>
+
           {/* Tabs */}
           <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg">
             <button
@@ -556,7 +621,7 @@ export default function TrackerDashboardPage() {
                   Sélectionner les matches à analyser :
                 </label>
                 <div className="flex flex-wrap gap-2">
-                  {matches.map(match => (
+                  {getFilteredMatches().map(match => (
                     <button
                       key={match.id}
                       onClick={() => {
@@ -589,8 +654,8 @@ export default function TrackerDashboardPage() {
                         // Désélectionner tous les matches
                         setSelectedMatches([]);
                       } else {
-                        // Sélectionner tous les matches
-                        setSelectedMatches(matches.map(match => match.id));
+                        // Sélectionner tous les matches filtrés
+                        setSelectedMatches(getFilteredMatches().map(match => match.id));
                       }
                     }}
                     className="text-sm text-blue-600 hover:text-blue-800 font-medium"
@@ -734,7 +799,7 @@ export default function TrackerDashboardPage() {
             {/* Actions par type - Séquences de 5 minutes */}
             <div className="bg-white rounded-lg shadow-lg p-6">
               <h2 className="text-xl font-bold text-gray-900 mb-4">Actions par Type - Séquences de 5 minutes</h2>
-              <ActionsByTypeChart events={matchEvents} selectedMatchIds={selectedMatches} />
+              <ActionsByTypeChart events={getFilteredEvents()} selectedMatchIds={selectedMatches} />
             </div>
 
             {/* Répartition des actions */}
@@ -770,7 +835,7 @@ export default function TrackerDashboardPage() {
           <div className="space-y-6">
             <div className="bg-white rounded-lg shadow-lg p-6">
               <h2 className="text-xl font-bold text-gray-900 mb-4">Radar des statistiques d'équipe</h2>
-              <TeamRadarChart />
+              <TeamRadarChart selectedMatchIds={getFilteredMatches().map(m => m.id)} />
             </div>
           </div>
         )}
