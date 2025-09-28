@@ -1365,8 +1365,9 @@ export default function MatchRecorderPage() {
       console.log('🔍 Initialisation: Tous les joueurs ont été initialisés avec +/- = 0');
 
       // ÉTAPE 2: Analyser les événements pour les statistiques
+      // IMPORTANT: Ne traiter que les événements avec player_id !== null pour éviter la double comptabilisation
       events.forEach(event => {
-        if (event.player_id) {
+        if (event.player_id !== null) {
           // Statistiques des joueurs
           if (!playerStatsMap.has(event.player_id)) {
             console.warn('⚠️ Joueur non initialisé trouvé dans les événements:', event.player_id);
@@ -1477,6 +1478,13 @@ export default function MatchRecorderPage() {
 
       // Gérer les événements CSC (contre son camp) avec player_id = NULL
       console.log('🔍 Gestion des événements CSC (player_id = NULL)...');
+      
+      // Debug: afficher tous les événements avec player_id = NULL
+      const nullPlayerEvents = events.filter(event => event.player_id === null);
+      console.log('🔍 Événements avec player_id = NULL:', nullPlayerEvents.map(e => ({
+        type: e.event_type,
+        playersOnField: e.players_on_field?.length || 0
+      })));
       
       // Buts CSC de l'adversaire (bénéficient notre équipe)
       const cscGoalsForUs = events.filter(event => 
