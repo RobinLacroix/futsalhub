@@ -403,8 +403,17 @@ export default function TrackerDashboardPage() {
       const stats: PlayerStats[] = players.map(player => {
         // Trouver tous les événements où ce joueur était sur le terrain (filtrés par match)
         const playerEvents = filteredEvents.filter(event => 
-          event.players_on_field.includes(player.id)
+          event.players_on_field && event.players_on_field.includes(player.id)
         );
+
+        // Debug pour vérifier les événements avec player_id = NULL
+        if (player.first_name === 'Jordan' || player.last_name === 'Jordan') {
+          const nullPlayerEvents = filteredEvents.filter(event => 
+            event.event_type === 'goal' && event.player_id === null
+          );
+          console.log(`🏀 DEBUG Jordan - Événements goal avec player_id = NULL:`, nullPlayerEvents);
+          console.log(`🏀 DEBUG Jordan - Événements où Jordan était sur le terrain:`, playerEvents);
+        }
 
         // Trouver tous les événements créés par ce joueur (filtrés par match)
         const playerCreatedEvents = filteredEvents.filter(event => 
@@ -459,34 +468,6 @@ export default function TrackerDashboardPage() {
           } else if (event.event_type === 'opponent_shot') {
             shotsPlusMinus -= 1; // Tir non cadré adverse quand le joueur était sur le terrain
           }
-        });
-
-        // Gérer les buts CSC (contre son camp) de l'adversaire
-        // Ces événements ont player_id = NULL mais tous les joueurs sur le terrain doivent être crédités
-        const cscEvents = filteredEvents.filter(event => 
-          event.event_type === 'goal' && 
-          event.player_id === null && 
-          event.players_on_field && 
-          event.players_on_field.includes(player.id)
-        );
-
-        // Gérer les buts CSC de notre équipe (contre son camp)
-        // Ces événements ont player_id = NULL mais tous les joueurs sur le terrain doivent être débités
-        const ourCscEvents = filteredEvents.filter(event => 
-          event.event_type === 'opponent_goal' && 
-          event.player_id === null && 
-          event.players_on_field && 
-          event.players_on_field.includes(player.id)
-        );
-        
-        cscEvents.forEach(event => {
-          plusMinus += 1; // But CSC adverse = +1 pour tous les joueurs sur le terrain
-          console.log(`🏀 CSC Adverse - ${player.first_name} ${player.last_name} +1 (était sur le terrain)`);
-        });
-
-        ourCscEvents.forEach(event => {
-          plusMinus -= 1; // But CSC de notre équipe = -1 pour tous les joueurs sur le terrain
-          console.log(`🏀 CSC Notre équipe - ${player.first_name} ${player.last_name} -1 (était sur le terrain)`);
         });
 
         // Récupérer le temps de jeu depuis les données du match
