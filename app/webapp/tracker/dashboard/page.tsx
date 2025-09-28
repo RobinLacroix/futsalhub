@@ -481,10 +481,12 @@ export default function TrackerDashboardPage() {
         
         cscEvents.forEach(event => {
           plusMinus += 1; // But CSC adverse = +1 pour tous les joueurs sur le terrain
+          console.log(`🏀 CSC Adverse - ${player.first_name} ${player.last_name} +1 (était sur le terrain)`);
         });
 
         ourCscEvents.forEach(event => {
           plusMinus -= 1; // But CSC de notre équipe = -1 pour tous les joueurs sur le terrain
+          console.log(`🏀 CSC Notre équipe - ${player.first_name} ${player.last_name} -1 (était sur le terrain)`);
         });
 
         // Récupérer le temps de jeu depuis les données du match
