@@ -444,8 +444,9 @@ export default function TrackerDashboardPage() {
         let plusMinus = 0;
         let shotsPlusMinus = 0;
 
-        // Pour chaque événement où le joueur était sur le terrain
-        playerEvents.forEach(event => {
+        // Pour chaque événement où le joueur était sur le terrain ET a un player_id valide
+        // (exclure les événements CSC qui ont player_id = NULL)
+        playerEvents.filter(event => event.player_id !== null).forEach(event => {
           if (event.event_type === 'goal') {
             plusMinus += 1; // But marqué quand le joueur était sur le terrain
           } else if (event.event_type === 'opponent_goal') {
@@ -469,16 +470,6 @@ export default function TrackerDashboardPage() {
           event.players_on_field && 
           event.players_on_field.includes(player.id)
         );
-        
-        // Debug pour voir les événements CSC
-        if (cscEvents.length > 0) {
-          console.log(`🔍 DEBUG CSC - ${player.first_name} ${player.last_name} a ${cscEvents.length} but(s) CSC adverse:`, cscEvents);
-        }
-        
-        cscEvents.forEach(event => {
-          plusMinus += 1; // But CSC adverse = +1 pour tous les joueurs sur le terrain
-          console.log(`🏆 CSC - ${player.first_name} ${player.last_name} crédité +1 pour but CSC adverse`);
-        });
 
         // Gérer les buts CSC de notre équipe (contre son camp)
         // Ces événements ont player_id = NULL mais tous les joueurs sur le terrain doivent être débités
@@ -489,6 +480,33 @@ export default function TrackerDashboardPage() {
           event.players_on_field.includes(player.id)
         );
         
+        // Debug pour voir les événements CSC
+        if (cscEvents.length > 0) {
+          console.log(`🔍 DEBUG CSC - ${player.first_name} ${player.last_name} a ${cscEvents.length} but(s) CSC adverse:`, cscEvents);
+        }
+
+        // Debug pour voir tous les événements du joueur
+        if (player.first_name === 'Adrien' && player.last_name === 'Daniel') {
+          console.log(`🔍 DEBUG ${player.first_name} ${player.last_name} - Événements:`, {
+            totalEvents: playerEvents.length,
+            eventsWithPlayerId: playerEvents.filter(e => e.player_id !== null).length,
+            eventsWithNullPlayerId: playerEvents.filter(e => e.player_id === null).length,
+            cscEvents: cscEvents.length,
+            ourCscEvents: ourCscEvents.length,
+            plusMinusBeforeCsc: plusMinus,
+            events: playerEvents.map(e => ({
+              type: e.event_type,
+              playerId: e.player_id,
+              playersOnField: e.players_on_field?.length || 0
+            }))
+          });
+        }
+        
+        cscEvents.forEach(event => {
+          plusMinus += 1; // But CSC adverse = +1 pour tous les joueurs sur le terrain
+          console.log(`🏆 CSC - ${player.first_name} ${player.last_name} crédité +1 pour but CSC adverse`);
+        });
+
         ourCscEvents.forEach(event => {
           plusMinus -= 1; // But CSC de notre équipe = -1 pour tous les joueurs sur le terrain
           console.log(`⚽ CSC - ${player.first_name} ${player.last_name} débité -1 pour but CSC de notre équipe`);
