@@ -461,6 +461,34 @@ export default function TrackerDashboardPage() {
           }
         });
 
+        // Gérer les buts CSC (contre son camp) de l'adversaire
+        // Ces événements ont player_id = NULL mais tous les joueurs sur le terrain doivent être crédités
+        const cscEvents = filteredEvents.filter(event => 
+          event.event_type === 'goal' && 
+          event.player_id === null && 
+          event.players_on_field && 
+          event.players_on_field.includes(player.id)
+        );
+        
+        cscEvents.forEach(event => {
+          plusMinus += 1; // But CSC adverse = +1 pour tous les joueurs sur le terrain
+          console.log(`🏆 CSC - ${player.first_name} ${player.last_name} crédité +1 pour but CSC adverse`);
+        });
+
+        // Gérer les buts CSC de notre équipe (contre son camp)
+        // Ces événements ont player_id = NULL mais tous les joueurs sur le terrain doivent être débités
+        const ourCscEvents = filteredEvents.filter(event => 
+          event.event_type === 'opponent_goal' && 
+          event.player_id === null && 
+          event.players_on_field && 
+          event.players_on_field.includes(player.id)
+        );
+        
+        ourCscEvents.forEach(event => {
+          plusMinus -= 1; // But CSC de notre équipe = -1 pour tous les joueurs sur le terrain
+          console.log(`⚽ CSC - ${player.first_name} ${player.last_name} débité -1 pour but CSC de notre équipe`);
+        });
+
         // Récupérer le temps de jeu depuis les données du match
         let totalTime = 0;
         if (selectedMatches.length > 0) {
