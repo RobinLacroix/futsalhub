@@ -723,86 +723,6 @@ export default function MatchRecorderPage() {
     }
   };
 
-  // Fonction pour gérer les buts CSC (contre son camp) de l'adversaire
-  const updateTeamGoalCSC = async (increment: boolean = true) => {
-    if (!matchData.selectedMatch) return;
-
-    setMatchData(prev => ({
-      ...prev,
-      teamScore: prev.teamScore + (increment ? 1 : -1),
-    }));
-
-    // Enregistrer l'événement dans la base de données
-    if (increment) {
-      const playersOnField = matchData.players
-        .filter(p => p.isOnField)
-        .map(p => p.id);
-
-      console.log(`[DEBUG] Enregistrement but CSC adverse:`, {
-        matchId: matchData.selectedMatch.id,
-        eventType: 'goal',
-        playerId: null,
-        playersOnField,
-        totalPlayersOnField: playersOnField.length,
-        allPlayers: matchData.players.map(p => ({ id: p.id, name: p.name, isOnField: p.isOnField }))
-      });
-
-      // Mettre à jour les statistiques +/- de tous les joueurs sur le terrain
-      setMatchData(prev => ({
-        ...prev,
-        players: prev.players.map(player => 
-          player.isOnField 
-            ? { 
-                ...player, 
-                stats: { 
-                  ...player.stats, 
-                  plusMinus: (player.stats.plusMinus || 0) + 1 // Incrémenter le +/- de 1 pour but CSC adverse
-                } 
-              }
-            : player
-        )
-      }));
-
-      await supabase
-        .from('match_events')
-        .insert({
-          match_id: matchData.selectedMatch.id,
-          event_type: 'goal',
-          match_time_seconds: matchData.matchTime,
-          half: matchData.currentHalf,
-          player_id: null, // NULL pour but CSC
-          players_on_field: playersOnField
-        });
-
-      console.log(`[DEBUG] But CSC adverse enregistré avec succès`);
-    } else {
-      // Supprimer le dernier événement de type goal avec player_id = null
-      await supabase.rpc('delete_last_event_by_type', {
-        p_match_id: matchData.selectedMatch.id,
-        p_event_type: 'goal',
-        p_player_id: null
-      });
-
-      // Décrémenter le +/- de tous les joueurs sur le terrain
-      setMatchData(prev => ({
-        ...prev,
-        players: prev.players.map(player => 
-          player.isOnField 
-            ? { 
-                ...player, 
-                stats: { 
-                  ...player.stats, 
-                  plusMinus: (player.stats.plusMinus || 0) - 1 // Décrémenter le +/- de 1
-                } 
-              }
-            : player
-        )
-      }));
-
-      console.log(`[DEBUG] But CSC adverse supprimé avec succès`);
-    }
-  };
-
   // Fonctions pour le clic long
   const handleLongPressStart = (playerId: string, statKey: string) => {
     const timerKey = `${playerId}-${statKey}`;
@@ -1139,16 +1059,30 @@ export default function MatchRecorderPage() {
   // Nouvelle fonction pour charger les données d'un match terminé
   const loadFinishedMatchData = async (matchId: string, events: any[], matchDetails: any) => {
     try {
+      // Récupérer les événements depuis Supabase
+      console.log('🔍 Chargement des événements depuis Supabase pour le match:', matchId);
+      const { data: matchEvents, error: eventsError } = await supabase
+        .from('match_events')
+        .select('*')
+        .eq('match_id', matchId)
+        .order('created_at', { ascending: true });
+
+      if (eventsError) {
+        console.error('Erreur lors du chargement des événements:', eventsError);
+        throw eventsError;
+      }
+
+      console.log('🔍 Événements chargés depuis Supabase:', matchEvents?.length || 0);
+      
       // Récupérer TOUS les joueurs qui ont participé à ce match
       // (équipe A, équipe B, ou autres équipes)
       let allPlayerIds = new Set<string>();
       let teamPlayers: any[] = [];
       
-      console.log('🔍 Debug - Événements reçus:', events.length);
       console.log('🔍 Debug - Match details:', matchDetails);
       
       // Ajouter les joueurs qui ont des événements
-      events.forEach(event => {
+      matchEvents?.forEach(event => {
         if (event.player_id) {
           allPlayerIds.add(event.player_id);
           console.log('🔍 Ajout joueur depuis événement:', event.player_id);
@@ -1188,9 +1122,11 @@ export default function MatchRecorderPage() {
       console.log('🔍 Tous les joueurs de la base récupérés:', allPlayersData?.length || 0);
       
       // Filtrer pour ne garder que ceux qui ont participé au match
+      // IMPORTANT: Inclure tous les joueurs qui apparaissent dans players_on_field
       if (allPlayersData && allPlayerIds.size > 0) {
         teamPlayers = allPlayersData.filter(player => allPlayerIds.has(player.id));
         console.log('🔍 Joueurs filtrés qui ont participé au match:', teamPlayers.length);
+        console.log('🔍 IDs des joueurs trouvés:', teamPlayers.map(p => p.id));
       } else if (allPlayersData) {
         // Si pas d'IDs spécifiques, prendre tous les joueurs (fallback)
         teamPlayers = allPlayersData;
@@ -1324,14 +1260,15 @@ export default function MatchRecorderPage() {
           yellowCards: 0,
           redCards: 0,
           totalTime: 0,
-          plusMinus: 0 // Initialiser le +/- à 0 pour TOUS les joueurs
+          plusMinus: 0 // Initialiser le +/- à 0, sera calculé depuis les événements
         });
       });
 
       console.log('🔍 Initialisation: Tous les joueurs ont été initialisés avec +/- = 0');
 
       // ÉTAPE 2: Analyser les événements pour les statistiques
-      events.forEach(event => {
+      matchEvents?.forEach(event => {
+        // Traiter les statistiques personnelles seulement si player_id existe
         if (event.player_id) {
           // Statistiques des joueurs
           if (!playerStatsMap.has(event.player_id)) {
@@ -1357,26 +1294,6 @@ export default function MatchRecorderPage() {
             case 'goal':
               playerStats.goals++;
               playerStats.shotsOnTarget++; // Un but est aussi un tir cadré
-              teamScore++;
-              
-              console.log('⚽ BUT MARQUÉ par notre équipe!');
-              console.log('🔍 Joueurs sur le terrain:', event.players_on_field);
-              
-              // Incrémenter le +/- de +1 pour tous les joueurs présents sur le terrain
-              if (event.players_on_field && Array.isArray(event.players_on_field)) {
-                event.players_on_field.forEach((playerId: string) => {
-                  if (playerStatsMap.has(playerId)) {
-                    const playerStats = playerStatsMap.get(playerId);
-                    const oldPlusMinus = playerStats.plusMinus;
-                    playerStats.plusMinus = (playerStats.plusMinus || 0) + 1;
-                    console.log(`📈 ${playerId}: +/- ${oldPlusMinus} → ${playerStats.plusMinus} (+1)`);
-                  } else {
-                    console.warn(`⚠️ Joueur ${playerId} non trouvé dans playerStatsMap pour le but marqué`);
-                  }
-                });
-              } else {
-                console.warn('⚠️ Pas de players_on_field pour le but marqué');
-              }
               break;
             case 'shot_on_target':
               playerStats.shotsOnTarget++;
@@ -1403,33 +1320,67 @@ export default function MatchRecorderPage() {
               playerStats.redCards++;
               break;
           }
-        } else if (event.event_type.startsWith('opponent_')) {
-          // Actions de l'adversaire
-          switch (event.event_type) {
-            case 'opponent_goal':
-              opponentScore++;
-              opponentActions.shotsOnTarget++;
-              opponentActions.shotsOffTarget++;
-              
-              console.log('🥅 BUT ENCAISSÉ par notre équipe!');
-              console.log('🔍 Joueurs sur le terrain:', event.players_on_field);
-              
-              // Décrémenter le +/- de -1 pour tous les joueurs présents sur le terrain
-              if (event.players_on_field && Array.isArray(event.players_on_field)) {
-                event.players_on_field.forEach((playerId: string) => {
-                  if (playerStatsMap.has(playerId)) {
-                    const playerStats = playerStatsMap.get(playerId);
-                    const oldPlusMinus = playerStats.plusMinus;
-                    playerStats.plusMinus = (playerStats.plusMinus || 0) - 1;
-                    console.log(`📉 ${playerId}: +/- ${oldPlusMinus} → ${playerStats.plusMinus} (-1)`);
-                  } else {
-                    console.warn(`⚠️ Joueur ${playerId} non trouvé dans playerStatsMap pour le but encaissé`);
-                  }
-                });
+        }
+
+        // Traiter le +/- pour TOUS les événements goal/opponent_goal, même si player_id = NULL
+        if (event.event_type === 'goal') {
+          teamScore++;
+          console.log('⚽ BUT MARQUÉ par notre équipe!');
+          console.log('🔍 Joueurs sur le terrain:', event.players_on_field);
+          
+          // Incrémenter le +/- de +1 pour tous les joueurs présents sur le terrain
+          if (event.players_on_field && Array.isArray(event.players_on_field)) {
+            event.players_on_field.forEach((playerId: string) => {
+              if (playerStatsMap.has(playerId)) {
+                const playerStats = playerStatsMap.get(playerId);
+                const oldPlusMinus = playerStats.plusMinus;
+                playerStats.plusMinus = (playerStats.plusMinus || 0) + 1;
+                console.log(`📈 ${playerId}: +/- ${oldPlusMinus} → ${playerStats.plusMinus} (+1)`);
+                
+                // Debug spécifique pour André
+                if (playerId === '80405a0d-8bd4-42bc-bc52-624341e4053d') {
+                  console.log(`🏀 DEBUG ANDRÉ - But marqué: +/- ${oldPlusMinus} → ${playerStats.plusMinus} (+1)`);
+                }
               } else {
-                console.warn('⚠️ Pas de players_on_field pour le but encaissé');
+                console.warn(`⚠️ Joueur ${playerId} non trouvé dans playerStatsMap pour le but marqué`);
+                console.warn(`⚠️ Joueurs disponibles dans playerStatsMap:`, Array.from(playerStatsMap.keys()));
+                console.warn(`⚠️ Joueurs sur le terrain:`, event.players_on_field);
               }
-              break;
+            });
+          } else {
+            console.warn('⚠️ Pas de players_on_field pour le but marqué');
+          }
+        } else if (event.event_type === 'opponent_goal') {
+          opponentScore++;
+          opponentActions.shotsOnTarget++;
+          opponentActions.shotsOffTarget++;
+          
+          console.log('🥅 BUT ENCAISSÉ par notre équipe!');
+          console.log('🔍 Joueurs sur le terrain:', event.players_on_field);
+          
+          // Décrémenter le +/- de -1 pour tous les joueurs présents sur le terrain
+          if (event.players_on_field && Array.isArray(event.players_on_field)) {
+            event.players_on_field.forEach((playerId: string) => {
+              if (playerStatsMap.has(playerId)) {
+                const playerStats = playerStatsMap.get(playerId);
+                const oldPlusMinus = playerStats.plusMinus;
+                playerStats.plusMinus = (playerStats.plusMinus || 0) - 1;
+                console.log(`📉 ${playerId}: +/- ${oldPlusMinus} → ${playerStats.plusMinus} (-1)`);
+                
+                // Debug spécifique pour André
+                if (playerId === '80405a0d-8bd4-42bc-bc52-624341e4053d') {
+                  console.log(`🏀 DEBUG ANDRÉ - But encaissé: +/- ${oldPlusMinus} → ${playerStats.plusMinus} (-1)`);
+                }
+              } else {
+                console.warn(`⚠️ Joueur ${playerId} non trouvé dans playerStatsMap pour le but encaissé`);
+              }
+            });
+          } else {
+            console.warn('⚠️ Pas de players_on_field pour le but encaissé');
+          }
+        } else if (event.event_type.startsWith('opponent_')) {
+          // Autres actions de l'adversaire
+          switch (event.event_type) {
             case 'opponent_shot_on_target':
               opponentActions.shotsOnTarget++;
               opponentActions.shotsOffTarget++;
@@ -1860,7 +1811,8 @@ export default function MatchRecorderPage() {
         goals: player.stats.goals || 0,
         yellow_cards: player.yellowCards || 0,
           red_cards: player.redCards || 0,
-          time_played: player.totalTime || 0
+          time_played: player.totalTime || 0,
+          plus_minus: player.stats.plusMinus || 0 // Ajouter le +/- pour la cohérence
         };
         
         console.log(`🔍 FINISH MATCH - Joueur ${player.name || player.id}:`, {
@@ -3127,58 +3079,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                 {/* Boutons à droite */}
                 <div className="flex flex-col gap-1 ml-1">
                 <button
-                  onClick={async () => {
-                    const timerKey = 'team-goal-csc';
-                    if (!longPressTriggered[timerKey]) {
-                      await updateTeamGoalCSC(true);
-                    }
-                  }}
-                  onMouseDown={() => {
-                    const timerKey = 'team-goal-csc';
-                    const timerId = setTimeout(async () => {
-                      await updateTeamGoalCSC(false); // Décrémenter
-                      setLongPressTriggered(prev => ({
-                        ...prev,
-                        [timerKey]: true
-                      }));
-                    }, 500);
-                    setLongPressTimers(prev => ({
-                      ...prev,
-                      [timerKey]: timerId
-                    }));
-                  }}
-                  onMouseUp={() => {
-                    const timerKey = 'team-goal-csc';
-                    const timer = longPressTimers[timerKey];
-                    if (timer) {
-                      clearTimeout(timer);
-                      setLongPressTimers(prev => {
-                        const newTimers = { ...prev };
-                        delete newTimers[timerKey];
-                        return newTimers;
-                      });
-                    }
-                    setLongPressTriggered(prev => ({
-                      ...prev,
-                      [timerKey]: false
-                    }));
-                  }}
-                  onMouseLeave={() => {
-                    const timerKey = 'team-goal-csc';
-                    const timer = longPressTimers[timerKey];
-                    if (timer) {
-                      clearTimeout(timer);
-                      setLongPressTimers(prev => {
-                        const newTimers = { ...prev };
-                        delete newTimers[timerKey];
-                        return newTimers;
-                      });
-                    }
-                    setLongPressTriggered(prev => ({
-                      ...prev,
-                      [timerKey]: false
-                    }));
-                  }}
+                  onClick={() => setMatchData(prev => ({ ...prev, teamScore: prev.teamScore + 1 }))}
                     className="py-2 px-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors font-semibold text-xs min-w-[60px]"
                 >
                   +1 Éq

@@ -406,14 +406,6 @@ export default function TrackerDashboardPage() {
           event.players_on_field && event.players_on_field.includes(player.id)
         );
 
-        // Debug pour vérifier les événements avec player_id = NULL
-        if (player.first_name === 'Jordan' || player.last_name === 'Jordan') {
-          const nullPlayerEvents = filteredEvents.filter(event => 
-            event.event_type === 'goal' && event.player_id === null
-          );
-          console.log(`🏀 DEBUG Jordan - Événements goal avec player_id = NULL:`, nullPlayerEvents);
-          console.log(`🏀 DEBUG Jordan - Événements où Jordan était sur le terrain:`, playerEvents);
-        }
 
         // Trouver tous les événements créés par ce joueur (filtrés par match)
         const playerCreatedEvents = filteredEvents.filter(event => 
@@ -437,17 +429,6 @@ export default function TrackerDashboardPage() {
         const adjustedShotsOnTarget = totalShotsOnTarget + totalGoals; // Tirs cadrés + buts
         const adjustedShots = adjustedShotsOnTarget + totalShotsOffTarget; // Tirs cadrés + tirs non cadrés
 
-        // Debug pour vérifier les calculs
-        if (player.first_name === 'Jordan' || player.last_name === 'Jordan') {
-          console.log(`🏀 DEBUG Jordan - Événements:`, {
-            goals: totalGoals,
-            shotsOnTarget: totalShotsOnTarget,
-            shotsOffTarget: totalShotsOffTarget,
-            adjustedShotsOnTarget,
-            adjustedShots,
-            events: playerCreatedEvents.map(e => e.event_type)
-          });
-        }
 
         // Calculer le +/- basé sur les événements réels
         let plusMinus = 0;
