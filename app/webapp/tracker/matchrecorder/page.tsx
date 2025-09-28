@@ -723,117 +723,83 @@ export default function MatchRecorderPage() {
     }
   };
 
-  // Fonction pour gérer les buts CSC (contre son camp) de l'adversaire (+1 Éq)
-  const updateCSCGoalForUs = async () => {
+  // Fonction pour gérer les buts CSC (contre son camp) de l'adversaire
+  const updateTeamGoalCSC = async (increment: boolean = true) => {
     if (!matchData.selectedMatch) return;
 
     setMatchData(prev => ({
       ...prev,
-      teamScore: prev.teamScore + 1,
-      // Mettre à jour le +/- de tous les joueurs sur le terrain (+1)
-      players: prev.players.map(player => {
-        if (player.isOnField) {
-          return {
-            ...player,
-            stats: {
-              ...player.stats,
-              plusMinus: (player.stats.plusMinus || 0) + 1
-            }
-          };
-        }
-        return player;
-      })
+      teamScore: prev.teamScore + (increment ? 1 : -1),
     }));
 
-    // Sauvegarder l'événement CSC dans la base de données
-    try {
+    // Enregistrer l'événement dans la base de données
+    if (increment) {
       const playersOnField = matchData.players
-        .filter(player => player.isOnField)
-        .map(player => player.id);
+        .filter(p => p.isOnField)
+        .map(p => p.id);
 
-      console.log(`[DEBUG] Enregistrement but CSC (adversaire):`, {
+      console.log(`[DEBUG] Enregistrement but CSC adverse:`, {
         matchId: matchData.selectedMatch.id,
         eventType: 'goal',
         playerId: null,
         playersOnField,
-        totalPlayersOnField: playersOnField.length
+        totalPlayersOnField: playersOnField.length,
+        allPlayers: matchData.players.map(p => ({ id: p.id, name: p.name, isOnField: p.isOnField }))
       });
 
-      const { error } = await supabase
+      // Mettre à jour les statistiques +/- de tous les joueurs sur le terrain
+      setMatchData(prev => ({
+        ...prev,
+        players: prev.players.map(player => 
+          player.isOnField 
+            ? { 
+                ...player, 
+                stats: { 
+                  ...player.stats, 
+                  plusMinus: (player.stats.plusMinus || 0) + 1 // Incrémenter le +/- de 1 pour but CSC adverse
+                } 
+              }
+            : player
+        )
+      }));
+
+      await supabase
         .from('match_events')
         .insert({
           match_id: matchData.selectedMatch.id,
-          event_type: 'goal', // But pour notre équipe
+          event_type: 'goal',
           match_time_seconds: matchData.matchTime,
           half: matchData.currentHalf,
-          player_id: null, // NULL car c'est un CSC de l'adversaire
+          player_id: null, // NULL pour but CSC
           players_on_field: playersOnField
         });
 
-      if (error) {
-        console.error('Erreur lors de la sauvegarde de l\'événement CSC pour nous:', error);
-      } else {
-        console.log('But CSC (adversaire) enregistré avec succès');
-      }
-    } catch (error) {
-      console.error('Erreur lors de la sauvegarde de l\'événement CSC pour nous:', error);
-    }
-  };
-
-  // Fonction pour gérer les buts CSC (contre son camp) de notre équipe (+1 Adv)
-  const updateCSCGoalAgainstUs = async () => {
-    if (!matchData.selectedMatch) return;
-
-    setMatchData(prev => ({
-      ...prev,
-      opponentScore: prev.opponentScore + 1,
-      // Mettre à jour le +/- de tous les joueurs sur le terrain (-1)
-      players: prev.players.map(player => {
-        if (player.isOnField) {
-          return {
-            ...player,
-            stats: {
-              ...player.stats,
-              plusMinus: (player.stats.plusMinus || 0) - 1
-            }
-          };
-        }
-        return player;
-      })
-    }));
-
-    // Sauvegarder l'événement CSC dans la base de données
-    try {
-      const playersOnField = matchData.players
-        .filter(player => player.isOnField)
-        .map(player => player.id);
-
-      console.log(`[DEBUG] Enregistrement but CSC (notre équipe):`, {
-        matchId: matchData.selectedMatch.id,
-        eventType: 'opponent_goal',
-        playerId: null,
-        playersOnField,
-        totalPlayersOnField: playersOnField.length
+      console.log(`[DEBUG] But CSC adverse enregistré avec succès`);
+    } else {
+      // Supprimer le dernier événement de type goal avec player_id = null
+      await supabase.rpc('delete_last_event_by_type', {
+        p_match_id: matchData.selectedMatch.id,
+        p_event_type: 'goal',
+        p_player_id: null
       });
 
-      const { error } = await supabase
-        .from('match_events')
-        .insert({
-          match_id: matchData.selectedMatch.id,
-          event_type: 'opponent_goal', // But pour l'adversaire
-          match_time_seconds: matchData.matchTime,
-          half: matchData.currentHalf,
-          player_id: null, // NULL car c'est un CSC de notre équipe
-          players_on_field: playersOnField
-        });
+      // Décrémenter le +/- de tous les joueurs sur le terrain
+      setMatchData(prev => ({
+        ...prev,
+        players: prev.players.map(player => 
+          player.isOnField 
+            ? { 
+                ...player, 
+                stats: { 
+                  ...player.stats, 
+                  plusMinus: (player.stats.plusMinus || 0) - 1 // Décrémenter le +/- de 1
+                } 
+              }
+            : player
+        )
+      }));
 
-      if (error) {
-        console.error('Erreur lors de la sauvegarde de l\'événement CSC contre nous:', error);
-      } else {
-        console.log('But CSC (notre équipe) enregistré avec succès');
-      }
-    } catch (error) {
-      console.error('Erreur lors de la sauvegarde de l\'événement CSC contre nous:', error);
+      console.log(`[DEBUG] But CSC adverse supprimé avec succès`);
     }
   };
 
@@ -1365,9 +1331,8 @@ export default function MatchRecorderPage() {
       console.log('🔍 Initialisation: Tous les joueurs ont été initialisés avec +/- = 0');
 
       // ÉTAPE 2: Analyser les événements pour les statistiques
-      // IMPORTANT: Ne traiter que les événements avec player_id !== null pour éviter la double comptabilisation
       events.forEach(event => {
-        if (event.player_id !== null) {
+        if (event.player_id) {
           // Statistiques des joueurs
           if (!playerStatsMap.has(event.player_id)) {
             console.warn('⚠️ Joueur non initialisé trouvé dans les événements:', event.player_id);
@@ -1473,62 +1438,6 @@ export default function MatchRecorderPage() {
               opponentActions.shotsOffTarget++;
               break;
           }
-        }
-      });
-
-      // Gérer les événements CSC (contre son camp) avec player_id = NULL
-      console.log('🔍 Gestion des événements CSC (player_id = NULL)...');
-      
-      // Debug: afficher tous les événements avec player_id = NULL
-      const nullPlayerEvents = events.filter(event => event.player_id === null);
-      console.log('🔍 Événements avec player_id = NULL:', nullPlayerEvents.map(e => ({
-        type: e.event_type,
-        playersOnField: e.players_on_field?.length || 0
-      })));
-      
-      // Buts CSC de l'adversaire (bénéficient notre équipe)
-      const cscGoalsForUs = events.filter(event => 
-        event.event_type === 'goal' && 
-        event.player_id === null && 
-        event.players_on_field
-      );
-      
-      // Buts CSC de notre équipe (pénalisent notre équipe)
-      const cscGoalsAgainstUs = events.filter(event => 
-        event.event_type === 'opponent_goal' && 
-        event.player_id === null && 
-        event.players_on_field
-      );
-      
-      console.log(`🔍 Événements CSC trouvés: ${cscGoalsForUs.length} pour nous, ${cscGoalsAgainstUs.length} contre nous`);
-      
-      // Appliquer les +/- pour les buts CSC de l'adversaire (+1 pour tous les joueurs sur le terrain)
-      cscGoalsForUs.forEach(event => {
-        console.log('🏆 CSC - But de l\'adversaire qui nous bénéficie');
-        if (event.players_on_field && Array.isArray(event.players_on_field)) {
-          event.players_on_field.forEach((playerId: string) => {
-            if (playerStatsMap.has(playerId)) {
-              const playerStats = playerStatsMap.get(playerId);
-              const oldPlusMinus = playerStats.plusMinus;
-              playerStats.plusMinus = (playerStats.plusMinus || 0) + 1;
-              console.log(`🏆 CSC - ${playerId}: +/- ${oldPlusMinus} → ${playerStats.plusMinus} (+1)`);
-            }
-          });
-        }
-      });
-      
-      // Appliquer les +/- pour les buts CSC de notre équipe (-1 pour tous les joueurs sur le terrain)
-      cscGoalsAgainstUs.forEach(event => {
-        console.log('⚽ CSC - But de notre équipe qui nous pénalise');
-        if (event.players_on_field && Array.isArray(event.players_on_field)) {
-          event.players_on_field.forEach((playerId: string) => {
-            if (playerStatsMap.has(playerId)) {
-              const playerStats = playerStatsMap.get(playerId);
-              const oldPlusMinus = playerStats.plusMinus;
-              playerStats.plusMinus = (playerStats.plusMinus || 0) - 1;
-              console.log(`⚽ CSC - ${playerId}: +/- ${oldPlusMinus} → ${playerStats.plusMinus} (-1)`);
-            }
-          });
         }
       });
 
@@ -3218,13 +3127,69 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                 {/* Boutons à droite */}
                 <div className="flex flex-col gap-1 ml-1">
                 <button
-                  onClick={updateCSCGoalForUs}
+                  onClick={async () => {
+                    const timerKey = 'team-goal-csc';
+                    if (!longPressTriggered[timerKey]) {
+                      await updateTeamGoalCSC(true);
+                    }
+                  }}
+                  onMouseDown={() => {
+                    const timerKey = 'team-goal-csc';
+                    const timerId = setTimeout(async () => {
+                      await updateTeamGoalCSC(false); // Décrémenter
+                      setLongPressTriggered(prev => ({
+                        ...prev,
+                        [timerKey]: true
+                      }));
+                    }, 500);
+                    setLongPressTimers(prev => ({
+                      ...prev,
+                      [timerKey]: timerId
+                    }));
+                  }}
+                  onMouseUp={() => {
+                    const timerKey = 'team-goal-csc';
+                    const timer = longPressTimers[timerKey];
+                    if (timer) {
+                      clearTimeout(timer);
+                      setLongPressTimers(prev => {
+                        const newTimers = { ...prev };
+                        delete newTimers[timerKey];
+                        return newTimers;
+                      });
+                    }
+                    setLongPressTriggered(prev => ({
+                      ...prev,
+                      [timerKey]: false
+                    }));
+                  }}
+                  onMouseLeave={() => {
+                    const timerKey = 'team-goal-csc';
+                    const timer = longPressTimers[timerKey];
+                    if (timer) {
+                      clearTimeout(timer);
+                      setLongPressTimers(prev => {
+                        const newTimers = { ...prev };
+                        delete newTimers[timerKey];
+                        return newTimers;
+                      });
+                    }
+                    setLongPressTriggered(prev => ({
+                      ...prev,
+                      [timerKey]: false
+                    }));
+                  }}
                     className="py-2 px-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors font-semibold text-xs min-w-[60px]"
                 >
                   +1 Éq
                 </button>
                 <button
-                    onClick={updateCSCGoalAgainstUs}
+                    onClick={async () => {
+                      const timerKey = 'opponent-goals';
+                      if (!longPressTriggered[timerKey]) {
+                        await updateOpponentGoal(true);
+                      }
+                    }}
                     className="py-2 px-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs min-w-[45px]"
                 >
                   +1 Adv
