@@ -2,7 +2,7 @@
 /* eslint-disable react/no-unescaped-entities */
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
 import { 
@@ -27,7 +27,10 @@ import {
   Square,
   ChevronUp,
   ChevronDown,
-  ChevronsUpDown
+  ChevronsUpDown,
+  WifiOff,
+  Wifi,
+  Database
 } from 'lucide-react';
 
 interface Player {
@@ -83,6 +86,26 @@ interface MatchData {
     shotsOnTarget: number;
     shotsOffTarget: number;
   };
+}
+
+interface LocalMatchEvent {
+  id: string;
+  match_id: string;
+  event_type: string;
+  match_time_seconds: number;
+  half: number;
+  player_id: string | null;
+  players_on_field: string[];
+  created_at: string;
+  synced?: boolean;
+}
+
+interface LocalMatchSnapshot {
+  match_id: string;
+  timestamp: string;
+  matchData: MatchData;
+  events: LocalMatchEvent[];
+  lastSavedAt: string;
 }
 
 const ACTIONS = [
@@ -180,6 +203,12 @@ export default function MatchRecorderPage() {
   const [selectedPlayerForChange, setSelectedPlayerForChange] = useState<string | null>(null);
   const [changeType, setChangeType] = useState<'substitution' | 'swap' | null>(null);
 
+  // États pour la gestion hors ligne
+  const [isOnline, setIsOnline] = useState(true);
+  const [localEvents, setLocalEvents] = useState<LocalMatchEvent[]>([]);
+  const [lastSyncTime, setLastSyncTime] = useState<string>('');
+  const [isSyncing, setIsSyncing] = useState(false);
+
   // Charger les données depuis Supabase
   useEffect(() => {
     if (activeTeam) {
@@ -273,6 +302,67 @@ export default function MatchRecorderPage() {
 
     return () => clearInterval(interval);
   }, [matchData.isRunning]);
+
+  // Détecter l'état de connexion
+  useEffect(() => {
+    const handleOnline = () => {
+      console.log('✅ Connexion internet rétablie');
+      setIsOnline(true);
+    };
+
+    const handleOffline = () => {
+      console.log('⚠️ Perte de connexion internet');
+      setIsOnline(false);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    // Vérifier l'état initial
+    setIsOnline(navigator.onLine);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Charger les données locales sauvegardées au démarrage
+  useEffect(() => {
+    const loadLocalData = () => {
+      try {
+        const savedData = localStorage.getItem('matchRecorder_localData');
+        if (savedData) {
+          const parsedData = JSON.parse(savedData) as LocalMatchSnapshot;
+          console.log('📦 Données locales trouvées:', parsedData);
+          
+          // Vérifier si les données sont récentes (moins de 7 jours)
+          const savedDate = new Date(parsedData.lastSavedAt);
+          const daysSinceSave = (Date.now() - savedDate.getTime()) / (1000 * 60 * 60 * 24);
+          
+          if (daysSinceSave < 7) {
+            setLocalEvents(parsedData.events || []);
+            console.log(`📦 ${parsedData.events.length} événements locaux chargés`);
+          } else {
+            console.log('🗑️ Données locales trop anciennes, suppression...');
+            localStorage.removeItem('matchRecorder_localData');
+          }
+        }
+      } catch (error) {
+        console.error('Erreur lors du chargement des données locales:', error);
+      }
+    };
+
+    loadLocalData();
+  }, []);
+
+  // Synchroniser automatiquement quand on revient en ligne avec des données non synchronisées
+  useEffect(() => {
+    if (isOnline && localEvents.length > 0 && !localEvents.every(e => e.synced) && !isSyncing && matchData.selectedMatch) {
+      console.log('Auto-synchronisation des données locales...');
+      syncLocalData();
+    }
+  }, [isOnline, localEvents.length, matchData.selectedMatch, isSyncing]);
 
   const formatTime = (seconds: number): string => {
     const minutes = Math.floor(seconds / 60);
@@ -388,6 +478,184 @@ export default function MatchRecorderPage() {
         return (bValue as number) - (aValue as number);
       }
     });
+  };
+
+  // Fonctions de gestion hors ligne
+  const saveToLocalStorage = (event?: LocalMatchEvent) => {
+    try {
+      if (!matchData.selectedMatch) return;
+      
+      // Ajouter le nouvel événement s'il existe
+      let updatedEvents = [...localEvents];
+      if (event) {
+        updatedEvents.push(event);
+        setLocalEvents(updatedEvents);
+      }
+
+      // Créer un snapshot complet
+      const snapshot: LocalMatchSnapshot = {
+        match_id: matchData.selectedMatch.id,
+        timestamp: new Date().toISOString(),
+        matchData: matchData,
+        events: updatedEvents,
+        lastSavedAt: new Date().toISOString()
+      };
+
+      // Sauvegarder dans localStorage
+      localStorage.setItem('matchRecorder_localData', JSON.stringify(snapshot));
+      console.log('💾 Données sauvegardées localement:', {
+        matchId: snapshot.match_id,
+        eventsCount: snapshot.events.length,
+        timestamp: snapshot.lastSavedAt
+      });
+    } catch (error) {
+      console.error('Erreur lors de la sauvegarde locale:', error);
+    }
+  };
+
+  const syncLocalData = async () => {
+    if (!matchData.selectedMatch || localEvents.length === 0) {
+      console.log('Aucune donnée à synchroniser');
+      return;
+    }
+
+    // Filtrer les événements non synchronisés
+    const unsyncedEvents = localEvents.filter(event => !event.synced);
+
+    if (unsyncedEvents.length === 0) {
+      console.log('Tous les événements sont déjà synchronisés');
+      return;
+    }
+
+    setIsSyncing(true);
+    console.log(`🔄 Synchronisation de ${unsyncedEvents.length} événements...`);
+
+    try {
+      // Tenter de sauvegarder chaque événement non synchronisé
+      for (const event of unsyncedEvents) {
+        const { error } = await supabase
+          .from('match_events')
+          .insert({
+            match_id: event.match_id,
+            event_type: event.event_type,
+            match_time_seconds: event.match_time_seconds,
+            half: event.half,
+            player_id: event.player_id,
+            players_on_field: event.players_on_field
+          });
+
+        if (!error) {
+          // Marquer comme synchronisé dans la liste locale
+          const updatedEvents = localEvents.map(e => 
+            e.id === event.id ? { ...e, synced: true } : e
+          );
+          setLocalEvents(updatedEvents);
+          
+          // Mettre à jour localStorage
+          const snapshot: LocalMatchSnapshot = {
+            match_id: matchData.selectedMatch.id,
+            timestamp: new Date().toISOString(),
+            matchData: matchData,
+            events: updatedEvents,
+            lastSavedAt: new Date().toISOString()
+          };
+          localStorage.setItem('matchRecorder_localData', JSON.stringify(snapshot));
+          console.log(`✅ Événement ${event.id} synchronisé`);
+        } else {
+          console.error(`❌ Erreur lors de la synchronisation de l'événement ${event.id}:`, error);
+          break; // Arrêter si erreur
+        }
+      }
+
+      // Nettoyer les événements synchronisés après un délai
+      const allSynced = localEvents.every(e => e.synced);
+      if (allSynced) {
+        console.log('✅ Tous les événements sont synchronisés');
+        setTimeout(() => {
+          localStorage.removeItem('matchRecorder_localData');
+          setLocalEvents([]);
+        }, 5000);
+      }
+
+      setLastSyncTime(new Date().toISOString());
+    } catch (error) {
+      console.error('Erreur lors de la synchronisation:', error);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const exportLocalDataToCSV = () => {
+    try {
+      const savedData = localStorage.getItem('matchRecorder_localData');
+      if (!savedData) {
+        alert('Aucune donnée locale à exporter');
+        return;
+      }
+
+      const parsedData = JSON.parse(savedData) as LocalMatchSnapshot;
+      
+      if (!parsedData.events || parsedData.events.length === 0) {
+        alert('Aucun événement local à exporter');
+        return;
+      }
+
+      // En-têtes CSV pour les événements
+      const headers = [
+        'ID Événement',
+        'Type d\'événement',
+        'Temps de match (secondes)',
+        'Mi-temps',
+        'ID Joueur',
+        'Joueurs sur le terrain',
+        'Date de création',
+        'Synchronisé'
+      ];
+
+      // Données des événements
+      const eventData = parsedData.events.map(event => [
+        event.id,
+        event.event_type,
+        event.match_time_seconds || 0,
+        event.half || 1,
+        event.player_id || 'N/A',
+        event.players_on_field ? event.players_on_field.join(';') : 'N/A',
+        new Date(event.created_at).toLocaleString('fr-FR'),
+        event.synced ? 'Oui' : 'Non'
+      ]);
+
+      // Informations du match
+      const matchInfo = [
+        [''],
+        ['INFORMATIONS DU MATCH (DONNÉES LOCALES)'],
+        ['ID Match', parsedData.match_id],
+        ['Date de sauvegarde', new Date(parsedData.lastSavedAt).toLocaleString('fr-FR')],
+        [''],
+        ['ÉVÉNEMENTS DU MATCH']
+      ];
+
+      // Combiner toutes les données
+      const csvContent = [
+        headers.join(','),
+        ...eventData.map(row => row.map(cell => `"${cell}"`).join(',')),
+        ...matchInfo.map(row => row.map(cell => `"${cell}"`).join(','))
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `match_data_local_${parsedData.match_id}_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      console.log('📥 Export CSV local réussi');
+    } catch (error) {
+      console.error('Erreur lors de l\'export CSV local:', error);
+      alert('Erreur lors de l\'export des données locales');
+    }
   };
 
   const formatMatchTime = (seconds: number): string => {
@@ -553,6 +821,20 @@ export default function MatchRecorderPage() {
         allPlayers: matchData.players.map(p => ({ id: p.id, name: p.name, isOnField: p.isOnField }))
       });
 
+      // Créer l'événement local
+      const localEvent: LocalMatchEvent = {
+        id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        match_id: matchData.selectedMatch.id,
+        event_type: eventType,
+        match_time_seconds: matchData.matchTime,
+        half: matchData.currentHalf,
+        player_id: playerId,
+        players_on_field: playersOnField,
+        created_at: new Date().toISOString(),
+        synced: false
+      };
+
+      // Essayer de sauvegarder en ligne
       const { error: insertError } = await supabase
         .from('match_events')
         .insert({
@@ -566,8 +848,14 @@ export default function MatchRecorderPage() {
 
       if (insertError) {
         console.error(`Erreur lors de l'insertion de l'événement ${statKey}:`, insertError);
+        console.log('💾 Enregistrement local en cours...');
+        // Sauvegarder localement si erreur
+        saveToLocalStorage(localEvent);
       } else {
         console.log(`[DEBUG] ${statKey} enregistré avec succès`);
+        localEvent.synced = true;
+        // Sauvegarder aussi localement pour backup
+        saveToLocalStorage(localEvent);
       }
     } else {
       // Supprimer le dernier événement de ce type
@@ -637,6 +925,19 @@ export default function MatchRecorderPage() {
         )
       }));
 
+      // Créer l'événement local
+      const localEvent: LocalMatchEvent = {
+        id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        match_id: matchData.selectedMatch.id,
+        event_type: 'opponent_goal',
+        match_time_seconds: matchData.matchTime,
+        half: matchData.currentHalf,
+        player_id: null,
+        players_on_field: playersOnField,
+        created_at: new Date().toISOString(),
+        synced: false
+      };
+
       const { error: insertError } = await supabase
         .from('match_events')
         .insert({
@@ -650,8 +951,12 @@ export default function MatchRecorderPage() {
 
       if (insertError) {
         console.error('Erreur lors de l\'insertion de l\'événement but adverse:', insertError);
+        console.log('💾 Enregistrement local en cours...');
+        saveToLocalStorage(localEvent);
       } else {
         console.log(`[DEBUG] But adverse enregistré avec succès`);
+        localEvent.synced = true;
+        saveToLocalStorage(localEvent);
       }
     } else {
       // Supprimer le dernier événement de ce type
@@ -702,7 +1007,20 @@ export default function MatchRecorderPage() {
         .filter(p => p.isOnField)
         .map(p => p.id);
 
-      await supabase
+      // Créer l'événement local
+      const localEvent: LocalMatchEvent = {
+        id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        match_id: matchData.selectedMatch.id,
+        event_type: eventType,
+        match_time_seconds: matchData.matchTime,
+        half: matchData.currentHalf,
+        player_id: null,
+        players_on_field: playersOnField,
+        created_at: new Date().toISOString(),
+        synced: false
+      };
+
+      const { error: insertError } = await supabase
         .from('match_events')
         .insert({
           match_id: matchData.selectedMatch.id,
@@ -712,6 +1030,15 @@ export default function MatchRecorderPage() {
           player_id: null, // NULL pour l'adversaire
           players_on_field: playersOnField
         });
+
+      if (insertError) {
+        console.error('Erreur lors de l\'insertion de l\'événement adverse:', insertError);
+        console.log('💾 Enregistrement local en cours...');
+        saveToLocalStorage(localEvent);
+      } else {
+        localEvent.synced = true;
+        saveToLocalStorage(localEvent);
+      }
     } else {
       // Supprimer le dernier événement de ce type
       const eventType = actionType === 'shotsOnTarget' ? 'opponent_shot_on_target' : 'opponent_shot';
@@ -907,7 +1234,20 @@ export default function MatchRecorderPage() {
         .filter(p => p.isOnField)
         .map(p => p.id);
 
-      await supabase
+      // Créer l'événement local
+      const localEvent: LocalMatchEvent = {
+        id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        match_id: matchData.selectedMatch.id,
+        event_type: eventType,
+        match_time_seconds: matchData.matchTime,
+        half: matchData.currentHalf,
+        player_id: playerId,
+        players_on_field: playersOnField,
+        created_at: new Date().toISOString(),
+        synced: false
+      };
+
+      const { error: insertError } = await supabase
         .from('match_events')
         .insert({
           match_id: matchData.selectedMatch.id,
@@ -917,6 +1257,15 @@ export default function MatchRecorderPage() {
           player_id: playerId,
           players_on_field: playersOnField
         });
+
+      if (insertError) {
+        console.error('Erreur lors de l\'insertion de l\'événement carte:', insertError);
+        console.log('💾 Enregistrement local en cours...');
+        saveToLocalStorage(localEvent);
+      } else {
+        localEvent.synced = true;
+        saveToLocalStorage(localEvent);
+      }
     } else {
       // Supprimer le dernier événement de ce type pour ce joueur
       const eventType = cardType === 'yellow' ? 'yellow_card' : 'red_card';
@@ -1264,7 +1613,6 @@ export default function MatchRecorderPage() {
         });
       });
 
-      console.log('🔍 Initialisation: Tous les joueurs ont été initialisés avec +/- = 0');
 
       // ÉTAPE 2: Analyser les événements pour les statistiques
       matchEvents?.forEach(event => {
@@ -1325,8 +1673,6 @@ export default function MatchRecorderPage() {
         // Traiter le +/- pour TOUS les événements goal/opponent_goal, même si player_id = NULL
         if (event.event_type === 'goal') {
           teamScore++;
-          console.log('⚽ BUT MARQUÉ par notre équipe!');
-          console.log('🔍 Joueurs sur le terrain:', event.players_on_field);
           
           // Incrémenter le +/- de +1 pour tous les joueurs présents sur le terrain
           if (event.players_on_field && Array.isArray(event.players_on_field)) {
@@ -1335,12 +1681,7 @@ export default function MatchRecorderPage() {
                 const playerStats = playerStatsMap.get(playerId);
                 const oldPlusMinus = playerStats.plusMinus;
                 playerStats.plusMinus = (playerStats.plusMinus || 0) + 1;
-                console.log(`📈 ${playerId}: +/- ${oldPlusMinus} → ${playerStats.plusMinus} (+1)`);
                 
-                // Debug spécifique pour André
-                if (playerId === '80405a0d-8bd4-42bc-bc52-624341e4053d') {
-                  console.log(`🏀 DEBUG ANDRÉ - But marqué: +/- ${oldPlusMinus} → ${playerStats.plusMinus} (+1)`);
-                }
               } else {
                 console.warn(`⚠️ Joueur ${playerId} non trouvé dans playerStatsMap pour le but marqué`);
                 console.warn(`⚠️ Joueurs disponibles dans playerStatsMap:`, Array.from(playerStatsMap.keys()));
@@ -1355,8 +1696,6 @@ export default function MatchRecorderPage() {
           opponentActions.shotsOnTarget++;
           opponentActions.shotsOffTarget++;
           
-          console.log('🥅 BUT ENCAISSÉ par notre équipe!');
-          console.log('🔍 Joueurs sur le terrain:', event.players_on_field);
           
           // Décrémenter le +/- de -1 pour tous les joueurs présents sur le terrain
           if (event.players_on_field && Array.isArray(event.players_on_field)) {
@@ -1365,12 +1704,7 @@ export default function MatchRecorderPage() {
                 const playerStats = playerStatsMap.get(playerId);
                 const oldPlusMinus = playerStats.plusMinus;
                 playerStats.plusMinus = (playerStats.plusMinus || 0) - 1;
-                console.log(`📉 ${playerId}: +/- ${oldPlusMinus} → ${playerStats.plusMinus} (-1)`);
                 
-                // Debug spécifique pour André
-                if (playerId === '80405a0d-8bd4-42bc-bc52-624341e4053d') {
-                  console.log(`🏀 DEBUG ANDRÉ - But encaissé: +/- ${oldPlusMinus} → ${playerStats.plusMinus} (-1)`);
-                }
               } else {
                 console.warn(`⚠️ Joueur ${playerId} non trouvé dans playerStatsMap pour le but encaissé`);
               }
@@ -1392,14 +1726,6 @@ export default function MatchRecorderPage() {
         }
       });
 
-      // Log final des +/- calculés
-      console.log('🔍 RÉSUMÉ FINAL des +/- calculés:');
-      allPlayersWithStats.forEach(player => {
-        const stats = playerStatsMap.get(player.id);
-        if (stats) {
-          console.log(`📊 ${player.name}: +/- ${stats.plusMinus}`);
-        }
-      });
 
       // Mettre à jour les joueurs avec leurs statistiques ET le temps de jeu
       const updatedPlayers = allPlayersWithStats.map(player => {
@@ -2963,6 +3289,42 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
             </div>
             
             <div className="flex items-center gap-2">
+              {/* Indicateur de connexion */}
+              <div className="flex items-center gap-1 px-2 py-1 rounded bg-gray-100 dark:bg-gray-700" title={isOnline ? "Connecté" : "Hors ligne - Données sauvegardées localement"}>
+                {isOnline ? (
+                  <Wifi className="h-3 w-3 text-green-600" />
+                ) : (
+                  <WifiOff className="h-3 w-3 text-red-600" />
+                )}
+                {localEvents.length > 0 && !localEvents.every(e => e.synced) && (
+                  <span title={`${localEvents.filter(e => !e.synced).length} événements non synchronisés`}>
+                    <Database className="h-3 w-3 text-orange-600 animate-pulse" />
+                  </span>
+                )}
+              </div>
+              
+              {localEvents.length > 0 && !localEvents.every(e => e.synced) && isOnline && !isSyncing && (
+                <button
+                  onClick={syncLocalData}
+                  className="flex items-center gap-1 px-2 py-1 bg-orange-600 text-white rounded hover:bg-orange-700 transition-colors text-xs font-semibold"
+                  title="Synchroniser les données locales"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Sync
+                </button>
+              )}
+              
+              {localEvents.length > 0 && (
+                <button
+                  onClick={exportLocalDataToCSV}
+                  className="flex items-center gap-1 px-2 py-1 bg-amber-600 text-white rounded hover:bg-amber-700 transition-colors text-xs font-semibold"
+                  title="Exporter les données locales"
+                >
+                  <Database className="h-3 w-3" />
+                  Local CSV
+                </button>
+              )}
+              
               <button
                 onClick={() => setActiveView(activeView === 'recording' ? 'summary' : 'recording')}
                 className={`flex items-center gap-1 px-2 py-1 rounded transition-colors text-xs font-semibold ${
