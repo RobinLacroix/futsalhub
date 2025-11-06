@@ -640,18 +640,34 @@ export default function DashboardPage() {
     return matchStats.filter(match => performanceFilters.selectedMatches.includes(match.id));
   }, [matchStats, performanceFilters.selectedMatches]);
 
+  // Filtrer les statistiques de présence détaillées pour ne garder que les joueurs existants dans la table players
+  const filteredDetailedAttendanceStats = useMemo(() => {
+    // Créer un Set des IDs des joueurs existants pour une recherche rapide
+    const existingPlayerIds = new Set(players.map(p => p.id));
+    
+    // Filtrer pour ne garder que les joueurs qui existent encore dans la table players
+    return detailedAttendanceStats.filter(stats => 
+      existingPlayerIds.has(stats.player_id)
+    );
+  }, [detailedAttendanceStats, players]);
+
   // Calcul des données pour les graphiques à partir des joueurs filtrés
   const chartData = useMemo(() => {
     // Calculer les stats de présence pour le radar chart en utilisant les données brutes des entraînements
-    const detailedAttendanceStats = calculateTrainingAttendanceStats(rawTrainingsData || []);
+    const allDetailedAttendanceStats = calculateTrainingAttendanceStats(rawTrainingsData || []);
+    
+    // Filtrer pour ne garder que les joueurs qui existent encore dans filteredPlayers
+    const filteredAttendanceStats = allDetailedAttendanceStats.filter(stats => 
+      filteredPlayers.some(player => player.id === stats.player_id)
+    );
     
     return {
       statusDistribution: aggregateByField(filteredPlayers, 'status'),
       footDistribution: aggregateByField(filteredPlayers, 'strong_foot'),
       matchesByStatus: calculateAverageByField(filteredPlayers, 'status', 'matches_played'),
       goalsByStatus: calculateAverageByField(filteredPlayers, 'status', 'goals'),
-      attendanceRadar: detailedAttendanceStats.map(stats => {
-        // Trouver le nom du joueur
+      attendanceRadar: filteredAttendanceStats.map(stats => {
+        // Trouver le nom du joueur (devrait toujours exister car filtré)
         const player = filteredPlayers.find(p => p.id === stats.player_id);
         const playerName = player ? `${player.first_name} ${player.last_name}` : `Joueur ${stats.player_id}`;
         
@@ -766,6 +782,8 @@ export default function DashboardPage() {
 
     // Formater les données pour les graphiques
     const scoredData = filteredStats.map(match => ({
+
+
       name: match.title,
       'Phase Offensive': match.goals_by_type.offensive,
       'Transition': match.goals_by_type.transition,
@@ -1182,9 +1200,9 @@ export default function DashboardPage() {
           <div className="bg-white p-6 rounded-lg shadow">
             <h3 className="text-lg text-gray-900 font-semibold mb-4">Statistiques de présence détaillées</h3>
             <div className="h-80">
-              {detailedAttendanceStats.length > 0 ? (
+              {filteredDetailedAttendanceStats.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={detailedAttendanceStats}>
+                  <BarChart data={filteredDetailedAttendanceStats}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis 
                       dataKey="player_id" 
