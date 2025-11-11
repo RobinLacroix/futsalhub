@@ -116,7 +116,6 @@ const ACTIONS = [
   { id: 'ballLoss', name: 'Perte de balle', acronym: 'PdB', icon: AlertTriangle, color: 'bg-red-500' },
   { id: 'ballRecovery', name: 'Récupération', acronym: 'R', icon: RefreshCw, color: 'bg-green-600' },
   { id: 'dribbleSuccess', name: 'Dribble réussi', acronym: 'D', icon: ArrowRight, color: 'bg-purple-500' },
-  { id: 'oneOnOneDefLost', name: '1v1 déf perdu', acronym: 'E', icon: AlertTriangle, color: 'bg-red-700' },
 ];
 
 const DEFAULT_SEQUENCE_TIME_LIMIT = 180;
@@ -3687,7 +3686,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                           </div>
 
                           {/* Actions rapides */}
-                          <div className="grid grid-cols-2 gap-1">
+                          <div className="grid grid-cols-2 gap-2">
                             {ACTIONS.map((action) => {
                               const IconComponent = action.icon;
                               return (
@@ -3716,7 +3715,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                           </div>
 
                           {/* Cartons */}
-                          <div className="flex justify-center gap-2 mt-2">
+                          <div className="flex justify-center gap-3 mt-4">
                             <button
                               onClick={async () => {
                                 const timerKey = `${player.id}-yellowCard`;
@@ -3756,7 +3755,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                           </div>
 
                           {/* Instructions tactiles */}
-                          <div className="mt-3 text-center">
+                          <div className="mt-4 text-center">
                             <button
                               onTouchStart={() => handlePlayerSelection(player.id, player.isOnField)}
                               onMouseDown={() => handlePlayerSelection(player.id, player.isOnField)}
@@ -3823,7 +3822,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                         </div>
 
                         {/* Cartons */}
-                        <div className="flex justify-center gap-1">
+                        <div className="flex justify-center gap-2 mt-3">
                           <button
                             onClick={() => {
                               const timerKey = `${player.id}-yellowCard`;
@@ -3863,7 +3862,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                         </div>
 
                         {/* Instructions tactiles */}
-                        <div className="mt-2 text-center">
+                        <div className="mt-3 text-center">
                           <button
                             onTouchStart={() => handlePlayerSelection(player.id, player.isOnField)}
                             onMouseDown={() => handlePlayerSelection(player.id, player.isOnField)}
