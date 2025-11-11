@@ -753,47 +753,86 @@ export default function MatchRecorderPage() {
     if (!matchData.selectedMatch) return;
 
     // Mettre à jour l'état local
+    let actualDeltaResult = 0;
+
     setMatchData(prev => {
-      const updatedPlayers = prev.players.map(player => 
-        player.id === playerId 
-          ? { 
-              ...player, 
-              stats: { 
-                ...player.stats, 
-                [statKey]: (player.stats[statKey] || 0) + (increment ? 1 : -1) 
-              } 
-            }
-          : player
-      );
+      const delta = increment ? 1 : -1;
+
+      const targetPlayer = prev.players.find(player => player.id === playerId);
+      const currentValue = targetPlayer ? targetPlayer.stats[statKey] || 0 : 0;
+      const nextValue = Math.max(currentValue + delta, 0);
+      const actualDelta = nextValue - currentValue;
+      actualDeltaResult = actualDelta;
+
+      if (actualDelta === 0 && statKey !== 'goals') {
+        // Aucun changement à appliquer
+        return prev;
+      }
+
+      const updatedPlayers = prev.players.map(player => {
+        if (player.id !== playerId) {
+          return player;
+        }
+
+        return {
+          ...player,
+          stats: {
+            ...player.stats,
+            [statKey]: nextValue,
+          },
+        };
+      });
 
       let newTeamScore = prev.teamScore;
       if (statKey === 'goals') {
-        newTeamScore = prev.teamScore + (increment ? 1 : -1);
-        
-        // Si c'est un but, mettre à jour le +/- de tous les joueurs sur le terrain
-        if (increment) {
-          // Incrémenter le +/- de tous les joueurs sur le terrain
-          updatedPlayers.forEach(player => {
-            if (player.isOnField) {
-              player.stats.plusMinus = (player.stats.plusMinus || 0) + 1;
-            }
-          });
-        } else {
-          // Décrémenter le +/- de tous les joueurs sur le terrain
-          updatedPlayers.forEach(player => {
-            if (player.isOnField) {
-              player.stats.plusMinus = (player.stats.plusMinus || 0) - 1;
-            }
-          });
+        if (actualDelta === 0) {
+          return prev;
         }
-        
-        // Un but incrémente aussi les tirs cadrés (mais PAS les tirs totaux pour éviter la double comptabilisation)
-        updatedPlayers.forEach(player => {
-          if (player.id === playerId) {
-            player.stats.shotsOnTarget = (player.stats.shotsOnTarget || 0) + (increment ? 1 : -1);
-            // Note: On n'incrémente PAS shotsOffTarget car un but est déjà un tir cadré
+
+        newTeamScore = Math.max(prev.teamScore + actualDelta, 0);
+
+        const plusMinusDelta = actualDelta > 0 ? 1 : -1;
+
+        const playersWithAdjustments = updatedPlayers.map(player => {
+          let updatedStats = player.stats;
+
+          if (player.isOnField) {
+            const currentPlusMinus = player.stats.plusMinus || 0;
+            const nextPlusMinus = currentPlusMinus + plusMinusDelta;
+            if (nextPlusMinus !== currentPlusMinus) {
+              updatedStats = {
+                ...updatedStats,
+                plusMinus: nextPlusMinus,
+              };
+            }
           }
+
+          if (player.id === playerId) {
+            const currentShotsOnTarget = player.stats.shotsOnTarget || 0;
+            const nextShotsOnTarget = Math.max(currentShotsOnTarget + actualDelta, 0);
+            if (nextShotsOnTarget !== currentShotsOnTarget) {
+              updatedStats = {
+                ...updatedStats,
+                shotsOnTarget: nextShotsOnTarget,
+              };
+            }
+          }
+
+          if (updatedStats !== player.stats) {
+            return {
+              ...player,
+              stats: updatedStats,
+            };
+          }
+
+          return player;
         });
+
+        return {
+          ...prev,
+          players: playersWithAdjustments,
+          teamScore: newTeamScore,
+        };
       } else if (statKey === 'shotsOnTarget') {
         // Un tir cadré est déjà compté dans shotsOnTarget, pas besoin d'incrémenter shotsOffTarget
         // Note: shotsOffTarget représente les tirs non cadrés uniquement
@@ -866,6 +905,10 @@ export default function MatchRecorderPage() {
         saveToLocalStorage(localEvent);
       }
     } else {
+      if (actualDeltaResult === 0) {
+        return;
+      }
+
       // Supprimer le dernier événement de ce type
       const eventType = statKey === 'goals' ? 'goal' : 
                        statKey === 'shotsOnTarget' ? 'shot_on_target' :
@@ -891,15 +934,21 @@ export default function MatchRecorderPage() {
   const updateOpponentGoal = async (increment: boolean = true) => {
     if (!matchData.selectedMatch) return;
 
-    setMatchData(prev => ({
-      ...prev,
-      opponentScore: prev.opponentScore + (increment ? 1 : -1),
-      opponentActions: {
-        ...prev.opponentActions,
-        shotsOnTarget: prev.opponentActions.shotsOnTarget + (increment ? 1 : -1), // Un but adverse ajoute aussi un tir cadré
-        shotsOffTarget: prev.opponentActions.shotsOffTarget + (increment ? 1 : -1), // Un but adverse ajoute aussi un tir total
-      },
-    }));
+    setMatchData(prev => {
+      const delta = increment ? 1 : -1;
+      const nextOpponentScore = Math.max(prev.opponentScore + delta, 0);
+      const nextShotsOnTarget = Math.max(prev.opponentActions.shotsOnTarget + delta, 0);
+
+      return {
+        ...prev,
+        opponentScore: nextOpponentScore,
+        opponentActions: {
+          ...prev.opponentActions,
+          shotsOnTarget: nextShotsOnTarget, // Un but adverse ajoute un tir cadré
+          shotsOffTarget: prev.opponentActions.shotsOffTarget, // Ne pas compter de tir non cadré pour un but
+        },
+      };
+    });
 
     // Enregistrer l'événement dans la base de données
     if (increment) {
@@ -1000,13 +1049,27 @@ export default function MatchRecorderPage() {
   const updateOpponentAction = async (actionType: 'shotsOnTarget' | 'shotsOffTarget', increment: boolean = true) => {
     if (!matchData.selectedMatch) return;
 
-    setMatchData(prev => ({
-      ...prev,
-      opponentActions: {
-        ...prev.opponentActions,
-        [actionType]: prev.opponentActions[actionType] + (increment ? 1 : -1),
-      },
-    }));
+    let actualDeltaResult = 0;
+
+    setMatchData(prev => {
+      const delta = increment ? 1 : -1;
+      const currentValue = prev.opponentActions[actionType] || 0;
+      const nextValue = Math.max(currentValue + delta, 0);
+      const actualDelta = nextValue - currentValue;
+      actualDeltaResult = actualDelta;
+
+      if (actualDelta === 0) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        opponentActions: {
+          ...prev.opponentActions,
+          [actionType]: nextValue,
+        },
+      };
+    });
 
     // Enregistrer l'événement dans la base de données
     if (increment) {
@@ -1048,6 +1111,10 @@ export default function MatchRecorderPage() {
         saveToLocalStorage(localEvent);
       }
     } else {
+      if (actualDeltaResult === 0) {
+        return;
+      }
+
       // Supprimer le dernier événement de ce type
       const eventType = actionType === 'shotsOnTarget' ? 'opponent_shot_on_target' : 'opponent_shot';
       await supabase.rpc('delete_last_event_by_type', {
@@ -1143,6 +1210,64 @@ export default function MatchRecorderPage() {
     }, 100);
   };
 
+  const handleSimpleLongPressStart = (timerKey: string, callback: () => Promise<void> | void) => {
+    const timerId = setTimeout(async () => {
+      await callback();
+      setLongPressTriggered(prev => ({
+        ...prev,
+        [timerKey]: true
+      }));
+    }, 500);
+
+    setLongPressTimers(prev => ({
+      ...prev,
+      [timerKey]: timerId
+    }));
+  };
+
+  const handleSimpleLongPressEnd = (timerKey: string) => {
+    const timer = longPressTimers[timerKey];
+
+    if (timer) {
+      clearTimeout(timer);
+      setLongPressTimers(prev => {
+        const newTimers = { ...prev };
+        delete newTimers[timerKey];
+        return newTimers;
+      });
+    }
+
+    setTimeout(() => {
+      setLongPressTriggered(prev => {
+        const newTriggered = { ...prev };
+        delete newTriggered[timerKey];
+        return newTriggered;
+      });
+    }, 100);
+  };
+
+  const handleTeamScoreLongPressStart = () => {
+    handleSimpleLongPressStart('score-team', async () => {
+      updateTeamScore(false);
+    });
+  };
+
+  const handleTeamScoreLongPressEnd = () => {
+    handleSimpleLongPressEnd('score-team');
+  };
+
+  const handleFoulLongPressStart = (isTeamFoul: boolean) => {
+    const timerKey = isTeamFoul ? 'foul-team' : 'foul-opponent';
+    handleSimpleLongPressStart(timerKey, async () => {
+      updateFouls(isTeamFoul, false);
+    });
+  };
+
+  const handleFoulLongPressEnd = (isTeamFoul: boolean) => {
+    const timerKey = isTeamFoul ? 'foul-team' : 'foul-opponent';
+    handleSimpleLongPressEnd(timerKey);
+  };
+
   // Fonctions pour calculer les statistiques du bilan
   const getTeamStats = () => {
     // Tirs non cadrés uniquement
@@ -1196,11 +1321,24 @@ export default function MatchRecorderPage() {
       .slice(0, limit);
   };
 
-  const updateFouls = (isTeamFoul: boolean) => {
+  const updateFouls = (isTeamFoul: boolean, increment: boolean = true) => {
+    setMatchData(prev => {
+      const delta = increment ? 1 : -1;
+      const teamFoulDelta = isTeamFoul ? delta : 0;
+      const opponentFoulDelta = !isTeamFoul ? delta : 0;
+
+      return {
+        ...prev,
+        teamFouls: Math.max(prev.teamFouls + teamFoulDelta, 0),
+        opponentFouls: Math.max(prev.opponentFouls + opponentFoulDelta, 0),
+      };
+    });
+  };
+
+  const updateTeamScore = (increment: boolean = true) => {
     setMatchData(prev => ({
       ...prev,
-      teamFouls: isTeamFoul ? prev.teamFouls + 1 : prev.teamFouls,
-      opponentFouls: !isTeamFoul ? prev.opponentFouls + 1 : prev.opponentFouls,
+      teamScore: Math.max(prev.teamScore + (increment ? 1 : -1), 0),
     }));
   };
 
@@ -3459,19 +3597,34 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                 {/* Boutons à droite */}
                 <div className="flex flex-col gap-1 ml-1">
                 <button
-                  onClick={() => setMatchData(prev => ({ ...prev, teamScore: prev.teamScore + 1 }))}
-                    className="py-2 px-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors font-semibold text-xs min-w-[60px]"
+                  onClick={() => {
+                    const timerKey = 'score-team';
+                    if (!longPressTriggered[timerKey]) {
+                      updateTeamScore(true);
+                    }
+                  }}
+                  onMouseDown={handleTeamScoreLongPressStart}
+                  onMouseUp={handleTeamScoreLongPressEnd}
+                  onMouseLeave={handleTeamScoreLongPressEnd}
+                  onTouchStart={handleTeamScoreLongPressStart}
+                  onTouchEnd={handleTeamScoreLongPressEnd}
+                  className="py-2 px-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors font-semibold text-xs min-w-[60px]"
                 >
                   +1 Éq
                 </button>
                 <button
-                    onClick={async () => {
-                      const timerKey = 'opponent-goals';
-                      if (!longPressTriggered[timerKey]) {
-                        await updateOpponentGoal(true);
-                      }
-                    }}
-                    className="py-2 px-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs min-w-[45px]"
+                  onClick={async () => {
+                    const timerKey = 'opponent-goals';
+                    if (!longPressTriggered[timerKey]) {
+                      await updateOpponentGoal(true);
+                    }
+                  }}
+                  onMouseDown={() => handleOpponentLongPressStart('goals')}
+                  onMouseUp={() => handleOpponentLongPressEnd('goals')}
+                  onMouseLeave={() => handleOpponentLongPressEnd('goals')}
+                  onTouchStart={() => handleOpponentLongPressStart('goals')}
+                  onTouchEnd={() => handleOpponentLongPressEnd('goals')}
+                  className="py-2 px-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs min-w-[45px]"
                 >
                   +1 Adv
                 </button>
@@ -3499,14 +3652,34 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                 {/* Boutons à droite */}
                 <div className="flex flex-col gap-1 ml-2">
                 <button
-                  onClick={() => updateFouls(true)}
-                    className="py-2 px-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors font-semibold text-xs min-w-[45px]"
+                  onClick={() => {
+                    const timerKey = 'foul-team';
+                    if (!longPressTriggered[timerKey]) {
+                      updateFouls(true);
+                    }
+                  }}
+                  onMouseDown={() => handleFoulLongPressStart(true)}
+                  onMouseUp={() => handleFoulLongPressEnd(true)}
+                  onMouseLeave={() => handleFoulLongPressEnd(true)}
+                  onTouchStart={() => handleFoulLongPressStart(true)}
+                  onTouchEnd={() => handleFoulLongPressEnd(true)}
+                  className="py-2 px-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors font-semibold text-xs min-w-[45px]"
                 >
                   Faute Éq
                 </button>
                 <button
-                  onClick={() => updateFouls(false)}
-                    className="py-2 px-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs min-w-[45px]"
+                  onClick={() => {
+                    const timerKey = 'foul-opponent';
+                    if (!longPressTriggered[timerKey]) {
+                      updateFouls(false);
+                    }
+                  }}
+                  onMouseDown={() => handleFoulLongPressStart(false)}
+                  onMouseUp={() => handleFoulLongPressEnd(false)}
+                  onMouseLeave={() => handleFoulLongPressEnd(false)}
+                  onTouchStart={() => handleFoulLongPressStart(false)}
+                  onTouchEnd={() => handleFoulLongPressEnd(false)}
+                  className="py-2 px-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs min-w-[45px]"
                 >
                   Faute Adv
                 </button>
