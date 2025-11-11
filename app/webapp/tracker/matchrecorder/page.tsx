@@ -42,6 +42,7 @@ interface Player {
   isOnField: boolean;
   totalTime: number;
   currentSequenceTime: number;
+  sequenceTimeLimit: number;
   yellowCards: number;
   redCards: number;
   stats: {
@@ -117,6 +118,8 @@ const ACTIONS = [
   { id: 'dribbleSuccess', name: 'Dribble réussi', acronym: 'D', icon: ArrowRight, color: 'bg-purple-500' },
   { id: 'oneOnOneDefLost', name: '1v1 déf perdu', acronym: 'E', icon: AlertTriangle, color: 'bg-red-700' },
 ];
+
+const DEFAULT_SEQUENCE_TIME_LIMIT = 180;
 
 export default function MatchRecorderPage() {
   const { activeTeam } = useActiveTeam();
@@ -246,6 +249,11 @@ export default function MatchRecorderPage() {
               return null;
             }
             
+            const sequenceTimeLimit =
+              typeof (player as any).sequence_time_limit === 'number'
+                ? (player as any).sequence_time_limit
+                : DEFAULT_SEQUENCE_TIME_LIMIT;
+
             return {
               id: player.id,
               name: `${player.first_name} ${player.last_name}`,
@@ -255,6 +263,7 @@ export default function MatchRecorderPage() {
               isOnField: false,
               totalTime: 0,
               currentSequenceTime: 0,
+              sequenceTimeLimit,
               stats: {
                 shotsOnTarget: 0,
                 shotsOffTarget: 0,
@@ -1014,7 +1023,7 @@ export default function MatchRecorderPage() {
         event_type: eventType,
         match_time_seconds: matchData.matchTime,
         half: matchData.currentHalf,
-        player_id: null,
+        player_id: null, // NULL pour l'adversaire
         players_on_field: playersOnField,
         created_at: new Date().toISOString(),
         synced: false
@@ -1499,6 +1508,10 @@ export default function MatchRecorderPage() {
         isOnField: false,
         totalTime: 0,
         currentSequenceTime: 0,
+        sequenceTimeLimit:
+          typeof (player as any).sequence_time_limit === 'number'
+            ? (player as any).sequence_time_limit
+            : DEFAULT_SEQUENCE_TIME_LIMIT,
         yellowCards: 0,
         redCards: 0,
         stats: {
@@ -1583,6 +1596,10 @@ export default function MatchRecorderPage() {
           isOnField: false,
           totalTime: time, // Temps de jeu depuis matchDetails.players
           currentSequenceTime: 0,
+          sequenceTimeLimit:
+            typeof (player as any).sequence_time_limit === 'number'
+              ? (player as any).sequence_time_limit
+              : DEFAULT_SEQUENCE_TIME_LIMIT,
           yellowCards: 0,
           redCards: 0,
           stats: stats
@@ -2256,6 +2273,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
       'Sur le terrain',
       'Temps total (s)',
       'Temps séquence (s)',
+      'Limite séquence (s)',
       'Cartons jaunes',
       'Cartons rouges',
       'Tirs cadrés',
@@ -2276,6 +2294,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
       player.isOnField ? 'Oui' : 'Non',
       player.totalTime,
       player.currentSequenceTime,
+      player.sequenceTimeLimit,
       player.yellowCards || 0,
       player.redCards || 0,
       player.stats.shotsOnTarget || 0,
@@ -3605,132 +3624,154 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                       if (a.position !== 'Gardien' && b.position === 'Gardien') return 1;
                       return 0;
                     })
-                    .map((player) => (
-                      <div
-                        key={player.id}
-                        className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 transition-all duration-200 ${
-                          selectedPlayerForChange === player.id 
-                            ? 'ring-4 ring-blue-500 scale-105 shadow-xl' 
-                            : player.position === 'Gardien' 
-                            ? 'border-2' 
-                            : player.isOnField 
-                              ? 'border-2 border-green-500' 
-                              : 'border border-gray-200 dark:border-gray-600'
-                        }`}
-                        style={player.position === 'Gardien' ? { borderColor: '#f59e0b' } : {}}
-                      >
-                        {/* En-tête du joueur */}
-                        <div className="text-center mb-3">
-                          <div className="font-bold text-sm text-gray-900 dark:text-white">
-                            {player.position === 'Gardien' && <span className="text-amber-500 mr-2">🧤</span>}
-                            {player.name}
-                          </div>
-                          <div className="text-xs text-gray-600 dark:text-gray-400">#{player.number} - {player.position}</div>
-                          {selectedPlayerForChange === player.id && (
-                            <div className="text-xs text-blue-600 font-bold mt-1">
-                              {changeType === 'substitution' ? '🔄 Sélectionné pour changement' : '↔️ Sélectionné pour échange'}
+                    .map((player) => {
+                      const isOverSequenceLimit = player.currentSequenceTime >= player.sequenceTimeLimit;
+                      const baseBorderClass = player.position === 'Gardien'
+                        ? 'border-2'
+                        : player.isOnField
+                          ? 'border-2 border-green-500'
+                          : 'border border-gray-200 dark:border-gray-600';
+                      const selectionClass =
+                        !isOverSequenceLimit && selectedPlayerForChange === player.id
+                          ? 'ring-4 ring-blue-500 scale-105 shadow-xl'
+                          : '';
+                      const alertClass = isOverSequenceLimit
+                        ? 'ring-4 ring-red-500 animate-pulse border-red-500'
+                        : '';
+
+                      return (
+                        <div
+                          key={player.id}
+                          className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 transition-all duration-200 ${baseBorderClass} ${selectionClass} ${alertClass}`}
+                          style={player.position === 'Gardien' ? { borderColor: '#f59e0b' } : {}}
+                        >
+                          {/* En-tête du joueur */}
+                          <div className="text-center mb-3">
+                            <div className="font-bold text-sm text-gray-900 dark:text-white">
+                              {player.position === 'Gardien' && <span className="text-amber-500 mr-2">🧤</span>}
+                              {player.name}
                             </div>
-                          )}
-                        </div>
-
-                        {/* Temps de jeu */}
-                        <div className="text-center mb-3">
-                          <div className="flex justify-between text-xs">
-                            <span className="text-gray-600 dark:text-gray-400">Total</span>
-                            <span className="text-gray-600 dark:text-gray-400">Séquence</span>
+                            <div className="text-xs text-gray-600 dark:text-gray-400">#{player.number} - {player.position}</div>
+                            {selectedPlayerForChange === player.id && !isOverSequenceLimit && (
+                              <div className="text-xs text-blue-600 font-bold mt-1">
+                                {changeType === 'substitution' ? '🔄 Sélectionné pour changement' : '↔️ Sélectionné pour échange'}
+                              </div>
+                            )}
+                            {isOverSequenceLimit && (
+                              <div className="text-xs font-bold text-red-600 mt-1 animate-pulse">
+                                ⏱️ Temps de séquence dépassé
+                              </div>
+                            )}
                           </div>
-                          <div className="flex justify-between font-mono text-sm font-bold">
-                            <span className="text-gray-900 dark:text-white">{formatTime(player.totalTime)}</span>
-                            <span className="text-gray-900 dark:text-white">{formatTime(player.currentSequenceTime)}</span>
+
+                          {/* Temps de jeu */}
+                          <div className="text-center mb-3">
+                            <div className="flex justify-between text-xs">
+                              <span className="text-gray-600 dark:text-gray-400">Total</span>
+                              <span className="text-gray-600 dark:text-gray-400">Séquence</span>
+                            </div>
+                            <div className="flex justify-between font-mono text-sm font-bold">
+                              <span className="text-gray-900 dark:text-white">{formatTime(player.totalTime)}</span>
+                              <span className={`text-gray-900 dark:text-white ${isOverSequenceLimit ? 'text-red-600 animate-pulse font-extrabold' : ''}`}>
+                                {formatTime(player.currentSequenceTime)}
+                              </span>
+                            </div>
+                            <div className={`mt-1 text-xs font-semibold ${isOverSequenceLimit ? 'text-red-600 animate-pulse' : 'text-gray-500 dark:text-gray-400'}`}>
+                              Limite: {formatTime(player.sequenceTimeLimit)}
+                            </div>
+                            {isOverSequenceLimit && (
+                              <div className="mt-1 text-xs font-bold text-red-600 animate-pulse">
+                                +{formatTime(player.currentSequenceTime - player.sequenceTimeLimit)} au-delà
+                              </div>
+                            )}
                           </div>
-                        </div>
 
-                        {/* Actions rapides */}
-                        <div className="grid grid-cols-2 gap-1">
-                          {ACTIONS.map((action) => {
-                            const IconComponent = action.icon;
-                            return (
-                              <button
-                                key={action.id}
-                                onClick={async () => {
-                                  const timerKey = `${player.id}-${action.id}`;
-                                  if (!longPressTriggered[timerKey]) {
-                                    await updatePlayerStat(player.id, action.id);
-                                  }
-                                }}
-                                onMouseDown={() => handleLongPressStart(player.id, action.id)}
-                                onMouseUp={() => handleLongPressEnd(player.id, action.id)}
-                                onMouseLeave={() => handleLongPressEnd(player.id, action.id)}
-                                onTouchStart={() => handleLongPressStart(player.id, action.id)}
-                                onTouchEnd={() => handleLongPressEnd(player.id, action.id)}
-                                className={`flex items-center justify-center gap-1 p-1 rounded text-white font-medium transition-colors text-xs ${action.color} hover:opacity-80 active:scale-95`}
-                                title={`${action.name} - Clic court: +1, Clic long: -1`}
-                              >
-                                <IconComponent className="h-3 w-3" />
-                                <span className="text-xs font-bold action-acronym">{action.acronym}</span>
-                                <span className="text-xs">{player.stats[action.id] || 0}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
+                          {/* Actions rapides */}
+                          <div className="grid grid-cols-2 gap-1">
+                            {ACTIONS.map((action) => {
+                              const IconComponent = action.icon;
+                              return (
+                                <button
+                                  key={action.id}
+                                  onClick={async () => {
+                                    const timerKey = `${player.id}-${action.id}`;
+                                    if (!longPressTriggered[timerKey]) {
+                                      await updatePlayerStat(player.id, action.id);
+                                    }
+                                  }}
+                                  onMouseDown={() => handleLongPressStart(player.id, action.id)}
+                                  onMouseUp={() => handleLongPressEnd(player.id, action.id)}
+                                  onMouseLeave={() => handleLongPressEnd(player.id, action.id)}
+                                  onTouchStart={() => handleLongPressStart(player.id, action.id)}
+                                  onTouchEnd={() => handleLongPressEnd(player.id, action.id)}
+                                  className={`flex items-center justify-center gap-1 p-1 rounded text-white font-medium transition-colors text-xs ${action.color} hover:opacity-80 active:scale-95`}
+                                  title={`${action.name} - Clic court: +1, Clic long: -1`}
+                                >
+                                  <IconComponent className="h-3 w-3" />
+                                  <span className="text-xs font-bold action-acronym">{action.acronym}</span>
+                                  <span className="text-xs">{player.stats[action.id] || 0}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
 
-                        {/* Cartons */}
-                        <div className="flex justify-center gap-2 mt-2">
-                          <button
-                            onClick={async () => {
-                              const timerKey = `${player.id}-yellowCard`;
-                              if (!longPressTriggered[timerKey]) {
-                                await updatePlayerCard(player.id, 'yellow');
-                              }
-                            }}
-                            onMouseDown={() => handleCardLongPressStart(player.id, 'yellow')}
-                            onMouseUp={() => handleCardLongPressEnd(player.id, 'yellow')}
-                            onMouseLeave={() => handleCardLongPressEnd(player.id, 'yellow')}
-                            onTouchStart={() => handleCardLongPressStart(player.id, 'yellow')}
-                            onTouchEnd={() => handleCardLongPressEnd(player.id, 'yellow')}
-                            className="flex items-center gap-1 px-2 py-1 bg-yellow-500 text-white rounded text-xs hover:bg-yellow-600 transition-colors active:scale-95"
-                            title="Clic court: +1, Clic long: -1"
-                          >
-                            <Circle className="h-3 w-3" />
-                            <span>{player.yellowCards || 0}</span>
-                          </button>
-                                                      <button
+                          {/* Cartons */}
+                          <div className="flex justify-center gap-2 mt-2">
+                            <button
                               onClick={async () => {
-                                const timerKey = `${player.id}-redCard`;
+                                const timerKey = `${player.id}-yellowCard`;
                                 if (!longPressTriggered[timerKey]) {
-                                  await updatePlayerCard(player.id, 'red');
+                                  await updatePlayerCard(player.id, 'yellow');
                                 }
                               }}
-                              onMouseDown={() => handleCardLongPressStart(player.id, 'red')}
-                              onMouseUp={() => handleCardLongPressEnd(player.id, 'red')}
-                              onMouseLeave={() => handleCardLongPressEnd(player.id, 'red')}
-                              onTouchStart={() => handleCardLongPressStart(player.id, 'red')}
-                              onTouchEnd={() => handleCardLongPressEnd(player.id, 'red')}
-                              className="flex items-center gap-1 px-2 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600 transition-colors active:scale-95"
+                              onMouseDown={() => handleCardLongPressStart(player.id, 'yellow')}
+                              onMouseUp={() => handleCardLongPressEnd(player.id, 'yellow')}
+                              onMouseLeave={() => handleCardLongPressEnd(player.id, 'yellow')}
+                              onTouchStart={() => handleCardLongPressStart(player.id, 'yellow')}
+                              onTouchEnd={() => handleCardLongPressEnd(player.id, 'yellow')}
+                              className="flex items-center gap-1 px-2 py-1 bg-yellow-500 text-white rounded text-xs hover:bg-yellow-600 transition-colors active:scale-95"
                               title="Clic court: +1, Clic long: -1"
                             >
-                            <Circle className="h-3 w-3" />
-                            <span>{player.redCards || 0}</span>
-                          </button>
-                        </div>
+                              <Circle className="h-3 w-3" />
+                              <span>{player.yellowCards || 0}</span>
+                            </button>
+                                                      <button
+                                onClick={async () => {
+                                  const timerKey = `${player.id}-redCard`;
+                                  if (!longPressTriggered[timerKey]) {
+                                    await updatePlayerCard(player.id, 'red');
+                                  }
+                                }}
+                                onMouseDown={() => handleCardLongPressStart(player.id, 'red')}
+                                onMouseUp={() => handleCardLongPressEnd(player.id, 'red')}
+                                onMouseLeave={() => handleCardLongPressEnd(player.id, 'red')}
+                                onTouchStart={() => handleCardLongPressStart(player.id, 'red')}
+                                onTouchEnd={() => handleCardLongPressEnd(player.id, 'red')}
+                                className="flex items-center gap-1 px-2 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600 transition-colors active:scale-95"
+                                title="Clic court: +1, Clic long: -1"
+                              >
+                              <Circle className="h-3 w-3" />
+                              <span>{player.redCards || 0}</span>
+                            </button>
+                          </div>
 
-                        {/* Instructions tactiles */}
-                        <div className="mt-3 text-center">
-                          <button
-                            onTouchStart={() => handlePlayerSelection(player.id, player.isOnField)}
-                            onMouseDown={() => handlePlayerSelection(player.id, player.isOnField)}
-                            className={`w-full px-2 py-1 rounded text-xs transition-colors ${
-                              selectedPlayerForChange === player.id
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                            }`}
-                            title="Appui long pour sélectionner ce joueur pour un changement"
-                          >
-                            {selectedPlayerForChange === player.id ? '✅ Sélectionné' : '👆 Appui long pour changer'}
-                          </button>
+                          {/* Instructions tactiles */}
+                          <div className="mt-3 text-center">
+                            <button
+                              onTouchStart={() => handlePlayerSelection(player.id, player.isOnField)}
+                              onMouseDown={() => handlePlayerSelection(player.id, player.isOnField)}
+                              className={`w-full px-2 py-1 rounded text-xs transition-colors ${
+                                selectedPlayerForChange === player.id
+                                  ? 'bg-blue-500 text-white'
+                                  : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                              }`}
+                            >
+                              {selectedPlayerForChange === player.id ? '✅ Joueur sélectionné' : 'Sélectionner pour changement'}
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                 </div>
               </div>
 

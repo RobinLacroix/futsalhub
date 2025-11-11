@@ -25,6 +25,7 @@ interface Player {
   goals?: number;
   training_attendance?: number;
   attendance_percentage?: number;
+  sequence_time_limit?: number;
 }
 
 interface PlayerFormData {
@@ -35,6 +36,7 @@ interface PlayerFormData {
   strong_foot: string;
   status: string;
   number: string;
+  sequence_time_limit: string;
 }
 
 interface FilterState {
@@ -52,7 +54,8 @@ const initialFormData: PlayerFormData = {
   position: '',
   strong_foot: '',
   status: '',
-  number: ''
+  number: '',
+  sequence_time_limit: '180'
 };
 
 const initialFilters: FilterState = {
@@ -239,7 +242,8 @@ export default function SquadPage() {
             matches_played: matchesPlayed,
             goals,
             training_attendance: trainingAttendance,
-            attendance_percentage
+          attendance_percentage,
+          sequence_time_limit: player.sequence_time_limit ?? 180
           };
         } catch (playerError) {
           console.error('Erreur lors du traitement du joueur:', player.id, playerError);
@@ -300,6 +304,10 @@ export default function SquadPage() {
 
       // Calcul dynamique des stats pour chaque joueur
       const playersWithStats = (data || []).map(player => {
+        const sequenceTimeLimit =
+          typeof (player as any).sequence_time_limit === 'number'
+            ? (player as any).sequence_time_limit
+            : 180;
         // Nombre de matchs joués
         const matchesPlayed = (matchesData || []).filter(match => {
           if (!match.players) return false;
@@ -339,7 +347,8 @@ export default function SquadPage() {
           matches_played: matchesPlayed,
           goals,
           training_attendance: trainingAttendance,
-          attendance_percentage: totalTrainings > 0 ? Math.round((trainingAttendance / totalTrainings) * 100) : 0
+          attendance_percentage: totalTrainings > 0 ? Math.round((trainingAttendance / totalTrainings) * 100) : 0,
+          sequence_time_limit: sequenceTimeLimit
         };
       });
 
@@ -387,7 +396,8 @@ export default function SquadPage() {
         position: player.position,
         strong_foot: player.strong_foot,
         status: player.status,
-        number: player.number?.toString() || ''
+      number: player.number?.toString() || '',
+      sequence_time_limit: (player.sequence_time_limit ?? 180).toString()
       });
     } else {
       setIsEditing(false);
@@ -419,9 +429,14 @@ export default function SquadPage() {
       console.log('🏆 Ajout/modification de joueur pour l\'équipe:', activeTeam.name, 'ID:', activeTeam.id);
 
       const playerData = {
-        ...formData,
+        first_name: formData.first_name,
+        last_name: formData.last_name,
         age: parseInt(formData.age),
+        position: formData.position,
+        strong_foot: formData.strong_foot,
+        status: formData.status,
         number: formData.number ? parseInt(formData.number) : null,
+        sequence_time_limit: formData.sequence_time_limit ? parseInt(formData.sequence_time_limit) : 180,
         team_id: activeTeam.id // Ajouter automatiquement le team_id
       };
 
@@ -647,6 +662,9 @@ export default function SquadPage() {
                   Statut
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Limite séquence (s)
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Matchs
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -666,7 +684,7 @@ export default function SquadPage() {
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredPlayers.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={12} className="px-6 py-8 text-center text-gray-500">
                     {players.length === 0 ? (
                       <div>
                         <p className="text-lg font-medium mb-2">Aucun joueur trouvé</p>
@@ -703,6 +721,9 @@ export default function SquadPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {player.status}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {player.sequence_time_limit ?? 180}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {player.matches_played || 0}
@@ -748,6 +769,7 @@ export default function SquadPage() {
                 <td></td>
                 <td></td>
                 <td></td>
+                <td className="px-6 py-2">-</td>
                 <td className="px-6 py-2">
                   {filteredPlayers.length > 0
                     ? (filteredPlayers.reduce((sum, p) => sum + (p.matches_played || 0), 0) / filteredPlayers.length).toFixed(1)
@@ -878,6 +900,20 @@ export default function SquadPage() {
                   <option value="Muté">Muté</option>
                   <option value="Muté HP">Muté HP</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Limite de temps par séquence (secondes)</label>
+                <input
+                  type="number"
+                  min="30"
+                  step="10"
+                  value={formData.sequence_time_limit}
+                  onChange={(e) => setFormData({ ...formData, sequence_time_limit: e.target.value })}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  required
+                />
+                <p className="mt-1 text-xs text-gray-500">Durée maximale avant alerte dans le match recorder (défaut 180 secondes).</p>
               </div>
 
               <div className="flex justify-end gap-2 mt-6">
