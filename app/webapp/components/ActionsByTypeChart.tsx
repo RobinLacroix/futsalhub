@@ -21,9 +21,6 @@ interface Props {
 }
 
 export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) {
-  // Créer des séquences de 5 minutes (300 secondes)
-  const TIME_SEQUENCE_SECONDS = 300
-  
   // Filtrer les événements pour les matchs sélectionnés
   // Si selectedMatchIds est vide, on considère tous les matches comme sélectionnés
   const filteredEvents = selectedMatchIds.length === 0 
@@ -40,45 +37,61 @@ export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) 
     sampleEvent: events[0],
     useAllEvents: selectedMatchIds.length === 0
   })
-  
+
   // Créer les séquences temporelles
   const timeSequences = useMemo(() => {
     if (filteredEvents.length === 0) return []
-    
-    // Trouver le temps maximum parmi tous les matchs
-    const maxTime = Math.max(...filteredEvents.map(e => e.match_time_seconds || 0))
-    const maxHalf = Math.max(...filteredEvents.map(e => e.half || 1))
-    
-    console.log('Time sequences debug:', { maxTime, maxHalf, filteredEventsLength: filteredEvents.length })
-    
+
     const sequences: Array<{
+      id: string
       label: string
       startTime: number
       endTime: number
       half: number
+      quartile: number
     }> = []
-    
-    // Créer les séquences pour chaque mi-temps
-    for (let half = 1; half <= maxHalf; half++) {
-      const halfMaxTime = half === 1 ? 45 * 60 : maxTime
-      
-      for (let time = 0; time < halfMaxTime; time += TIME_SEQUENCE_SECONDS) {
-        const endTime = Math.min(time + TIME_SEQUENCE_SECONDS, halfMaxTime)
-        const startMinutes = Math.floor(time / 60)
-        const startSeconds = time % 60
-        const endMinutes = Math.floor(endTime / 60)
-        const endSeconds = endTime % 60
-        
-        sequences.push({
-          label: `M${half} ${startMinutes.toString().padStart(2, '0')}:${startSeconds.toString().padStart(2, '0')}-${endMinutes.toString().padStart(2, '0')}:${endSeconds.toString().padStart(2, '0')}`,
-          startTime: time,
-          endTime: endTime,
-          half: half
-        })
+
+    const eventsByHalf = filteredEvents.reduce<Record<number, EventRow[]>>((acc, event) => {
+      const half = event.half || 1
+      if (!acc[half]) {
+        acc[half] = []
       }
-    }
-    
-    console.log('Generated sequences:', sequences.length)
+      acc[half].push(event)
+      return acc
+    }, {})
+
+    Object.entries(eventsByHalf)
+      .sort(([halfA], [halfB]) => Number(halfA) - Number(halfB))
+      .forEach(([halfKey, halfEvents]) => {
+        const half = Number(halfKey)
+        const adjustedDuration = Math.max(...halfEvents.map(e => e.match_time_seconds || 0)) + 1
+        const quartileDuration = Math.max(1, Math.ceil(adjustedDuration / 4))
+
+        for (let quartileIndex = 0; quartileIndex < 4; quartileIndex++) {
+          const startTime = quartileIndex * quartileDuration
+          let endTime = (quartileIndex + 1) * quartileDuration
+          if (quartileIndex === 3) {
+            endTime = adjustedDuration
+          } else {
+            endTime = Math.min(endTime, adjustedDuration)
+          }
+
+          if (endTime <= startTime) {
+            endTime = startTime + 1
+          }
+
+          sequences.push({
+            id: `H${half}-Q${quartileIndex + 1}`,
+            label: `M${half}-Q${quartileIndex + 1}`,
+            startTime,
+            endTime,
+            half,
+            quartile: quartileIndex + 1
+          })
+        }
+      })
+
+    console.log('Generated aggregate quartile sequences:', sequences.length)
     return sequences
   }, [filteredEvents])
   
@@ -92,10 +105,10 @@ export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) 
       opponent_shot_on_target: number
       opponent_shot: number
     }> = {}
-    
+
     // Initialiser toutes les séquences avec des compteurs à 0
     timeSequences.forEach(seq => {
-      counts[seq.label] = {
+      counts[`${seq.half}-${seq.quartile}`] = {
         goal: 0,
         shot_on_target: 0,
         shot: 0,
@@ -104,48 +117,49 @@ export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) 
         opponent_shot: 0
       }
     })
-    
+
     // Compter les événements pour chaque séquence
     filteredEvents.forEach(event => {
       const eventTime = event.match_time_seconds || 0
       const eventHalf = event.half || 1
-      
+
       // Trouver la séquence correspondante
       const sequence = timeSequences.find(seq => 
         seq.half === eventHalf && 
         eventTime >= seq.startTime && 
         eventTime < seq.endTime
       )
-      
+
       if (sequence) {
+        const key = `${sequence.half}-${sequence.quartile}`
         switch (event.event_type) {
           case 'goal':
-            counts[sequence.label].goal += 1
+            counts[key].goal += 1
             // Un but ajoute aussi 1 tir cadré et 1 tir
-            counts[sequence.label].shot_on_target += 1
-            counts[sequence.label].shot += 1
+            counts[key].shot_on_target += 1
+            counts[key].shot += 1
             break
           case 'shot_on_target':
-            counts[sequence.label].shot_on_target += 1
+            counts[key].shot_on_target += 1
             // Un tir cadré ajoute aussi 1 tir
-            counts[sequence.label].shot += 1
+            counts[key].shot += 1
             break
           case 'shot':
-            counts[sequence.label].shot += 1
+            counts[key].shot += 1
             break
           case 'opponent_goal':
-            counts[sequence.label].opponent_goal += 1
+            counts[key].opponent_goal += 1
             // Un but encaissé ajoute aussi 1 tir cadré concédé et 1 tir concédé
-            counts[sequence.label].opponent_shot_on_target += 1
-            counts[sequence.label].opponent_shot += 1
+            counts[key].opponent_shot_on_target += 1
+            counts[key].opponent_shot += 1
             break
           case 'opponent_shot_on_target':
-            counts[sequence.label].opponent_shot_on_target += 1
+            counts[key].opponent_shot_on_target += 1
             // Un tir cadré concédé ajoute aussi 1 tir concédé
-            counts[sequence.label].opponent_shot += 1
+            counts[key].opponent_shot += 1
             break
           case 'opponent_shot':
-            counts[sequence.label].opponent_shot += 1
+            counts[key].opponent_shot += 1
             break
         }
       }
@@ -163,7 +177,7 @@ export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) 
       datasets: [
         {
           label: 'Buts',
-          data: labels.map(label => eventCountsBySequence[label]?.goal || 0),
+          data: timeSequences.map(seq => eventCountsBySequence[`${seq.half}-${seq.quartile}`]?.goal || 0),
           backgroundColor: 'rgba(34, 197, 94, 0.1)',
           borderColor: 'rgb(34, 197, 94)',
           borderWidth: 3,
@@ -177,7 +191,7 @@ export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) 
         },
         {
           label: 'Tirs cadrés',
-          data: labels.map(label => eventCountsBySequence[label]?.shot_on_target || 0),
+          data: timeSequences.map(seq => eventCountsBySequence[`${seq.half}-${seq.quartile}`]?.shot_on_target || 0),
           backgroundColor: 'rgba(59, 130, 246, 0.1)',
           borderColor: 'rgb(59, 130, 246)',
           borderWidth: 3,
@@ -191,7 +205,7 @@ export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) 
         },
         {
           label: 'Tirs',
-          data: labels.map(label => eventCountsBySequence[label]?.shot || 0),
+          data: timeSequences.map(seq => eventCountsBySequence[`${seq.half}-${seq.quartile}`]?.shot || 0),
           backgroundColor: 'rgba(147, 51, 234, 0.1)',
           borderColor: 'rgb(147, 51, 234)',
           borderWidth: 3,
@@ -205,7 +219,7 @@ export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) 
         },
         {
           label: 'Buts encaissés',
-          data: labels.map(label => eventCountsBySequence[label]?.opponent_goal || 0),
+          data: timeSequences.map(seq => eventCountsBySequence[`${seq.half}-${seq.quartile}`]?.opponent_goal || 0),
           backgroundColor: 'rgba(239, 68, 68, 0.1)',
           borderColor: 'rgb(239, 68, 68)',
           borderWidth: 3,
@@ -219,7 +233,7 @@ export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) 
         },
         {
           label: 'Tirs cadrés concédés',
-          data: labels.map(label => eventCountsBySequence[label]?.opponent_shot_on_target || 0),
+          data: timeSequences.map(seq => eventCountsBySequence[`${seq.half}-${seq.quartile}`]?.opponent_shot_on_target || 0),
           backgroundColor: 'rgba(245, 158, 11, 0.1)',
           borderColor: 'rgb(245, 158, 11)',
           borderWidth: 3,
@@ -233,7 +247,7 @@ export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) 
         },
         {
           label: 'Tirs concédés',
-          data: labels.map(label => eventCountsBySequence[label]?.opponent_shot || 0),
+          data: timeSequences.map(seq => eventCountsBySequence[`${seq.half}-${seq.quartile}`]?.opponent_shot || 0),
           backgroundColor: 'rgba(168, 85, 247, 0.1)',
           borderColor: 'rgb(168, 85, 247)',
           borderWidth: 3,
@@ -255,7 +269,7 @@ export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) 
     plugins: {
       title: {
         display: true,
-        text: 'Courbes de relevé des actions - Séquences de 5 minutes',
+        text: 'Courbes de relevé des actions par quartile et mi-temps (agrégé)',
         font: {
           size: 16,
           weight: 'bold' as const
@@ -291,20 +305,32 @@ export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) 
         },
         padding: 12,
         callbacks: {
-          afterBody: function(context: { label: string }[]) {
-            const label = context[0].label
-            const totalTeam = (eventCountsBySequence[label]?.goal || 0) + 
-                             (eventCountsBySequence[label]?.shot_on_target || 0) + 
-                             (eventCountsBySequence[label]?.shot || 0)
-            const totalOpponent = (eventCountsBySequence[label]?.opponent_goal || 0) + 
-                                 (eventCountsBySequence[label]?.opponent_shot_on_target || 0) + 
-                                 (eventCountsBySequence[label]?.opponent_shot || 0)
+          afterBody: function(context: { dataIndex: number }[]) {
+            const dataIndex = context[0].dataIndex
+            const seq = timeSequences[dataIndex]
+            if (!seq) {
+              return []
+            }
+            const key = `${seq.half}-${seq.quartile}`
+            const teamGoals = eventCountsBySequence[key]?.goal || 0
+            const opponentGoals = eventCountsBySequence[key]?.opponent_goal || 0
+            const goalsDiff = teamGoals - opponentGoals
+
+            const teamShots = (eventCountsBySequence[key]?.shot_on_target || 0) + 
+                             (eventCountsBySequence[key]?.shot || 0)
+            const opponentShots = (eventCountsBySequence[key]?.opponent_shot_on_target || 0) + 
+                                 (eventCountsBySequence[key]?.opponent_shot || 0)
+            const shotsDiff = teamShots - opponentShots
             
             return [
               '',
-              `Total équipe: ${totalTeam}`,
-              `Total adversaire: ${totalOpponent}`,
-              `Différence: ${totalTeam - totalOpponent > 0 ? '+' : ''}${totalTeam - totalOpponent}`
+              `Buts équipe: ${teamGoals}`,
+              `Buts adversaire: ${opponentGoals}`,
+              `Diff. buts: ${goalsDiff > 0 ? '+' : ''}${goalsDiff}`,
+              '',
+              `Tirs équipe: ${teamShots}`,
+              `Tirs adversaire: ${opponentShots}`,
+              `Diff. tirs: ${shotsDiff > 0 ? '+' : ''}${shotsDiff}`
             ]
           }
         }

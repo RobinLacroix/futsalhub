@@ -727,63 +727,64 @@ export default function TrackerDashboardPage() {
           </div>
         </div>
 
+        {/* Sélection des matches (commune à tous les onglets) */}
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+          <h3 className="text-lg font-bold text-gray-900 mb-4">Sélectionner les matches à analyser</h3>
+          <div className="flex flex-wrap gap-2">
+            {getFilteredMatches().map(match => {
+              const isSelected = selectedMatches.includes(match.id);
+              return (
+                <button
+                  key={match.id}
+                  onClick={() => {
+                    setSelectedMatches(prev =>
+                      prev.includes(match.id)
+                        ? prev.filter(id => id !== match.id)
+                        : [...prev, match.id]
+                    );
+                  }}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                    isSelected
+                      ? 'bg-blue-600 text-white shadow'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                  title={match.date ? new Date(match.date).toLocaleDateString('fr-FR') : undefined}
+                >
+                  {match.title}
+                </button>
+              );
+            })}
+            {getFilteredMatches().length === 0 && (
+              <div className="text-sm text-gray-500">
+                Aucun match ne correspond aux filtres actuels.
+              </div>
+            )}
+          </div>
+          <div className="flex items-center justify-between mt-3">
+            <p className="text-sm text-gray-500">
+              {selectedMatches.length === 0
+                ? 'Tous les matches filtrés sont inclus.'
+                : `${selectedMatches.length} match(es) sélectionné(s) sur ${getFilteredMatches().length}`}
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setSelectedMatches([])}
+                className="text-sm text-red-500 hover:text-red-600 font-medium"
+              >
+                Réinitialiser
+              </button>
+              <button
+                onClick={() => setSelectedMatches(getFilteredMatches().map(match => match.id))}
+                className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+              >
+                Sélectionner tout
+              </button>
+            </div>
+          </div>
+        </div>
+
         {activeTab === 'plusminus' && (
           <div className="space-y-6">
-            {/* Filtres */}
-            <div className="bg-white rounded-lg shadow-lg p-6">
-              <h3 className="text-lg font-bold text-gray-900 mb-4">Filtres</h3>
-              
-              {/* Sélection des matches */}
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Sélectionner les matches à analyser :
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {getFilteredMatches().map(match => (
-                    <button
-                      key={match.id}
-                      onClick={() => {
-                        setSelectedMatches(prev =>
-                          prev.includes(match.id)
-                            ? prev.filter(id => id !== match.id)
-                            : [...prev, match.id]
-                        );
-                      }}
-                      className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
-                        selectedMatches.includes(match.id)
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                      }`}
-                    >
-                      {match.title}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex items-center justify-between mt-2">
-                  <p className="text-sm text-gray-500">
-                    {selectedMatches.length === 0 
-                      ? 'Tous les matches sont sélectionnés' 
-                      : `${selectedMatches.length} match(es) sélectionné(s)`
-                    }
-                  </p>
-                  <button
-                    onClick={() => {
-                      if (selectedMatches.length === 0) {
-                        // Désélectionner tous les matches
-                        setSelectedMatches([]);
-                      } else {
-                        // Sélectionner tous les matches filtrés
-                        setSelectedMatches(getFilteredMatches().map(match => match.id));
-                      }
-                    }}
-                    className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-                  >
-                    {selectedMatches.length === 0 ? 'Désélectionner tout' : 'Sélectionner tout'}
-                  </button>
-                </div>
-              </div>
-            </div>
-
             {/* Graphiques */}
             <div className="grid grid-cols-1 gap-6">
               {/* Stats +/- Buts */}
@@ -1026,10 +1027,13 @@ export default function TrackerDashboardPage() {
 
         {activeTab === 'actions' && (
           <div className="space-y-6">
-            {/* Actions par type - Séquences de 5 minutes */}
+            {/* Actions par quart de mi-temps */}
             <div className="bg-white rounded-lg shadow-lg p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Actions par Type - Séquences de 5 minutes</h2>
-              <ActionsByTypeChart events={getFilteredEvents()} selectedMatchIds={selectedMatches} />
+              <h2 className="text-xl font-bold text-gray-900 mb-4">Actions par quart de mi-temps</h2>
+              <ActionsByTypeChart
+                events={getFilteredEvents()}
+                selectedMatchIds={selectedMatches}
+              />
             </div>
 
             {/* Répartition des actions */}
