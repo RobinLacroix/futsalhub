@@ -220,6 +220,7 @@ export default function CalendarPage() {
   const [matchStats, setMatchStats] = useState<MatchStats[]>([]);
   const [matchLocationFilter, setMatchLocationFilter] = useState<'Tous' | 'Domicile' | 'Exterieur'>('Tous');
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [isMobile, setIsMobile] = useState(false);
 
 
 
@@ -271,6 +272,16 @@ export default function CalendarPage() {
       fetchMatchStats();
     }
   }, [activeTeam]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const fetchMatches = async () => {
     try {
@@ -1513,7 +1524,7 @@ export default function CalendarPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="min-h-screen bg-gray-50 px-4 py-6 sm:p-8">
       {error && (
         <div className="mb-4 p-4 bg-red-50 text-red-600 rounded-md flex items-center gap-2">
           <AlertCircle className="h-5 w-5" />
@@ -1521,11 +1532,11 @@ export default function CalendarPage() {
         </div>
       )}
 
-      <div className="flex justify-between items-center mb-6">
-        <div>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
+        <div className="space-y-2">
           <h1 className="text-2xl font-bold text-gray-900">Calendrier</h1>
           {activeTeam && (
-            <div className="flex items-center gap-2 mt-2">
+            <div className="flex items-center gap-2">
               <div 
                 className="w-4 h-4 rounded-full"
                 style={{ backgroundColor: activeTeam.color }}
@@ -1536,11 +1547,11 @@ export default function CalendarPage() {
             </div>
           )}
         </div>
-        <div className="flex gap-4">
+        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 w-full sm:w-auto">
           <button
             onClick={handleOpenTrainingModal}
             disabled={!activeTeam}
-            className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors ${
+            className={`flex items-center justify-center gap-2 px-4 py-2 rounded-md transition-colors w-full sm:w-auto ${
               activeTeam 
                 ? 'bg-green-600 text-white hover:bg-green-700' 
                 : 'bg-gray-400 text-gray-200 cursor-not-allowed'
@@ -1552,7 +1563,7 @@ export default function CalendarPage() {
           <button
             onClick={handleOpenModal}
             disabled={!activeTeam}
-            className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors ${
+            className={`flex items-center justify-center gap-2 px-4 py-2 rounded-md transition-colors w-full sm:w-auto ${
               activeTeam 
                 ? 'bg-blue-600 text-white hover:bg-blue-700' 
                 : 'bg-gray-400 text-gray-200 cursor-not-allowed'
@@ -1564,26 +1575,30 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow p-6">
-        <DragAndDropCalendar
-          localizer={localizer}
-          events={events}
-          startAccessor={(event: object) => (event as RBCalendarEvent).start}
-          endAccessor={(event: object) => (event as RBCalendarEvent).end}
-          style={{ height: 600 }}
-          onSelectEvent={handleCalendarEventClick}
-          onEventDrop={moveEvent}
-          draggableAccessor={() => true}
-          onDoubleClickEvent={handleCalendarEventClick}
-          eventPropGetter={eventPropGetter}
-          components={{ event: CustomEvent }}
-          views={['month', 'week', 'day']}
-          defaultView="month"
-          toolbar={true}
-          popup
-          date={currentDate}
-          onNavigate={setCurrentDate}
-        />
+      <div className="bg-white rounded-lg shadow p-4 sm:p-6 overflow-hidden">
+        <div className="w-full overflow-x-auto">
+          <div className="min-w-[600px] sm:min-w-0">
+            <DragAndDropCalendar
+              localizer={localizer}
+              events={events}
+              startAccessor={(event: object) => (event as RBCalendarEvent).start}
+              endAccessor={(event: object) => (event as RBCalendarEvent).end}
+              style={{ height: isMobile ? 520 : 600 }}
+              onSelectEvent={handleCalendarEventClick}
+              onEventDrop={moveEvent}
+              draggableAccessor={() => true}
+              onDoubleClickEvent={handleCalendarEventClick}
+              eventPropGetter={eventPropGetter}
+              components={{ event: CustomEvent }}
+              views={isMobile ? ['agenda', 'day', 'week', 'month'] : ['month', 'week', 'day']}
+              defaultView={isMobile ? 'agenda' : 'month'}
+              toolbar={true}
+              popup
+              date={currentDate}
+              onNavigate={setCurrentDate}
+            />
+          </div>
+        </div>
       </div>
 
       {/* Modal d'ajout de match */}
@@ -1707,7 +1722,7 @@ export default function CalendarPage() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Score équipe</label>
                     <Controller
@@ -1743,7 +1758,7 @@ export default function CalendarPage() {
                 {/* Répartition des buts marqués */}
                 <div className="mt-6">
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Répartition des buts marqués</h3>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700">Phase Offensive</label>
                       <Controller
@@ -1810,7 +1825,7 @@ export default function CalendarPage() {
                 {/* Répartition des buts encaissés */}
                 <div className="mt-6">
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Répartition des buts encaissés</h3>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700">Phase Offensive</label>
                       <Controller
@@ -1878,7 +1893,7 @@ export default function CalendarPage() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">Joueurs participants</label>
                   <div className="border rounded-md overflow-hidden">
                     {/* Header de la table */}
-                    <div className="grid grid-cols-12 gap-4 bg-gray-50 p-3 border-b">
+                    <div className="hidden sm:grid grid-cols-12 gap-4 bg-gray-50 p-3 border-b">
                       <div className="col-span-4">
                         <span className="text-sm font-medium text-gray-700">Joueur</span>
                       </div>
@@ -1894,17 +1909,17 @@ export default function CalendarPage() {
                     </div>
 
                     {/* Liste des joueurs */}
-                    <div className="max-h-[300px] overflow-y-auto">
+                    <div className="max-h-[300px] overflow-y-auto divide-y">
                       {players.map(player => {
                         const isPlayerPresent = watch(`players.${player.id}.present`);
                         
                         return (
                           <div 
                             key={player.id} 
-                            className="grid grid-cols-12 gap-4 p-3 border-b last:border-b-0 hover:bg-gray-50"
+                            className="grid grid-cols-1 sm:grid-cols-12 gap-4 p-3 hover:bg-gray-50"
                           >
                             {/* Case à cocher et nom du joueur */}
-                            <div className="col-span-4 flex items-center gap-2">
+                            <div className="flex items-center gap-3 sm:col-span-4">
                               <Controller
                                 name={`players.${player.id}.present`}
                                 control={control}
@@ -1924,7 +1939,8 @@ export default function CalendarPage() {
                             </div>
 
                             {/* Buts marqués */}
-                            <div className="col-span-2">
+                            <div className="sm:col-span-2">
+                              <label className="text-xs font-medium text-gray-500 sm:hidden">Buts marqués</label>
                               <Controller
                                 name={`players.${player.id}.goals`}
                                 control={control}
@@ -1945,7 +1961,8 @@ export default function CalendarPage() {
                             </div>
 
                             {/* Cartons jaunes */}
-                            <div className="col-span-3">
+                            <div className="sm:col-span-3">
+                              <label className="text-xs font-medium text-gray-500 sm:hidden">Cartons jaunes</label>
                               <Controller
                                 name={`players.${player.id}.yellow_cards`}
                                 control={control}
@@ -1966,7 +1983,8 @@ export default function CalendarPage() {
                             </div>
 
                             {/* Cartons rouges */}
-                            <div className="col-span-3">
+                            <div className="sm:col-span-3">
+                              <label className="text-xs font-medium text-gray-500 sm:hidden">Cartons rouges</label>
                               <Controller
                                 name={`players.${player.id}.red_cards`}
                                 control={control}
@@ -2120,23 +2138,23 @@ export default function CalendarPage() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Statut des joueurs</label>
                   <div className="border rounded-md overflow-hidden">
-                    <div className="max-h-[300px] overflow-y-auto">
+                    <div className="max-h-[300px] overflow-y-auto divide-y">
                       {players.map(player => (
                         <div 
                           key={player.id} 
-                          className="flex items-center gap-3 p-3 border-b last:border-b-0 hover:bg-gray-50"
+                          className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 hover:bg-gray-50"
                         >
                           <span className="text-sm text-gray-900 flex-1">
                             {player.first_name} {player.last_name}
                           </span>
                           
-                          <div className="flex items-center gap-3">
+                          <div className="flex flex-wrap items-center gap-3 sm:gap-4 sm:justify-end">
                             <Controller
                               name={`players.${player.id}.status`}
                               control={trainingControl}
                               defaultValue="present"
                               render={({ field: { value, onChange } }) => (
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-3">
                                   <label className="flex items-center gap-1 text-xs">
                                     <input
                                       type="radio"

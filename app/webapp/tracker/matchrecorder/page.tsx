@@ -99,6 +99,8 @@ interface LocalMatchEvent {
   players_on_field: string[];
   created_at: string;
   synced?: boolean;
+  location_x?: number | null;
+  location_y?: number | null;
 }
 
 interface LocalMatchSnapshot {
@@ -194,6 +196,20 @@ export default function MatchRecorderPage() {
   // États pour le clic long
   const [longPressTimers, setLongPressTimers] = useState<{ [key: string]: NodeJS.Timeout }>({});
   const [longPressTriggered, setLongPressTriggered] = useState<{ [key: string]: boolean }>({});
+  // Localisation terrain (coordonnées normalisées 0..1)
+  const [selectedLocation, setSelectedLocation] = useState<{ x: number; y: number } | null>(null);
+  
+  // État pour le filtre d'action dans le bilan (multichoix)
+  const [actionFilter, setActionFilter] = useState<string[]>(['all']);
+  const [matchEvents, setMatchEvents] = useState<Array<{
+    id: string;
+    action_type: string;
+    location_x: number | null;
+    location_y: number | null;
+    player_name?: string;
+    half: number;
+    match_time_seconds?: number;
+  }>>([]);
   
   // État pour le tri des statistiques des joueurs
   const [sortConfig, setSortConfig] = useState<{
@@ -310,6 +326,105 @@ export default function MatchRecorderPage() {
 
     return () => clearInterval(interval);
   }, [matchData.isRunning]);
+
+  // Charger les événements du match pour l'affichage sur le terrain
+  useEffect(() => {
+    const loadMatchEvents = async () => {
+      if ((activeView === 'summary' || currentStep === 'summary') && matchData.selectedMatch) {
+        try {
+          const { data: events, error } = await supabase
+            .from('match_events')
+            .select('id, event_type, location_x, location_y, half, player_id, match_time_seconds')
+            .eq('match_id', matchData.selectedMatch.id)
+            .not('location_x', 'is', null)
+            .not('location_y', 'is', null)
+            .order('created_at', { ascending: true });
+
+          if (error) {
+            console.error('Erreur lors du chargement des événements:', error);
+            return;
+          }
+
+          if (events) {
+            // Récupérer les noms des joueurs
+            const playerIds = [...new Set(events.map((e: any) => e.player_id).filter(Boolean))];
+            const playerMap = new Map<string, string>();
+            
+            if (playerIds.length > 0) {
+              // Essayer d'abord avec le filtre par équipe
+              let query = supabase
+                .from('players')
+                .select('id, name')
+                .in('id', playerIds);
+              
+              if (activeTeam?.id) {
+                query = query.eq('team_id', activeTeam.id);
+              }
+              
+              let { data: playersData, error: playersError } = await query;
+              
+              // Si aucun joueur trouvé avec le filtre équipe, essayer sans filtre
+              if (!playersData || playersData.length === 0) {
+                console.warn('Aucun joueur trouvé avec filtre équipe, recherche sans filtre...');
+                const { data: allPlayersData, error: allPlayersError } = await supabase
+                  .from('players')
+                  .select('id, name')
+                  .in('id', playerIds);
+                
+                if (!allPlayersError && allPlayersData) {
+                  playersData = allPlayersData;
+                  playersError = null;
+                }
+              }
+              
+              if (playersError) {
+                console.error('Erreur lors de la récupération des joueurs:', playersError);
+              }
+              
+              if (playersData && playersData.length > 0) {
+                console.log('Joueurs récupérés:', playersData.length, 'sur', playerIds.length, 'IDs recherchés:', playerIds);
+                playersData.forEach((p: any) => {
+                  // S'assurer que l'ID est bien une string pour la correspondance
+                  playerMap.set(String(p.id), p.name);
+                });
+                console.log('PlayerMap créé:', Array.from(playerMap.entries()));
+              } else {
+                console.warn('Aucun joueur trouvé pour les IDs:', playerIds);
+              }
+            }
+
+            setMatchEvents(events.map((event: any) => {
+              let playerName = 'Adversaire';
+              if (event.player_id) {
+                // S'assurer que l'ID est converti en string pour la correspondance
+                const playerIdStr = String(event.player_id);
+                playerName = playerMap.get(playerIdStr) || 'Inconnu';
+                if (playerName === 'Inconnu') {
+                  console.warn('Joueur non trouvé pour player_id:', event.player_id, '(string:', playerIdStr, ') dans l\'événement:', event.id);
+                  console.warn('IDs disponibles dans playerMap:', Array.from(playerMap.keys()));
+                }
+              }
+              return {
+                id: event.id,
+                action_type: event.event_type,
+                location_x: event.location_x,
+                location_y: event.location_y,
+                player_name: playerName,
+                half: event.half || 1,
+                match_time_seconds: event.match_time_seconds || 0,
+              };
+            }));
+          }
+        } catch (error) {
+          console.error('Erreur lors du chargement des événements:', error);
+        }
+      } else {
+        setMatchEvents([]);
+      }
+    };
+
+    loadMatchEvents();
+  }, [activeView, currentStep, matchData.selectedMatch, activeTeam]);
 
   // Détecter l'état de connexion
   useEffect(() => {
@@ -878,7 +993,9 @@ export default function MatchRecorderPage() {
         player_id: playerId,
         players_on_field: playersOnField,
         created_at: new Date().toISOString(),
-        synced: false
+        synced: false,
+        location_x: selectedLocation?.x ?? null,
+        location_y: selectedLocation?.y ?? null
       };
 
       // Essayer de sauvegarder en ligne
@@ -890,7 +1007,9 @@ export default function MatchRecorderPage() {
           match_time_seconds: matchData.matchTime,
           half: matchData.currentHalf,
           player_id: playerId,
-          players_on_field: playersOnField
+          players_on_field: playersOnField,
+          location_x: selectedLocation?.x ?? null,
+          location_y: selectedLocation?.y ?? null
         });
 
       if (insertError) {
@@ -904,6 +1023,8 @@ export default function MatchRecorderPage() {
         // Sauvegarder aussi localement pour backup
         saveToLocalStorage(localEvent);
       }
+      // Reset de la position sélectionnée après enregistrement
+      setSelectedLocation(null);
     } else {
       if (actualDeltaResult === 0) {
         return;
@@ -992,7 +1113,9 @@ export default function MatchRecorderPage() {
         player_id: null,
         players_on_field: playersOnField,
         created_at: new Date().toISOString(),
-        synced: false
+        synced: false,
+        location_x: selectedLocation?.x ?? null,
+        location_y: selectedLocation?.y ?? null
       };
 
       const { error: insertError } = await supabase
@@ -1003,7 +1126,9 @@ export default function MatchRecorderPage() {
           match_time_seconds: matchData.matchTime,
           half: matchData.currentHalf,
           player_id: null, // NULL pour l'adversaire
-          players_on_field: playersOnField
+          players_on_field: playersOnField,
+          location_x: selectedLocation?.x ?? null,
+          location_y: selectedLocation?.y ?? null
         });
 
       if (insertError) {
@@ -1015,6 +1140,7 @@ export default function MatchRecorderPage() {
         localEvent.synced = true;
         saveToLocalStorage(localEvent);
       }
+      setSelectedLocation(null);
     } else {
       // Supprimer le dernier événement de ce type
       const { error: deleteError } = await supabase.rpc('delete_last_event_by_type', {
@@ -1088,7 +1214,9 @@ export default function MatchRecorderPage() {
         player_id: null, // NULL pour l'adversaire
         players_on_field: playersOnField,
         created_at: new Date().toISOString(),
-        synced: false
+        synced: false,
+        location_x: selectedLocation?.x ?? null,
+        location_y: selectedLocation?.y ?? null
       };
 
       const { error: insertError } = await supabase
@@ -1099,7 +1227,9 @@ export default function MatchRecorderPage() {
           match_time_seconds: matchData.matchTime,
           half: matchData.currentHalf,
           player_id: null, // NULL pour l'adversaire
-          players_on_field: playersOnField
+          players_on_field: playersOnField,
+          location_x: selectedLocation?.x ?? null,
+          location_y: selectedLocation?.y ?? null
         });
 
       if (insertError) {
@@ -1110,6 +1240,7 @@ export default function MatchRecorderPage() {
         localEvent.synced = true;
         saveToLocalStorage(localEvent);
       }
+      setSelectedLocation(null);
     } else {
       if (actualDeltaResult === 0) {
         return;
@@ -1320,6 +1451,422 @@ export default function MatchRecorderPage() {
       .sort((a, b) => b.totalTime - a.totalTime)
       .slice(0, limit);
   };
+
+  // Vue de bilan en direct pendant l'enregistrement
+  const renderLiveSummary = () => (
+    <div className="space-y-3">
+      {/* Statistiques générales */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 border border-gray-200 dark:border-gray-700">
+        <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+          <Trophy className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          Bilan du Match
+        </h2>
+        
+        {/* Statistiques des tirs */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+          {/* Notre équipe */}
+          <div className="bg-blue-50 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-600 rounded p-3 shadow-sm">
+            <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2 flex items-center gap-1">
+              <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+              Notre Équipe
+            </h3>
+            <div className="space-y-1">
+              <div className="flex justify-between items-center py-1 px-2 bg-blue-100 dark:bg-blue-800/60 rounded border border-blue-200 dark:border-blue-700">
+                <span className="text-xs font-medium text-blue-800 dark:text-blue-200">Tirs totaux</span>
+                <span className="font-bold text-blue-950 dark:text-white text-sm">{getTeamStats().totalShots}</span>
+              </div>
+              <div className="flex justify-between items-center py-1 px-2 bg-green-100 dark:bg-green-800/60 rounded border border-green-200 dark:border-green-700">
+                <span className="text-xs font-medium text-green-800 dark:text-green-200">Tirs cadrés</span>
+                <span className="font-bold text-green-950 dark:text-white text-sm">{getTeamStats().totalShotsOnTarget}</span>
+              </div>
+              <div className="flex justify-between items-center py-1 px-2 bg-yellow-100 dark:bg-yellow-800/60 rounded border border-yellow-200 dark:border-yellow-700">
+                <span className="text-xs font-medium text-yellow-800 dark:text-yellow-200">Tirs non cadrés</span>
+                <span className="font-bold text-yellow-950 dark:text-white text-sm">{getTeamStats().totalShotsOffTarget}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Équipe adverse */}
+          <div className="bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-600 rounded p-3 shadow-sm">
+            <h3 className="text-sm font-semibold text-red-900 dark:text-red-100 mb-2 flex items-center gap-1">
+              <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+              Équipe Adverse
+            </h3>
+            <div className="space-y-1">
+              <div className="flex justify-between items-center py-1 px-2 bg-red-100 dark:bg-red-800/60 rounded border border-red-200 dark:border-red-700">
+                <span className="text-xs font-medium text-red-800 dark:text-red-200">Total tirs</span>
+                <span className="font-bold text-red-950 dark:text-white text-sm">
+                  {getTeamStats().opponentShots}
+                  {matchData.currentHalf === 2 && matchData.firstHalfOpponentActions.shotsOnTarget + matchData.firstHalfOpponentActions.shotsOffTarget > 0 && (
+                    <span className="text-xs text-red-600 dark:text-red-400 ml-1">
+                      ({matchData.firstHalfOpponentActions.shotsOnTarget + matchData.firstHalfOpponentActions.shotsOffTarget})
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-1 px-2 bg-orange-100 dark:bg-orange-800/60 rounded border border-orange-200 dark:border-orange-700">
+                <span className="text-xs font-medium text-orange-800 dark:text-orange-200">Tirs cadrés</span>
+                <span className="font-bold text-orange-950 dark:text-orange-200 text-sm">
+                  {getTeamStats().opponentShotsOnTarget}
+                  {matchData.currentHalf === 2 && matchData.firstHalfOpponentActions.shotsOnTarget > 0 && (
+                    <span className="text-xs text-orange-600 dark:text-orange-400 ml-1">
+                      ({matchData.firstHalfOpponentActions.shotsOnTarget})
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-1 px-2 bg-yellow-100 dark:bg-yellow-800/60 rounded border border-yellow-200 dark:border-yellow-700">
+                <span className="text-xs font-medium text-yellow-800 dark:text-yellow-200">Tirs non cadrés</span>
+                <span className="font-bold text-yellow-950 dark:text-white text-sm">
+                  {getTeamStats().opponentShotsOffTarget}
+                  {matchData.currentHalf === 2 && matchData.firstHalfOpponentActions.shotsOffTarget > 0 && (
+                    <span className="text-xs text-yellow-600 dark:text-yellow-400 ml-1">
+                      ({matchData.firstHalfOpponentActions.shotsOffTarget})
+                    </span>
+                  )}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Top joueurs par catégorie */}
+        <div className="grid grid-cols-2 gap-3">
+          {/* Temps de jeu */}
+          <div className="bg-green-50 dark:bg-green-900/40 border border-green-200 dark:border-green-600 rounded p-3 shadow-sm">
+            <h3 className="text-sm font-semibold text-green-900 dark:text-green-100 mb-2 flex items-center gap-1">
+              <Clock className="h-4 w-4" />
+              Plus de temps de jeu
+            </h3>
+            <div className="space-y-1">
+              {getTopPlayersByTime().map((player, index) => (
+                <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-green-100 dark:bg-green-800/60 rounded border border-green-200 dark:border-green-700">
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-medium text-green-800 dark:text-green-200">
+                      {index + 1}. {player.name}
+                    </span>
+                  </div>
+                  <span className="font-mono text-xs font-bold text-green-950 dark:text-white">
+                    {formatTime(player.totalTime)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Tirs */}
+          <div className="bg-yellow-50 dark:bg-yellow-900/40 border border-yellow-200 dark:border-yellow-600 rounded p-3 shadow-sm">
+            <h3 className="text-sm font-semibold text-yellow-900 dark:text-yellow-100 mb-2 flex items-center gap-1">
+              <Target className="h-4 w-4" />
+              Plus de tirs
+            </h3>
+            <div className="space-y-1">
+              {getTopPlayersByTotalShots().map((player, index) => {
+                const totalShots = (player.stats.shotsOnTarget || 0) + (player.stats.shotsOffTarget || 0);
+                return (
+                  <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-yellow-100 dark:bg-yellow-800/60 rounded border border-yellow-200 dark:border-yellow-700">
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs font-medium text-yellow-800 dark:text-yellow-200">
+                        {index + 1}. {player.name}
+                      </span>
+                    </div>
+                    <span className="font-mono text-xs font-bold text-yellow-950 dark:text-white">
+                      {totalShots} ({player.stats.shotsOnTarget || 0} cadrés)
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Récupérations */}
+          <div className="bg-blue-50 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-600 rounded p-3 shadow-sm">
+            <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2 flex items-center gap-1">
+              <RefreshCw className="h-4 w-4" />
+              Plus de récupérations
+            </h3>
+            <div className="space-y-1">
+              {getTopPlayers('ballRecovery').map((player, index) => (
+                <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-blue-100 dark:bg-blue-800/60 rounded border border-blue-200 dark:border-blue-700">
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-medium text-blue-800 dark:text-blue-200">
+                      {index + 1}. {player.name}
+                    </span>
+                  </div>
+                  <span className="font-mono text-xs font-bold text-blue-950 dark:text-white">
+                    {player.stats.ballRecovery || 0}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Pertes de balle */}
+          <div className="bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-600 rounded p-3 shadow-sm">
+            <h3 className="text-sm font-semibold text-red-900 dark:text-red-100 mb-2 flex items-center gap-1">
+              <AlertTriangle className="h-4 w-4" />
+              Plus de pertes de balle
+            </h3>
+            <div className="space-y-1">
+              {getTopPlayers('ballLoss').map((player, index) => (
+                <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-red-100 dark:bg-red-800/60 rounded border border-red-200 dark:border-red-700">
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-medium text-red-800 dark:text-red-200">
+                      {index + 1}. {player.name}
+                    </span>
+                  </div>
+                  <span className="font-mono text-xs font-bold text-red-950 dark:text-white">
+                    {player.stats.ballLoss || 0}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Dribbles */}
+          <div className="bg-purple-50 dark:bg-purple-900/40 border border-purple-200 dark:border-purple-600 rounded p-3 shadow-sm">
+            <h3 className="text-sm font-semibold text-purple-900 dark:text-purple-100 mb-2 flex items-center gap-1">
+              <ArrowRight className="h-4 w-4" />
+              Plus de dribbles réussis
+            </h3>
+            <div className="space-y-1">
+              {getTopPlayers('dribbleSuccess').map((player, index) => (
+                <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-purple-100 dark:bg-purple-800/60 rounded border border-purple-200 dark:border-purple-700">
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-medium text-purple-800 dark:text-purple-200">
+                      {index + 1}. {player.name}
+                    </span>
+                  </div>
+                  <span className="font-mono text-xs font-bold text-purple-950 dark:text-white">
+                    {player.stats.dribbleSuccess || 0}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 1v1 perdus */}
+          <div className="bg-orange-50 dark:bg-orange-900/40 border border-orange-200 dark:border-orange-600 rounded p-3 shadow-sm">
+            <h3 className="text-sm font-semibold text-orange-900 dark:text-orange-100 mb-2 flex items-center gap-1">
+              <AlertTriangle className="h-4 w-4" />
+              Plus de 1v1 perdus
+            </h3>
+            <div className="space-y-1">
+              {getTopPlayers('oneOnOneDefLost').map((player, index) => (
+                <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-orange-100 dark:bg-orange-800/60 rounded border border-orange-200 dark:border-orange-700">
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-medium text-orange-800 dark:text-orange-200">
+                      {index + 1}. {player.name}
+                    </span>
+                  </div>
+                  <span className="font-mono text-xs font-bold text-orange-950 dark:text-white">
+                    {player.stats.oneOnOneDefLost || 0}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Terrain avec actions */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 border border-gray-200 dark:border-gray-700 mt-6">
+        <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+          <Target className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          Visualisation des actions sur le terrain
+        </h2>
+
+        {/* Filtre par type d'action (multichoix) */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Filtrer par type d'action (sélection multiple) :
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { value: 'all', label: 'Toutes les actions' },
+              { value: 'goal', label: 'Buts' },
+              { value: 'shot_on_target', label: 'Tirs cadrés' },
+              { value: 'shot', label: 'Tirs non cadrés' },
+              { value: 'ball_loss', label: 'Pertes de balle' },
+              { value: 'ball_recovery', label: 'Récupérations' },
+              { value: 'dribble_success', label: 'Dribbles réussis' },
+              { value: 'opponent_goal', label: 'Buts adverses' },
+              { value: 'opponent_shot_on_target', label: 'Tirs cadrés adverses' },
+              { value: 'opponent_shot', label: 'Tirs adverses' },
+            ].map((option) => {
+              const isSelected = actionFilter.includes(option.value);
+              return (
+                <button
+                  key={option.value}
+                  onClick={() => {
+                    if (option.value === 'all') {
+                      // Si "Toutes" est cliqué, basculer entre tout sélectionner et tout désélectionner
+                      setActionFilter(actionFilter.includes('all') ? [] : ['all']);
+                    } else {
+                      // Retirer "all" si présent et ajouter/retirer l'option
+                      const newFilter = actionFilter.filter(f => f !== 'all');
+                      if (isSelected) {
+                        setActionFilter(newFilter.filter(f => f !== option.value));
+                      } else {
+                        setActionFilter([...newFilter, option.value]);
+                      }
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    isSelected
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+          {actionFilter.length === 0 && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+              Aucun filtre sélectionné. Sélectionnez au moins un type d'action pour afficher les résultats.
+            </p>
+          )}
+        </div>
+
+        {/* Terrain avec actions */}
+        <div className="relative w-full max-w-2xl mx-auto scale-90 origin-center">
+          <div
+            className="relative w-full"
+            style={{
+              aspectRatio: '432 / 262',
+              backgroundImage: `url('/futsal_pitch_hor.png')`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              backgroundRepeat: 'no-repeat',
+              borderRadius: 12,
+              border: '1px solid rgba(209,213,219,1)',
+            }}
+          >
+            {/* Afficher les actions filtrées */}
+            {matchEvents
+              .filter(event => {
+                // Si aucun filtre n'est sélectionné, ne rien afficher
+                if (actionFilter.length === 0) return false;
+                // Si "all" est sélectionné, tout afficher
+                if (actionFilter.includes('all')) return true;
+                
+                // Mapping entre event_type de la DB et les IDs du filtre
+                const eventTypeMap: { [key: string]: string } = {
+                  'goal': 'goal',
+                  'shot_on_target': 'shot_on_target',
+                  'shot': 'shot',
+                  'ball_loss': 'ball_loss',
+                  'recovery': 'ball_recovery',
+                  'dribble': 'dribble_success',
+                  'opponent_goal': 'opponent_goal',
+                  'opponent_shot_on_target': 'opponent_shot_on_target',
+                  'opponent_shot': 'opponent_shot',
+                };
+                
+                const mappedType = eventTypeMap[event.action_type] || event.action_type;
+                // Vérifier si le type d'événement correspond à l'un des filtres sélectionnés
+                return actionFilter.includes(mappedType) || actionFilter.includes(event.action_type);
+              })
+              .map((event) => {
+                // Mapping entre event_type de la DB et les IDs des ACTIONS
+                const eventTypeToActionId: { [key: string]: string } = {
+                  'goal': 'goals',
+                  'shot_on_target': 'shotsOnTarget',
+                  'shot': 'shotsOffTarget',
+                  'ball_loss': 'ballLoss',
+                  'recovery': 'ballRecovery',
+                  'dribble': 'dribbleSuccess',
+                };
+                const actionId = eventTypeToActionId[event.action_type] || event.action_type;
+                let actionConfig = ACTIONS.find(a => a.id === actionId);
+                
+                // Gérer les actions adverses
+                if (!actionConfig && event.action_type.includes('opponent')) {
+                  const opponentActionNames: { [key: string]: string } = {
+                    'opponent_goal': 'But adverse',
+                    'opponent_shot_on_target': 'Tir cadré adverse',
+                    'opponent_shot': 'Tir adverse',
+                  };
+                  actionConfig = {
+                    color: 'bg-red-500',
+                    icon: Target,
+                    name: opponentActionNames[event.action_type] || event.action_type,
+                    id: event.action_type,
+                    acronym: 'Adv',
+                  };
+                }
+                
+                if (!actionConfig) {
+                  actionConfig = { color: 'bg-gray-500', icon: Target, name: event.action_type, id: event.action_type, acronym: '?' };
+                }
+                
+                const IconComponent = actionConfig.icon;
+                
+                return (
+                  <div
+                    key={event.id}
+                    className="absolute -translate-x-1/2 -translate-y-1/2 group cursor-pointer"
+                    style={{
+                      // Adaptation pour terrain horizontal : inverser x et y + symétrie horizontale
+                      // x (horizontal du terrain vertical) → top (vertical du terrain horizontal)
+                      // y (vertical du terrain vertical) → left (horizontal du terrain horizontal) inversé
+                      left: `${(1 - (event.location_y || 0)) * 100}%`,
+                      top: `${(event.location_x || 0) * 100}%`,
+                    }}
+                    title={`${actionConfig.name} - ${event.player_name} (M${event.half}) ${event.match_time_seconds ? formatTime(event.match_time_seconds) : ''}`}
+                  >
+                    <div className={`w-4 h-4 rounded-full ${actionConfig.color} ring-2 ring-white shadow-lg flex items-center justify-center transition-transform group-hover:scale-125`}>
+                      <IconComponent className="h-2.5 w-2.5 text-white" />
+                    </div>
+                    {/* Tooltip au survol */}
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
+                      {actionConfig.name} - {event.player_name} (M{event.half} {event.match_time_seconds ? formatTime(event.match_time_seconds) : ''})
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+
+        {/* Légende */}
+        <div className="mt-4 flex flex-wrap gap-3 justify-center">
+          {ACTIONS.map((action) => {
+            const IconComponent = action.icon;
+            // Mapping inverse : action.id → event_type de la DB
+            const actionIdToEventType: { [key: string]: string[] } = {
+              'goals': ['goal'],
+              'shotsOnTarget': ['shot_on_target'],
+              'shotsOffTarget': ['shot'],
+              'ballLoss': ['ball_loss'],
+              'ballRecovery': ['recovery'],
+              'dribbleSuccess': ['dribble'],
+            };
+            const eventTypes = actionIdToEventType[action.id] || [];
+            const count = matchEvents.filter(e => eventTypes.includes(e.action_type)).length;
+            return (
+              <div key={action.id} className="flex items-center gap-2 px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-lg">
+                <div className={`w-3 h-3 rounded-full ${action.color} flex items-center justify-center`}>
+                  <IconComponent className="h-2 w-2 text-white" />
+                </div>
+                <span className="text-xs text-gray-700 dark:text-gray-300">{action.name}</span>
+                <span className="text-xs font-bold text-gray-900 dark:text-white">({count})</span>
+              </div>
+            );
+          })}
+          {/* Actions adverses */}
+          <div className="flex items-center gap-2 px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-lg">
+            <div className="w-3 h-3 rounded-full bg-red-500"></div>
+            <span className="text-xs text-gray-700 dark:text-gray-300">But adverse</span>
+            <span className="text-xs font-bold text-gray-900 dark:text-white">
+              ({matchEvents.filter(e => e.action_type === 'opponent_goal').length})
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
   const updateFouls = (isTeamFoul: boolean, increment: boolean = true) => {
     setMatchData(prev => {
@@ -2886,6 +3433,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                   Annuler
                 </button>
               </div>
+              {/* Colonne droite: terrain cliquable (uniquement pendant la saisie, pas sur la page de sélection des matchs) */}
             </div>
           )}
 
@@ -3399,6 +3947,189 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
             </div>
           </div>
 
+          {/* Terrain avec actions */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4 border border-gray-200 dark:border-gray-700 mt-6">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+              <Target className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+              Visualisation des actions sur le terrain
+            </h2>
+
+            {/* Filtre par type d'action (multichoix) */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Filtrer par type d'action (sélection multiple) :
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { value: 'all', label: 'Toutes les actions' },
+                  { value: 'goal', label: 'Buts' },
+                  { value: 'shot_on_target', label: 'Tirs cadrés' },
+                  { value: 'shot', label: 'Tirs non cadrés' },
+                  { value: 'ball_loss', label: 'Pertes de balle' },
+                  { value: 'ball_recovery', label: 'Récupérations' },
+                  { value: 'dribble_success', label: 'Dribbles réussis' },
+                  { value: 'opponent_goal', label: 'Buts adverses' },
+                  { value: 'opponent_shot_on_target', label: 'Tirs cadrés adverses' },
+                  { value: 'opponent_shot', label: 'Tirs adverses' },
+                ].map((option) => {
+                  const isSelected = actionFilter.includes(option.value);
+                  return (
+                    <button
+                      key={option.value}
+                      onClick={() => {
+                        if (option.value === 'all') {
+                          setActionFilter(actionFilter.includes('all') ? [] : ['all']);
+                        } else {
+                          const newFilter = actionFilter.filter(f => f !== 'all');
+                          if (isSelected) {
+                            setActionFilter(newFilter.filter(f => f !== option.value));
+                          } else {
+                            setActionFilter([...newFilter, option.value]);
+                          }
+                        }
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        isSelected
+                          ? 'bg-blue-600 text-white shadow-md'
+                          : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {actionFilter.length === 0 && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                  Aucun filtre sélectionné. Sélectionnez au moins un type d'action pour afficher les résultats.
+                </p>
+              )}
+            </div>
+
+            {/* Terrain avec actions */}
+            <div className="relative w-full max-w-2xl mx-auto scale-90 origin-center">
+              <div
+                className="relative w-full"
+                style={{
+                  aspectRatio: '432 / 262',
+                  backgroundImage: `url('/futsal_pitch_hor.png')`,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                  backgroundRepeat: 'no-repeat',
+                  borderRadius: 12,
+                  border: '1px solid rgba(209,213,219,1)',
+                }}
+              >
+                {/* Afficher les actions filtrées */}
+                {matchEvents
+                  .filter(event => {
+                    if (actionFilter.length === 0) return false;
+                    if (actionFilter.includes('all')) return true;
+                    
+                    const eventTypeMap: { [key: string]: string } = {
+                      'goal': 'goal',
+                      'shot_on_target': 'shot_on_target',
+                      'shot': 'shot',
+                      'ball_loss': 'ball_loss',
+                      'recovery': 'ball_recovery',
+                      'dribble': 'dribble_success',
+                      'opponent_goal': 'opponent_goal',
+                      'opponent_shot_on_target': 'opponent_shot_on_target',
+                      'opponent_shot': 'opponent_shot',
+                    };
+                    
+                    const mappedType = eventTypeMap[event.action_type] || event.action_type;
+                    return actionFilter.includes(mappedType) || actionFilter.includes(event.action_type);
+                  })
+                  .map((event) => {
+                    const eventTypeToActionId: { [key: string]: string } = {
+                      'goal': 'goals',
+                      'shot_on_target': 'shotsOnTarget',
+                      'shot': 'shotsOffTarget',
+                      'ball_loss': 'ballLoss',
+                      'recovery': 'ballRecovery',
+                      'dribble': 'dribbleSuccess',
+                    };
+                    const actionId = eventTypeToActionId[event.action_type] || event.action_type;
+                    let actionConfig = ACTIONS.find(a => a.id === actionId);
+                    
+                    if (!actionConfig && event.action_type.includes('opponent')) {
+                      const opponentActionNames: { [key: string]: string } = {
+                        'opponent_goal': 'But adverse',
+                        'opponent_shot_on_target': 'Tir cadré adverse',
+                        'opponent_shot': 'Tir adverse',
+                      };
+                      actionConfig = {
+                        color: 'bg-red-500',
+                        icon: Target,
+                        name: opponentActionNames[event.action_type] || event.action_type,
+                        id: event.action_type,
+                        acronym: 'Adv',
+                      };
+                    }
+                    
+                    if (!actionConfig) {
+                      actionConfig = { color: 'bg-gray-500', icon: Target, name: event.action_type, id: event.action_type, acronym: '?' };
+                    }
+                    
+                    const IconComponent = actionConfig.icon;
+                    
+                    return (
+                      <div
+                        key={event.id}
+                        className="absolute -translate-x-1/2 -translate-y-1/2 group cursor-pointer"
+                        style={{
+                          left: `${(1 - (event.location_y || 0)) * 100}%`,
+                          top: `${(event.location_x || 0) * 100}%`,
+                        }}
+                        title={`${actionConfig.name} - ${event.player_name} (M${event.half}) ${event.match_time_seconds ? formatTime(event.match_time_seconds) : ''}`}
+                      >
+                        <div className={`w-4 h-4 rounded-full ${actionConfig.color} ring-2 ring-white shadow-lg flex items-center justify-center transition-transform group-hover:scale-125`}>
+                          <IconComponent className="h-2.5 w-2.5 text-white" />
+                        </div>
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
+                          {actionConfig.name} - {event.player_name} (M{event.half} {event.match_time_seconds ? formatTime(event.match_time_seconds) : ''})
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+
+            {/* Légende */}
+            <div className="mt-4 flex flex-wrap gap-3 justify-center">
+              {ACTIONS.map((action) => {
+                const IconComponent = action.icon;
+                const actionIdToEventType: { [key: string]: string[] } = {
+                  'goals': ['goal'],
+                  'shotsOnTarget': ['shot_on_target'],
+                  'shotsOffTarget': ['shot'],
+                  'ballLoss': ['ball_loss'],
+                  'ballRecovery': ['recovery'],
+                  'dribbleSuccess': ['dribble'],
+                };
+                const eventTypes = actionIdToEventType[action.id] || [];
+                const count = matchEvents.filter(e => eventTypes.includes(e.action_type)).length;
+                return (
+                  <div key={action.id} className="flex items-center gap-2 px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-lg">
+                    <div className={`w-3 h-3 rounded-full ${action.color} flex items-center justify-center`}>
+                      <IconComponent className="h-2 w-2 text-white" />
+                    </div>
+                    <span className="text-xs text-gray-700 dark:text-gray-300">{action.name}</span>
+                    <span className="text-xs font-bold text-gray-900 dark:text-white">({count})</span>
+                  </div>
+                );
+              })}
+              <div className="flex items-center gap-2 px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-lg">
+                <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                <span className="text-xs text-gray-700 dark:text-gray-300">But adverse</span>
+                <span className="text-xs font-bold text-gray-900 dark:text-white">
+                  ({matchEvents.filter(e => e.action_type === 'opponent_goal').length})
+                </span>
+              </div>
+            </div>
+          </div>
+
           {/* Boutons d'action */}
           <div className="flex justify-center gap-4 mt-4">
             <button
@@ -3554,30 +4285,30 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
               <div className="flex items-center justify-between">
                 {/* Temps à gauche */}
                 <div className="text-center flex-1">
-                <div className="text-lg font-mono font-bold text-blue-600 dark:text-blue-400">
-                  {formatMatchTime(matchData.matchTime)}
+                  <div className="text-lg font-mono font-bold text-blue-600 dark:text-blue-400">
+                    {formatMatchTime(matchData.matchTime)}
+                  </div>
                 </div>
-              </div>
-              
+                
                 {/* Boutons empilés à droite */}
                 <div className="flex flex-col gap-1 ml-2">
-                <button
-                  onClick={toggleMatch}
+                  <button
+                    onClick={toggleMatch}
                     className={`py-2 px-4 rounded text-white font-semibold transition-colors text-xs min-w-[60px] ${
-                    matchData.isRunning 
-                      ? 'bg-red-500 hover:bg-red-600' 
-                      : 'bg-green-500 hover:bg-green-600'
-                  }`}
-                >
+                      matchData.isRunning 
+                        ? 'bg-red-500 hover:bg-red-600' 
+                        : 'bg-green-500 hover:bg-green-600'
+                    }`}
+                  >
                     {matchData.isRunning ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                </button>
-                
-                <button
-                  onClick={nextHalf}
+                  </button>
+                  
+                  <button
+                    onClick={nextHalf}
                     className="py-2 px-4 bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors font-semibold text-xs min-w-[60px]"
-                >
+                  >
                     <Zap className="h-3 w-3" />
-                </button>
+                  </button>
                 </div>
               </div>
             </div>
@@ -3589,45 +4320,45 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
               <div className="flex items-center justify-between">
                 {/* Score au centre */}
                 <div className="text-center flex-1">
-                <div className="text-lg font-bold text-blue-600 dark:text-blue-400">
-                  {matchData.teamScore} - {matchData.opponentScore}
+                  <div className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                    {matchData.teamScore} - {matchData.opponentScore}
+                  </div>
                 </div>
-              </div>
-              
+                
                 {/* Boutons à droite */}
                 <div className="flex flex-col gap-1 ml-1">
-                <button
-                  onClick={() => {
-                    const timerKey = 'score-team';
-                    if (!longPressTriggered[timerKey]) {
-                      updateTeamScore(true);
-                    }
-                  }}
-                  onMouseDown={handleTeamScoreLongPressStart}
-                  onMouseUp={handleTeamScoreLongPressEnd}
-                  onMouseLeave={handleTeamScoreLongPressEnd}
-                  onTouchStart={handleTeamScoreLongPressStart}
-                  onTouchEnd={handleTeamScoreLongPressEnd}
-                  className="py-2 px-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors font-semibold text-xs min-w-[60px]"
-                >
-                  +1 Éq
-                </button>
-                <button
-                  onClick={async () => {
-                    const timerKey = 'opponent-goals';
-                    if (!longPressTriggered[timerKey]) {
-                      await updateOpponentGoal(true);
-                    }
-                  }}
-                  onMouseDown={() => handleOpponentLongPressStart('goals')}
-                  onMouseUp={() => handleOpponentLongPressEnd('goals')}
-                  onMouseLeave={() => handleOpponentLongPressEnd('goals')}
-                  onTouchStart={() => handleOpponentLongPressStart('goals')}
-                  onTouchEnd={() => handleOpponentLongPressEnd('goals')}
-                  className="py-2 px-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs min-w-[45px]"
-                >
-                  +1 Adv
-                </button>
+                  <button
+                    onClick={() => {
+                      const timerKey = 'score-team';
+                      if (!longPressTriggered[timerKey]) {
+                        updateTeamScore(true);
+                      }
+                    }}
+                    onMouseDown={handleTeamScoreLongPressStart}
+                    onMouseUp={handleTeamScoreLongPressEnd}
+                    onMouseLeave={handleTeamScoreLongPressEnd}
+                    onTouchStart={handleTeamScoreLongPressStart}
+                    onTouchEnd={handleTeamScoreLongPressEnd}
+                    className="py-2 px-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors font-semibold text-xs min-w-[60px]"
+                  >
+                    +1 Éq
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const timerKey = 'opponent-goals';
+                      if (!longPressTriggered[timerKey]) {
+                        await updateOpponentGoal(true);
+                      }
+                    }}
+                    onMouseDown={() => handleOpponentLongPressStart('goals')}
+                    onMouseUp={() => handleOpponentLongPressEnd('goals')}
+                    onMouseLeave={() => handleOpponentLongPressEnd('goals')}
+                    onTouchStart={() => handleOpponentLongPressStart('goals')}
+                    onTouchEnd={() => handleOpponentLongPressEnd('goals')}
+                    className="py-2 px-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs min-w-[45px]"
+                  >
+                    +1 Adv
+                  </button>
                 </div>
               </div>
             </div>
@@ -3639,50 +4370,50 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
               <div className="flex items-center justify-between">
                 {/* Compteurs de fautes au centre */}
                 <div className="flex items-center gap-3 flex-1 justify-center">
-                <div className="text-center">
+                  <div className="text-center">
                     <div className="text-base font-bold text-blue-600 dark:text-blue-400">{matchData.teamFouls}</div>
                     <div className="text-xs text-gray-500">Équipe</div>
-                </div>
-                <div className="text-center">
+                  </div>
+                  <div className="text-center">
                     <div className="text-base font-bold text-red-600 dark:text-red-400">{matchData.opponentFouls}</div>
                     <div className="text-xs text-gray-500">Adversaire</div>
+                  </div>
                 </div>
-              </div>
-              
+                
                 {/* Boutons à droite */}
                 <div className="flex flex-col gap-1 ml-2">
-                <button
-                  onClick={() => {
-                    const timerKey = 'foul-team';
-                    if (!longPressTriggered[timerKey]) {
-                      updateFouls(true);
-                    }
-                  }}
-                  onMouseDown={() => handleFoulLongPressStart(true)}
-                  onMouseUp={() => handleFoulLongPressEnd(true)}
-                  onMouseLeave={() => handleFoulLongPressEnd(true)}
-                  onTouchStart={() => handleFoulLongPressStart(true)}
-                  onTouchEnd={() => handleFoulLongPressEnd(true)}
-                  className="py-2 px-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors font-semibold text-xs min-w-[45px]"
-                >
-                  Faute Éq
-                </button>
-                <button
-                  onClick={() => {
-                    const timerKey = 'foul-opponent';
-                    if (!longPressTriggered[timerKey]) {
-                      updateFouls(false);
-                    }
-                  }}
-                  onMouseDown={() => handleFoulLongPressStart(false)}
-                  onMouseUp={() => handleFoulLongPressEnd(false)}
-                  onMouseLeave={() => handleFoulLongPressEnd(false)}
-                  onTouchStart={() => handleFoulLongPressStart(false)}
-                  onTouchEnd={() => handleFoulLongPressEnd(false)}
-                  className="py-2 px-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs min-w-[45px]"
-                >
-                  Faute Adv
-                </button>
+                  <button
+                    onClick={() => {
+                      const timerKey = 'foul-team';
+                      if (!longPressTriggered[timerKey]) {
+                        updateFouls(true);
+                      }
+                    }}
+                    onMouseDown={() => handleFoulLongPressStart(true)}
+                    onMouseUp={() => handleFoulLongPressEnd(true)}
+                    onMouseLeave={() => handleFoulLongPressEnd(true)}
+                    onTouchStart={() => handleFoulLongPressStart(true)}
+                    onTouchEnd={() => handleFoulLongPressEnd(true)}
+                    className="py-2 px-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors font-semibold text-xs min-w-[45px]"
+                  >
+                    Faute Éq
+                  </button>
+                  <button
+                    onClick={() => {
+                      const timerKey = 'foul-opponent';
+                      if (!longPressTriggered[timerKey]) {
+                        updateFouls(false);
+                      }
+                    }}
+                    onMouseDown={() => handleFoulLongPressStart(false)}
+                    onMouseUp={() => handleFoulLongPressEnd(false)}
+                    onMouseLeave={() => handleFoulLongPressEnd(false)}
+                    onTouchStart={() => handleFoulLongPressStart(false)}
+                    onTouchEnd={() => handleFoulLongPressEnd(false)}
+                    className="py-2 px-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors font-semibold text-xs min-w-[45px]"
+                  >
+                    Faute Adv
+                  </button>
                 </div>
               </div>
             </div>
@@ -3693,7 +4424,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
               
               <div className="grid grid-cols-3 gap-2">
                 <button
-                  onClick={async (e) => {
+                  onClick={async () => {
                     const timerKey = 'opponent-goals';
                     if (!longPressTriggered[timerKey]) {
                       await updateOpponentGoal(true);
@@ -3750,150 +4481,318 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
 
         {/* Vue de saisie ou bilan */}
         <div className="pt-2">
-        {activeView === 'recording' ? (
-          // Vue de saisie
-          matchData.players.length === 0 ? (
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-8 text-center">
-              <Users className="h-16 w-16 text-gray-400 mx-auto mb-6" />
-              <p className="text-xl text-gray-600 dark:text-gray-400">Aucun joueur sélectionné</p>
-              <p className="text-lg text-gray-500 dark:text-gray-500 mt-3">
-                Sélectionnez des joueurs pour commencer l&apos;enregistrement.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-6">
-              {/* Titulaires */}
-              <div>
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                  Joueurs sur le terrain
-                </h3>
-                  
-                  {/* Indicateur de sélection et bouton d'annulation */}
-                  {selectedPlayerForChange && (
-                    <div className="flex items-center gap-3">
-                      <div className="text-sm text-blue-600 font-semibold flex items-center gap-2">
-                        <span className="animate-pulse">🎯</span>
-                        Joueur sélectionné pour changement
-                      </div>
-                      <button
-                        onClick={resetPlayerSelection}
-                        className="px-3 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600 transition-colors active:scale-95"
-                        title="Annuler la sélection"
-                      >
-                        ❌ Annuler
-                      </button>
+          {activeView === 'recording' && (
+            matchData.players.length === 0 ? (
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-8 text-center">
+                <Users className="h-16 w-16 text-gray-400 mx-auto mb-6" />
+                <p className="text-xl text-gray-600 dark:text-gray-400">Aucun joueur sélectionné</p>
+                <p className="text-lg text-gray-500 dark:text-gray-500 mt-3">
+                  Sélectionnez des joueurs pour commencer l&apos;enregistrement.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Ligne 1: Titulaires + Terrain */}
+                <div className="flex flex-col lg:flex-row gap-6 mb-6">
+                  {/* Colonne gauche : Titulaires */}
+                  <div className="w-full min-w-0" style={{ flexBasis: '80%', flexGrow: 0, flexShrink: 0 }}>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                        <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                        Joueurs sur le terrain
+                      </h3>
+                      
+                      {/* Indicateur de sélection et bouton d'annulation */}
+                      {selectedPlayerForChange && (
+                        <div className="flex items-center gap-3">
+                          <div className="text-sm text-blue-600 font-semibold flex items-center gap-2">
+                            <span className="animate-pulse">🎯</span>
+                            Joueur sélectionné pour changement
+                          </div>
+                          <button
+                            onClick={resetPlayerSelection}
+                            className="px-3 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600 transition-colors active:scale-95"
+                            title="Annuler la sélection"
+                          >
+                            ❌ Annuler
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-                <div className="grid grid-cols-5 gap-3">
-                  {matchData.players
-                    .filter(player => player.isStarter && player.isOnField)
-                    .sort((a, b) => {
-                      // Gardien en premier
-                      if (a.position === 'Gardien' && b.position !== 'Gardien') return -1;
-                      if (a.position !== 'Gardien' && b.position === 'Gardien') return 1;
-                      return 0;
-                    })
-                    .map((player) => {
-                      const isOverSequenceLimit = player.currentSequenceTime >= player.sequenceTimeLimit;
-                      const baseBorderClass = player.position === 'Gardien'
-                        ? 'border-2'
-                        : player.isOnField
-                          ? 'border-2 border-green-500'
-                          : 'border border-gray-200 dark:border-gray-600';
-                      const selectionClass =
-                        !isOverSequenceLimit && selectedPlayerForChange === player.id
-                          ? 'ring-4 ring-blue-500 scale-105 shadow-xl'
-                          : '';
-                      const alertClass = isOverSequenceLimit
-                        ? 'ring-4 ring-red-500 animate-pulse border-red-500'
-                        : '';
+                    <div className="grid grid-cols-5 gap-3">
+                      {matchData.players
+                        .filter(player => player.isStarter && player.isOnField)
+                        .sort((a, b) => {
+                          // Gardien en premier
+                          if (a.position === 'Gardien' && b.position !== 'Gardien') return -1;
+                          if (a.position !== 'Gardien' && b.position === 'Gardien') return 1;
+                          return 0;
+                        })
+                        .map((player) => {
+                          const isOverSequenceLimit = player.currentSequenceTime >= player.sequenceTimeLimit;
+                          const baseBorderClass = player.position === 'Gardien'
+                            ? 'border-2'
+                            : player.isOnField
+                              ? 'border-2 border-green-500'
+                              : 'border border-gray-200 dark:border-gray-600';
+                          const selectionClass =
+                            !isOverSequenceLimit && selectedPlayerForChange === player.id
+                              ? 'ring-4 ring-blue-500 scale-105 shadow-xl'
+                              : '';
+                          const alertClass = isOverSequenceLimit
+                            ? 'ring-4 ring-red-500 animate-pulse border-red-500'
+                            : '';
 
-                      return (
+                          return (
+                            <div
+                              key={player.id}
+                              className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 transition-all duration-200 ${baseBorderClass} ${selectionClass} ${alertClass}`}
+                              style={player.position === 'Gardien' ? { borderColor: '#f59e0b' } : {}}
+                            >
+                              {/* En-tête du joueur */}
+                              <div className="text-center mb-3">
+                                <div className="font-bold text-sm text-gray-900 dark:text-white">
+                                  {player.position === 'Gardien' && <span className="text-amber-500 mr-2">🧤</span>}
+                                  {player.name}
+                                </div>
+                                <div className="text-xs text-gray-600 dark:text-gray-400">
+                                  #{player.number} - {player.position}
+                                </div>
+                                {selectedPlayerForChange === player.id && !isOverSequenceLimit && (
+                                  <div className="text-xs text-blue-600 font-bold mt-1">
+                                    {changeType === 'substitution' ? '🔄 Sélectionné pour changement' : '↔️ Sélectionné pour échange'}
+                                  </div>
+                                )}
+                                {isOverSequenceLimit && (
+                                  <div className="text-xs font-bold text-red-600 mt-1 animate-pulse">
+                                    ⏱️ Temps de séquence dépassé
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Temps de jeu */}
+                              <div className="text-center mb-3">
+                                <div className="flex justify-between text-xs">
+                                  <span className="text-gray-600 dark:text-gray-400">Total</span>
+                                  <span className="text-gray-600 dark:text-gray-400">Séquence</span>
+                                </div>
+                                <div className="flex justify-between font-mono text-sm font-bold">
+                                  <span className="text-gray-900 dark:text-white">{formatTime(player.totalTime)}</span>
+                                  <span className={`text-gray-900 dark:text-white ${isOverSequenceLimit ? 'text-red-600 animate-pulse font-extrabold' : ''}`}>
+                                    {formatTime(player.currentSequenceTime)}
+                                  </span>
+                                </div>
+                                <div className={`mt-1 text-xs font-semibold ${isOverSequenceLimit ? 'text-red-600 animate-pulse' : 'text-gray-500 dark:text-gray-400'}`}>
+                                  Limite: {formatTime(player.sequenceTimeLimit)}
+                                </div>
+                                {isOverSequenceLimit && (
+                                  <div className="mt-1 text-xs font-bold text-red-600 animate-pulse">
+                                    +{formatTime(player.currentSequenceTime - player.sequenceTimeLimit)} au-delà
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Actions rapides */}
+                              <div className="grid grid-cols-2 gap-2">
+                                {ACTIONS.map((action) => {
+                                  const IconComponent = action.icon;
+                                  return (
+                                    <button
+                                      key={action.id}
+                                      onClick={async () => {
+                                        const timerKey = `${player.id}-${action.id}`;
+                                        if (!longPressTriggered[timerKey]) {
+                                          await updatePlayerStat(player.id, action.id);
+                                        }
+                                      }}
+                                      onMouseDown={() => handleLongPressStart(player.id, action.id)}
+                                      onMouseUp={() => handleLongPressEnd(player.id, action.id)}
+                                      onMouseLeave={() => handleLongPressEnd(player.id, action.id)}
+                                      onTouchStart={() => handleLongPressStart(player.id, action.id)}
+                                      onTouchEnd={() => handleLongPressEnd(player.id, action.id)}
+                                      className={`flex items-center justify-center gap-1 p-1 rounded text-white font-medium transition-colors text-xs ${action.color} hover:opacity-80 active:scale-95`}
+                                      title={`${action.name} - Clic court: +1, Clic long: -1`}
+                                    >
+                                      <IconComponent className="h-3 w-3" />
+                                      <span className="text-xs font-bold action-acronym">{action.acronym}</span>
+                                      <span className="text-xs">{player.stats[action.id] || 0}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              {/* Cartons */}
+                              <div className="flex justify-center gap-3 mt-4">
+                                <button
+                                  onClick={async () => {
+                                    const timerKey = `${player.id}-yellowCard`;
+                                    if (!longPressTriggered[timerKey]) {
+                                      await updatePlayerCard(player.id, 'yellow');
+                                    }
+                                  }}
+                                  onMouseDown={() => handleCardLongPressStart(player.id, 'yellow')}
+                                  onMouseUp={() => handleCardLongPressEnd(player.id, 'yellow')}
+                                  onMouseLeave={() => handleCardLongPressEnd(player.id, 'yellow')}
+                                  onTouchStart={() => handleCardLongPressStart(player.id, 'yellow')}
+                                  onTouchEnd={() => handleCardLongPressEnd(player.id, 'yellow')}
+                                  className="flex items-center gap-1 px-2 py-1 bg-yellow-500 text-white rounded text-xs hover:bg-yellow-600 transition-colors active:scale-95"
+                                  title="Clic court: +1, Clic long: -1"
+                                >
+                                  <Circle className="h-3 w-3" />
+                                  <span>{player.yellowCards || 0}</span>
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    const timerKey = `${player.id}-redCard`;
+                                    if (!longPressTriggered[timerKey]) {
+                                      await updatePlayerCard(player.id, 'red');
+                                    }
+                                  }}
+                                  onMouseDown={() => handleCardLongPressStart(player.id, 'red')}
+                                  onMouseUp={() => handleCardLongPressEnd(player.id, 'red')}
+                                  onMouseLeave={() => handleCardLongPressEnd(player.id, 'red')}
+                                  onTouchStart={() => handleCardLongPressStart(player.id, 'red')}
+                                  onTouchEnd={() => handleCardLongPressEnd(player.id, 'red')}
+                                  className="flex items-center gap-1 px-2 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600 transition-colors active:scale-95"
+                                  title="Clic court: +1, Clic long: -1"
+                                >
+                                  <Circle className="h-3 w-3" />
+                                  <span>{player.redCards || 0}</span>
+                                </button>
+                              </div>
+
+                              {/* Instructions tactiles */}
+                              <div className="mt-4 text-center">
+                                <button
+                                  onTouchStart={() => handlePlayerSelection(player.id, player.isOnField)}
+                                  onMouseDown={() => handlePlayerSelection(player.id, player.isOnField)}
+                                  className={`w-full px-2 py-1 rounded text-xs transition-colors ${
+                                    selectedPlayerForChange === player.id
+                                      ? 'bg-blue-500 text-white'
+                                      : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                                  }`}
+                                >
+                                  {selectedPlayerForChange === player.id ? '✅ Joueur sélectionné' : 'Sélectionner pour changement'}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+
+                  {/* Colonne droite: terrain cliquable */}
+                  <div className="w-full lg:w-[25%] lg:flex-none min-w-0">
+                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 border border-gray-200 dark:border-gray-700 lg:sticky lg:top-4">
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
+                        Sélectionner la zone de terrain
+                      </h3>
+                      <div className="relative w-full">
+                        <div
+                          onClick={(e) => {
+                            const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                            const x = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
+                            const y = Math.min(Math.max((e.clientY - rect.top) / rect.height, 0), 1);
+                            setSelectedLocation({ x, y });
+                          }}
+                          className="relative w-full"
+                          style={{
+                            aspectRatio: '262 / 432',
+                            backgroundImage: `url('/futsal_pitch.png')`,
+                            backgroundSize: 'cover',
+                            backgroundPosition: 'center',
+                            backgroundRepeat: 'no-repeat',
+                            borderRadius: 12,
+                            border: '1px solid rgba(209,213,219,1)',
+                          }}
+                          title="Touchez/cliquez pour définir la position"
+                        >
+                          {selectedLocation && (
+                            <div
+                              className="absolute -translate-x-1/2 -translate-y-1/2"
+                              style={{
+                                left: `${selectedLocation.x * 100}%`,
+                                top: `${selectedLocation.y * 100}%`,
+                              }}
+                            >
+                              <div className="w-3 h-3 rounded-full bg-blue-600 ring-2 ring-white shadow" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                        {selectedLocation
+                          ? `Position: x=${selectedLocation.x.toFixed(2)}, y=${selectedLocation.y.toFixed(2)}`
+                          : 'Aucune position sélectionnée. Les actions seront enregistrées sans coordonnées.'}
+                        {selectedLocation && (
+                          <button
+                            onClick={() => setSelectedLocation(null)}
+                            className="ml-2 px-2 py-0.5 rounded bg-gray-100 hover:bg-gray-200 text-gray-700"
+                          >
+                            Effacer
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Ligne 2: Remplaçants (pleine largeur) */}
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                    <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                    Remplaçants
+                  </h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
+                    {matchData.players
+                      .filter(player => !player.isOnField)
+                      .sort((a, b) => {
+                        // Gardien en dernier
+                        if (a.position === 'Gardien' && b.position !== 'Gardien') return 1;
+                        if (a.position !== 'Gardien' && b.position === 'Gardien') return -1;
+                        return 0;
+                      })
+                      .map((player) => (
                         <div
                           key={player.id}
-                          className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 transition-all duration-200 ${baseBorderClass} ${selectionClass} ${alertClass}`}
+                          className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-2 transition-all duration-200 ${
+                            selectedPlayerForChange === player.id 
+                              ? 'ring-4 ring-blue-500 scale-105 shadow-xl' 
+                              : player.position === 'Gardien' 
+                              ? 'border-2' 
+                              : 'border border-gray-200 dark:border-gray-600'
+                          }`}
                           style={player.position === 'Gardien' ? { borderColor: '#f59e0b' } : {}}
                         >
                           {/* En-tête du joueur */}
-                          <div className="text-center mb-3">
-                            <div className="font-bold text-sm text-gray-900 dark:text-white">
+                          <div className="text-center mb-2">
+                            <div className="font-bold text-xs text-gray-900 dark:text-white">
                               {player.position === 'Gardien' && <span className="text-amber-500 mr-2">🧤</span>}
                               {player.name}
                             </div>
-                            <div className="text-xs text-gray-600 dark:text-gray-400">#{player.number} - {player.position}</div>
-                            {selectedPlayerForChange === player.id && !isOverSequenceLimit && (
+                            <div className="text-xs text-gray-600 dark:text-gray-400">#{player.number}</div>
+                            {selectedPlayerForChange === player.id && (
                               <div className="text-xs text-blue-600 font-bold mt-1">
-                                {changeType === 'substitution' ? '🔄 Sélectionné pour changement' : '↔️ Sélectionné pour échange'}
-                              </div>
-                            )}
-                            {isOverSequenceLimit && (
-                              <div className="text-xs font-bold text-red-600 mt-1 animate-pulse">
-                                ⏱️ Temps de séquence dépassé
+                                🔄 Sélectionné pour entrer
                               </div>
                             )}
                           </div>
 
                           {/* Temps de jeu */}
-                          <div className="text-center mb-3">
-                            <div className="flex justify-between text-xs">
-                              <span className="text-gray-600 dark:text-gray-400">Total</span>
-                              <span className="text-gray-600 dark:text-gray-400">Séquence</span>
+                          <div className="text-center mb-2">
+                            <div className="text-xs text-gray-600 dark:text-gray-400">Total</div>
+                            <div className="font-mono text-xs font-bold text-gray-900 dark:text-white">
+                              {formatTime(player.totalTime)}
                             </div>
-                            <div className="flex justify-between font-mono text-sm font-bold">
-                              <span className="text-gray-900 dark:text-white">{formatTime(player.totalTime)}</span>
-                              <span className={`text-gray-900 dark:text-white ${isOverSequenceLimit ? 'text-red-600 animate-pulse font-extrabold' : ''}`}>
-                                {formatTime(player.currentSequenceTime)}
-                              </span>
-                            </div>
-                            <div className={`mt-1 text-xs font-semibold ${isOverSequenceLimit ? 'text-red-600 animate-pulse' : 'text-gray-500 dark:text-gray-400'}`}>
-                              Limite: {formatTime(player.sequenceTimeLimit)}
-                            </div>
-                            {isOverSequenceLimit && (
-                              <div className="mt-1 text-xs font-bold text-red-600 animate-pulse">
-                                +{formatTime(player.currentSequenceTime - player.sequenceTimeLimit)} au-delà
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Actions rapides */}
-                          <div className="grid grid-cols-2 gap-2">
-                            {ACTIONS.map((action) => {
-                              const IconComponent = action.icon;
-                              return (
-                                <button
-                                  key={action.id}
-                                  onClick={async () => {
-                                    const timerKey = `${player.id}-${action.id}`;
-                                    if (!longPressTriggered[timerKey]) {
-                                      await updatePlayerStat(player.id, action.id);
-                                    }
-                                  }}
-                                  onMouseDown={() => handleLongPressStart(player.id, action.id)}
-                                  onMouseUp={() => handleLongPressEnd(player.id, action.id)}
-                                  onMouseLeave={() => handleLongPressEnd(player.id, action.id)}
-                                  onTouchStart={() => handleLongPressStart(player.id, action.id)}
-                                  onTouchEnd={() => handleLongPressEnd(player.id, action.id)}
-                                  className={`flex items-center justify-center gap-1 p-1 rounded text-white font-medium transition-colors text-xs ${action.color} hover:opacity-80 active:scale-95`}
-                                  title={`${action.name} - Clic court: +1, Clic long: -1`}
-                                >
-                                  <IconComponent className="h-3 w-3" />
-                                  <span className="text-xs font-bold action-acronym">{action.acronym}</span>
-                                  <span className="text-xs">{player.stats[action.id] || 0}</span>
-                                </button>
-                              );
-                            })}
                           </div>
 
                           {/* Cartons */}
-                          <div className="flex justify-center gap-3 mt-4">
+                          <div className="flex justify-center gap-2 mt-3">
                             <button
-                              onClick={async () => {
+                              onClick={() => {
                                 const timerKey = `${player.id}-yellowCard`;
                                 if (!longPressTriggered[timerKey]) {
-                                  await updatePlayerCard(player.id, 'yellow');
+                                  updatePlayerCard(player.id, 'yellow');
                                 }
                               }}
                               onMouseDown={() => handleCardLongPressStart(player.id, 'yellow')}
@@ -3901,378 +4800,56 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                               onMouseLeave={() => handleCardLongPressEnd(player.id, 'yellow')}
                               onTouchStart={() => handleCardLongPressStart(player.id, 'yellow')}
                               onTouchEnd={() => handleCardLongPressEnd(player.id, 'yellow')}
-                              className="flex items-center gap-1 px-2 py-1 bg-yellow-500 text-white rounded text-xs hover:bg-yellow-600 transition-colors active:scale-95"
+                              className="flex items-center gap-1 px-1 py-0.5 bg-yellow-500 text-white rounded text-xs hover:bg-yellow-600 transition-colors active:scale-95"
                               title="Clic court: +1, Clic long: -1"
                             >
-                              <Circle className="h-3 w-3" />
-                              <span>{player.yellowCards || 0}</span>
+                              <Circle className="h-2 w-2" />
+                              <span className="text-xs">{player.yellowCards || 0}</span>
                             </button>
-                                                      <button
-                                onClick={async () => {
-                                  const timerKey = `${player.id}-redCard`;
-                                  if (!longPressTriggered[timerKey]) {
-                                    await updatePlayerCard(player.id, 'red');
-                                  }
-                                }}
-                                onMouseDown={() => handleCardLongPressStart(player.id, 'red')}
-                                onMouseUp={() => handleCardLongPressEnd(player.id, 'red')}
-                                onMouseLeave={() => handleCardLongPressEnd(player.id, 'red')}
-                                onTouchStart={() => handleCardLongPressStart(player.id, 'red')}
-                                onTouchEnd={() => handleCardLongPressEnd(player.id, 'red')}
-                                className="flex items-center gap-1 px-2 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600 transition-colors active:scale-95"
-                                title="Clic court: +1, Clic long: -1"
-                              >
-                              <Circle className="h-3 w-3" />
-                              <span>{player.redCards || 0}</span>
+                            <button
+                              onClick={() => {
+                                const timerKey = `${player.id}-redCard`;
+                                if (!longPressTriggered[timerKey]) {
+                                  updatePlayerCard(player.id, 'red');
+                                }
+                              }}
+                              onMouseDown={() => handleCardLongPressStart(player.id, 'red')}
+                              onMouseUp={() => handleCardLongPressEnd(player.id, 'red')}
+                              onMouseLeave={() => handleCardLongPressEnd(player.id, 'red')}
+                              onTouchStart={() => handleCardLongPressStart(player.id, 'red')}
+                              onTouchEnd={() => handleCardLongPressEnd(player.id, 'red')}
+                              className="flex items-center gap-1 px-1 py-0.5 bg-red-500 text-white rounded text-xs hover:bg-red-600 transition-colors active:scale-95"
+                              title="Clic court: +1, Clic long: -1"
+                            >
+                              <Circle className="h-2 w-2" />
+                              <span className="text-xs">{player.redCards || 0}</span>
                             </button>
                           </div>
 
                           {/* Instructions tactiles */}
-                          <div className="mt-4 text-center">
+                          <div className="mt-3 text-center">
                             <button
                               onTouchStart={() => handlePlayerSelection(player.id, player.isOnField)}
                               onMouseDown={() => handlePlayerSelection(player.id, player.isOnField)}
                               className={`w-full px-2 py-1 rounded text-xs transition-colors ${
                                 selectedPlayerForChange === player.id
-                                  ? 'bg-blue-500 text-white'
-                                  : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                                  ? 'bg-blue-600 text-white'
+                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                               }`}
+                              title="Appui long pour sélectionner ce joueur pour un changement"
                             >
-                              {selectedPlayerForChange === player.id ? '✅ Joueur sélectionné' : 'Sélectionner pour changement'}
+                              {selectedPlayerForChange === player.id ? '✅ Sélectionné' : '👆 Appui long pour entrer'}
                             </button>
                           </div>
                         </div>
-                      );
-                    })}
-                </div>
-              </div>
-
-              {/* Remplaçants */}
-              <div>
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                  <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-                  Remplaçants
-                </h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
-                  {matchData.players
-                    .filter(player => !player.isOnField)
-                    .sort((a, b) => {
-                      // Gardien en dernier
-                      if (a.position === 'Gardien' && b.position !== 'Gardien') return 1;
-                      if (a.position !== 'Gardien' && b.position === 'Gardien') return -1;
-                      return 0;
-                    })
-                    .map((player) => (
-                      <div
-                        key={player.id}
-                        className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-2 transition-all duration-200 ${
-                          selectedPlayerForChange === player.id 
-                            ? 'ring-4 ring-blue-500 scale-105 shadow-xl' 
-                            : player.position === 'Gardien' 
-                            ? 'border-2' 
-                            : 'border border-gray-200 dark:border-gray-600'
-                        }`}
-                        style={player.position === 'Gardien' ? { borderColor: '#f59e0b' } : {}}
-                      >
-                        {/* En-tête du joueur */}
-                        <div className="text-center mb-2">
-                          <div className="font-bold text-xs text-gray-900 dark:text-white">
-                            {player.position === 'Gardien' && <span className="text-amber-500 mr-2">🧤</span>}
-                            {player.name}
-                          </div>
-                          <div className="text-xs text-gray-600 dark:text-gray-400">#{player.number}</div>
-                          {selectedPlayerForChange === player.id && (
-                            <div className="text-xs text-blue-600 font-bold mt-1">
-                              🔄 Sélectionné pour entrer
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Temps de jeu */}
-                        <div className="text-center mb-2">
-                          <div className="text-xs text-gray-600 dark:text-gray-400">Total</div>
-                          <div className="font-mono text-xs font-bold text-gray-900 dark:text-white">{formatTime(player.totalTime)}</div>
-                        </div>
-
-                        {/* Cartons */}
-                        <div className="flex justify-center gap-2 mt-3">
-                          <button
-                            onClick={() => {
-                              const timerKey = `${player.id}-yellowCard`;
-                              if (!longPressTriggered[timerKey]) {
-                                updatePlayerCard(player.id, 'yellow');
-                              }
-                            }}
-                            onMouseDown={() => handleCardLongPressStart(player.id, 'yellow')}
-                            onMouseUp={() => handleCardLongPressEnd(player.id, 'yellow')}
-                            onMouseLeave={() => handleCardLongPressEnd(player.id, 'yellow')}
-                            onTouchStart={() => handleCardLongPressStart(player.id, 'yellow')}
-                            onTouchEnd={() => handleCardLongPressEnd(player.id, 'yellow')}
-                            className="flex items-center gap-1 px-1 py-0.5 bg-yellow-500 text-white rounded text-xs hover:bg-yellow-600 transition-colors active:scale-95"
-                            title="Clic court: +1, Clic long: -1"
-                          >
-                            <Circle className="h-2 w-2" />
-                            <span className="text-xs">{player.yellowCards || 0}</span>
-                          </button>
-                          <button
-                            onClick={() => {
-                              const timerKey = `${player.id}-redCard`;
-                              if (!longPressTriggered[timerKey]) {
-                                updatePlayerCard(player.id, 'red');
-                              }
-                            }}
-                            onMouseDown={() => handleCardLongPressStart(player.id, 'red')}
-                            onMouseUp={() => handleCardLongPressEnd(player.id, 'red')}
-                            onMouseLeave={() => handleCardLongPressEnd(player.id, 'red')}
-                            onTouchStart={() => handleCardLongPressStart(player.id, 'red')}
-                            onTouchEnd={() => handleCardLongPressEnd(player.id, 'red')}
-                            className="flex items-center gap-1 px-1 py-0.5 bg-red-500 text-white rounded text-xs hover:bg-red-600 transition-colors active:scale-95"
-                            title="Clic court: +1, Clic long: -1"
-                          >
-                            <Circle className="h-2 w-2" />
-                            <span className="text-xs">{player.redCards || 0}</span>
-                          </button>
-                        </div>
-
-                        {/* Instructions tactiles */}
-                        <div className="mt-3 text-center">
-                          <button
-                            onTouchStart={() => handlePlayerSelection(player.id, player.isOnField)}
-                            onMouseDown={() => handlePlayerSelection(player.id, player.isOnField)}
-                            className={`w-full px-2 py-1 rounded text-xs transition-colors ${
-                              selectedPlayerForChange === player.id
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                            }`}
-                            title="Appui long pour sélectionner ce joueur pour un changement"
-                          >
-                            {selectedPlayerForChange === player.id ? '✅ Sélectionné' : '👆 Appui long pour entrer'}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            </div>
-          )
-        ) : (
-          // Vue bilan
-          <div className="space-y-3">
-            {/* Statistiques générales */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 border border-gray-200 dark:border-gray-700">
-              <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
-                <Trophy className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                Bilan du Match
-              </h2>
-              
-              {/* Statistiques des tirs */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-                {/* Notre équipe */}
-                <div className="bg-blue-50 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-600 rounded p-3 shadow-sm">
-                  <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2 flex items-center gap-1">
-                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                    Notre Équipe
-                  </h3>
-                  <div className="space-y-1">
-                    <div className="flex justify-between items-center py-1 px-2 bg-blue-100 dark:bg-blue-800/60 rounded border border-blue-200 dark:border-blue-700">
-                      <span className="text-xs font-medium text-blue-800 dark:text-blue-200">Tirs totaux</span>
-                      <span className="font-bold text-blue-950 dark:text-white text-sm">{getTeamStats().totalShots}</span>
-                    </div>
-                    <div className="flex justify-between items-center py-1 px-2 bg-green-100 dark:bg-green-800/60 rounded border border-green-200 dark:border-green-700">
-                      <span className="text-xs font-medium text-green-800 dark:text-green-200">Tirs cadrés</span>
-                      <span className="font-bold text-green-950 dark:text-white text-sm">{getTeamStats().totalShotsOnTarget}</span>
-                    </div>
-                    <div className="flex justify-between items-center py-1 px-2 bg-yellow-100 dark:bg-yellow-800/60 rounded border border-yellow-200 dark:border-yellow-700">
-                      <span className="text-xs font-medium text-yellow-800 dark:text-yellow-200">Tirs non cadrés</span>
-                      <span className="font-bold text-yellow-950 dark:text-white text-sm">{getTeamStats().totalShotsOffTarget}</span>
-                    </div>
+                      ))}
                   </div>
                 </div>
+              </>
+            )
+          )}
 
-                {/* Équipe adverse */}
-                <div className="bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-600 rounded p-3 shadow-sm">
-                  <h3 className="text-sm font-semibold text-red-900 dark:text-red-100 mb-2 flex items-center gap-1">
-                    <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                    Équipe Adverse
-                  </h3>
-                  <div className="space-y-1">
-                    <div className="flex justify-between items-center py-1 px-2 bg-red-100 dark:bg-red-800/60 rounded border border-red-200 dark:border-red-700">
-                      <span className="text-xs font-medium text-red-800 dark:text-red-200">Total tirs</span>
-                      <span className="font-bold text-red-950 dark:text-white text-sm">
-                        {getTeamStats().opponentShots}
-                        {matchData.currentHalf === 2 && matchData.firstHalfOpponentActions.shotsOnTarget + matchData.firstHalfOpponentActions.shotsOffTarget > 0 && (
-                          <span className="text-xs text-red-600 dark:text-red-400 ml-1">
-                            ({matchData.firstHalfOpponentActions.shotsOnTarget + matchData.firstHalfOpponentActions.shotsOffTarget})
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center py-1 px-2 bg-orange-100 dark:bg-orange-800/60 rounded border border-orange-200 dark:border-orange-700">
-                      <span className="text-xs font-medium text-orange-800 dark:text-orange-200">Tirs cadrés</span>
-                      <span className="font-bold text-orange-950 dark:text-orange-200 text-sm">
-                        {getTeamStats().opponentShotsOnTarget}
-                        {matchData.currentHalf === 2 && matchData.firstHalfOpponentActions.shotsOnTarget > 0 && (
-                          <span className="text-xs text-orange-600 dark:text-orange-400 ml-1">
-                            ({matchData.firstHalfOpponentActions.shotsOnTarget})
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center py-1 px-2 bg-yellow-100 dark:bg-yellow-800/60 rounded border border-yellow-200 dark:border-yellow-700">
-                      <span className="text-xs font-medium text-yellow-800 dark:text-yellow-200">Tirs non cadrés</span>
-                      <span className="font-bold text-yellow-950 dark:text-white text-sm">
-                        {getTeamStats().opponentShotsOffTarget}
-                        {matchData.currentHalf === 2 && matchData.firstHalfOpponentActions.shotsOffTarget > 0 && (
-                          <span className="text-xs text-yellow-600 dark:text-yellow-400 ml-1">
-                            ({matchData.firstHalfOpponentActions.shotsOffTarget})
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Top joueurs par catégorie */}
-              <div className="grid grid-cols-2 gap-3">
-                {/* Temps de jeu */}
-                <div className="bg-green-50 dark:bg-green-900/40 border border-green-200 dark:border-green-600 rounded p-3 shadow-sm">
-                  <h3 className="text-sm font-semibold text-green-900 dark:text-green-100 mb-2 flex items-center gap-1">
-                    <Clock className="h-4 w-4" />
-                    Plus de temps de jeu
-                  </h3>
-                  <div className="space-y-1">
-                    {getTopPlayersByTime().map((player, index) => (
-                      <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-green-100 dark:bg-green-800/60 rounded border border-green-200 dark:border-green-700">
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs font-medium text-green-800 dark:text-green-200">
-                            {index + 1}. {player.name}
-                          </span>
-                        </div>
-                        <span className="font-mono text-xs font-bold text-green-950 dark:text-white">
-                          {formatTime(player.totalTime)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Tirs */}
-                <div className="bg-yellow-50 dark:bg-yellow-900/40 border border-yellow-200 dark:border-yellow-600 rounded p-3 shadow-sm">
-                  <h3 className="text-sm font-semibold text-yellow-900 dark:text-yellow-100 mb-2 flex items-center gap-1">
-                    <Target className="h-4 w-4" />
-                    Plus de tirs
-                  </h3>
-                  <div className="space-y-1">
-                    {getTopPlayersByTotalShots().map((player, index) => {
-                      const totalShots = (player.stats.shotsOnTarget || 0) + (player.stats.shotsOffTarget || 0);
-                      return (
-                        <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-yellow-100 dark:bg-yellow-800/60 rounded border border-yellow-200 dark:border-yellow-700">
-                          <div className="flex items-center gap-1">
-                            <span className="text-xs font-medium text-yellow-800 dark:text-yellow-200">
-                              {index + 1}. {player.name}
-                            </span>
-                          </div>
-                          <span className="font-mono text-xs font-bold text-yellow-950 dark:text-white">
-                            {totalShots} ({player.stats.shotsOnTarget || 0} cadrés)
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Récupérations */}
-                <div className="bg-blue-50 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-600 rounded p-3 shadow-sm">
-                  <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2 flex items-center gap-1">
-                    <RefreshCw className="h-4 w-4" />
-                    Plus de récupérations
-                  </h3>
-                  <div className="space-y-1">
-                    {getTopPlayers('ballRecovery').map((player, index) => (
-                      <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-blue-100 dark:bg-blue-800/60 rounded border border-blue-200 dark:border-blue-700">
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs font-medium text-blue-800 dark:text-blue-200">
-                            {index + 1}. {player.name}
-                          </span>
-                        </div>
-                        <span className="font-mono text-xs font-bold text-blue-950 dark:text-white">
-                          {player.stats.ballRecovery || 0}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Pertes de balle */}
-                <div className="bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-600 rounded p-3 shadow-sm">
-                  <h3 className="text-sm font-semibold text-red-900 dark:text-red-100 mb-2 flex items-center gap-1">
-                    <AlertTriangle className="h-4 w-4" />
-                    Plus de pertes de balle
-                  </h3>
-                  <div className="space-y-1">
-                    {getTopPlayers('ballLoss').map((player, index) => (
-                      <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-red-100 dark:bg-red-800/60 rounded border border-red-200 dark:border-red-700">
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs font-medium text-red-800 dark:text-red-200">
-                            {index + 1}. {player.name}
-                          </span>
-                        </div>
-                        <span className="font-mono text-xs font-bold text-red-950 dark:text-white">
-                          {player.stats.ballLoss || 0}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Dribbles */}
-                <div className="bg-purple-50 dark:bg-purple-900/40 border border-purple-200 dark:border-purple-600 rounded p-3 shadow-sm">
-                  <h3 className="text-sm font-semibold text-purple-900 dark:text-purple-100 mb-2 flex items-center gap-1">
-                    <ArrowRight className="h-4 w-4" />
-                    Plus de dribbles réussis
-                  </h3>
-                  <div className="space-y-1">
-                    {getTopPlayers('dribbleSuccess').map((player, index) => (
-                      <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-purple-100 dark:bg-purple-800/60 rounded border border-purple-200 dark:border-purple-700">
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs font-medium text-purple-800 dark:text-purple-200">
-                            {index + 1}. {player.name}
-                          </span>
-                        </div>
-                        <span className="font-mono text-xs font-bold text-purple-950 dark:text-white">
-                          {player.stats.dribbleSuccess || 0}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* 1v1 perdus */}
-                <div className="bg-orange-50 dark:bg-orange-900/40 border border-orange-200 dark:border-orange-600 rounded p-3 shadow-sm">
-                  <h3 className="text-sm font-semibold text-orange-900 dark:text-orange-100 mb-2 flex items-center gap-1">
-                    <AlertTriangle className="h-4 w-4" />
-                    Plus de 1v1 perdus
-                  </h3>
-                  <div className="space-y-1">
-                    {getTopPlayers('oneOnOneDefLost').map((player, index) => (
-                      <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-orange-100 dark:bg-orange-800/60 rounded border border-orange-200 dark:border-orange-700">
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs font-medium text-orange-800 dark:text-orange-200">
-                            {index + 1}. {player.name}
-                          </span>
-                        </div>
-                        <span className="font-mono text-xs font-bold text-orange-950 dark:text-white">
-                          {player.stats.oneOnOneDefLost || 0}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+          {activeView === 'summary' && renderLiveSummary()}
         </div>
       </div>
     </div>

@@ -37,11 +37,11 @@ export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) 
     sampleEvent: events[0],
     useAllEvents: selectedMatchIds.length === 0
   })
-
+  
   // Créer les séquences temporelles
   const timeSequences = useMemo(() => {
     if (filteredEvents.length === 0) return []
-
+    
     const sequences: Array<{
       id: string
       label: string
@@ -50,7 +50,7 @@ export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) 
       half: number
       quartile: number
     }> = []
-
+    
     const eventsByHalf = filteredEvents.reduce<Record<number, EventRow[]>>((acc, event) => {
       const half = event.half || 1
       if (!acc[half]) {
@@ -79,18 +79,18 @@ export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) 
           if (endTime <= startTime) {
             endTime = startTime + 1
           }
-
-          sequences.push({
+        
+        sequences.push({
             id: `H${half}-Q${quartileIndex + 1}`,
             label: `M${half}-Q${quartileIndex + 1}`,
             startTime,
             endTime,
             half,
             quartile: quartileIndex + 1
-          })
-        }
+        })
+      }
       })
-
+    
     console.log('Generated aggregate quartile sequences:', sequences.length)
     return sequences
   }, [filteredEvents])
@@ -105,7 +105,7 @@ export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) 
       opponent_shot_on_target: number
       opponent_shot: number
     }> = {}
-
+    
     // Initialiser toutes les séquences avec des compteurs à 0
     timeSequences.forEach(seq => {
       counts[`${seq.half}-${seq.quartile}`] = {
@@ -117,19 +117,19 @@ export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) 
         opponent_shot: 0
       }
     })
-
+    
     // Compter les événements pour chaque séquence
     filteredEvents.forEach(event => {
       const eventTime = event.match_time_seconds || 0
       const eventHalf = event.half || 1
-
+      
       // Trouver la séquence correspondante
       const sequence = timeSequences.find(seq => 
         seq.half === eventHalf && 
         eventTime >= seq.startTime && 
         eventTime < seq.endTime
       )
-
+      
       if (sequence) {
         const key = `${sequence.half}-${sequence.quartile}`
         switch (event.event_type) {
