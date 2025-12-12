@@ -249,11 +249,36 @@ export default function MatchRecorderPage() {
           setMatches(matchesData || []);
         }
 
-        // Charger les joueurs
-        const { data: playersData, error: playersError } = await supabase
-          .from('players')
-          .select('*')
-          .order('last_name');
+        // Charger les joueurs via la table de liaison si une équipe est active
+        let playersData: any[] | null = null;
+        let playersError: any = null;
+        
+        if (activeTeam?.id) {
+          const { data: playerTeamsData, error: ptError } = await supabase
+            .from('player_teams')
+            .select(`
+              player_id,
+              players (*)
+            `)
+            .eq('team_id', activeTeam.id);
+          
+          if (ptError) {
+            playersError = ptError;
+          } else {
+            playersData = playerTeamsData?.map((item: any) => item.players).filter(Boolean) || [];
+            // Trier par nom de famille
+            playersData.sort((a: any, b: any) => (a.last_name || '').localeCompare(b.last_name || ''));
+          }
+        } else {
+          // Si aucune équipe active, charger tous les joueurs
+          const { data: allPlayersData, error: allPlayersError } = await supabase
+            .from('players')
+            .select('*')
+            .order('last_name');
+          
+          playersData = allPlayersData;
+          playersError = allPlayersError;
+        }
 
         if (playersError) {
           console.error('Erreur lors du chargement des joueurs:', playersError);
@@ -351,28 +376,43 @@ export default function MatchRecorderPage() {
             const playerMap = new Map<string, string>();
             
             if (playerIds.length > 0) {
-              // Essayer d'abord avec le filtre par équipe
-              let query = supabase
-                .from('players')
-                .select('id, name')
-                .in('id', playerIds);
+              let playersData: any[] | null = null;
+              let playersError: any = null;
               
               if (activeTeam?.id) {
-                query = query.eq('team_id', activeTeam.id);
+                // Utiliser la table de liaison pour filtrer par équipe
+                const { data: playerTeamsData, error: ptError } = await supabase
+                  .from('player_teams')
+                  .select(`
+                    player_id,
+                    players (id, first_name, last_name)
+                  `)
+                  .eq('team_id', activeTeam.id)
+                  .in('player_id', playerIds);
+                
+                if (ptError) {
+                  playersError = ptError;
+                } else {
+                  playersData = playerTeamsData?.map((item: any) => ({
+                    id: item.players?.id,
+                    name: item.players ? `${item.players.first_name} ${item.players.last_name}` : null
+                  })).filter((p: any) => p.id && p.name) || [];
+                }
               }
-              
-              let { data: playersData, error: playersError } = await query;
               
               // Si aucun joueur trouvé avec le filtre équipe, essayer sans filtre
               if (!playersData || playersData.length === 0) {
                 console.warn('Aucun joueur trouvé avec filtre équipe, recherche sans filtre...');
                 const { data: allPlayersData, error: allPlayersError } = await supabase
                   .from('players')
-                  .select('id, name')
+                  .select('id, first_name, last_name')
                   .in('id', playerIds);
                 
                 if (!allPlayersError && allPlayersData) {
-                  playersData = allPlayersData;
+                  playersData = allPlayersData.map((p: any) => ({
+                    id: p.id,
+                    name: `${p.first_name} ${p.last_name}`
+                  }));
                   playersError = null;
                 }
               }

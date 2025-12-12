@@ -361,11 +361,22 @@ export default function CalendarPage() {
 
       console.log('🏆 Calendar - Chargement des joueurs pour l\'équipe:', activeTeam.name);
       
-      const { data, error } = await supabase
-        .from('players')
-        .select('id, first_name, last_name')
-        .eq('team_id', activeTeam.id)
-        .order('last_name');
+      // Récupération des joueurs via la table de liaison
+      const { data: playerTeamsData, error } = await supabase
+        .from('player_teams')
+        .select(`
+          player_id,
+          players (id, first_name, last_name)
+        `)
+        .eq('team_id', activeTeam.id);
+      
+      if (error) throw error;
+      
+      // Transformer les données pour extraire les joueurs
+      const data = playerTeamsData?.map((item: any) => item.players).filter(Boolean) || [];
+      
+      // Trier par nom de famille
+      data.sort((a: any, b: any) => (a.last_name || '').localeCompare(b.last_name || ''));
 
       if (error) throw error;
 

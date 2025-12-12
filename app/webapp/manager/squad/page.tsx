@@ -37,6 +37,7 @@ interface PlayerFormData {
   status: string;
   number: string;
   sequence_time_limit: string;
+  selectedTeams: string[]; // Tableau d'IDs d'équipes
 }
 
 interface FilterState {
@@ -55,7 +56,8 @@ const initialFormData: PlayerFormData = {
   strong_foot: '',
   status: '',
   number: '',
-  sequence_time_limit: '180'
+  sequence_time_limit: '180',
+  selectedTeams: []
 };
 
 const initialFilters: FilterState = {
@@ -67,7 +69,7 @@ const initialFilters: FilterState = {
 };
 
 export default function SquadPage() {
-  const { activeTeam } = useActiveTeam();
+  const { activeTeam, teams } = useActiveTeam();
   const [players, setPlayers] = useState<Player[]>([]);
   const [totalTrainings, setTotalTrainings] = useState<number>(0);
   const [loading, setLoading] = useState(true);
@@ -272,19 +274,24 @@ export default function SquadPage() {
       
       console.log('🏆 Chargement des joueurs pour l\'équipe:', activeTeam.name, 'ID:', activeTeam.id);
       
-      // Récupération des joueurs filtrés par équipe
+      // Récupération des joueurs filtrés par équipe via la table de liaison
       const { data, error } = await supabase
-        .from('players')
-        .select('*')
+        .from('player_teams')
+        .select(`
+          player_id,
+          players (*)
+        `)
         .eq('team_id', activeTeam.id)
-        .order('last_name');
+        .order('players(last_name)');
+      
+      // Transformer les données pour extraire les joueurs
+      const playersData = data?.map((item: any) => item.players).filter(Boolean) || [];
 
       if (error) throw error;
 
-      console.log('📊 Joueurs récupérés de Supabase:', data?.length || 0);
-      if (data && data.length > 0) {
-        console.log('📋 Premier joueur (exemple):', data[0]);
-        console.log('🔍 Vérification team_id du premier joueur:', data[0].team_id);
+      console.log('📊 Joueurs récupérés de Supabase:', playersData?.length || 0);
+      if (playersData && playersData.length > 0) {
+        console.log('📋 Premier joueur (exemple):', playersData[0]);
       } else {
         console.log('⚠️ Aucun joueur trouvé pour l\'équipe:', activeTeam.name);
         console.log('⚠️ Vérifiez que l\'équipe a des joueurs dans la base de données');
@@ -303,7 +310,7 @@ export default function SquadPage() {
       if (trainingsError) throw trainingsError;
 
       // Calcul dynamique des stats pour chaque joueur
-      const playersWithStats = (data || []).map(player => {
+      const playersWithStats = (playersData || []).map(player => {
         const sequenceTimeLimit =
           typeof (player as any).sequence_time_limit === 'number'
             ? (player as any).sequence_time_limit
@@ -377,7 +384,7 @@ export default function SquadPage() {
     });
   }, [players, filters]);
 
-  const handleOpenModal = (player?: Player) => {
+  const handleOpenModal = async (player?: Player) => {
     // Vérifier qu'une équipe est active
     if (!activeTeam) {
       setError('Aucune équipe active sélectionnée. Veuillez sélectionner une équipe dans la sidebar.');
@@ -389,6 +396,15 @@ export default function SquadPage() {
     if (player) {
       setIsEditing(true);
       setCurrentPlayer(player);
+      
+      // Récupérer les équipes du joueur
+      const { data: playerTeamsData } = await supabase
+        .from('player_teams')
+        .select('team_id')
+        .eq('player_id', player.id);
+      
+      const playerTeamIds = playerTeamsData?.map(pt => pt.team_id) || [];
+      
       setFormData({
         first_name: player.first_name,
         last_name: player.last_name,
@@ -396,13 +412,17 @@ export default function SquadPage() {
         position: player.position,
         strong_foot: player.strong_foot,
         status: player.status,
-      number: player.number?.toString() || '',
-      sequence_time_limit: (player.sequence_time_limit ?? 180).toString()
+        number: player.number?.toString() || '',
+        sequence_time_limit: (player.sequence_time_limit ?? 180).toString(),
+        selectedTeams: playerTeamIds
       });
     } else {
       setIsEditing(false);
       setCurrentPlayer(null);
-      setFormData(initialFormData);
+      setFormData({
+        ...initialFormData,
+        selectedTeams: [activeTeam.id] // Pré-sélectionner l'équipe active par défaut
+      });
     }
     setIsModalOpen(true);
   };
@@ -420,13 +440,13 @@ export default function SquadPage() {
     setSuccess(null);
 
     try {
-      // Vérifier qu'une équipe est active
-      if (!activeTeam) {
-        setError('Aucune équipe active sélectionnée. Veuillez sélectionner une équipe dans la sidebar.');
+      // Vérifier qu'au moins une équipe est sélectionnée
+      if (!formData.selectedTeams || formData.selectedTeams.length === 0) {
+        setError('Veuillez sélectionner au moins une équipe pour ce joueur.');
         return;
       }
 
-      console.log('🏆 Ajout/modification de joueur pour l\'équipe:', activeTeam.name, 'ID:', activeTeam.id);
+      console.log('🏆 Ajout/modification de joueur pour les équipes:', formData.selectedTeams);
 
       const playerData = {
         first_name: formData.first_name,
@@ -437,26 +457,73 @@ export default function SquadPage() {
         status: formData.status,
         number: formData.number ? parseInt(formData.number) : null,
         sequence_time_limit: formData.sequence_time_limit ? parseInt(formData.sequence_time_limit) : 180,
-        team_id: activeTeam.id // Ajouter automatiquement le team_id
+        team_id: formData.selectedTeams[0] // Garder la première équipe comme équipe principale (rétrocompatibilité)
       };
 
       console.log('🏆 Données du joueur à enregistrer:', playerData);
 
+      let playerId: string;
+
       if (isEditing && currentPlayer) {
-        const { error } = await supabase
+        // Mise à jour du joueur
+        const { error: updateError } = await supabase
           .from('players')
           .update(playerData)
           .eq('id', currentPlayer.id);
 
-        if (error) throw error;
-        setSuccess(`Joueur modifié avec succès dans l'équipe ${activeTeam.name}`);
-      } else {
-        const { error } = await supabase
-          .from('players')
-          .insert([playerData]);
+        if (updateError) throw updateError;
+        playerId = currentPlayer.id;
 
-        if (error) throw error;
-        setSuccess(`Joueur ajouté avec succès dans l'équipe ${activeTeam.name}`);
+        // Mettre à jour les relations avec les équipes
+        // Supprimer toutes les relations existantes
+        const { error: deleteError } = await supabase
+          .from('player_teams')
+          .delete()
+          .eq('player_id', playerId);
+
+        if (deleteError) throw deleteError;
+
+        // Ajouter les nouvelles relations
+        const teamRelations = formData.selectedTeams.map(teamId => ({
+          player_id: playerId,
+          team_id: teamId
+        }));
+
+        const { error: insertError } = await supabase
+          .from('player_teams')
+          .insert(teamRelations);
+
+        if (insertError) throw insertError;
+
+        const teamNames = teams.filter(t => formData.selectedTeams.includes(t.id)).map(t => t.name).join(', ');
+        setSuccess(`Joueur modifié avec succès dans ${teamNames}`);
+      } else {
+        // Création du joueur
+        const { data: newPlayer, error: insertError } = await supabase
+          .from('players')
+          .insert([playerData])
+          .select()
+          .single();
+
+        if (insertError) throw insertError;
+        if (!newPlayer) throw new Error('Erreur lors de la création du joueur');
+
+        playerId = newPlayer.id;
+
+        // Ajouter les relations avec les équipes
+        const teamRelations = formData.selectedTeams.map(teamId => ({
+          player_id: playerId,
+          team_id: teamId
+        }));
+
+        const { error: relationError } = await supabase
+          .from('player_teams')
+          .insert(teamRelations);
+
+        if (relationError) throw relationError;
+
+        const teamNames = teams.filter(t => formData.selectedTeams.includes(t.id)).map(t => t.name).join(', ');
+        setSuccess(`Joueur ajouté avec succès dans ${teamNames}`);
       }
 
       handleCloseModal();
@@ -914,6 +981,53 @@ export default function SquadPage() {
                   required
                 />
                 <p className="mt-1 text-xs text-gray-500">Durée maximale avant alerte dans le match recorder (défaut 180 secondes).</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Équipes <span className="text-gray-500 text-xs">(sélection multiple possible)</span>
+                </label>
+                <div className="mt-2 space-y-2 max-h-48 overflow-y-auto border border-gray-300 rounded-md p-3">
+                  {teams.map((team) => (
+                    <label key={team.id} className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                      <input
+                        type="checkbox"
+                        checked={formData.selectedTeams.includes(team.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setFormData({
+                              ...formData,
+                              selectedTeams: [...formData.selectedTeams, team.id]
+                            });
+                          } else {
+                            setFormData({
+                              ...formData,
+                              selectedTeams: formData.selectedTeams.filter(id => id !== team.id)
+                            });
+                          }
+                        }}
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <div className="flex items-center gap-2 flex-1">
+                        <div
+                          className="w-4 h-4 rounded-full"
+                          style={{ backgroundColor: team.color }}
+                        ></div>
+                        <span className="text-sm text-gray-700">
+                          {team.name} {team.category && `(${team.category}${team.level ? ` - ${team.level}` : ''})`}
+                        </span>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+                {formData.selectedTeams.length === 0 && (
+                  <p className="mt-1 text-xs text-red-500">Veuillez sélectionner au moins une équipe</p>
+                )}
+                {formData.selectedTeams.length > 0 && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    {formData.selectedTeams.length} équipe{formData.selectedTeams.length > 1 ? 's' : ''} sélectionnée{formData.selectedTeams.length > 1 ? 's' : ''}
+                  </p>
+                )}
               </div>
 
               <div className="flex justify-end gap-2 mt-6">
