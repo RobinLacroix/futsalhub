@@ -9,7 +9,7 @@ export default function Home() {
 
   return (
     <main>
-      <a href="/signup" className="text-2xl font-bold">Hello FutsalHub!</a>
+      <a href="/signup" className="text-2xl font-bold">Cliquez Ici!</a>
     </main>
   );
 }
