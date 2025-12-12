@@ -398,12 +398,37 @@ export default function SquadPage() {
       setCurrentPlayer(player);
       
       // Récupérer les équipes du joueur
-      const { data: playerTeamsData } = await supabase
-        .from('player_teams')
-        .select('team_id')
-        .eq('player_id', player.id);
+      let playerTeamIds: string[] = [];
       
-      const playerTeamIds = playerTeamsData?.map(pt => pt.team_id) || [];
+      try {
+        const { data: playerTeamsData, error: playerTeamsError } = await supabase
+          .from('player_teams')
+          .select('team_id')
+          .eq('player_id', player.id);
+        
+        if (playerTeamsError) {
+          console.warn('Erreur lors de la récupération des équipes du joueur:', playerTeamsError);
+        } else {
+          playerTeamIds = playerTeamsData?.map(pt => pt.team_id) || [];
+        }
+      } catch (err) {
+        console.warn('Erreur lors de la récupération des équipes du joueur:', err);
+      }
+      
+      // Si le joueur n'a pas d'équipes dans player_teams, utiliser team_id ou l'équipe active
+      if (playerTeamIds.length === 0) {
+        const fallbackTeamId = (player as any).team_id || activeTeam?.id;
+        if (fallbackTeamId) {
+          playerTeamIds = [fallbackTeamId];
+        } else if (activeTeam) {
+          playerTeamIds = [activeTeam.id];
+        }
+      }
+      
+      // S'assurer qu'au moins une équipe est sélectionnée
+      if (playerTeamIds.length === 0 && activeTeam) {
+        playerTeamIds = [activeTeam.id];
+      }
       
       setFormData({
         first_name: player.first_name,
@@ -443,6 +468,7 @@ export default function SquadPage() {
       // Vérifier qu'au moins une équipe est sélectionnée
       if (!formData.selectedTeams || formData.selectedTeams.length === 0) {
         setError('Veuillez sélectionner au moins une équipe pour ce joueur.');
+        setIsSubmitting(false);
         return;
       }
 
@@ -860,9 +886,9 @@ export default function SquadPage() {
 
       {/* Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <div className="flex justify-between items-center mb-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg w-full max-w-md max-h-[90vh] flex flex-col">
+            <div className="flex justify-between items-center p-6 pb-4 border-b">
               <h2 className="text-xl font-semibold">
                 {isEditing ? 'Modifier le joueur' : 'Ajouter un joueur'}
               </h2>
@@ -874,7 +900,8 @@ export default function SquadPage() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+              <div className="flex-1 overflow-y-auto p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700">Numéro</label>
                 <input
@@ -1029,8 +1056,9 @@ export default function SquadPage() {
                   </p>
                 )}
               </div>
+              </div>
 
-              <div className="flex justify-end gap-2 mt-6">
+              <div className="flex justify-end gap-2 p-6 pt-4 border-t bg-gray-50">
                 <button
                   type="button"
                   onClick={handleCloseModal}
