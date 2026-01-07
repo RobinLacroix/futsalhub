@@ -101,7 +101,7 @@ export default function Sidebar({ isExpanded, onToggle }: SidebarProps) {
       items: [
         {
           name: 'Librairie',
-          href: '/webapp/share/library',
+          href: '/webapp/library',
           icon: FileText
         },
         {

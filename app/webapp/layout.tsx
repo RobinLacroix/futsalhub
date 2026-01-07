@@ -147,7 +147,7 @@ function Sidebar({ isExpanded, onToggle }: { isExpanded: boolean; onToggle: () =
       items: [
         {
           name: 'Librairie',
-          href: '/webapp/share/library',
+          href: '/webapp/library',
           icon: FileText
         },
         {

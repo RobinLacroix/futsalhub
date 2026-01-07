@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Field } from './components/Field';
 import { SchematicElements } from './components/SchematicElements';
 import { Toolbar } from './components/Toolbar';
@@ -39,9 +40,11 @@ const FUTSAL_WIDTH_M = 20;  // Largeur (verticale, haut-bas)
 const BLANK_LENGTH_M = 20;
 const BLANK_WIDTH_M = 20;
 
-export default function SchematicsPage() {
+function SchematicsPageContent() {
+  const searchParams = useSearchParams();
   const { activeTeam } = useActiveTeam();
   const [fieldType, setFieldType] = useState<FieldType>('futsal');
+  const [hasLoadedFromUrl, setHasLoadedFromUrl] = useState(false);
   const [elements, setElements] = useState<SchematicElement[]>([]);
   const [circuits, setCircuits] = useState<Circuit[]>([{
     id: 'circuit-1',
@@ -2103,6 +2106,26 @@ export default function SchematicsPage() {
     }
   }, []);
 
+  // Charger automatiquement le schéma depuis l'URL si présent
+  useEffect(() => {
+    const schematicId = searchParams.get('schematic');
+    if (schematicId && !hasLoadedFromUrl) {
+      const loadSchematicFromUrl = async () => {
+        try {
+          const schematic = await schematicsService.getSchematicById(schematicId);
+          if (schematic) {
+            handleLoadSchematic(schematic.data);
+            setCurrentSchematicId(schematic.id);
+            setHasLoadedFromUrl(true);
+          }
+        } catch (err) {
+          console.error('Erreur lors du chargement du schéma depuis l\'URL:', err);
+        }
+      };
+      loadSchematicFromUrl();
+    }
+  }, [searchParams, hasLoadedFromUrl, handleLoadSchematic]);
+
   // Initialiser l'historique au chargement
   useEffect(() => {
     if (elements.length === 0 && history.length === 1 && history[0].length === 0) {
@@ -2443,6 +2466,14 @@ export default function SchematicsPage() {
         })()}
       />
     </div>
+  );
+}
+
+export default function SchematicsPage() {
+  return (
+    <Suspense fallback={<div className="h-screen flex items-center justify-center">Chargement...</div>}>
+      <SchematicsPageContent />
+    </Suspense>
   );
 }
 
