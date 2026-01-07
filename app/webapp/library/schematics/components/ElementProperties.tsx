@@ -13,7 +13,7 @@ export function ElementProperties({ element, onClose, onUpdate }: ElementPropert
   if (!element) return null;
 
   const isPlayer = element.type === 'player';
-  const isZone = element.type === 'rectangle' || element.type === 'circle' || element.type === 'triangle';
+  const isZone = element.type === 'rectangle' || element.type === 'circle';
   const isLine = element.type === 'line' || element.type === 'arrow';
 
   return (

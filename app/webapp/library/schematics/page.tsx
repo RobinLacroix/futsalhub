@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Field } from './components/Field';
 import { SchematicElements } from './components/SchematicElements';
 import { Toolbar } from './components/Toolbar';
@@ -21,7 +21,8 @@ import type {
   LineElement,
   PlayerElement,
   BallElement,
-  MaterialElement
+  MaterialElement,
+  FieldType
 } from '@/types/schematics';
 
 type Circuit = {
@@ -32,11 +33,15 @@ type Circuit = {
 
 // Terrain de futsal : 40m (longueur horizontale) x 20m (largeur verticale)
 // Format paysage : 40m de gauche à droite, 20m de haut en bas
-const FIELD_LENGTH_M = 40; // Longueur (horizontale, gauche-droite)
-const FIELD_WIDTH_M = 20;  // Largeur (verticale, haut-bas)
+// Dimensions par défaut (seront dynamiques selon le type de terrain)
+const FUTSAL_LENGTH_M = 40; // Longueur (horizontale, gauche-droite)
+const FUTSAL_WIDTH_M = 20;  // Largeur (verticale, haut-bas)
+const BLANK_LENGTH_M = 20;
+const BLANK_WIDTH_M = 20;
 
 export default function SchematicsPage() {
   const { activeTeam } = useActiveTeam();
+  const [fieldType, setFieldType] = useState<FieldType>('futsal');
   const [elements, setElements] = useState<SchematicElement[]>([]);
   const [circuits, setCircuits] = useState<Circuit[]>([{
     id: 'circuit-1',
@@ -60,15 +65,28 @@ export default function SchematicsPage() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawStart, setDrawStart] = useState<Position | null>(null);
   const [drawCurrent, setDrawCurrent] = useState<Position | null>(null);
+  const [isShiftPressed, setIsShiftPressed] = useState(false);
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectionBox, setSelectionBox] = useState<{ start: Position; end: Position } | null>(null);
   const [draggedElements, setDraggedElements] = useState<{ ids: string[]; offsetX: number; offsetY: number; initialPositions: Map<string, { x: number; y: number; endX?: number; endY?: number }> } | null>(null);
-  const [draggedElement, setDraggedElement] = useState<{ id: string; offsetX: number; offsetY: number; isMovingEnd?: boolean } | null>(null);
+  const [draggedElement, setDraggedElement] = useState<{ id: string; offsetX: number; offsetY: number; isMovingEnd?: boolean; isMovingLine?: boolean; initialStartX?: number; initialStartY?: number; initialEndX?: number; initialEndY?: number } | null>(null);
   const [resizingHandle, setResizingHandle] = useState<{ id: string; handleType: string; initialPos: Position; initialElement: SchematicElement } | null>(null);
   const resizingHandleRef = useRef<{ id: string; handleType: string; initialPos: Position; initialElement: SchematicElement } | null>(null);
+  const isMultiDragRef = useRef<boolean>(false);
   const [copiedElement, setCopiedElement] = useState<SchematicElement | null>(null);
   const [copiedElements, setCopiedElements] = useState<SchematicElement[]>([]);
   const svgRef = useRef<SVGSVGElement>(null);
+  
+  // Historique pour undo/redo
+  const [history, setHistory] = useState<SchematicElement[][]>([[]]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const historyIndexRef = useRef(0);
+  const maxHistorySize = 50;
+  
+  // Synchroniser la ref avec l'état
+  useEffect(() => {
+    historyIndexRef.current = historyIndex;
+  }, [historyIndex]);
 
   // Accès pratique au circuit et aux séquences courants
   const currentCircuit = circuits[currentCircuitIndex] || circuits[0];
@@ -78,6 +96,53 @@ export default function SchematicsPage() {
   const roundToDecimeter = useCallback((value: number): number => {
     return Math.round(value * 10) / 10;
   }, []);
+
+  // Sauvegarder l'état actuel dans l'historique
+  const saveToHistory = useCallback((newElements: SchematicElement[]) => {
+    setHistory(prev => {
+      const currentIndex = historyIndexRef.current;
+      const newHistory = prev.slice(0, currentIndex + 1); // Supprimer les états futurs si on est au milieu de l'historique
+      newHistory.push(newElements.map(el => JSON.parse(JSON.stringify(el)))); // Deep copy
+      // Limiter la taille de l'historique
+      if (newHistory.length > maxHistorySize) {
+        newHistory.shift();
+        setHistoryIndex(prevIndex => {
+          const newIndex = Math.max(0, prevIndex - 1);
+          historyIndexRef.current = newIndex;
+          return newIndex;
+        });
+        return newHistory;
+      }
+      setHistoryIndex(prevIndex => {
+        const newIndex = Math.min(prevIndex + 1, maxHistorySize - 1);
+        historyIndexRef.current = newIndex;
+        return newIndex;
+      });
+      return newHistory;
+    });
+  }, []);
+
+  // Annuler (undo)
+  const handleUndo = useCallback(() => {
+    if (historyIndex > 0) {
+      const newIndex = historyIndex - 1;
+      setHistoryIndex(newIndex);
+      historyIndexRef.current = newIndex;
+      setElements(history[newIndex].map(el => JSON.parse(JSON.stringify(el))));
+      setSelectedElements([]);
+    }
+  }, [historyIndex, history]);
+
+  // Refaire (redo)
+  const handleRedo = useCallback(() => {
+    if (historyIndex < history.length - 1) {
+      const newIndex = historyIndex + 1;
+      setHistoryIndex(newIndex);
+      historyIndexRef.current = newIndex;
+      setElements(history[newIndex].map(el => JSON.parse(JSON.stringify(el))));
+      setSelectedElements([]);
+    }
+  }, [historyIndex, history]);
 
   // Ajouter une nouvelle séquence (copie de la séquence actuelle) dans le circuit courant
   const handleAddSequence = useCallback(() => {
@@ -89,7 +154,7 @@ export default function SchematicsPage() {
       const seqs = [...circuit.sequences];
       // Sauvegarder l'état courant dans la séquence actuelle
       seqs[currentSequenceIndex] = elements.map(el => ({ ...el }));
-      // Nouvelle séquence initialisée avec la position actuelle
+      // Nouvelle séquence initialisée avec la position actuelle (les éléments verrouillés restent à leur position)
       const newSeq = elements.map(el => ({ ...el }));
       seqs.push(newSeq);
 
@@ -97,7 +162,7 @@ export default function SchematicsPage() {
       return updated;
     });
     setCurrentSequenceIndex(prev => prev + 1);
-    // La séquence suivante commence avec les mêmes éléments
+    // La séquence suivante commence avec les mêmes éléments (y compris les verrouillés)
     setElements(elements.map(el => ({ ...el })));
     setSelectedElements([]);
   }, [elements, currentCircuitIndex, currentSequenceIndex]);
@@ -122,21 +187,41 @@ export default function SchematicsPage() {
       return updated;
     });
 
+    const targetSequence = sequences[index];
+    // Conserver les éléments verrouillés de la séquence actuelle
+    const lockedElements = elements.filter((el: SchematicElement) => el.isLocked);
+    const lockedById = new Map(lockedElements.map((el: SchematicElement) => [el.id, el]));
+    
+    const newElements = targetSequence.map((el: SchematicElement) => {
+      // Si l'élément existe dans la séquence cible et est verrouillé, garder la version verrouillée
+      const locked = lockedById.get(el.id);
+      return locked || el;
+    });
+    
+    // Ajouter les éléments verrouillés qui n'existent pas dans la séquence cible
+    lockedElements.forEach((locked: SchematicElement) => {
+      if (!newElements.some((el: SchematicElement) => el.id === locked.id)) {
+        newElements.push(locked);
+      }
+    });
+    
+    setElements(newElements);
     setCurrentSequenceIndex(index);
-  }, [currentCircuitIndex, currentSequenceIndex, elements, isPlaying]);
+  }, [currentCircuitIndex, currentSequenceIndex, elements, isPlaying, sequences]);
 
   // Gérer play/pause
   const handlePlayPause = useCallback(() => {
     setIsPlaying(prev => {
       if (!prev) {
         // Démarrer la lecture depuis la séquence actuelle
-        // Sauvegarder d'abord la séquence actuelle dans le circuit courant
+        // Sauvegarder d'abord la séquence actuelle dans le circuit courant (incluant les éléments verrouillés)
         setCircuits(prevCircuits => {
           const updated = [...prevCircuits];
           const circuit = updated[currentCircuitIndex];
           if (!circuit) return prevCircuits;
 
           const seqs = [...circuit.sequences];
+          // Inclure tous les éléments (y compris les verrouillés) dans la séquence
           seqs[currentSequenceIndex] = elements.map(el => ({ ...el }));
 
           updated[currentCircuitIndex] = { ...circuit, sequences: seqs };
@@ -178,24 +263,58 @@ export default function SchematicsPage() {
     });
   }, [sequences.length, currentCircuitIndex, currentSequenceIndex, isPlaying]);
 
-  // Ajouter un nouveau circuit (copie vide avec une séquence 0)
+  // Ajouter un nouveau circuit (copie vide avec une séquence 0, mais incluant les éléments verrouillés)
   const handleAddCircuit = useCallback(() => {
+    // Conserver les éléments verrouillés du circuit actuel
+    const lockedElements = elements.filter((el: SchematicElement) => el.isLocked);
+    
     setCircuits(prev => {
       const newCircuit: Circuit = {
         id: `circuit-${Date.now()}-${Math.random()}`,
         name: `Circuit ${prev.length + 1}`,
-        sequences: [[]],
+        sequences: [lockedElements.map(el => ({ ...el }))], // Inclure les éléments verrouillés dans la séquence 0
       };
       return [...prev, newCircuit];
     });
     setCurrentCircuitIndex(prev => prev + 1);
     setCurrentSequenceIndex(0);
-    setElements([]);
+    setElements(lockedElements.map(el => ({ ...el }))); // Initialiser avec les éléments verrouillés
     setSelectedElements([]);
     setIsPlaying(false);
-  }, []);
+  }, [elements]);
 
   // Supprimer le circuit courant
+  const handleDuplicateCircuit = useCallback(() => {
+    setCircuits(prev => {
+      const circuit = prev[currentCircuitIndex];
+      if (!circuit) return prev;
+
+      // Sauvegarder l'état actuel du circuit avant de le dupliquer
+      const currentSequences = [...circuit.sequences];
+      currentSequences[currentSequenceIndex] = elements.map(el => ({ ...el }));
+
+      // Créer une copie profonde du circuit avec toutes ses séquences
+      const duplicatedCircuit: Circuit = {
+        id: `circuit-${Date.now()}-${Math.random()}`,
+        name: `${circuit.name} (copie)`,
+        sequences: currentSequences.map(seq => seq.map(el => JSON.parse(JSON.stringify(el))))
+      };
+
+      // Insérer le circuit dupliqué juste après le circuit actuel
+      const newCircuits = [...prev];
+      newCircuits.splice(currentCircuitIndex + 1, 0, duplicatedCircuit);
+      
+      // Passer au circuit dupliqué
+      setCurrentCircuitIndex(currentCircuitIndex + 1);
+      setCurrentSequenceIndex(0);
+      setElements(duplicatedCircuit.sequences[0].map(el => JSON.parse(JSON.stringify(el))));
+      setSelectedElements([]);
+      setIsPlaying(false);
+
+      return newCircuits;
+    });
+  }, [elements, currentCircuitIndex, currentSequenceIndex]);
+
   const handleDeleteCircuit = useCallback(() => {
     setCircuits(prev => {
       if (prev.length <= 1) return prev;
@@ -230,12 +349,30 @@ export default function SchematicsPage() {
       return updated;
     });
 
+    // Conserver les éléments verrouillés lors du changement de circuit
+    const lockedElements = elements.filter((el: SchematicElement) => el.isLocked);
+    const lockedById = new Map(lockedElements.map((el: SchematicElement) => [el.id, el]));
+
     setCurrentCircuitIndex(index);
     setCurrentSequenceIndex(0);
 
     const targetCircuit = circuits[index];
     const targetSeq = targetCircuit?.sequences[0] || [];
-    setElements(targetSeq.map(el => ({ ...el })));
+    
+    // Conserver les éléments verrouillés
+    const newElements = targetSeq.map((el: SchematicElement) => {
+      const locked = lockedById.get(el.id);
+      return locked || el;
+    });
+    
+    // Ajouter les éléments verrouillés qui n'existent pas dans la séquence cible
+    lockedElements.forEach((locked: SchematicElement) => {
+      if (!newElements.some((el: SchematicElement) => el.id === locked.id)) {
+        newElements.push(locked);
+      }
+    });
+    
+    setElements(newElements);
     setSelectedElements([]);
     setIsPlaying(false);
   }, [circuits, currentCircuitIndex, currentSequenceIndex, elements]);
@@ -261,10 +398,19 @@ export default function SchematicsPage() {
       const fromSeq = sequences[fromIndex] || [];
       const toSeq = sequences[toIndex] || fromSeq;
 
+      // Conserver les éléments verrouillés de la séquence actuelle
+      const lockedElements = elements.filter((el: SchematicElement) => el.isLocked);
+      const lockedById = new Map(lockedElements.map((el: SchematicElement) => [el.id, el]));
+
       const toMap = new Map<string, SchematicElement>();
       toSeq.forEach(el => toMap.set(el.id, el));
 
       const interpolated = fromSeq.map(fromEl => {
+        // Si l'élément est verrouillé, ne pas l'interpoler, garder sa position
+        if (fromEl.isLocked) {
+          return fromEl;
+        }
+        
         const toEl = toMap.get(fromEl.id) || fromEl;
 
         // Interpolation linéaire des positions principales
@@ -300,12 +446,27 @@ export default function SchematicsPage() {
         return base as SchematicElement;
       });
 
+      // Ajouter les éléments verrouillés qui n'existent pas dans la séquence
+      lockedElements.forEach((locked: SchematicElement) => {
+        if (!interpolated.some((el: SchematicElement) => el.id === locked.id)) {
+          interpolated.push(locked);
+        }
+      });
+
       setElements(interpolated);
 
       if (t < 1 && isPlaying) {
         animationFrameId = requestAnimationFrame(animate);
       } else {
         // Fin de la transition vers toIndex
+        // S'assurer que les éléments verrouillés sont présents dans la séquence finale
+        const finalElements = [...interpolated];
+        lockedElements.forEach((locked: SchematicElement) => {
+          if (!finalElements.some((el: SchematicElement) => el.id === locked.id)) {
+            finalElements.push(locked);
+          }
+        });
+        setElements(finalElements);
         setCurrentSequenceIndex(toIndex);
 
         if (toIndex >= sequences.length - 1) {
@@ -343,6 +504,25 @@ export default function SchematicsPage() {
       setSelectedElements([]);
     }
   }, [currentSequenceIndex, sequences, isPlaying]);
+
+  // Obtenir les dimensions du terrain selon le type
+  const getFieldDimensions = useCallback(() => {
+    if (fieldType === 'futsal') {
+      return { length: FUTSAL_LENGTH_M, width: FUTSAL_WIDTH_M };
+    } else {
+      return { length: BLANK_LENGTH_M, width: BLANK_WIDTH_M };
+    }
+  }, [fieldType]);
+
+  // Obtenir les offsets pour centrer le terrain (identique à Field et SchematicElements)
+  const fieldOffsets = useMemo(() => {
+    const { length: FIELD_LENGTH_M, width: FIELD_WIDTH_M } = getFieldDimensions();
+    const fieldLength = FIELD_LENGTH_M * scale;
+    const fieldWidth = FIELD_WIDTH_M * scale;
+    const offsetX = (1000 - fieldLength) / 2;
+    const offsetY = (600 - fieldWidth) / 2;
+    return { offsetX, offsetY };
+  }, [fieldType, scale, getFieldDimensions]);
 
   // Convertir les coordonnées de la souris en coordonnées du terrain
   const getFieldCoordinates = useCallback((clientX: number, clientY: number): Position => {
@@ -385,9 +565,10 @@ export default function SchematicsPage() {
     const viewBoxX = (svgX / actualWidth) * viewBoxWidth;
     const viewBoxY = (svgY / actualHeight) * viewBoxHeight;
     
-    // Dimensions du terrain dans le viewBox (format paysage : 40m horizontal x 20m vertical)
-    const fieldLength = FIELD_LENGTH_M * scale; // 40m horizontal (gauche-droite)
-    const fieldWidth = FIELD_WIDTH_M * scale;   // 20m vertical (haut-bas)
+    // Dimensions du terrain dans le viewBox (dynamiques selon le type)
+    const { length: FIELD_LENGTH_M, width: FIELD_WIDTH_M } = getFieldDimensions();
+    const fieldLength = FIELD_LENGTH_M * scale;
+    const fieldWidth = FIELD_WIDTH_M * scale;
     const fieldOffsetX = (viewBoxWidth - fieldLength) / 2;
     const fieldOffsetY = (viewBoxHeight - fieldWidth) / 2;
     
@@ -396,7 +577,7 @@ export default function SchematicsPage() {
     const y = (viewBoxY - fieldOffsetY) / scale;
     
     return { x, y };
-  }, [scale]);
+  }, [scale, fieldType]);
   
   // Trouver un joueur proche d'une position
   const findPlayerNearPosition = useCallback((pos: Position, excludeId?: string): PlayerElement | null => {
@@ -447,23 +628,6 @@ export default function SchematicsPage() {
     return Math.sqrt(dx * dx + dy * dy);
   }, []);
 
-  // Vérifier si un point est dans un triangle (test de signe de l'aire)
-  const pointInTriangle = useCallback((point: Position, p1: Position, p2: Position, p3: Position): boolean => {
-    // Fonction pour calculer l'aire signée d'un triangle
-    const sign = (p1: Position, p2: Position, p3: Position): number => {
-      return (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y);
-    };
-
-    const d1 = sign(point, p1, p2);
-    const d2 = sign(point, p2, p3);
-    const d3 = sign(point, p3, p1);
-
-    const hasNeg = (d1 < 0) || (d2 < 0) || (d3 < 0);
-    const hasPos = (d1 > 0) || (d2 > 0) || (d3 > 0);
-
-    return !(hasNeg && hasPos);
-  }, []);
-  
   // Trouver l'élément à une position donnée
   const findElementAtPosition = useCallback((pos: Position, elementsList: SchematicElement[]): SchematicElement | null => {
     // Tolérance améliorée: ~8px convertis en mètres, pour faciliter la sélection des lignes/flèches
@@ -486,14 +650,6 @@ export default function SchematicsPage() {
         const radius = circle.width / 2;
         const dist = Math.sqrt(Math.pow(pos.x - centerX, 2) + Math.pow(pos.y - centerY, 2));
         if (dist <= radius + tolerance) {
-          return element;
-        }
-      } else if (element.type === 'triangle') {
-        const triangle = element as ZoneElement;
-        // Pour simplifier, utiliser la même détection que pour les rectangles
-        // Cela devrait permettre au moins de détecter les triangles dans leur rectangle englobant
-        if (pos.x >= triangle.x - tolerance && pos.x <= triangle.x + triangle.width + tolerance &&
-            pos.y >= triangle.y - tolerance && pos.y <= triangle.y + triangle.height + tolerance) {
           return element;
         }
       } else if (element.type === 'line' || element.type === 'arrow') {
@@ -553,10 +709,33 @@ export default function SchematicsPage() {
     const element = elements.find(el => el.id === elementId);
     if (!element) return;
     
+    // Ne pas permettre de déplacer un élément verrouillé
+    if (element.isLocked) {
+      // Permettre seulement la sélection
+      const pos = getFieldCoordinates(e.clientX, e.clientY);
+      if (e.shiftKey) {
+        e.stopPropagation(); // Empêcher la propagation vers handleMouseDown
+        setSelectedElements(prev => {
+          const isSelected = prev.some(el => el.id === elementId);
+          if (isSelected) {
+            return prev.filter(el => el.id !== elementId);
+          } else {
+            return [...prev, element];
+          }
+        });
+      } else {
+        e.stopPropagation(); // Empêcher la propagation vers handleMouseDown
+        setSelectedElements([element]);
+      }
+      return;
+    }
+    
     const pos = getFieldCoordinates(e.clientX, e.clientY);
     
     // Gérer Maj+clic pour sélection multiple
     if (e.shiftKey) {
+      e.stopPropagation(); // Empêcher la propagation vers handleMouseDown
+      e.preventDefault(); // Empêcher le comportement par défaut
       setSelectedElements(prev => {
         const isSelected = prev.some(el => el.id === elementId);
         if (isSelected) {
@@ -570,59 +749,18 @@ export default function SchematicsPage() {
       return;
     }
     
-    // Si l'élément n'est pas dans la sélection, le sélectionner seul
+    // Vérifier la sélection actuelle
     const isInSelection = selectedElements.some(el => el.id === elementId);
+    
+    // Si l'élément n'est pas dans la sélection, le sélectionner seul et le déplacer
     if (!isInSelection) {
       setSelectedElements([element]);
-    }
-    
-    // Si plusieurs éléments sont sélectionnés, déplacer tous
-    if (selectedElements.length > 1 && selectedElements.some(el => el.id === elementId)) {
-      // Calculer l'offset minimum pour tous les éléments sélectionnés
-      const minX = Math.min(...selectedElements.map(el => {
-        if (el.type === 'rectangle' || el.type === 'circle' || el.type === 'triangle') {
-          return (el as ZoneElement).x;
-        } else if (el.type === 'line' || el.type === 'arrow') {
-          return Math.min((el as LineElement).x, (el as LineElement).endX);
-        }
-        return el.x;
-      }));
-      const minY = Math.min(...selectedElements.map(el => {
-        if (el.type === 'rectangle' || el.type === 'circle' || el.type === 'triangle') {
-          return (el as ZoneElement).y;
-        } else if (el.type === 'line' || el.type === 'arrow') {
-          return Math.min((el as LineElement).y, (el as LineElement).endY);
-        }
-        return el.y;
-      }));
-      
-      // Stocker les positions initiales de tous les éléments
-      const initialPositions = new Map<string, { x: number; y: number; endX?: number; endY?: number }>();
-      selectedElements.forEach(el => {
-        if (el.type === 'line' || el.type === 'arrow') {
-          const lineEl = el as LineElement;
-          initialPositions.set(el.id, { x: lineEl.x, y: lineEl.y, endX: lineEl.endX, endY: lineEl.endY });
-        } else if (el.type === 'rectangle' || el.type === 'circle' || el.type === 'triangle') {
-          const zoneEl = el as ZoneElement;
-          initialPositions.set(el.id, { x: zoneEl.x, y: zoneEl.y });
-        } else {
-          initialPositions.set(el.id, { x: el.x, y: el.y });
-        }
-      });
-      
-      setDraggedElements({
-        ids: selectedElements.map(el => el.id),
-        offsetX: pos.x - minX,
-        offsetY: pos.y - minY,
-        initialPositions
-      });
-    } else {
       // Calculer l'offset pour le déplacement d'un seul élément
       let offsetX = 0;
       let offsetY = 0;
       let isMovingEnd = false;
       
-      // Pour les lignes, déterminer si on déplace le début ou la fin
+      // Pour les lignes, déterminer si on déplace le début, la fin, ou toute la ligne
       if (element.type === 'line' || element.type === 'arrow') {
         const lineElement = element as LineElement;
         const distToStart = Math.sqrt(
@@ -632,20 +770,41 @@ export default function SchematicsPage() {
           Math.pow(pos.x - lineElement.endX, 2) + Math.pow(pos.y - lineElement.endY, 2)
         );
         
-        // Si on est plus proche du début, déplacer le début
-        if (distToStart < distToEnd) {
+        // Tolérance pour considérer qu'on clique sur un point (1 mètre)
+        const pointTolerance = 1.0;
+        
+        // Si on clique très proche d'un point, déplacer seulement ce point
+        if (distToStart < pointTolerance) {
           offsetX = pos.x - lineElement.x;
           offsetY = pos.y - lineElement.y;
           isMovingEnd = false;
-        } else {
+        } else if (distToEnd < pointTolerance) {
           offsetX = pos.x - lineElement.endX;
           offsetY = pos.y - lineElement.endY;
           isMovingEnd = true;
+        } else {
+          // Sinon, déplacer toute la ligne
+          const midX = (lineElement.x + lineElement.endX) / 2;
+          const midY = (lineElement.y + lineElement.endY) / 2;
+          offsetX = pos.x - midX;
+          offsetY = pos.y - midY;
+          
+          setDraggedElement({
+            id: element.id,
+            offsetX,
+            offsetY,
+            isMovingLine: true,
+            initialStartX: lineElement.x,
+            initialStartY: lineElement.y,
+            initialEndX: lineElement.endX,
+            initialEndY: lineElement.endY
+          });
+          setSelectedTool('select');
+          return;
         }
       } else {
         // Pour les autres éléments, calculer l'offset normal
-        // Pour les zones, utiliser le coin supérieur gauche
-        if (element.type === 'rectangle' || element.type === 'circle' || element.type === 'triangle') {
+        if (element.type === 'rectangle' || element.type === 'circle') {
           const zoneElement = element as ZoneElement;
           offsetX = pos.x - zoneElement.x;
           offsetY = pos.y - zoneElement.y;
@@ -662,16 +821,169 @@ export default function SchematicsPage() {
         offsetY,
         ...(element.type === 'line' || element.type === 'arrow' ? { isMovingEnd } : {})
       });
+      setSelectedTool('select');
+      return;
+    } else if (selectedElements.length > 1) {
+      // Si plusieurs éléments sont sélectionnés et que l'élément cliqué est dans la sélection, déplacer tous
+      // Récupérer les éléments actuels depuis le tableau elements
+      const currentSelectedElements = selectedElements.map(selEl => elements.find(el => el.id === selEl.id)).filter((el): el is SchematicElement => el !== undefined);
+      
+      // Calculer l'offset minimum pour tous les éléments sélectionnés
+      const minX = Math.min(...currentSelectedElements.map(el => {
+        if (el.type === 'rectangle' || el.type === 'circle') {
+          return (el as ZoneElement).x;
+        } else if (el.type === 'line' || el.type === 'arrow') {
+          return Math.min((el as LineElement).x, (el as LineElement).endX);
+        }
+        return el.x;
+      }));
+      const minY = Math.min(...currentSelectedElements.map(el => {
+        if (el.type === 'rectangle' || el.type === 'circle') {
+          return (el as ZoneElement).y;
+        } else if (el.type === 'line' || el.type === 'arrow') {
+          return Math.min((el as LineElement).y, (el as LineElement).endY);
+        }
+        return el.y;
+      }));
+      
+      // Filtrer les éléments verrouillés - ne pas les déplacer
+      const elementsToMove = currentSelectedElements.filter((el: SchematicElement) => !el.isLocked);
+      if (elementsToMove.length > 0) {
+        // Stocker les positions initiales de tous les éléments
+        const initialPositions = new Map<string, { x: number; y: number; endX?: number; endY?: number }>();
+        elementsToMove.forEach((el: SchematicElement) => {
+          if (el.type === 'line' || el.type === 'arrow') {
+            const lineEl = el as LineElement;
+            initialPositions.set(el.id, { x: lineEl.x, y: lineEl.y, endX: lineEl.endX, endY: lineEl.endY });
+          } else if (el.type === 'rectangle' || el.type === 'circle') {
+            const zoneEl = el as ZoneElement;
+            initialPositions.set(el.id, { x: zoneEl.x, y: zoneEl.y });
+          } else {
+            initialPositions.set(el.id, { x: el.x, y: el.y });
+          }
+        });
+        
+        // Déclencher le déplacement immédiatement
+        isMultiDragRef.current = true; // Marquer qu'on est en train de déplacer plusieurs éléments
+        setDraggedElements({
+          ids: elementsToMove.map((el: SchematicElement) => el.id),
+          offsetX: pos.x - minX,
+          offsetY: pos.y - minY,
+          initialPositions
+        });
+        // Réinitialiser le flag après un court délai
+        setTimeout(() => {
+          isMultiDragRef.current = false;
+        }, 100);
+        return; // Sortir pour ne pas continuer avec le déplacement d'un seul élément
+      }
     }
     
+    // Si un seul élément est sélectionné, le déplacer
+    setSelectedElements(prev => {
+      if (prev.length === 1 && prev[0].id === elementId) {
+        // Calculer l'offset pour le déplacement d'un seul élément
+        let offsetX = 0;
+        let offsetY = 0;
+        let isMovingEnd = false;
+        
+        // Pour les lignes, déterminer si on déplace le début, la fin, ou toute la ligne
+        if (element.type === 'line' || element.type === 'arrow') {
+          const lineElement = element as LineElement;
+          const distToStart = Math.sqrt(
+            Math.pow(pos.x - lineElement.x, 2) + Math.pow(pos.y - lineElement.y, 2)
+          );
+          const distToEnd = Math.sqrt(
+            Math.pow(pos.x - lineElement.endX, 2) + Math.pow(pos.y - lineElement.endY, 2)
+          );
+          
+          // Tolérance pour considérer qu'on clique sur un point (1 mètre)
+          const pointTolerance = 1.0;
+          
+          // Calculer la distance du point au segment de ligne
+          const lineLength = Math.sqrt(
+            Math.pow(lineElement.endX - lineElement.x, 2) + Math.pow(lineElement.endY - lineElement.y, 2)
+          );
+          
+          // Vecteur de la ligne
+          const dx = lineElement.endX - lineElement.x;
+          const dy = lineElement.endY - lineElement.y;
+          
+          // Vecteur du point de départ au point cliqué
+          const px = pos.x - lineElement.x;
+          const py = pos.y - lineElement.y;
+          
+          // Projection du point sur la ligne
+          const t = Math.max(0, Math.min(1, (px * dx + py * dy) / (lineLength * lineLength)));
+          const projX = lineElement.x + t * dx;
+          const projY = lineElement.y + t * dy;
+          const distToLine = Math.sqrt(
+            Math.pow(pos.x - projX, 2) + Math.pow(pos.y - projY, 2)
+          );
+          
+          // Si on clique très proche d'un point, déplacer seulement ce point
+          if (distToStart < pointTolerance) {
+            offsetX = pos.x - lineElement.x;
+            offsetY = pos.y - lineElement.y;
+            isMovingEnd = false;
+          } else if (distToEnd < pointTolerance) {
+            offsetX = pos.x - lineElement.endX;
+            offsetY = pos.y - lineElement.endY;
+            isMovingEnd = true;
+          } else {
+            // Sinon, déplacer toute la ligne
+            // Utiliser le point le plus proche comme référence pour l'offset
+            const midX = (lineElement.x + lineElement.endX) / 2;
+            const midY = (lineElement.y + lineElement.endY) / 2;
+            offsetX = pos.x - midX;
+            offsetY = pos.y - midY;
+            
+            setDraggedElement({
+              id: element.id,
+              offsetX,
+              offsetY,
+              isMovingLine: true,
+              initialStartX: lineElement.x,
+              initialStartY: lineElement.y,
+              initialEndX: lineElement.endX,
+              initialEndY: lineElement.endY
+            });
+            return prev;
+          }
+        } else {
+          // Pour les autres éléments, calculer l'offset normal
+          // Pour les zones, utiliser le coin supérieur gauche
+          if (element.type === 'rectangle' || element.type === 'circle') {
+            const zoneElement = element as ZoneElement;
+            offsetX = pos.x - zoneElement.x;
+            offsetY = pos.y - zoneElement.y;
+          } else {
+            // Pour les éléments ponctuels, utiliser le centre
+            offsetX = pos.x - element.x;
+            offsetY = pos.y - element.y;
+          }
+        }
+        
+        setDraggedElement({ 
+          id: element.id, 
+          offsetX, 
+          offsetY,
+          ...(element.type === 'line' || element.type === 'arrow' ? { isMovingEnd } : {})
+        });
+      }
+      
+      return prev;
+    });
+    
     setSelectedTool('select'); // Passer en mode sélection quand on clique sur un élément
-  }, [elements, getFieldCoordinates, selectedElements]);
+  }, [elements, getFieldCoordinates]);
 
   // Créer un nouvel élément
   const createElement = useCallback((
     tool: ToolType,
     start: Position,
-    end: Position
+    end: Position,
+    shiftKey: boolean = false
   ): SchematicElement | null => {
     // Arrondir les positions de départ et d'arrivée au décimètre
     const roundedStart = { x: roundToDecimeter(start.x), y: roundToDecimeter(start.y) };
@@ -682,10 +994,30 @@ export default function SchematicsPage() {
 
     switch (tool) {
       case 'rectangle':
-        const rectX = roundToDecimeter(Math.min(roundedStart.x, roundedEnd.x));
-        const rectY = roundToDecimeter(Math.min(roundedStart.y, roundedEnd.y));
-        const rectWidth = roundToDecimeter(Math.abs(roundedEnd.x - roundedStart.x));
-        const rectHeight = roundToDecimeter(Math.abs(roundedEnd.y - roundedStart.y));
+        let rectX = roundToDecimeter(Math.min(roundedStart.x, roundedEnd.x));
+        let rectY = roundToDecimeter(Math.min(roundedStart.y, roundedEnd.y));
+        let rectWidth = roundToDecimeter(Math.abs(roundedEnd.x - roundedStart.x));
+        let rectHeight = roundToDecimeter(Math.abs(roundedEnd.y - roundedStart.y));
+        
+        // Si Maj est pressé, forcer un carré (même largeur et hauteur)
+        if (shiftKey) {
+          const size = Math.max(rectWidth, rectHeight);
+          rectWidth = size;
+          rectHeight = size;
+          // Recentrer le rectangle pour qu'il parte du point de départ
+          // Calculer la nouvelle position en gardant le point de départ comme coin
+          if (roundedEnd.x < roundedStart.x) {
+            rectX = roundToDecimeter(roundedStart.x - size);
+          } else {
+            rectX = roundedStart.x;
+          }
+          if (roundedEnd.y < roundedStart.y) {
+            rectY = roundToDecimeter(roundedStart.y - size);
+          } else {
+            rectY = roundedStart.y;
+          }
+        }
+        
         return {
           id,
           type: 'rectangle',
@@ -719,41 +1051,33 @@ export default function SchematicsPage() {
           fillOpacity: 0.3
         } as ZoneElement;
 
-      case 'triangle':
-        const triX = roundToDecimeter(Math.min(roundedStart.x, roundedEnd.x));
-        const triY = roundToDecimeter(Math.min(roundedStart.y, roundedEnd.y));
-        const triWidth = roundToDecimeter(Math.abs(roundedEnd.x - roundedStart.x));
-        const triHeight = roundToDecimeter(Math.abs(roundedEnd.y - roundedStart.y));
-        return {
-          id,
-          type: 'triangle',
-          x: triX,
-          y: triY,
-          width: triWidth,
-          height: triHeight,
-          points: [
-            { x: roundToDecimeter(Math.min(roundedStart.x, roundedEnd.x)), y: roundToDecimeter(Math.max(roundedStart.y, roundedEnd.y)) },
-            { x: roundToDecimeter(Math.min(roundedStart.x, roundedEnd.x) + Math.abs(roundedEnd.x - roundedStart.x) / 2), y: roundToDecimeter(Math.min(roundedStart.y, roundedEnd.y)) },
-            { x: roundToDecimeter(Math.max(roundedStart.x, roundedEnd.x)), y: roundToDecimeter(Math.max(roundedStart.y, roundedEnd.y)) }
-          ],
-          color: defaultColor,
-          strokeWidth: 2,
-          strokeStyle: 'solid',
-          fillColor: '#000000',
-          fillOpacity: 0.3
-        } as ZoneElement;
-
       case 'line': {
+        let endX = roundedEnd.x;
+        let endY = roundedEnd.y;
+        
+        // Si Maj est pressé, forcer horizontal ou vertical selon ce qui est le plus proche
+        if (shiftKey) {
+          const dx = Math.abs(roundedEnd.x - roundedStart.x);
+          const dy = Math.abs(roundedEnd.y - roundedStart.y);
+          if (dx > dy) {
+            // Plus horizontal, forcer horizontal
+            endY = roundedStart.y;
+          } else {
+            // Plus vertical, forcer vertical
+            endX = roundedStart.x;
+          }
+        }
+        
         // Détecter si le début ou la fin de la ligne est proche d'un joueur
         const startPlayer = findPlayerNearPosition(roundedStart);
-        const endPlayer = findPlayerNearPosition(roundedEnd);
+        const endPlayer = findPlayerNearPosition({ x: endX, y: endY });
         return {
           id,
           type: 'line',
           x: roundedStart.x,
           y: roundedStart.y,
-          endX: roundedEnd.x,
-          endY: roundedEnd.y,
+          endX: endX,
+          endY: endY,
           color: defaultColor,
           strokeWidth: 2,
           strokeStyle: 'solid',
@@ -763,16 +1087,32 @@ export default function SchematicsPage() {
       }
 
       case 'arrow': {
+        let endX = roundedEnd.x;
+        let endY = roundedEnd.y;
+        
+        // Si Maj est pressé, forcer horizontal ou vertical selon ce qui est le plus proche
+        if (shiftKey) {
+          const dx = Math.abs(roundedEnd.x - roundedStart.x);
+          const dy = Math.abs(roundedEnd.y - roundedStart.y);
+          if (dx > dy) {
+            // Plus horizontal, forcer horizontal
+            endY = roundedStart.y;
+          } else {
+            // Plus vertical, forcer vertical
+            endX = roundedStart.x;
+          }
+        }
+        
         // Détecter si le début ou la fin de la flèche est proche d'un joueur
         const startPlayer = findPlayerNearPosition(roundedStart);
-        const endPlayer = findPlayerNearPosition(roundedEnd);
+        const endPlayer = findPlayerNearPosition({ x: endX, y: endY });
         return {
           id,
           type: 'arrow',
           x: roundedStart.x,
           y: roundedStart.y,
-          endX: roundedEnd.x,
-          endY: roundedEnd.y,
+          endX: endX,
+          endY: endY,
           color: defaultColor,
           strokeWidth: 2,
           strokeStyle: 'solid',
@@ -854,115 +1194,19 @@ export default function SchematicsPage() {
   const handleMouseDown = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     if (e.button !== 0) return; // Seulement clic gauche
     
+    // Si l'événement a été stoppé (par exemple par handleElementMouseDown), ne rien faire
+    if (e.defaultPrevented) return;
+    
     const pos = getFieldCoordinates(e.clientX, e.clientY);
     
     // Si on est en mode sélection, vérifier d'abord si on a cliqué sur un élément
     if (selectedTool === 'select') {
       const clickedElement = findElementAtPosition(pos, elements);
       if (clickedElement) {
-        // Gérer Maj+clic pour sélection multiple
-        if (e.shiftKey) {
-          setSelectedElements(prev => {
-            const isSelected = prev.some(el => el.id === clickedElement.id);
-            if (isSelected) {
-              return prev.filter(el => el.id !== clickedElement.id);
-            } else {
-              return [...prev, clickedElement];
-            }
-          });
-          return;
-        }
-        
-        // Si l'élément n'est pas dans la sélection, le sélectionner seul
-        const isInSelection = selectedElements.some(el => el.id === clickedElement.id);
-        if (!isInSelection) {
-          setSelectedElements([clickedElement]);
-        }
-        
-        // Si plusieurs éléments sont sélectionnés, déplacer tous
-        if (selectedElements.length > 1 && selectedElements.some(el => el.id === clickedElement.id)) {
-          // Calculer l'offset minimum pour tous les éléments sélectionnés
-          const minX = Math.min(...selectedElements.map(el => {
-            if (el.type === 'rectangle' || el.type === 'circle' || el.type === 'triangle') {
-              return (el as ZoneElement).x;
-            } else if (el.type === 'line' || el.type === 'arrow') {
-              return Math.min((el as LineElement).x, (el as LineElement).endX);
-            }
-            return el.x;
-          }));
-          const minY = Math.min(...selectedElements.map(el => {
-            if (el.type === 'rectangle' || el.type === 'circle' || el.type === 'triangle') {
-              return (el as ZoneElement).y;
-            } else if (el.type === 'line' || el.type === 'arrow') {
-              return Math.min((el as LineElement).y, (el as LineElement).endY);
-            }
-            return el.y;
-          }));
-          
-          // Stocker les positions initiales de tous les éléments
-          const initialPositions = new Map<string, { x: number; y: number; endX?: number; endY?: number }>();
-          selectedElements.forEach(el => {
-            if (el.type === 'line' || el.type === 'arrow') {
-              const lineEl = el as LineElement;
-              initialPositions.set(el.id, { x: lineEl.x, y: lineEl.y, endX: lineEl.endX, endY: lineEl.endY });
-            } else if (el.type === 'rectangle' || el.type === 'circle' || el.type === 'triangle') {
-              const zoneEl = el as ZoneElement;
-              initialPositions.set(el.id, { x: zoneEl.x, y: zoneEl.y });
-            } else {
-              initialPositions.set(el.id, { x: el.x, y: el.y });
-            }
-          });
-          
-          setDraggedElements({
-            ids: selectedElements.map(el => el.id),
-            offsetX: pos.x - minX,
-            offsetY: pos.y - minY,
-            initialPositions
-          });
-        } else {
-          // Calculer l'offset pour le déplacement d'un seul élément
-          let offsetX = 0;
-          let offsetY = 0;
-          let isMovingEnd = false;
-          
-          // Pour les lignes, déterminer si on déplace le début ou la fin
-          if (clickedElement.type === 'line' || clickedElement.type === 'arrow') {
-            const lineElement = clickedElement as LineElement;
-            const distToStart = Math.sqrt(
-              Math.pow(pos.x - lineElement.x, 2) + Math.pow(pos.y - lineElement.y, 2)
-            );
-            const distToEnd = Math.sqrt(
-              Math.pow(pos.x - lineElement.endX, 2) + Math.pow(pos.y - lineElement.endY, 2)
-            );
-            
-            if (distToStart < distToEnd) {
-              offsetX = pos.x - lineElement.x;
-              offsetY = pos.y - lineElement.y;
-              isMovingEnd = false;
-            } else {
-              offsetX = pos.x - lineElement.endX;
-              offsetY = pos.y - lineElement.endY;
-              isMovingEnd = true;
-            }
-          } else if (clickedElement.type === 'rectangle' || clickedElement.type === 'circle' || clickedElement.type === 'triangle') {
-            // Pour les zones, utiliser le coin supérieur gauche
-            const zoneElement = clickedElement as ZoneElement;
-            offsetX = pos.x - zoneElement.x;
-            offsetY = pos.y - zoneElement.y;
-          } else {
-            // Pour les éléments ponctuels, utiliser le centre
-            offsetX = pos.x - clickedElement.x;
-            offsetY = pos.y - clickedElement.y;
-          }
-          
-          setDraggedElement({ 
-            id: clickedElement.id, 
-            offsetX, 
-            offsetY,
-            ...(clickedElement.type === 'line' || clickedElement.type === 'arrow' ? { isMovingEnd } : {})
-          });
-        }
-        
+        // Si on clique sur un élément, handleElementMouseDown devrait gérer cela via onElementMouseDown
+        // On ne fait rien ici pour éviter les conflits avec la sélection multiple
+        // handleElementMouseDown sera appelé via onElementMouseDown dans SchematicElements
+        // et gérera la sélection multiple avec Maj+clic ainsi que le déplacement
         return;
       } else {
         // Sinon, commencer une zone de sélection si pas de Maj
@@ -971,7 +1215,7 @@ export default function SchematicsPage() {
           setIsSelecting(true);
           setSelectionBox({ start: pos, end: pos });
         } else {
-          setSelectedElements([]);
+          // Avec Maj+clic sur le terrain vide, ne rien faire (garder la sélection actuelle)
         }
         return;
       }
@@ -979,8 +1223,9 @@ export default function SchematicsPage() {
 
     // Si on est déjà en train de dessiner (ligne/flèche depuis un élément), terminer le dessin
     if (isDrawing && drawStart && (selectedTool === 'line' || selectedTool === 'arrow')) {
-      const newElement = createElement(selectedTool, drawStart, pos);
+      const newElement = createElement(selectedTool, drawStart, pos, e.shiftKey);
       if (newElement) {
+        saveToHistory(elements); // Sauvegarder avant l'ajout
         setElements(prev => [...prev, newElement]);
       }
       setIsDrawing(false);
@@ -995,6 +1240,7 @@ export default function SchematicsPage() {
     if (pointElements.includes(selectedTool)) {
       const newElement = createElement(selectedTool, pos, pos);
       if (newElement) {
+        saveToHistory(elements); // Sauvegarder avant l'ajout
         setElements(prev => [...prev, newElement]);
       }
       return;
@@ -1116,32 +1362,6 @@ export default function SchematicsPage() {
           );
         }
         
-        if (element.type === 'triangle') {
-          const triangle = element as ZoneElement;
-          const initial = currentResizingHandle.initialElement as ZoneElement;
-          const points = initial.points || [
-            { x: initial.x, y: initial.y + initial.height },
-            { x: initial.x + initial.width / 2, y: initial.y },
-            { x: initial.x + initial.width, y: initial.y + initial.height }
-          ];
-          
-          const vertexIndex = parseInt(handleType.split('-')[1]);
-          const newPoints = [...points];
-          newPoints[vertexIndex] = { x: roundToDecimeter(pos.x), y: roundToDecimeter(pos.y) };
-          
-          // Recalculer x, y, width, height basés sur les nouveaux points
-          const minX = roundToDecimeter(Math.min(newPoints[0].x, newPoints[1].x, newPoints[2].x));
-          const maxX = roundToDecimeter(Math.max(newPoints[0].x, newPoints[1].x, newPoints[2].x));
-          const minY = roundToDecimeter(Math.min(newPoints[0].y, newPoints[1].y, newPoints[2].y));
-          const maxY = roundToDecimeter(Math.max(newPoints[0].y, newPoints[1].y, newPoints[2].y));
-          
-          return prev.map(el => 
-            el.id === currentResizingHandle.id 
-              ? { ...el, x: minX, y: minY, width: roundToDecimeter(maxX - minX), height: roundToDecimeter(maxY - minY), points: newPoints } as ZoneElement
-              : el
-          );
-        }
-        
         if (element.type === 'line' || element.type === 'arrow') {
           const line = element as LineElement;
           if (handleType === 'start') {
@@ -1220,7 +1440,7 @@ export default function SchematicsPage() {
           const initialPos = draggedElements.initialPositions.get(el.id);
           if (!initialPos) return el;
           
-          if (el.type === 'rectangle' || el.type === 'circle' || el.type === 'triangle') {
+          if (el.type === 'rectangle' || el.type === 'circle') {
             return { ...el, x: roundToDecimeter(initialPos.x + deltaX), y: roundToDecimeter(initialPos.y + deltaY) } as ZoneElement;
           } else if (el.type === 'line' || el.type === 'arrow') {
             const line = el as LineElement;
@@ -1284,6 +1504,35 @@ export default function SchematicsPage() {
             return prev;
           }
           
+          // Si on déplace toute la ligne
+          if (draggedElement.isMovingLine && draggedElement.initialStartX !== undefined && draggedElement.initialStartY !== undefined && draggedElement.initialEndX !== undefined && draggedElement.initialEndY !== undefined) {
+            const deltaX = roundToDecimeter(pos.x - draggedElement.offsetX - (draggedElement.initialStartX + draggedElement.initialEndX) / 2);
+            const deltaY = roundToDecimeter(pos.y - draggedElement.offsetY - (draggedElement.initialStartY + draggedElement.initialEndY) / 2);
+            
+            const newX = roundToDecimeter(draggedElement.initialStartX + deltaX);
+            const newY = roundToDecimeter(draggedElement.initialStartY + deltaY);
+            const newEndX = roundToDecimeter(draggedElement.initialEndX + deltaX);
+            const newEndY = roundToDecimeter(draggedElement.initialEndY + deltaY);
+            
+            // Vérifier si on peut associer les points à des joueurs
+            const startPlayer = findPlayerNearPosition({ x: newX, y: newY });
+            const endPlayer = findPlayerNearPosition({ x: newEndX, y: newEndY });
+            
+            return prev.map(el => 
+              el.id === draggedElement.id 
+                ? { 
+                    ...el, 
+                    x: newX, 
+                    y: newY,
+                    endX: newEndX,
+                    endY: newEndY,
+                    startPlayerId: startPlayer?.id,
+                    endPlayerId: endPlayer?.id
+                  } as LineElement
+                : el
+            );
+          }
+          
           // Utiliser le flag isMovingEnd pour savoir quel point déplacer
           if (draggedElement.isMovingEnd) {
             // Déplacer la fin - vérifier si on peut l'associer à un joueur
@@ -1320,7 +1569,7 @@ export default function SchematicsPage() {
                 : el
             );
           }
-        } else if (element.type === 'rectangle' || element.type === 'circle' || element.type === 'triangle') {
+        } else if (element.type === 'rectangle' || element.type === 'circle') {
           // Pour les zones, déplacer en gardant la taille
           return prev.map(el => 
             el.id === draggedElement.id 
@@ -1456,12 +1705,14 @@ export default function SchematicsPage() {
       const resizingId = currentResizingHandle.id;
       resizingHandleRef.current = null;
       setResizingHandle(null);
-      // Mettre à jour l'élément sélectionné avec les valeurs finales arrondies
+      // Mettre à jour l'élément sélectionné avec les valeurs finales arrondies et sauvegarder l'historique
       setElements(prev => {
         const element = prev.find(el => el.id === resizingId);
         if (element) {
           setSelectedElements([element]);
         }
+        // Sauvegarder l'historique après le redimensionnement
+        saveToHistory(prev);
         return prev;
       });
       return;
@@ -1469,28 +1720,32 @@ export default function SchematicsPage() {
     
     // Arrêter le déplacement de plusieurs éléments
     if (draggedElements) {
+      // Sauvegarder l'historique après le déplacement
+      setElements(prev => {
+        saveToHistory(prev);
+        return prev;
+      });
       setDraggedElements(null);
       return;
     }
     
     // Arrêter le déplacement
     if (draggedElement) {
+      // Sauvegarder l'historique après le déplacement
+      setElements(prev => {
+        saveToHistory(prev);
+        return prev;
+      });
       setDraggedElement(null);
       return;
     }
     
-    // Finir le dessin
+    // Finir le dessin - Ne pas sauvegarder ici car handleMouseUp le fera
+    // Cette fonction est appelée pour les événements globaux, mais handleMouseUp gère déjà le dessin
     if (!isDrawing || !drawStart || !drawCurrent) return;
-
-    const newElement = createElement(selectedTool, drawStart, drawCurrent);
-    if (newElement) {
-      setElements(prev => [...prev, newElement]);
-    }
-
-    setIsDrawing(false);
-    setDrawStart(null);
-    setDrawCurrent(null);
-  }, [isDrawing, drawStart, drawCurrent, selectedTool, draggedElement, createElement]);
+    
+    // Ne rien faire ici, handleMouseUp s'en occupe
+  }, [isDrawing, drawStart, drawCurrent, selectedTool, draggedElement, draggedElements]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     // Finaliser la zone de sélection
@@ -1503,7 +1758,7 @@ export default function SchematicsPage() {
       // Trouver tous les éléments dans la zone de sélection
       // Un élément est sélectionné si son bounding box intersecte avec la zone de sélection
       const selectedInBox = elements.filter(element => {
-        if (element.type === 'rectangle' || element.type === 'circle' || element.type === 'triangle') {
+        if (element.type === 'rectangle' || element.type === 'circle') {
           const zone = element as ZoneElement;
           // Vérifier si le rectangle de l'élément intersecte avec la zone de sélection
           const elemMinX = zone.x;
@@ -1533,8 +1788,9 @@ export default function SchematicsPage() {
     
     // Si on dessine (pas de drag)
     if (isDrawing && drawStart && drawCurrent && !draggedElement && !draggedElements) {
-      const newElement = createElement(selectedTool, drawStart, drawCurrent);
+      const newElement = createElement(selectedTool, drawStart, drawCurrent, e.shiftKey);
       if (newElement) {
+        saveToHistory(elements); // Sauvegarder avant l'ajout
         setElements(prev => [...prev, newElement]);
       }
 
@@ -1542,7 +1798,7 @@ export default function SchematicsPage() {
       setDrawStart(null);
       setDrawCurrent(null);
     }
-  }, [isDrawing, drawStart, drawCurrent, selectedTool, draggedElement, draggedElements, isSelecting, selectionBox, elements, createElement]);
+  }, [isDrawing, drawStart, drawCurrent, selectedTool, draggedElement, draggedElements, isSelecting, selectionBox, elements, createElement, saveToHistory]);
 
   // Gérer le menu contextuel
   const handleElementContextMenu = useCallback((elementId: string, position: Position) => {
@@ -1618,17 +1874,42 @@ export default function SchematicsPage() {
     });
   }, [selectedElements, contextMenu.elementId]);
 
+  // Verrouiller/Déverrouiller un élément
+  const handleToggleLock = useCallback(() => {
+    const elementId = contextMenu.elementId;
+    if (!elementId) return;
+    
+    saveToHistory(elements); // Sauvegarder avant la modification
+    
+    setElements(prev => prev.map(el => {
+      if (el.id === elementId) {
+        return { ...el, isLocked: !el.isLocked };
+      }
+      return el;
+    }));
+    
+    // Mettre à jour la sélection si l'élément est sélectionné
+    setSelectedElements(prev => prev.map(el => {
+      if (el.id === elementId) {
+        return { ...el, isLocked: !el.isLocked };
+      }
+      return el;
+    }));
+  }, [contextMenu.elementId, elements, saveToHistory]);
+
   const handleDelete = useCallback(() => {
     // Supprimer tous les éléments sélectionnés ou l'élément du menu contextuel
     if (selectedElements.length > 0) {
+      saveToHistory(elements); // Sauvegarder avant la suppression
       const idsToDelete = selectedElements.map(el => el.id);
       setElements(prev => prev.filter(e => !idsToDelete.includes(e.id)));
       setSelectedElements([]);
     } else if (contextMenu.elementId) {
+      saveToHistory(elements); // Sauvegarder avant la suppression
       setElements(prev => prev.filter(e => e.id !== contextMenu.elementId));
     }
     handleCloseContextMenu();
-  }, [selectedElements, contextMenu.elementId, handleCloseContextMenu]);
+  }, [selectedElements, contextMenu.elementId, handleCloseContextMenu, elements, saveToHistory]);
 
   const handleDrawLine = useCallback(() => {
     if (!contextMenu.elementId) return;
@@ -1640,7 +1921,7 @@ export default function SchematicsPage() {
     let startY = element.y;
     
     // Pour les zones, utiliser le centre
-    if (element.type === 'rectangle' || element.type === 'circle' || element.type === 'triangle') {
+    if (element.type === 'rectangle' || element.type === 'circle') {
       const zoneElement = element as ZoneElement;
       startX = zoneElement.x + zoneElement.width / 2;
       startY = zoneElement.y + zoneElement.height / 2;
@@ -1663,7 +1944,7 @@ export default function SchematicsPage() {
     let startY = element.y;
     
     // Pour les zones, utiliser le centre
-    if (element.type === 'rectangle' || element.type === 'circle' || element.type === 'triangle') {
+    if (element.type === 'rectangle' || element.type === 'circle') {
       const zoneElement = element as ZoneElement;
       startX = zoneElement.x + zoneElement.width / 2;
       startY = zoneElement.y + zoneElement.height / 2;
@@ -1708,12 +1989,16 @@ export default function SchematicsPage() {
       }));
     }
     
-    setElements(prev => prev.map(e => {
-      if (e.id === elementId) {
-        return { ...e, ...roundedUpdates } as SchematicElement;
-      }
-      return e;
-    }));
+    setElements(prev => {
+      // Sauvegarder l'historique avant la modification
+      saveToHistory(prev);
+      return prev.map(e => {
+        if (e.id === elementId) {
+          return { ...e, ...roundedUpdates } as SchematicElement;
+        }
+        return e;
+      });
+    });
     // Mettre à jour la sélection
     setSelectedElements(prev => {
       const updated = prev.map(el => {
@@ -1724,7 +2009,7 @@ export default function SchematicsPage() {
       });
       return updated as SchematicElement[];
     });
-  }, [roundToDecimeter]);
+  }, [roundToDecimeter, saveToHistory]);
 
   // Zoom
   const handleZoomIn = useCallback(() => {
@@ -1745,6 +2030,9 @@ export default function SchematicsPage() {
       throw new Error('Aucune équipe sélectionnée');
     }
 
+    // Récupérer les éléments verrouillés pour les inclure dans toutes les séquences
+    const lockedElements = elements.filter((el: SchematicElement) => el.isLocked);
+
     // Sauvegarder l'état actuel et récupérer les circuits mis à jour
     let updatedCircuits: Circuit[] = [];
     setCircuits(prev => {
@@ -1752,7 +2040,27 @@ export default function SchematicsPage() {
       const circuit = updatedCircuits[currentCircuitIndex];
       if (circuit) {
         const seqs = [...circuit.sequences];
+        // Sauvegarder la séquence actuelle avec tous les éléments (y compris verrouillés)
         seqs[currentSequenceIndex] = elements.map(el => ({ ...el }));
+        
+        // S'assurer que les éléments verrouillés sont présents dans toutes les séquences
+        seqs.forEach((seq, index) => {
+          const lockedById = new Map(lockedElements.map((el: SchematicElement) => [el.id, el]));
+          const newSeq = seq.map((el: SchematicElement) => {
+            const locked = lockedById.get(el.id);
+            return locked || el;
+          });
+          
+          // Ajouter les éléments verrouillés qui n'existent pas dans cette séquence
+          lockedElements.forEach((locked: SchematicElement) => {
+            if (!newSeq.some((el: SchematicElement) => el.id === locked.id)) {
+              newSeq.push(locked);
+            }
+          });
+          
+          seqs[index] = newSeq;
+        });
+        
         updatedCircuits[currentCircuitIndex] = { ...circuit, sequences: seqs };
       }
       return updatedCircuits;
@@ -1785,9 +2093,22 @@ export default function SchematicsPage() {
       setCurrentCircuitIndex(data.currentCircuitIndex || 0);
       const targetCircuit = data.circuits[data.currentCircuitIndex || 0];
       const seq0 = targetCircuit?.sequences?.[0] || [];
-      setElements(seq0.map(el => ({ ...el })));
+      const loadedElements = seq0.map(el => ({ ...el }));
+      setElements(loadedElements);
       setCurrentSequenceIndex(0);
       setSelectedElements([]);
+      // Réinitialiser l'historique avec les éléments chargés
+      setHistory([loadedElements.map(el => JSON.parse(JSON.stringify(el)))]);
+      setHistoryIndex(0);
+    }
+  }, []);
+
+  // Initialiser l'historique au chargement
+  useEffect(() => {
+    if (elements.length === 0 && history.length === 1 && history[0].length === 0) {
+      // Initialiser avec un état vide
+      setHistory([[]]);
+      setHistoryIndex(0);
     }
   }, []);
 
@@ -1847,11 +2168,54 @@ export default function SchematicsPage() {
         handleDelete();
         return;
       }
+      
+      // Ctrl+Z ou Cmd+Z : Annuler (undo)
+      if (isModifierPressed && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
+      
+      // Ctrl+Y ou Cmd+Y : Refaire (redo) - raccourci alternatif
+      if (isModifierPressed && e.key === 'y' && !e.shiftKey) {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+      
+      // Ctrl+Shift+Z ou Cmd+Shift+Z : Refaire (redo)
+      if (isModifierPressed && (e.key === 'Z' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
     };
     
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [selectedElements, copiedElements, handleCopy, handlePaste, handleDelete]);
+  }, [selectedElements, copiedElements, handleCopy, handlePaste, handleDelete, handleUndo, handleRedo]);
+
+  // Détecter la touche Maj pour les contraintes de dessin
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') {
+        setIsShiftPressed(true);
+      }
+    };
+    
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') {
+        setIsShiftPressed(false);
+      }
+    };
+    
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
 
   return (
     <div className="h-screen flex flex-col w-full min-w-0 relative">
@@ -1882,8 +2246,11 @@ export default function SchematicsPage() {
         currentCircuitIndex={currentCircuitIndex}
         onSelectCircuit={handleSelectCircuit}
         onAddCircuit={handleAddCircuit}
+        onDuplicateCircuit={handleDuplicateCircuit}
         onDeleteCircuit={handleDeleteCircuit}
         onOpenSaveLoad={() => setSaveLoadModalOpen(true)}
+        fieldType={fieldType}
+        onFieldTypeChange={setFieldType}
       />
 
       {/* Modal Enregistrer/Charger */}
@@ -1924,7 +2291,7 @@ export default function SchematicsPage() {
             onMouseLeave={handleMouseUp}
             style={{ pointerEvents: 'auto' }}
           >
-            <Field width={1000} height={600} scale={scale} />
+            <Field width={1000} height={600} scale={scale} fieldType={fieldType} />
             {/* Trajets entre la séquence N et la séquence N+1 */}
             {currentSequenceIndex < sequences.length - 1 && sequences[currentSequenceIndex] && sequences[currentSequenceIndex + 1] && (
               <SequenceTrajectories
@@ -1933,6 +2300,7 @@ export default function SchematicsPage() {
                 scale={scale}
                 svgWidth={1000}
                 svgHeight={600}
+                fieldType={fieldType}
               />
             )}
             <SchematicElements
@@ -1941,10 +2309,31 @@ export default function SchematicsPage() {
               svgWidth={1000}
               svgHeight={600}
               selectedElementIds={selectedElements.map(el => el.id)}
+              fieldType={fieldType}
               onElementClick={(id) => {
                 const element = elements.find(e => e.id === id);
                 if (element) {
-                  setSelectedElements([element]);
+                  // Si on vient de déclencher un déplacement multi-éléments, ne pas modifier la sélection
+                  if (isMultiDragRef.current) {
+                    return;
+                  }
+                  
+                  // Si on est en train de déplacer des éléments, ne pas modifier la sélection
+                  if (draggedElements || draggedElement) {
+                    return;
+                  }
+                  
+                  // Vérifier si l'élément est déjà dans une sélection multiple
+                  // Si c'est le cas, ne rien faire (le déplacement est géré par onMouseDown)
+                  setSelectedElements(prev => {
+                    // Si l'élément est déjà dans la sélection et qu'il y a plusieurs éléments, ne rien changer
+                    // Cela signifie qu'on vient de cliquer sur un élément déjà sélectionné pour le déplacer
+                    if (prev.length > 1 && prev.some(el => el.id === id)) {
+                      return prev; // Garder la sélection multiple
+                    }
+                    // Sinon, sélectionner uniquement cet élément
+                    return [element];
+                  });
                   setSelectedTool('select');
                 }
               }}
@@ -1955,10 +2344,9 @@ export default function SchematicsPage() {
             {/* Handles de redimensionnement pour les éléments sélectionnés (seulement le premier) */}
             {selectedElements.length === 1 && (selectedElements[0].type === 'rectangle' || 
                                 selectedElements[0].type === 'circle' || 
-                                selectedElements[0].type === 'triangle' || 
                                 selectedElements[0].type === 'line' || 
                                 selectedElements[0].type === 'arrow') && (
-              <g transform={`translate(${(1000 - FIELD_LENGTH_M * scale) / 2}, ${(600 - FIELD_WIDTH_M * scale) / 2})`}>
+              <g transform={`translate(${fieldOffsets.offsetX}, ${fieldOffsets.offsetY})`}>
                 {(() => {
                   // Pendant le redimensionnement ou le déplacement, utiliser l'élément actuel depuis elements
                   const currentElement = (resizingHandle || draggedElement)
@@ -1984,7 +2372,7 @@ export default function SchematicsPage() {
             
             {/* Zone de sélection */}
             {isSelecting && selectionBox && (
-              <g transform={`translate(${(1000 - FIELD_LENGTH_M * scale) / 2}, ${(600 - FIELD_WIDTH_M * scale) / 2})`}>
+              <g transform={`translate(${fieldOffsets.offsetX}, ${fieldOffsets.offsetY})`}>
                 <rect
                   x={Math.min(selectionBox.start.x, selectionBox.end.x) * scale}
                   y={Math.min(selectionBox.start.y, selectionBox.end.y) * scale}
@@ -2003,7 +2391,7 @@ export default function SchematicsPage() {
             {isDrawing && drawStart && drawCurrent && (
               <g opacity={0.5}>
                 {(() => {
-                  const preview = createElement(selectedTool, drawStart, drawCurrent);
+                  const preview = createElement(selectedTool, drawStart, drawCurrent, isShiftPressed);
                   if (!preview) return null;
                   return (
                     <>
@@ -2012,8 +2400,9 @@ export default function SchematicsPage() {
                         scale={scale}
                         svgWidth={1000}
                         svgHeight={600}
+                        fieldType={fieldType}
                       />
-                      <g transform={`translate(${(1000 - FIELD_LENGTH_M * scale) / 2}, ${(600 - FIELD_WIDTH_M * scale) / 2})`}>
+                      <g transform={`translate(${fieldOffsets.offsetX}, ${fieldOffsets.offsetY})`}>
                         <DimensionLabels
                           element={preview}
                           scale={scale}
@@ -2040,12 +2429,17 @@ export default function SchematicsPage() {
           if (!contextMenu.elementId) return false;
           const element = elements.find(e => e.id === contextMenu.elementId);
           if (!element) return false;
-          // Les buts, rectangles, triangles peuvent être tournés
+          // Les buts, rectangles peuvent être tournés
           return element.type === 'goal' || 
                  element.type === 'rectangle' || 
-                 element.type === 'triangle' ||
                  element.type === 'cone' ||
                  element.type === 'ladder';
+        })()}
+        onToggleLock={handleToggleLock}
+        isLocked={(() => {
+          if (!contextMenu.elementId) return false;
+          const element = elements.find(e => e.id === contextMenu.elementId);
+          return element?.isLocked || false;
         })()}
       />
     </div>

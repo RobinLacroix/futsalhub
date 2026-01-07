@@ -4,7 +4,6 @@ export type ToolType =
   | 'select'
   | 'rectangle'
   | 'circle'
-  | 'triangle'
   | 'line'
   | 'arrow'
   | 'player'
@@ -31,14 +30,13 @@ export interface BaseElement {
   fillColor?: string;
   fillOpacity?: number;
   rotation?: number;
+  isLocked?: boolean; // Si true, l'élément est verrouillé et reste à la même position dans toutes les séquences
 }
 
 export interface ZoneElement extends BaseElement {
-  type: 'rectangle' | 'circle' | 'triangle';
+  type: 'rectangle' | 'circle';
   width: number;
   height: number;
-  // Pour le triangle : points supplémentaires
-  points?: Position[];
 }
 
 export interface LineElement extends BaseElement {
@@ -69,6 +67,8 @@ export interface MaterialElement extends BaseElement {
 }
 
 export type SchematicElement = ZoneElement | LineElement | PlayerElement | BallElement | MaterialElement;
+
+export type FieldType = 'futsal' | 'blank';
 
 export interface ContextMenuState {
   visible: boolean;

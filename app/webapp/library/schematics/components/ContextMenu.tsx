@@ -1,6 +1,6 @@
 'use client';
 
-import { X, Copy, Trash2, ArrowRight, Minus, RotateCw } from 'lucide-react';
+import { X, Copy, Trash2, ArrowRight, Minus, RotateCw, Lock, Unlock } from 'lucide-react';
 import type { ContextMenuState } from '@/types/schematics';
 
 interface ContextMenuProps {
@@ -12,6 +12,8 @@ interface ContextMenuProps {
   onDrawArrow: () => void;
   onRotate90?: () => void;
   canRotate?: boolean;
+  onToggleLock?: () => void;
+  isLocked?: boolean;
 }
 
 export function ContextMenu({ 
@@ -22,7 +24,9 @@ export function ContextMenu({
   onDrawLine, 
   onDrawArrow,
   onRotate90,
-  canRotate = false
+  canRotate = false,
+  onToggleLock,
+  isLocked = false
 }: ContextMenuProps) {
   if (!menu.visible) return null;
 
@@ -86,6 +90,28 @@ export function ContextMenu({
           >
             <RotateCw className="h-4 w-4" />
             Rotation 90°
+          </button>
+        )}
+        
+        {onToggleLock && (
+          <button
+            onClick={() => {
+              onToggleLock();
+              onClose();
+            }}
+            className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+          >
+            {isLocked ? (
+              <>
+                <Unlock className="h-4 w-4" />
+                Déverrouiller
+              </>
+            ) : (
+              <>
+                <Lock className="h-4 w-4" />
+                Verrouiller
+              </>
+            )}
           </button>
         )}
         

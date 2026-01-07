@@ -4,7 +4,6 @@ import {
   MousePointer2, 
   Square, 
   Circle, 
-  Triangle, 
   Minus, 
   ArrowRight, 
   Users, 
@@ -16,9 +15,11 @@ import {
   Play,
   Pause,
   Trash2,
-  Save
+  Save,
+  Grid3x3,
+  Copy
 } from 'lucide-react';
-import type { ToolType } from '@/types/schematics';
+import type { ToolType, FieldType } from '@/types/schematics';
 
 interface ToolbarProps {
   selectedTool: ToolType;
@@ -40,8 +41,11 @@ interface ToolbarProps {
   currentCircuitIndex: number;
   onSelectCircuit: (index: number) => void;
   onAddCircuit: () => void;
+  onDuplicateCircuit: () => void;
   onDeleteCircuit: () => void;
   onOpenSaveLoad: () => void;
+  fieldType: FieldType;
+  onFieldTypeChange: (type: FieldType) => void;
 }
 
 export function Toolbar({
@@ -64,14 +68,16 @@ export function Toolbar({
   currentCircuitIndex,
   onSelectCircuit,
   onAddCircuit,
+  onDuplicateCircuit,
   onDeleteCircuit,
-  onOpenSaveLoad
+  onOpenSaveLoad,
+  fieldType,
+  onFieldTypeChange
 }: ToolbarProps) {
   const tools: { type: ToolType; icon: React.ReactNode; label: string }[] = [
     { type: 'select', icon: <MousePointer2 className="h-5 w-5" />, label: 'Sélectionner' },
     { type: 'rectangle', icon: <Square className="h-5 w-5" />, label: 'Rectangle' },
     { type: 'circle', icon: <Circle className="h-5 w-5" />, label: 'Cercle' },
-    { type: 'triangle', icon: <Triangle className="h-5 w-5" />, label: 'Triangle' },
     { type: 'line', icon: <Minus className="h-5 w-5" />, label: 'Ligne' },
     { type: 'arrow', icon: <ArrowRight className="h-5 w-5" />, label: 'Flèche' },
     { type: 'player', icon: <Users className="h-5 w-5" />, label: 'Joueur' },
@@ -79,10 +85,39 @@ export function Toolbar({
     { type: 'goal', icon: <Goal className="h-5 w-5" />, label: 'But' },
   ];
 
-  return (
-    <div className="bg-white border-b border-gray-200 p-4 flex items-center gap-3 flex-wrap">
-      <div className="flex items-center gap-2 border-r border-gray-300 pr-4">
-        {tools.map(tool => (
+          return (
+            <div className="bg-white border-b border-gray-200 p-4 flex items-center gap-3 flex-wrap">
+              {/* Sélecteur de type de terrain */}
+              <div className="flex items-center gap-2 border-r border-gray-300 pr-4">
+                <span className="text-xs text-gray-600">Terrain</span>
+                <button
+                  onClick={() => onFieldTypeChange('futsal')}
+                  className={`px-2 py-1 rounded-md text-xs flex items-center gap-1 ${
+                    fieldType === 'futsal'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                  title="Terrain Futsal (40x20m)"
+                >
+                  <Grid3x3 className="h-4 w-4" />
+                  Futsal
+                </button>
+                <button
+                  onClick={() => onFieldTypeChange('blank')}
+                  className={`px-2 py-1 rounded-md text-xs flex items-center gap-1 ${
+                    fieldType === 'blank'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                  title="Terrain vierge (20x20m)"
+                >
+                  <Square className="h-4 w-4" />
+                  Vierge
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 border-r border-gray-300 pr-4">
+                {tools.map(tool => (
           <button
             key={tool.type}
             onClick={() => onToolSelect(tool.type)}
@@ -153,6 +188,13 @@ export function Toolbar({
             title="Ajouter un circuit"
           >
             +
+          </button>
+          <button
+            onClick={onDuplicateCircuit}
+            className="px-2 py-1 rounded-md text-xs bg-purple-500 text-white hover:bg-purple-600 flex items-center justify-center"
+            title="Dupliquer le circuit"
+          >
+            <Copy className="h-3 w-3" />
           </button>
           <button
             onClick={onDeleteCircuit}

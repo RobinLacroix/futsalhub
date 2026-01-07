@@ -91,55 +91,6 @@ export function DimensionLabels({ element, scale }: DimensionLabelsProps) {
     );
   }
 
-  if (element.type === 'triangle') {
-    const triangle = element as ZoneElement;
-    const points = triangle.points || [
-      { x: triangle.x, y: triangle.y + triangle.height },
-      { x: triangle.x + triangle.width / 2, y: triangle.y },
-      { x: triangle.x + triangle.width, y: triangle.y + triangle.height }
-    ];
-    // Calculer le centre du triangle pour la rotation
-    const centerX = ((points[0].x + points[1].x + points[2].x) / 3) * scale;
-    const centerY = ((points[0].y + points[1].y + points[2].y) / 3) * scale;
-    const rotation = triangle.rotation || 0;
-    
-    // Pour les rotations de 90° ou 270°, échanger largeur et hauteur visuellement
-    const normalizedRotation = ((rotation % 360) + 360) % 360;
-    const isRotated90or270 = normalizedRotation === 90 || normalizedRotation === 270;
-    const displayWidth = isRotated90or270 ? triangle.height : triangle.width;
-    const displayHeight = isRotated90or270 ? triangle.width : triangle.height;
-
-    return (
-      <g transform={`translate(${centerX}, ${centerY}) rotate(${rotation}) translate(${-centerX}, ${-centerY})`}>
-        {/* Label pour la largeur (toujours horizontal par rapport à l'élément) */}
-        <text
-          x={(triangle.x + triangle.width / 2) * scale}
-          y={(triangle.y - 0.5) * scale}
-          fill="#3B82F6"
-          fontSize={12}
-          textAnchor="middle"
-          dominantBaseline="middle"
-          fontWeight="bold"
-          style={{ userSelect: 'none', pointerEvents: 'none' }}
-        >
-          {displayWidth.toFixed(1)}m
-        </text>
-        {/* Label pour la hauteur (toujours vertical par rapport à l'élément) */}
-        <text
-          x={(triangle.x + triangle.width + 1.5) * scale}
-          y={(triangle.y + triangle.height / 2) * scale}
-          fill="#3B82F6"
-          fontSize={12}
-          textAnchor="start"
-          dominantBaseline="middle"
-          fontWeight="bold"
-          style={{ userSelect: 'none', pointerEvents: 'none' }}
-        >
-          {displayHeight.toFixed(1)}m
-        </text>
-      </g>
-    );
-  }
 
   if (element.type === 'line' || element.type === 'arrow') {
     const line = element as LineElement;

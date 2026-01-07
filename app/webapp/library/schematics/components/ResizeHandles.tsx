@@ -75,26 +75,6 @@ export function ResizeHandles({ element, scale, onHandleMouseDown }: ResizeHandl
     );
   }
 
-  if (element.type === 'triangle') {
-    const triangle = element as ZoneElement;
-    const points = triangle.points || [
-      { x: triangle.x, y: triangle.y + triangle.height },
-      { x: triangle.x + triangle.width / 2, y: triangle.y },
-      { x: triangle.x + triangle.width, y: triangle.y + triangle.height }
-    ];
-    // Calculer le centre du triangle pour la rotation
-    const centerX = (points[0].x + points[1].x + points[2].x) / 3;
-    const centerY = (points[0].y + points[1].y + points[2].y) / 3;
-    const rotation = triangle.rotation || 0;
-
-    return (
-      <g transform={`translate(${centerX * scale}, ${centerY * scale}) rotate(${rotation}) translate(${-centerX * scale}, ${-centerY * scale})`}>
-        {points.map((point, index) => 
-          renderHandle(point.x, point.y, 'move', `vertex-${index}`)
-        )}
-      </g>
-    );
-  }
 
   if (element.type === 'line' || element.type === 'arrow') {
     const line = element as LineElement;

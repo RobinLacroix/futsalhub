@@ -8,19 +8,25 @@ interface SequenceTrajectoriesProps {
   scale: number;
   svgWidth?: number;
   svgHeight?: number;
+  fieldType?: 'futsal' | 'blank';
 }
 
-// Terrain de futsal : 40m (longueur horizontale) x 20m (largeur verticale)
-const FIELD_LENGTH_M = 40;
-const FIELD_WIDTH_M = 20;
+// Dimensions des terrains
+const FUTSAL_LENGTH_M = 40;
+const FUTSAL_WIDTH_M = 20;
+const BLANK_LENGTH_M = 20;
+const BLANK_WIDTH_M = 20;
 
 export function SequenceTrajectories({
   previous,
   current,
   scale,
   svgWidth = 1000,
-  svgHeight = 600
+  svgHeight = 600,
+  fieldType = 'futsal'
 }: SequenceTrajectoriesProps) {
+  const FIELD_LENGTH_M = fieldType === 'futsal' ? FUTSAL_LENGTH_M : BLANK_LENGTH_M;
+  const FIELD_WIDTH_M = fieldType === 'futsal' ? FUTSAL_WIDTH_M : BLANK_WIDTH_M;
   const fieldLength = FIELD_LENGTH_M * scale;
   const fieldWidth = FIELD_WIDTH_M * scale;
   const offsetX = (svgWidth - fieldLength) / 2;
@@ -32,8 +38,7 @@ export function SequenceTrajectories({
   const getCenter = (el: SchematicElement): { x: number; y: number } | null => {
     switch (el.type) {
       case 'rectangle':
-      case 'circle':
-      case 'triangle': {
+      case 'circle': {
         const zone: any = el;
         return {
           x: zone.x + (zone.width || 0) / 2,
@@ -70,8 +75,7 @@ export function SequenceTrajectories({
       case 'ball':
         return ((el as any).size || 1) / 2;
       case 'rectangle':
-      case 'circle':
-      case 'triangle': {
+      case 'circle': {
         const zone: any = el;
         const w = zone.width || 0;
         const h = zone.height || 0;

@@ -1,17 +1,26 @@
 'use client';
 
+import type { FieldType } from '@/types/schematics';
+
 interface FieldProps {
   width: number;
   height: number;
   scale: number;
+  fieldType?: FieldType;
 }
 
 // Terrain de futsal : 40m (longueur horizontale) x 20m (largeur verticale)
 // Format paysage : 40m de gauche à droite, 20m de haut en bas
-const FIELD_LENGTH_M = 40; // Longueur (horizontale, gauche-droite)
-const FIELD_WIDTH_M = 20;  // Largeur (verticale, haut-bas)
+const FUTSAL_LENGTH_M = 40; // Longueur (horizontale, gauche-droite)
+const FUTSAL_WIDTH_M = 20;  // Largeur (verticale, haut-bas)
 
-export function Field({ width, height, scale }: FieldProps) {
+// Terrain vierge : 20m x 20m
+const BLANK_LENGTH_M = 20;
+const BLANK_WIDTH_M = 20;
+
+export function Field({ width, height, scale, fieldType = 'futsal' }: FieldProps) {
+  const FIELD_LENGTH_M = fieldType === 'futsal' ? FUTSAL_LENGTH_M : BLANK_LENGTH_M;
+  const FIELD_WIDTH_M = fieldType === 'futsal' ? FUTSAL_WIDTH_M : BLANK_WIDTH_M;
   // Dimensions en pixels (format paysage : longueur horizontale, largeur verticale)
   const fieldLength = FIELD_LENGTH_M * scale; // 40m horizontal (gauche-droite)
   const fieldWidth = FIELD_WIDTH_M * scale;   // 20m vertical (haut-bas)
@@ -43,11 +52,17 @@ export function Field({ width, height, scale }: FieldProps) {
         width={fieldLength}
         height={fieldWidth}
         fill="#f4d5b8"
-        stroke="#000000"
-        strokeWidth={3}
+        stroke="#ffffff"
+        strokeWidth={lineWidth * 2}
       />
-
-      {/* Lignes du terrain - périmètre */}
+      
+      {fieldType === 'blank' ? (
+        // Terrain vierge : seulement le rectangle avec bordure blanche
+        null
+      ) : (
+        // Terrain futsal complet avec toutes les marques
+        <>
+          {/* Lignes du terrain - périmètre */}
       <rect
         x={0}
         y={0}
@@ -193,9 +208,18 @@ export function Field({ width, height, scale }: FieldProps) {
       {/* But gauche */}
       <g>
         <defs>
-          <pattern id="goalPatternLeft" x="0" y="0" width="8" height="8" patternUnits="userSpaceOnUse">
-            <rect width="8" height="8" fill="#ffffff" />
-            <path d="M 0 0 L 8 8 M -2 2 L 2 -2 M 6 10 L 10 6" stroke="#3b82f6" strokeWidth="1" />
+          <pattern id="goalPatternLeft" x="0" y="0" width="12" height="12" patternUnits="userSpaceOnUse">
+            <rect width="12" height="12" fill="#ffffff" />
+            {/* Lignes verticales du filet */}
+            <line x1="0" y1="0" x2="0" y2="12" stroke="#3b82f6" strokeWidth="0.5" />
+            <line x1="4" y1="0" x2="4" y2="12" stroke="#3b82f6" strokeWidth="0.5" />
+            <line x1="8" y1="0" x2="8" y2="12" stroke="#3b82f6" strokeWidth="0.5" />
+            <line x1="12" y1="0" x2="12" y2="12" stroke="#3b82f6" strokeWidth="0.5" />
+            {/* Lignes horizontales du filet */}
+            <line x1="0" y1="0" x2="12" y2="0" stroke="#3b82f6" strokeWidth="0.5" />
+            <line x1="0" y1="4" x2="12" y2="4" stroke="#3b82f6" strokeWidth="0.5" />
+            <line x1="0" y1="8" x2="12" y2="8" stroke="#3b82f6" strokeWidth="0.5" />
+            <line x1="0" y1="12" x2="12" y2="12" stroke="#3b82f6" strokeWidth="0.5" />
           </pattern>
         </defs>
         <rect
@@ -212,9 +236,18 @@ export function Field({ width, height, scale }: FieldProps) {
       {/* But droite */}
       <g>
         <defs>
-          <pattern id="goalPatternRight" x="0" y="0" width="8" height="8" patternUnits="userSpaceOnUse">
-            <rect width="8" height="8" fill="#ffffff" />
-            <path d="M 0 0 L 8 8 M -2 2 L 2 -2 M 6 10 L 10 6" stroke="#3b82f6" strokeWidth="1" />
+          <pattern id="goalPatternRight" x="0" y="0" width="12" height="12" patternUnits="userSpaceOnUse">
+            <rect width="12" height="12" fill="#ffffff" />
+            {/* Lignes verticales du filet */}
+            <line x1="0" y1="0" x2="0" y2="12" stroke="#3b82f6" strokeWidth="0.5" />
+            <line x1="4" y1="0" x2="4" y2="12" stroke="#3b82f6" strokeWidth="0.5" />
+            <line x1="8" y1="0" x2="8" y2="12" stroke="#3b82f6" strokeWidth="0.5" />
+            <line x1="12" y1="0" x2="12" y2="12" stroke="#3b82f6" strokeWidth="0.5" />
+            {/* Lignes horizontales du filet */}
+            <line x1="0" y1="0" x2="12" y2="0" stroke="#3b82f6" strokeWidth="0.5" />
+            <line x1="0" y1="4" x2="12" y2="4" stroke="#3b82f6" strokeWidth="0.5" />
+            <line x1="0" y1="8" x2="12" y2="8" stroke="#3b82f6" strokeWidth="0.5" />
+            <line x1="0" y1="12" x2="12" y2="12" stroke="#3b82f6" strokeWidth="0.5" />
           </pattern>
         </defs>
         <rect
@@ -276,6 +309,8 @@ export function Field({ width, height, scale }: FieldProps) {
           </text>
         </g>
       ))}
+        </>
+      )}
     </g>
   );
 }

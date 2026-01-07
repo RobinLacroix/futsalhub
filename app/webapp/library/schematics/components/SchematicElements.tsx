@@ -11,12 +11,14 @@ interface SchematicElementsProps {
   onElementClick?: (elementId: string) => void;
   onElementMouseDown?: (elementId: string, e: React.MouseEvent) => void;
   onElementContextMenu?: (elementId: string, position: Position) => void;
+  fieldType?: 'futsal' | 'blank';
 }
 
-// Terrain de futsal : 40m (longueur horizontale) x 20m (largeur verticale)
-// Format paysage : 40m de gauche à droite, 20m de haut en bas
-const FIELD_LENGTH_M = 40; // Longueur (horizontale, gauche-droite)
-const FIELD_WIDTH_M = 20;  // Largeur (verticale, haut-bas)
+// Dimensions des terrains
+const FUTSAL_LENGTH_M = 40;
+const FUTSAL_WIDTH_M = 20;
+const BLANK_LENGTH_M = 20;
+const BLANK_WIDTH_M = 20;
 
 export function SchematicElements({ 
   elements, 
@@ -26,11 +28,14 @@ export function SchematicElements({
   selectedElementIds = [],
   onElementClick,
   onElementMouseDown,
-  onElementContextMenu 
+  onElementContextMenu,
+  fieldType = 'futsal'
 }: SchematicElementsProps) {
   // Calculer l'offset pour centrer le terrain (identique à Field)
-  const fieldLength = FIELD_LENGTH_M * scale; // 40m horizontal (gauche-droite)
-  const fieldWidth = FIELD_WIDTH_M * scale;   // 20m vertical (haut-bas)
+  const FIELD_LENGTH_M = fieldType === 'futsal' ? FUTSAL_LENGTH_M : BLANK_LENGTH_M;
+  const FIELD_WIDTH_M = fieldType === 'futsal' ? FUTSAL_WIDTH_M : BLANK_WIDTH_M;
+  const fieldLength = FIELD_LENGTH_M * scale;
+  const fieldWidth = FIELD_WIDTH_M * scale;
   const offsetX = (svgWidth - fieldLength) / 2;
   const offsetY = (svgHeight - fieldWidth) / 2;
   const getStrokeDashArray = (style: string) => {
@@ -56,7 +61,6 @@ export function SchematicElements({
   const shapeElements = elements.filter(element => 
     element.type === 'rectangle' || 
     element.type === 'circle' || 
-    element.type === 'triangle' || 
     element.type === 'line' || 
     element.type === 'arrow'
   );
@@ -108,43 +112,6 @@ export function SchematicElements({
               cx={centerX}
               cy={centerY}
               r={radius}
-              fill="rgba(255, 235, 59, 0.3)"
-              stroke="#FFC107"
-              strokeWidth={3}
-              strokeDasharray="5,5"
-              pointerEvents="none"
-            />
-          </g>
-        );
-      }
-      
-      case 'triangle': {
-        const zone = element as any;
-        const points = zone.points || [
-          { x: zone.x, y: zone.y + zone.height },
-          { x: zone.x + zone.width / 2, y: zone.y },
-          { x: zone.x + zone.width, y: zone.y + zone.height }
-        ];
-        const triangleCenterX = (points[0].x + points[1].x + points[2].x) / 3 * highlightScale;
-        const triangleCenterY = (points[0].y + points[1].y + points[2].y) / 3 * highlightScale;
-        // Calculer les points avec padding
-        const centerX = (points[0].x + points[1].x + points[2].x) / 3;
-        const centerY = (points[0].y + points[1].y + points[2].y) / 3;
-        const highlightedPoints = points.map(p => {
-          const dx = p.x - centerX;
-          const dy = p.y - centerY;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const newDist = dist + highlightPadding;
-          const angle = Math.atan2(dy, dx);
-          return {
-            x: (centerX + newDist * Math.cos(angle)) * highlightScale,
-            y: (centerY + newDist * Math.sin(angle)) * highlightScale
-          };
-        });
-        return (
-          <g transform={`translate(${triangleCenterX}, ${triangleCenterY}) rotate(${zone.rotation || 0}) translate(${-triangleCenterX}, ${-triangleCenterY})`}>
-            <polygon
-              points={highlightedPoints.map(p => `${p.x},${p.y}`).join(' ')}
               fill="rgba(255, 235, 59, 0.3)"
               stroke="#FFC107"
               strokeWidth={3}
@@ -262,7 +229,15 @@ export function SchematicElements({
           style: { cursor: 'pointer' },
           onClick: (e: React.MouseEvent) => {
             e.stopPropagation();
-            onElementClick?.(element.id);
+            // Ne pas appeler onElementClick si Maj est pressé (géré par onMouseDown)
+            // Ne pas appeler onElementClick si on vient de déclencher un déplacement (détecté par onMouseDown)
+            // On utilise un flag pour éviter que onClick ne réinitialise la sélection après un déplacement multi-éléments
+            if (!e.shiftKey) {
+              // Utiliser requestAnimationFrame pour s'assurer que handleElementMouseDown a fini
+              requestAnimationFrame(() => {
+                onElementClick?.(element.id);
+              });
+            }
           },
           onMouseDown: (e: React.MouseEvent) => {
             e.stopPropagation();
@@ -301,44 +276,6 @@ export function SchematicElements({
               </g>
             );
 
-          case 'triangle':
-            const trianglePoints = element.points || [
-              { x: element.x, y: element.y + element.height },
-              { x: element.x + element.width / 2, y: element.y },
-              { x: element.x + element.width, y: element.y + element.height }
-            ];
-            // Calculer le centre du triangle pour la rotation
-            const triangleCenterX = (trianglePoints[0].x + trianglePoints[1].x + trianglePoints[2].x) / 3 * scale;
-            const triangleCenterY = (trianglePoints[0].y + trianglePoints[1].y + trianglePoints[2].y) / 3 * scale;
-            return (
-              <g 
-                key={element.id} 
-                data-element={element.id} 
-                transform={`translate(${triangleCenterX}, ${triangleCenterY}) rotate(${element.rotation || 0}) translate(${-triangleCenterX}, ${-triangleCenterY})`}
-              >
-                {renderHighlight(element)}
-                <polygon
-                  points={trianglePoints.map(p => `${p.x * scale},${p.y * scale}`).join(' ')}
-                  fill={element.fillColor || 'none'}
-                  fillOpacity={element.fillOpacity || 0}
-                  stroke={element.color}
-                  strokeWidth={element.strokeWidth}
-                  strokeDasharray={getStrokeDashArray(element.strokeStyle)}
-                  style={{ cursor: 'pointer' }}
-                  onClick={(e: React.MouseEvent) => {
-                    e.stopPropagation();
-                    onElementClick?.(element.id);
-                  }}
-                  onMouseDown={(e: React.MouseEvent) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    onElementMouseDown?.(element.id, e);
-                  }}
-                  onContextMenu={(e: React.MouseEvent) => handleContextMenu(e, element.id)}
-                  pointerEvents="all"
-                />
-              </g>
-            );
 
           case 'line':
           case 'arrow':
@@ -538,6 +475,7 @@ export function SchematicElements({
             const goalWidth = element.size * scale;
             const goalHeight = Math.min(goalWidth * 0.6, 1 * scale); // Max 1m de hauteur
             const goalId = `goal-${element.id}`;
+            const patternSize = Math.min(goalWidth * 0.15, goalHeight * 0.15);
             return (
               <g key={element.id} data-element={element.id}>
                 {renderHighlight(element)}
@@ -547,28 +485,82 @@ export function SchematicElements({
                     id={`netPattern-${goalId}`}
                     x="0"
                     y="0"
-                    width={goalWidth * 0.1}
-                    height={goalHeight * 0.1}
+                    width={patternSize}
+                    height={patternSize}
                     patternUnits="userSpaceOnUse"
                   >
-                    {/* Lignes horizontales du filet */}
-                    <line
-                      x1="0"
-                      y1="0"
-                      x2={goalWidth * 0.1}
-                      y2="0"
-                      stroke={element.color}
-                      strokeWidth={Math.max(0.5, element.strokeWidth * 0.3)}
-                      opacity="0.6"
-                    />
                     {/* Lignes verticales du filet */}
                     <line
                       x1="0"
                       y1="0"
                       x2="0"
-                      y2={goalHeight * 0.1}
+                      y2={patternSize}
                       stroke={element.color}
-                      strokeWidth={Math.max(0.5, element.strokeWidth * 0.3)}
+                      strokeWidth={Math.max(0.3, element.strokeWidth * 0.2)}
+                      opacity="0.6"
+                    />
+                    <line
+                      x1={patternSize / 3}
+                      y1="0"
+                      x2={patternSize / 3}
+                      y2={patternSize}
+                      stroke={element.color}
+                      strokeWidth={Math.max(0.3, element.strokeWidth * 0.2)}
+                      opacity="0.6"
+                    />
+                    <line
+                      x1={(patternSize * 2) / 3}
+                      y1="0"
+                      x2={(patternSize * 2) / 3}
+                      y2={patternSize}
+                      stroke={element.color}
+                      strokeWidth={Math.max(0.3, element.strokeWidth * 0.2)}
+                      opacity="0.6"
+                    />
+                    <line
+                      x1={patternSize}
+                      y1="0"
+                      x2={patternSize}
+                      y2={patternSize}
+                      stroke={element.color}
+                      strokeWidth={Math.max(0.3, element.strokeWidth * 0.2)}
+                      opacity="0.6"
+                    />
+                    {/* Lignes horizontales du filet */}
+                    <line
+                      x1="0"
+                      y1="0"
+                      x2={patternSize}
+                      y2="0"
+                      stroke={element.color}
+                      strokeWidth={Math.max(0.3, element.strokeWidth * 0.2)}
+                      opacity="0.6"
+                    />
+                    <line
+                      x1="0"
+                      y1={patternSize / 3}
+                      x2={patternSize}
+                      y2={patternSize / 3}
+                      stroke={element.color}
+                      strokeWidth={Math.max(0.3, element.strokeWidth * 0.2)}
+                      opacity="0.6"
+                    />
+                    <line
+                      x1="0"
+                      y1={(patternSize * 2) / 3}
+                      x2={patternSize}
+                      y2={(patternSize * 2) / 3}
+                      stroke={element.color}
+                      strokeWidth={Math.max(0.3, element.strokeWidth * 0.2)}
+                      opacity="0.6"
+                    />
+                    <line
+                      x1="0"
+                      y1={patternSize}
+                      x2={patternSize}
+                      y2={patternSize}
+                      stroke={element.color}
+                      strokeWidth={Math.max(0.3, element.strokeWidth * 0.2)}
                       opacity="0.6"
                     />
                   </pattern>
