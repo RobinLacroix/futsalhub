@@ -18,7 +18,8 @@ import {
   ChevronLeft,
   ChevronRight,
   PieChart,
-  Shield
+  Shield,
+  Layout
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -102,6 +103,11 @@ export default function Sidebar({ isExpanded, onToggle }: SidebarProps) {
           name: 'Librairie',
           href: '/webapp/share/library',
           icon: FileText
+        },
+        {
+          name: 'Schémas tactiques',
+          href: '/webapp/library/schematics',
+          icon: Layout
         },
         {
           name: 'Forum',

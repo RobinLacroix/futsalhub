@@ -20,7 +20,8 @@ import {
   ChevronRight,
   LogOut,
   PieChart,
-  Shield
+  Shield,
+  Layout
 } from 'lucide-react';
 
 // Composant UserMenu pour la sidebar
@@ -148,6 +149,11 @@ function Sidebar({ isExpanded, onToggle }: { isExpanded: boolean; onToggle: () =
           name: 'Librairie',
           href: '/webapp/share/library',
           icon: FileText
+        },
+        {
+          name: 'Schémas tactiques',
+          href: '/webapp/library/schematics',
+          icon: Layout
         },
         {
           name: 'Forum',
