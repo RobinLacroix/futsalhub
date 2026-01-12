@@ -28,16 +28,17 @@ export function SaveLoadModal({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isOpen && teamId) {
+    if (isOpen) {
       loadSchematics();
     }
-  }, [isOpen, teamId]);
+  }, [isOpen]);
 
   const loadSchematics = async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await schematicsService.getSchematicsByTeam(teamId);
+      // Récupérer tous les schémas (accessibles à toutes les équipes)
+      const data = await schematicsService.getSchematicsByTeam();
       setSchematics(data);
     } catch (err: any) {
       setError(err.message || 'Erreur lors du chargement des schémas');

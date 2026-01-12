@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Field } from '../../library/schematics/components/Field';
 import { SchematicElements } from '../../library/schematics/components/SchematicElements';
 import { SequenceTrajectories } from '../../library/schematics/components/SequenceTrajectories';
@@ -20,38 +20,67 @@ export function SchematicPreview({ data, fieldType = 'futsal' }: SchematicPrevie
   const [elements, setElements] = useState<SchematicElement[]>([]);
   const isPlayingRef = useRef(false);
   const currentSequenceIndexRef = useRef(0);
+  const sequencesRef = useRef<SchematicElement[][]>([[]]);
+
+  // Synchroniser currentCircuitIndex avec data.currentCircuitIndex si fourni
+  useEffect(() => {
+    if (data.currentCircuitIndex !== undefined && data.currentCircuitIndex !== currentCircuitIndex) {
+      setCurrentCircuitIndex(data.currentCircuitIndex);
+    }
+  }, [data.currentCircuitIndex]);
   
   // Échelle pour la prévisualisation (plus petite que l'éditeur)
   const scale = 8; // 8 pixels par mètre
   const svgWidth = 400;
   const svgHeight = 300;
 
-  // Récupérer le circuit et les séquences actuels
-  const currentCircuit = data.circuits?.[currentCircuitIndex];
-  const sequences = currentCircuit?.sequences || [[]];
+  // Récupérer le circuit et les séquences actuels (mémorisés pour éviter les re-renders)
+  const currentCircuit = useMemo(() => {
+    return data.circuits?.[currentCircuitIndex];
+  }, [data.circuits, currentCircuitIndex]);
 
-  // Initialiser les éléments avec la séquence 0
+  const sequences = useMemo(() => {
+    return currentCircuit?.sequences || [[]];
+  }, [currentCircuit]);
+
+  // Créer une clé stable pour le circuit actuel
+  const circuitKey = useMemo(() => {
+    return currentCircuit?.id || `${currentCircuitIndex}-${data.circuits?.length || 0}`;
+  }, [currentCircuit?.id, currentCircuitIndex, data.circuits?.length]);
+
+  // Initialiser les éléments avec la séquence 0 quand le circuit change
   useEffect(() => {
+    if (sequences.length === 0) {
+      setElements([]);
+      setCurrentSequenceIndex(0);
+      setIsPlaying(false);
+      isPlayingRef.current = false;
+      return;
+    }
     const seq0 = sequences[0] || [];
     setElements(seq0.map(el => ({ ...el })));
     setCurrentSequenceIndex(0);
     setIsPlaying(false);
-  }, [currentCircuitIndex, data.circuits, sequences]);
+    isPlayingRef.current = false;
+  }, [circuitKey, sequences.length]);
 
   // Mettre à jour les éléments quand la séquence change manuellement (hors lecture)
   useEffect(() => {
     if (isPlaying) return;
-    const targetSequence = sequences[currentSequenceIndex];
-    if (targetSequence && targetSequence.length >= 0) {
+    const seqs = sequencesRef.current;
+    if (currentSequenceIndex < 0 || currentSequenceIndex >= seqs.length) return;
+    const targetSequence = seqs[currentSequenceIndex];
+    if (targetSequence) {
       setElements(targetSequence.map(el => ({ ...el })));
     }
-  }, [currentSequenceIndex, sequences, isPlaying]);
+  }, [currentSequenceIndex, sequences.length, isPlaying]);
 
   // Synchroniser les refs avec l'état
   useEffect(() => {
     isPlayingRef.current = isPlaying;
     currentSequenceIndexRef.current = currentSequenceIndex;
-  }, [isPlaying, currentSequenceIndex]);
+    sequencesRef.current = sequences;
+  }, [isPlaying, currentSequenceIndex, sequences]);
 
   // Animation entre les séquences
   useEffect(() => {
@@ -59,7 +88,8 @@ export function SchematicPreview({ data, fieldType = 'futsal' }: SchematicPrevie
       return;
     }
     
-    if (sequences.length <= 1) {
+    const currentSequences = sequencesRef.current;
+    if (currentSequences.length <= 1) {
       setIsPlaying(false);
       return;
     }
@@ -69,11 +99,11 @@ export function SchematicPreview({ data, fieldType = 'futsal' }: SchematicPrevie
 
     // Utiliser l'index actuel depuis la ref pour éviter les problèmes de closure
     let fromIndex = currentSequenceIndexRef.current;
-    let toIndex = Math.min(fromIndex + 1, sequences.length - 1);
+    let toIndex = Math.min(fromIndex + 1, currentSequences.length - 1);
     let startTime: number | null = null;
     
     // Si on est déjà à la dernière séquence, ne pas démarrer
-    if (fromIndex >= sequences.length - 1) {
+    if (fromIndex >= currentSequences.length - 1) {
       setIsPlaying(false);
       return;
     }
@@ -83,12 +113,20 @@ export function SchematicPreview({ data, fieldType = 'futsal' }: SchematicPrevie
         return;
       }
       
+      // Récupérer les séquences actuelles depuis la ref
+      const seqs = sequencesRef.current;
+      if (seqs.length <= 1) {
+        setIsPlaying(false);
+        isPlayingRef.current = false;
+        return;
+      }
+      
       if (!startTime) startTime = timestamp;
       const elapsed = timestamp - startTime;
       let t = Math.min(elapsed / segmentDuration, 1);
 
-      const fromSeq = sequences[fromIndex] || [];
-      const toSeq = sequences[toIndex] || fromSeq;
+      const fromSeq = seqs[fromIndex] || [];
+      const toSeq = seqs[toIndex] || fromSeq;
 
       // Conserver les éléments verrouillés depuis la séquence de départ
       const lockedElements = fromSeq.filter((el: SchematicElement) => el.isLocked);
@@ -161,12 +199,13 @@ export function SchematicPreview({ data, fieldType = 'futsal' }: SchematicPrevie
         setElements(finalElements);
         
         const newIndex = toIndex;
+        const seqs = sequencesRef.current;
         
         // Mettre à jour l'index de séquence de manière synchrone (état et ref)
         setCurrentSequenceIndex(newIndex);
         currentSequenceIndexRef.current = newIndex;
 
-        if (newIndex >= sequences.length - 1) {
+        if (newIndex >= seqs.length - 1) {
           // Dernière séquence atteinte : arrêter
           setIsPlaying(false);
           isPlayingRef.current = false;
@@ -175,7 +214,7 @@ export function SchematicPreview({ data, fieldType = 'futsal' }: SchematicPrevie
 
         // Préparer le segment suivant immédiatement
         fromIndex = newIndex;
-        toIndex = Math.min(newIndex + 1, sequences.length - 1);
+        toIndex = Math.min(newIndex + 1, seqs.length - 1);
         startTime = null;
 
         // Continuer l'animation immédiatement si on est toujours en mode play
@@ -194,7 +233,7 @@ export function SchematicPreview({ data, fieldType = 'futsal' }: SchematicPrevie
         cancelAnimationFrame(animationFrameId);
       }
     };
-  }, [isPlaying, sequences]);
+  }, [isPlaying]);
 
   const handlePlayPause = useCallback(() => {
     setIsPlaying(prev => {
@@ -287,6 +326,7 @@ export function SchematicPreview({ data, fieldType = 'futsal' }: SchematicPrevie
             svgWidth={svgWidth}
             svgHeight={svgHeight}
             fieldType={fieldType}
+            isPreview={true}
           />
         </svg>
       </div>

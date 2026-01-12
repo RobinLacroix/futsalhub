@@ -20,13 +20,26 @@ export interface SchematicRecord {
 
 export const schematicsService = {
   /**
-   * Récupère tous les schémas d'une équipe
+   * Récupère tous les schémas (accessibles à toutes les équipes)
+   * Le team_id est conservé pour référence mais ne filtre plus les résultats
    */
-  async getSchematicsByTeam(teamId: string): Promise<SchematicRecord[]> {
+  async getSchematicsByTeam(teamId?: string): Promise<SchematicRecord[]> {
     const { data, error } = await supabase
       .from('schematics')
       .select('*')
-      .eq('team_id', teamId)
+      .order('updated_at', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  /**
+   * Récupère tous les schémas (méthode alternative sans paramètre)
+   */
+  async getAllSchematics(): Promise<SchematicRecord[]> {
+    const { data, error } = await supabase
+      .from('schematics')
+      .select('*')
       .order('updated_at', { ascending: false });
 
     if (error) throw error;

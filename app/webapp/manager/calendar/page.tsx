@@ -11,14 +11,28 @@ import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
 import moment from 'moment';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import { format } from 'date-fns';
+import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
+import { schematicsService, type SchematicData } from '@/lib/services/schematicsService';
+import { SchematicPreview } from '../../library/components/SchematicPreview';
 import {
   X,
   AlertCircle,
   Dumbbell,
-  Trophy
+  Trophy,
+  ChevronLeft,
+  ChevronRight,
+  GripVertical,
+  Plus,
+  Trash2,
+  Layout,
+  ExternalLink,
+  Search,
+  Filter
 } from 'lucide-react';
+import { DurationSlider } from './components/DurationSlider';
 
 // Types
 interface Player {
@@ -107,6 +121,13 @@ interface MatchFormData {
 
 type TrainingTheme = 'Offensif' | 'Défensif' | 'Transition' | 'Supériorité';
 
+interface SessionPart {
+  id: string;
+  type: 'Echauffement' | 'Exercice' | 'Situation' | 'Jeu';
+  duration: number; // en minutes
+  procedureId?: string | null;
+}
+
 interface TrainingFormData {
   date: Date;
   location: string;
@@ -118,6 +139,9 @@ interface TrainingFormData {
       status: PlayerStatus;
     };
   };
+  // Page 2
+  sessionDuration?: number; // durée totale en minutes
+  sessionParts?: SessionPart[]; // organisation de la séance
 }
 
 interface TrainingStats {
@@ -187,7 +211,9 @@ const trainingSchema = yup.object().shape({
         player && typeof player === 'object' && 'status' in player && player.status === 'present'
       );
     }
-  )
+  ),
+  sessionDuration: yup.number().min(45).max(150).optional(),
+  sessionParts: yup.array().optional()
 });
 
 const localizer = momentLocalizer(moment);
@@ -204,6 +230,7 @@ type RBCalendarEvent = {
 const DragAndDropCalendar = withDragAndDrop<RBCalendarEvent>(ReactBigCalendar);
 
 export default function CalendarPage() {
+  const router = useRouter();
   const { activeTeam } = useActiveTeam();
   const [matches, setMatches] = useState<Match[]>([]);
   const [trainings, setTrainings] = useState<Training[]>([]);
@@ -221,6 +248,16 @@ export default function CalendarPage() {
   const [matchLocationFilter, setMatchLocationFilter] = useState<'Tous' | 'Domicile' | 'Exterieur'>('Tous');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [isMobile, setIsMobile] = useState(false);
+  
+  // État pour la pagination du formulaire d'entraînement
+  const [trainingFormPage, setTrainingFormPage] = useState(1);
+  const [availableProcedures, setAvailableProcedures] = useState<any[]>([]);
+  const [selectedProcedureForPart, setSelectedProcedureForPart] = useState<{ partId: string; procedureId: string | null } | null>(null);
+  const [draggedPartId, setDraggedPartId] = useState<string | null>(null);
+  const [viewingProcedure, setViewingProcedure] = useState<any | null>(null);
+  const [procedureDetailSchematic, setProcedureDetailSchematic] = useState<any | null>(null);
+  const [procedureSearchTerm, setProcedureSearchTerm] = useState('');
+  const [procedureFilterTheme, setProcedureFilterTheme] = useState<string | null>(null);
 
 
 
@@ -250,16 +287,39 @@ export default function CalendarPage() {
     }
   });
 
-  const { control: trainingControl, handleSubmit: handleTrainingSubmit, reset: resetTraining, watch: watchTraining, formState: { errors: trainingErrors } } = useForm<TrainingFormData>({
+  const { control: trainingControl, handleSubmit: handleTrainingSubmit, reset: resetTraining, watch: watchTraining, setValue: setTrainingValue, formState: { errors: trainingErrors } } = useForm<TrainingFormData>({
     resolver: yupResolver(trainingSchema),
     defaultValues: {
       date: new Date(),
       location: '',
       theme: 'Offensif',
       key_principle: '',
-      players: {}
+      players: {},
+      sessionDuration: 60,
+      sessionParts: [] // Ne pas préremplir - l'utilisateur créera sa propre organisation
     }
   });
+
+  // Charger les procédés depuis la librairie
+  useEffect(() => {
+    const fetchProcedures = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('training_procedures')
+          .select('*')
+          .order('created_at', { ascending: false });
+        
+        if (error) throw error;
+        setAvailableProcedures(data || []);
+      } catch (err) {
+        console.error('Erreur lors du chargement des procédés:', err);
+      }
+    };
+    
+    if (isTrainingModalOpen) {
+      fetchProcedures();
+    }
+  }, [isTrainingModalOpen]);
 
   // Chargement des données
   useEffect(() => {
@@ -344,6 +404,9 @@ export default function CalendarPage() {
           id: playerId,
           status: status as PlayerStatus
         })) : [],
+        // Conserver session_duration et session_parts pour l'édition
+        session_duration: training.session_duration || null,
+        session_parts: training.session_parts || null,
         type: 'training' as const
       })));
     } catch (err) {
@@ -540,8 +603,11 @@ export default function CalendarPage() {
       location: '',
       theme: 'Offensif',
       key_principle: '',
-      players: {}
+      players: {},
+      sessionDuration: 60,
+      sessionParts: [] // Ne pas préremplir
     });
+    setTrainingFormPage(1);
     setIsTrainingModalOpen(true);
   };
 
@@ -549,6 +615,7 @@ export default function CalendarPage() {
     setIsTrainingModalOpen(false);
     setIsEditing(false);
     setEditingEvent(null);
+    setTrainingFormPage(1);
     resetTraining({});
   };
 
@@ -691,13 +758,13 @@ export default function CalendarPage() {
         score_opponent: event.score_opponent,
         opponent_team: (event as any).opponent_team || '',
         players: playersData,
-        goals_by_type: {
+        goals_by_type: (event as any).goals_by_type || {
           offensive: 0,
           transition: 0,
           cpa: 0,
           superiority: 0
         },
-        conceded_by_type: {
+        conceded_by_type: (event as any).conceded_by_type || {
           offensive: 0,
           transition: 0,
           cpa: 0,
@@ -746,17 +813,24 @@ export default function CalendarPage() {
 
       console.log('Données des joueurs préparées:', playersData);
 
-      const formData = {
+      const formData: TrainingFormData = {
         date: event.date,
         location: event.location,
         theme: event.theme as TrainingTheme,
         key_principle: event.key_principle,
-        players: playersData
+        players: playersData,
+        // Charger les données de la page 2 si disponibles
+        sessionDuration: (event as any).session_duration || undefined,
+        sessionParts: (event as any).session_parts || undefined
       };
 
       console.log('Données du formulaire à pré-remplir:', formData);
       resetTraining(formData);
       setIsTrainingModalOpen(true);
+      // Si on a des données de session, afficher directement la page 2
+      if (formData.sessionDuration || (formData.sessionParts && formData.sessionParts.length > 0)) {
+        setTrainingFormPage(2);
+      }
     }
   };
 
@@ -857,13 +931,24 @@ export default function CalendarPage() {
         }
       });
 
-      const trainingData = {
+      const trainingData: any = {
         date: data.date.toISOString(),
         location: data.location,
         theme: data.theme,
         key_principle: data.key_principle,
         attendance: attendanceData // Mise à jour du champ JSONB
       };
+
+      // Ajouter les données de la page 2 si disponibles
+      if (data.sessionDuration) {
+        trainingData.session_duration = data.sessionDuration;
+      }
+      if (data.sessionParts && data.sessionParts.length > 0) {
+        trainingData.session_parts = data.sessionParts;
+      } else if (data.sessionParts && data.sessionParts.length === 0) {
+        // Si sessionParts est un tableau vide, le mettre à null pour nettoyer
+        trainingData.session_parts = null;
+      }
 
       console.log('Données de l\'entraînement à mettre à jour:', trainingData);
 
@@ -1143,7 +1228,7 @@ export default function CalendarPage() {
         });
 
         // Créer l'entraînement avec les présences directement dans le JSONB
-        const trainingData = {
+        const trainingData: any = {
           date: data.date.toISOString(),
           location: data.location,
           theme: data.theme,
@@ -1151,6 +1236,14 @@ export default function CalendarPage() {
           attendance: attendanceData, // Stockage direct dans le JSONB
           team_id: activeTeam.id // Ajouter automatiquement le team_id
         };
+
+        // Ajouter les données de la page 2 si disponibles
+        if (data.sessionDuration) {
+          trainingData.session_duration = data.sessionDuration;
+        }
+        if (data.sessionParts && data.sessionParts.length > 0) {
+          trainingData.session_parts = data.sessionParts; // Stockage en JSONB
+        }
 
         console.log('Données de l\'entraînement à enregistrer:', trainingData);
 
@@ -1171,7 +1264,11 @@ export default function CalendarPage() {
         setSuccess('Entraînement ajouté avec succès');
       } catch (err) {
         console.error('Erreur lors de l\'enregistrement:', err);
-        setError(err instanceof Error ? err.message : 'Erreur lors de l\'enregistrement');
+        const errorMessage = err instanceof Error ? err.message : 'Erreur lors de l\'enregistrement';
+        if (err && typeof err === 'object' && 'message' in err) {
+          console.error('Détails de l\'erreur:', JSON.stringify(err, null, 2));
+        }
+        setError(errorMessage);
       }
     }
   };
@@ -2047,10 +2144,10 @@ export default function CalendarPage() {
       {/* Modal d'ajout d'entraînement */}
       {isTrainingModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-[600px] max-h-[90vh] flex flex-col">
+          <div className="bg-white rounded-lg w-full max-w-[800px] max-h-[90vh] flex flex-col">
             {/* Header fixe */}
-            <div className="flex justify-between items-center p-6 border-b">
-              <h2 className="text-xl font-semibold">Ajouter un entraînement</h2>
+            <div className="flex justify-between items-center p-4 border-b">
+              <h2 className="text-lg font-semibold text-gray-900">Ajouter un entraînement</h2>
               <button
                 onClick={handleCloseTrainingModal}
                 className="text-gray-500 hover:text-gray-700"
@@ -2059,11 +2156,19 @@ export default function CalendarPage() {
               </button>
             </div>
 
+            {/* Indicateur de page */}
+            <div className="flex items-center justify-center gap-2 p-2 border-b bg-gray-50">
+              <div className={`w-2 h-2 rounded-full ${trainingFormPage === 1 ? 'bg-green-600' : 'bg-gray-300'}`} />
+              <div className={`w-2 h-2 rounded-full ${trainingFormPage === 2 ? 'bg-green-600' : 'bg-gray-300'}`} />
+            </div>
+
             {/* Contenu scrollable */}
-            <div className="flex-1 overflow-y-auto p-6">
-              <form onSubmit={handleTrainingSubmit(onSubmitTraining)} className="space-y-4">
+            <div className="flex-1 overflow-y-auto p-4">
+              <form onSubmit={handleTrainingSubmit(onSubmitTraining)} className="space-y-3">
+                {trainingFormPage === 1 ? (
+                  <>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Date</label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Date</label>
                   <Controller
                     name="date"
                     control={trainingControl}
@@ -2077,17 +2182,17 @@ export default function CalendarPage() {
                             onChange(date);
                           }
                         }}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm py-1.5"
                       />
                     )}
                   />
                   {trainingErrors.date && (
-                    <p className="mt-1 text-sm text-red-600">{trainingErrors.date.message}</p>
+                    <p className="mt-0.5 text-xs text-red-600">{trainingErrors.date.message}</p>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Lieu</label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Lieu</label>
                   <Controller
                     name="location"
                     control={trainingControl}
@@ -2095,25 +2200,25 @@ export default function CalendarPage() {
                       <input
                         {...field}
                         type="text"
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm py-1.5"
                       />
                     )}
                   />
                   {trainingErrors.location && (
-                    <p className="mt-1 text-sm text-red-600">{trainingErrors.location.message}</p>
+                    <p className="mt-0.5 text-xs text-red-600">{trainingErrors.location.message}</p>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Thème</label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Thème</label>
                   <Controller
                     name="theme"
                     control={trainingControl}
                     render={({ field }) => (
-                      <div className="mt-1">
+                      <div>
                         <select
                           {...field}
-                          className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                          className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900 text-sm py-1.5"
                         >
                           <option value="Offensif">Offensif</option>
                           <option value="Défensif">Défensif</option>
@@ -2121,7 +2226,7 @@ export default function CalendarPage() {
                           <option value="Supériorité">Supériorité</option>
                         </select>
                         {trainingErrors.theme && (
-                          <p className="mt-1 text-sm text-red-600">{trainingErrors.theme.message}</p>
+                          <p className="mt-0.5 text-xs text-red-600">{trainingErrors.theme.message}</p>
                         )}
                       </div>
                     )}
@@ -2129,31 +2234,31 @@ export default function CalendarPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Principe clé</label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Principe clé</label>
                   <Controller
                     name="key_principle"
                     control={trainingControl}
                     render={({ field }) => (
                       <textarea
                         {...field}
-                        rows={3}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        rows={2}
+                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm py-1.5"
                       />
                     )}
                   />
                   {trainingErrors.key_principle && (
-                    <p className="mt-1 text-sm text-red-600">{trainingErrors.key_principle.message}</p>
+                    <p className="mt-0.5 text-xs text-red-600">{trainingErrors.key_principle.message}</p>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Statut des joueurs</label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1.5">Statut des joueurs</label>
                   <div className="border rounded-md overflow-hidden">
-                    <div className="max-h-[300px] overflow-y-auto divide-y">
+                    <div className="max-h-[200px] overflow-y-auto divide-y">
                       {players.map(player => (
                         <div 
                           key={player.id} 
-                          className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 hover:bg-gray-50"
+                          className="flex flex-col sm:flex-row sm:items-center gap-2 p-2 hover:bg-gray-50"
                         >
                           <span className="text-sm text-gray-900 flex-1">
                             {player.first_name} {player.last_name}
@@ -2210,11 +2315,590 @@ export default function CalendarPage() {
                     </div>
                   </div>
                 </div>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="text-base font-semibold text-gray-900 mb-3">
+                      Comment souhaitez-vous organiser votre séance ?
+                    </h3>
+
+                    {/* Durée de séance et Nombre de joueurs côte à côte */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {/* Durée de la séance */}
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                          Durée de la séance (minutes)
+                        </label>
+                        <Controller
+                          name="sessionDuration"
+                          control={trainingControl}
+                          render={({ field: { value, onChange } }) => {
+                            const duration = value || 60;
+                            return (
+                              <div className="space-y-1.5">
+                                <input
+                                  type="range"
+                                  min="45"
+                                  max="150"
+                                  value={duration}
+                                  onChange={(e) => {
+                                    const newDuration = parseInt(e.target.value) || 60;
+                                    onChange(newDuration);
+                                  }}
+                                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                                />
+                                <div className="flex justify-between items-center">
+                                  <span className="text-xs text-gray-600">45 min</span>
+                                  <span className="text-sm font-semibold text-blue-600">{duration} min</span>
+                                  <span className="text-xs text-gray-600">150 min</span>
+                                </div>
+                              </div>
+                            );
+                          }}
+                        />
+                      </div>
+
+                      {/* Nombre de joueurs présents */}
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                          Nombre de joueurs présents
+                        </label>
+                        <Controller
+                          name="players"
+                          control={trainingControl}
+                          render={({ field }) => {
+                            const presentCount = Object.values(field.value || {}).filter((p: any) => p?.status === 'present').length;
+                            const totalPlayers = players.length;
+                            
+                            return (
+                              <div className="space-y-1.5">
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max={totalPlayers}
+                                  value={presentCount}
+                                  onChange={(e) => {
+                                    const targetCount = parseInt(e.target.value);
+                                    const currentPresent = Object.entries(field.value || {}).filter(([_, p]: [string, any]) => p?.status === 'present');
+                                    
+                                    if (targetCount > currentPresent.length) {
+                                      // Ajouter des joueurs présents
+                                      const absentPlayers = players.filter(p => {
+                                        const playerData = field.value?.[p.id];
+                                        return !playerData || playerData.status !== 'present';
+                                      });
+                                      const toAdd = targetCount - currentPresent.length;
+                                      const newValue = { ...field.value };
+                                      
+                                      for (let i = 0; i < Math.min(toAdd, absentPlayers.length); i++) {
+                                        newValue[absentPlayers[i].id] = {
+                                          id: absentPlayers[i].id,
+                                          status: 'present' as PlayerStatus
+                                        };
+                                      }
+                                      field.onChange(newValue);
+                                    } else if (targetCount < currentPresent.length) {
+                                      // Retirer des joueurs présents
+                                      const toRemove = currentPresent.length - targetCount;
+                                      const newValue = { ...field.value };
+                                      let removed = 0;
+                                      
+                                      for (const [playerId, playerData] of currentPresent) {
+                                        if (removed < toRemove) {
+                                          newValue[playerId] = {
+                                            id: playerId,
+                                            status: 'absent' as PlayerStatus
+                                          };
+                                          removed++;
+                                        }
+                                      }
+                                      field.onChange(newValue);
+                                    }
+                                  }}
+                                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                                />
+                                <div className="flex justify-between items-center">
+                                  <span className="text-xs text-gray-600">0 joueur</span>
+                                  <span className="text-sm font-semibold text-green-600">{presentCount} joueurs</span>
+                                  <span className="text-xs text-gray-600">{totalPlayers} joueurs</span>
+                                </div>
+                              </div>
+                            );
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Organisation de la séance */}
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                        Organisation de la séance
+                      </label>
+                      
+                      <div className="space-y-2 mb-3">
+                        {(watchTraining('sessionParts') || []).map((part: SessionPart, index: number) => {
+                          const typeColors: Record<string, string> = {
+                            Echauffement: 'bg-green-100 text-green-800 border-green-300',
+                            Exercice: 'bg-orange-100 text-orange-800 border-orange-300',
+                            Situation: 'bg-blue-100 text-blue-800 border-blue-300',
+                            Jeu: 'bg-purple-100 text-purple-800 border-purple-300'
+                          };
+                          
+                          const selectedProcedure = availableProcedures.find(p => p.id === part.procedureId);
+                          const isDragging = draggedPartId === part.id;
+                          
+                          // Calculer l'heure de début et de fin en fonction de l'ordre
+                          const currentParts = watchTraining('sessionParts') || [];
+                          const startTime = currentParts.slice(0, index).reduce((sum: number, p: SessionPart) => sum + p.duration, 0);
+                          const endTime = startTime + part.duration;
+                          
+                          // Formater les heures (0:00 - 1:30 format)
+                          const formatTime = (minutes: number) => {
+                            const hours = Math.floor(minutes / 60);
+                            const mins = Math.floor(minutes % 60);
+                            if (hours > 0) {
+                              return mins > 0 ? `${hours}h${mins}` : `${hours}h`;
+                            }
+                            return `${mins}mn`;
+                          };
+                          
+                          return (
+                            <div
+                              key={part.id}
+                              draggable
+                              onDragStart={(e) => {
+                                setDraggedPartId(part.id);
+                                e.dataTransfer.effectAllowed = 'move';
+                                e.dataTransfer.setData('text/plain', part.id);
+                              }}
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                                e.dataTransfer.dropEffect = 'move';
+                              }}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                const draggedId = e.dataTransfer.getData('text/plain');
+                                if (draggedId !== part.id) {
+                                  const currentParts = watchTraining('sessionParts') || [];
+                                  const draggedIndex = currentParts.findIndex((p: SessionPart) => p.id === draggedId);
+                                  const dropIndex = currentParts.findIndex((p: SessionPart) => p.id === part.id);
+                                  
+                                  if (draggedIndex !== -1 && dropIndex !== -1) {
+                                    const newParts = [...currentParts];
+                                    const [removed] = newParts.splice(draggedIndex, 1);
+                                    newParts.splice(dropIndex, 0, removed);
+                                    setTrainingValue('sessionParts', newParts);
+                                  }
+                                }
+                                setDraggedPartId(null);
+                              }}
+                              onDragEnd={() => {
+                                setDraggedPartId(null);
+                              }}
+                              className={`flex flex-col sm:flex-row sm:items-center gap-2 p-2 rounded-lg border cursor-move transition-all ${
+                                typeColors[part.type] || 'bg-gray-100'
+                              } ${isDragging ? 'opacity-50 scale-95' : 'hover:shadow-md'}`}
+                            >
+                              <div className="flex items-center gap-2 flex-1">
+                                <GripVertical className="h-4 w-4 text-gray-400 cursor-grab active:cursor-grabbing" />
+                                <div className="flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2">
+                                  <span className="text-sm font-medium">{part.type}</span>
+                                  <span className="text-xs text-gray-500">
+                                    {formatTime(startTime)} - {formatTime(endTime)}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <label className="text-xs text-gray-600">Durée:</label>
+                                  <input
+                                    type="number"
+                                    min="5"
+                                    max={watchTraining('sessionDuration') || 60}
+                                    value={Math.round(part.duration)}
+                                    onChange={(e) => {
+                                      const newDuration = Math.max(5, Math.min(parseInt(e.target.value) || 5, watchTraining('sessionDuration') || 60));
+                                      const currentParts = watchTraining('sessionParts') || [];
+                                      const updated = currentParts.map((p: SessionPart) =>
+                                        p.id === part.id ? { ...p, duration: newDuration } : p
+                                      );
+                                      setTrainingValue('sessionParts', updated);
+                                    }}
+                                    className="w-14 px-1.5 py-0.5 text-xs rounded border border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                                  />
+                                </div>
+                              </div>
+                              
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (selectedProcedure) {
+                                      // Afficher les détails du procédé
+                                      setViewingProcedure(selectedProcedure);
+                                      // Charger le schéma si présent
+                                      if (selectedProcedure.schematic_id && activeTeam?.id) {
+                                        schematicsService.getSchematicById(selectedProcedure.schematic_id)
+                                          .then((schematic) => {
+                                            if (schematic && schematic.data) {
+                                              setProcedureDetailSchematic(schematic.data);
+                                            } else {
+                                              setProcedureDetailSchematic(null);
+                                            }
+                                          })
+                                          .catch((err) => {
+                                            console.error('Erreur lors du chargement du schéma pour la prévisualisation:', err);
+                                            setProcedureDetailSchematic(null);
+                                          });
+                                      } else {
+                                        setProcedureDetailSchematic(null);
+                                      }
+                                    } else {
+                                      // Charger un nouveau procédé
+                                      setSelectedProcedureForPart({ partId: part.id, procedureId: part.procedureId || null });
+                                    }
+                                  }}
+                                  className="px-2 py-0.5 text-xs font-medium bg-white rounded hover:bg-gray-50 border"
+                                >
+                                  {selectedProcedure ? selectedProcedure.title : 'Charger un procédé'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const currentParts = watchTraining('sessionParts') || [];
+                                    const updated = currentParts.filter((p: SessionPart) => p.id !== part.id);
+                                    setTrainingValue('sessionParts', updated);
+                                  }}
+                                  className="p-0.5 text-red-600 hover:text-red-800"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Ajouter un type d'exercice */}
+                      <div className="flex gap-2 mb-2">
+                        <select
+                          id="newPartType"
+                          className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm py-1 bg-white text-gray-900"
+                          defaultValue="Jeu"
+                        >
+                          <option value="Echauffement">Echauffement</option>
+                          <option value="Exercice">Exercice</option>
+                          <option value="Situation">Situation</option>
+                          <option value="Jeu">Jeu</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const select = document.getElementById('newPartType') as HTMLSelectElement;
+                            const newType = select.value as 'Echauffement' | 'Exercice' | 'Situation' | 'Jeu';
+                            const currentParts = watchTraining('sessionParts') || [];
+                            const totalDuration = watchTraining('sessionDuration') || 60;
+                            const currentTotal = currentParts.reduce((sum: number, p: SessionPart) => sum + p.duration, 0);
+                            const remaining = totalDuration - currentTotal;
+                            const newDuration = remaining > 0 ? Math.min(remaining, 20) : 10;
+                            
+                            // Demander la durée par défaut (10 min pour échauffement, 15 pour les autres)
+                            const defaultDuration = newType === 'Echauffement' ? 10 : 15;
+                            const newPart: SessionPart = {
+                              id: Date.now().toString(),
+                              type: newType,
+                              duration: defaultDuration,
+                              procedureId: null
+                            };
+                            
+                            setTrainingValue('sessionParts', [...currentParts, newPart]);
+                          }}
+                          className="px-3 py-1 text-xs font-medium text-green-700 bg-green-50 border border-green-300 rounded-md hover:bg-green-100"
+                        >
+                          <Plus className="h-3.5 w-3.5 inline mr-1" />
+                          Ajouter
+                        </button>
+                      </div>
+
+                      {/* Réglette unique pour toutes les jonctions */}
+                      {(watchTraining('sessionParts') || []).length > 1 && (
+                        <div className="mt-3 space-y-1.5">
+                          <h4 className="text-xs font-medium text-gray-700">
+                            Ajustez ici la durée de chaque partie de la séance
+                          </h4>
+                          <div className="relative h-12 bg-gray-200 rounded-lg overflow-hidden">
+                            {(watchTraining('sessionParts') || []).map((part: SessionPart, index: number) => {
+                              const totalDuration = watchTraining('sessionDuration') || 60;
+                              const currentParts = watchTraining('sessionParts') || [];
+                              
+                              // Calculer la position de début en additionnant les durées des segments précédents
+                              const startTime = currentParts.slice(0, index).reduce((sum: number, p: SessionPart) => sum + p.duration, 0);
+                              const leftPercent = (startTime / totalDuration) * 100;
+                              const width = (part.duration / totalDuration) * 100;
+                              
+                              // Couleurs pour les segments
+                              const partColors: Record<string, string> = {
+                                Echauffement: '#10b981',
+                                Exercice: '#f97316',
+                                Situation: '#3b82f6',
+                                Jeu: '#a855f7'
+                              };
+                              
+                              return (
+                                <div
+                                  key={part.id}
+                                  className="absolute h-full flex items-center justify-center"
+                                  style={{
+                                    left: `${leftPercent}%`,
+                                    width: `${width}%`,
+                                    backgroundColor: partColors[part.type] || '#9ca3af',
+                                    opacity: 0.8
+                                  }}
+                                >
+                                  <span className="text-xs font-medium text-white px-2">
+                                    {part.type} (~{Math.round(part.duration)}mn)
+                                  </span>
+                                </div>
+                              );
+                            })}
+                            
+                            {/* Poignées pour chaque jonction */}
+                            {(watchTraining('sessionParts') || []).slice(0, -1).map((part: SessionPart, index: number) => {
+                              const nextPart = (watchTraining('sessionParts') || [])[index + 1];
+                              const totalDuration = watchTraining('sessionDuration') || 60;
+                              const currentParts = watchTraining('sessionParts') || [];
+                              
+                              // Calculer la position de la poignée (fin du procédé actuel = début du suivant)
+                              const startTime = currentParts.slice(0, index + 1).reduce((sum: number, p: SessionPart) => sum + p.duration, 0);
+                              const positionPercent = (startTime / totalDuration) * 100;
+                              
+                              return (
+                                <div
+                                  key={`handle-${part.id}`}
+                                  className="absolute top-0 bottom-0 w-2 cursor-ew-resize z-10 flex items-center justify-center bg-gray-800 hover:bg-gray-900 transition-colors"
+                                  style={{
+                                    left: `${positionPercent}%`,
+                                    transform: 'translateX(-50%)'
+                                  }}
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    const slider = e.currentTarget.parentElement;
+                                    if (!slider) return;
+                                    
+                                    const sliderRect = slider.getBoundingClientRect();
+                                    const startX = e.clientX;
+                                    const startPartDuration = part.duration;
+                                    const startNextDuration = nextPart.duration;
+                                    const totalAdjacent = startPartDuration + startNextDuration;
+                                    
+                                    const handleMove = (moveEvent: MouseEvent) => {
+                                      moveEvent.preventDefault();
+                                      const deltaX = moveEvent.clientX - startX;
+                                      const deltaPercent = (deltaX / sliderRect.width) * 100;
+                                      const deltaMinutes = (deltaPercent / 100) * totalDuration;
+                                      
+                                      // Calculer les nouvelles durées
+                                      const newPartDuration = startPartDuration + deltaMinutes;
+                                      const newNextDuration = startNextDuration - deltaMinutes;
+                                      
+                                      // Vérifier les contraintes (minimum 5 minutes pour chaque)
+                                      if (newPartDuration >= 5 && newNextDuration >= 5) {
+                                        const updated = currentParts.map((p: SessionPart) => {
+                                          if (p.id === part.id) {
+                                            return { ...p, duration: Math.round(newPartDuration * 10) / 10 };
+                                          }
+                                          if (p.id === nextPart.id) {
+                                            return { ...p, duration: Math.round(newNextDuration * 10) / 10 };
+                                          }
+                                          return p;
+                                        });
+                                        setTrainingValue('sessionParts', updated);
+                                      }
+                                    };
+                                    
+                                    const handleUp = () => {
+                                      document.removeEventListener('mousemove', handleMove);
+                                      document.removeEventListener('mouseup', handleUp);
+                                    };
+                                    
+                                    document.addEventListener('mousemove', handleMove);
+                                    document.addEventListener('mouseup', handleUp);
+                                  }}
+                                >
+                                  <GripVertical className="h-6 w-6 text-white" />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Message si aucune partie n'est définie */}
+                      {(watchTraining('sessionParts') || []).length === 0 && (
+                        <div className="text-center py-8 text-gray-500 border-2 border-dashed border-gray-300 rounded-lg">
+                          <p className="text-sm">Aucune partie définie. Ajoutez des parties pour organiser votre séance.</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Modal pour sélectionner un procédé */}
+                    {selectedProcedureForPart && (() => {
+                      const targetPartType = (watchTraining('sessionParts') || []).find((sp: SessionPart) => sp.id === selectedProcedureForPart.partId)?.type;
+                      const filteredProcedures = availableProcedures.filter((p) => {
+                        // Filtrer par type du procédé de la partie
+                        if (p.type !== targetPartType) return false;
+                        
+                        // Filtrer par recherche (titre et objectifs)
+                        if (procedureSearchTerm.trim()) {
+                          const searchLower = procedureSearchTerm.toLowerCase();
+                          const matchesTitle = p.title?.toLowerCase().includes(searchLower);
+                          const matchesObjectives = p.objectives?.toLowerCase().includes(searchLower);
+                          if (!matchesTitle && !matchesObjectives) return false;
+                        }
+                        
+                        // Filtrer par thème
+                        if (procedureFilterTheme && p.theme !== procedureFilterTheme) return false;
+                        
+                        return true;
+                      });
+
+                      const themes = ['Offensif', 'Defensif', 'Transition', 'CPA'] as const;
+
+                      return (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-60 p-4">
+                          <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
+                            {/* Header */}
+                            <div className="flex justify-between items-center px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
+                              <h3 className="text-xl font-bold text-gray-900">Sélectionner un procédé</h3>
+                              <button
+                                onClick={() => {
+                                  setSelectedProcedureForPart(null);
+                                  setProcedureSearchTerm('');
+                                  setProcedureFilterTheme(null);
+                                }}
+                                className="text-gray-500 hover:text-gray-700 transition-colors p-1 rounded-lg hover:bg-white"
+                              >
+                                <X className="h-5 w-5" />
+                              </button>
+                            </div>
+
+                            {/* Barre de recherche et filtres */}
+                            <div className="px-6 py-4 border-b bg-gray-50 space-y-3">
+                              {/* Barre de recherche */}
+                              <div className="relative">
+                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                                <input
+                                  type="text"
+                                  placeholder="Rechercher par titre ou objectifs..."
+                                  value={procedureSearchTerm}
+                                  onChange={(e) => setProcedureSearchTerm(e.target.value)}
+                                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white placeholder-gray-400"
+                                />
+                              </div>
+
+                              {/* Filtres par thème */}
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <Filter className="h-4 w-4 text-gray-500" />
+                                <span className="text-sm font-medium text-gray-700">Filtrer par thème:</span>
+                                <button
+                                  onClick={() => setProcedureFilterTheme(null)}
+                                  className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
+                                    procedureFilterTheme === null
+                                      ? 'bg-blue-600 text-white shadow-md'
+                                      : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-100'
+                                  }`}
+                                >
+                                  Tous
+                                </button>
+                                {themes.map((theme) => (
+                                  <button
+                                    key={theme}
+                                    onClick={() => setProcedureFilterTheme(procedureFilterTheme === theme ? null : theme)}
+                                    className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
+                                      procedureFilterTheme === theme
+                                        ? 'bg-blue-600 text-white shadow-md'
+                                        : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-100'
+                                    }`}
+                                  >
+                                    {theme}
+                                  </button>
+                                ))}
+                              </div>
+
+                              {/* Compteur de résultats */}
+                              <div className="text-sm text-gray-600">
+                                {filteredProcedures.length} procédé{filteredProcedures.length !== 1 ? 's' : ''} trouvé{filteredProcedures.length !== 1 ? 's' : ''}
+                              </div>
+                            </div>
+
+                            {/* Liste des procédés */}
+                            <div className="flex-1 overflow-y-auto p-6">
+                              {filteredProcedures.length === 0 ? (
+                                <div className="text-center py-12 text-gray-500">
+                                  <Search className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                                  <p className="text-sm font-medium">Aucun procédé trouvé</p>
+                                  <p className="text-xs mt-1">Essayez de modifier vos critères de recherche ou filtres</p>
+                                </div>
+                              ) : (
+                                <div className="grid grid-cols-1 gap-3">
+                                  {filteredProcedures.map((procedure) => (
+                                    <button
+                                      key={procedure.id}
+                                      type="button"
+                                      onClick={() => {
+                                        const currentParts = watchTraining('sessionParts') || [];
+                                        const updated = currentParts.map((p: SessionPart) =>
+                                          p.id === selectedProcedureForPart.partId
+                                            ? { ...p, procedureId: procedure.id }
+                                            : p
+                                        );
+                                        setTrainingValue('sessionParts', updated);
+                                        setSelectedProcedureForPart(null);
+                                        setProcedureSearchTerm('');
+                                        setProcedureFilterTheme(null);
+                                      }}
+                                      className="w-full text-left p-4 rounded-xl border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all bg-white group"
+                                    >
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="flex-1 min-w-0">
+                                          <div className="font-semibold text-gray-900 text-base mb-2 group-hover:text-blue-600 transition-colors">
+                                            {procedure.title}
+                                          </div>
+                                          <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                                              {procedure.type}
+                                            </span>
+                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                                              {procedure.theme}
+                                            </span>
+                                            {procedure.duration_minutes && (
+                                              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                                                {procedure.duration_minutes} min
+                                              </span>
+                                            )}
+                                          </div>
+                                          {procedure.objectives && (
+                                            <p className="text-sm text-gray-600 line-clamp-2 mt-2">
+                                              {procedure.objectives}
+                                            </p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </>
+                )}
               </form>
             </div>
 
             {/* Footer fixe */}
-            <div className="flex justify-end gap-2 p-6 border-t bg-gray-50">
+            <div className="flex justify-between items-center gap-2 p-4 border-t bg-gray-50">
               <button
                 type="button"
                 onClick={handleCloseTrainingModal}
@@ -2222,12 +2906,195 @@ export default function CalendarPage() {
               >
                 Annuler
               </button>
+              
+              <div className="flex gap-2">
+                {trainingFormPage === 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => setTrainingFormPage(2)}
+                    className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 flex items-center gap-2"
+                  >
+                    Suivant
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setTrainingFormPage(1)}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 flex items-center gap-2"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Précédent
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        console.log('Bouton Ajouter cliqué');
+                        console.log('Données du formulaire:', watchTraining());
+                        handleTrainingSubmit(onSubmitTraining)().catch((err) => {
+                          console.error('Erreur lors de la soumission:', err);
+                          setError('Erreur lors de la soumission du formulaire');
+                        });
+                      }}
+                      className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700"
+                    >
+                      Ajouter
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de détails du procédé */}
+      {viewingProcedure && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex justify-between items-start gap-4 border-b px-6 py-4">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">{viewingProcedure.title}</h2>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                    {viewingProcedure.theme}
+                  </span>
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                    {viewingProcedure.type}
+                  </span>
+                  {viewingProcedure.duration_minutes && (
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                      {viewingProcedure.duration_minutes} min
+                    </span>
+                  )}
+                  {viewingProcedure.min_players && (
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                      {viewingProcedure.min_players} joueurs minimum
+                    </span>
+                  )}
+                </div>
+              </div>
               <button
-                type="submit"
-                onClick={handleTrainingSubmit(onSubmitTraining)}
-                className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700"
+                onClick={() => {
+                  setViewingProcedure(null);
+                  setProcedureDetailSchematic(null);
+                }}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
               >
-                Ajouter
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Colonne gauche : Texte */}
+                <div className="space-y-4">
+                  {viewingProcedure.image_url && (
+                    <div className="relative w-full h-40 rounded-xl overflow-hidden border border-gray-200">
+                      <Image
+                        src={viewingProcedure.image_url}
+                        alt={`Illustration pour ${viewingProcedure.title}`}
+                        fill
+                        className="object-cover"
+                      />
+                    </div>
+                  )}
+
+                  <section>
+                    <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+                      Objectifs
+                    </h3>
+                    <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">{viewingProcedure.objectives}</p>
+                  </section>
+
+                  <section>
+                    <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+                      Consignes / Règles
+                    </h3>
+                    <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">{viewingProcedure.instructions}</p>
+                  </section>
+
+                  {viewingProcedure.variants && (
+                    <section>
+                      <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+                        Variantes
+                      </h3>
+                      <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">{viewingProcedure.variants}</p>
+                    </section>
+                  )}
+
+                  {viewingProcedure.corrections && (
+                    <section>
+                      <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+                        Correctifs / Comportements attendus
+                      </h3>
+                      <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">{viewingProcedure.corrections}</p>
+                    </section>
+                  )}
+
+                  {(viewingProcedure.field_dimensions || viewingProcedure.duration_minutes || viewingProcedure.min_players) && (
+                    <section className="grid gap-3 sm:grid-cols-3">
+                      {viewingProcedure.field_dimensions && (
+                        <div className="bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
+                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                            Dimension du terrain
+                          </div>
+                          <div className="mt-1 text-sm text-gray-800">{viewingProcedure.field_dimensions}</div>
+                        </div>
+                      )}
+                      {viewingProcedure.duration_minutes && (
+                        <div className="bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
+                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                            Durée indicative
+                          </div>
+                          <div className="mt-1 text-sm text-gray-800">{viewingProcedure.duration_minutes} minutes</div>
+                        </div>
+                      )}
+                      {viewingProcedure.min_players && (
+                        <div className="bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
+                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                            Nombre de joueurs minimum
+                          </div>
+                          <div className="mt-1 text-sm text-gray-800">{viewingProcedure.min_players}</div>
+                        </div>
+                      )}
+                    </section>
+                  )}
+                </div>
+
+                {/* Colonne droite : Schéma */}
+                <div className="space-y-4">
+                  {viewingProcedure.schematic_id && procedureDetailSchematic && (
+                    <section>
+                      <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">
+                        Schéma tactique
+                      </h3>
+                      <SchematicPreview data={procedureDetailSchematic} />
+                      <button
+                        onClick={() => router.push(`/webapp/library/schematics?schematic=${viewingProcedure.schematic_id}`)}
+                        className="mt-2 w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                      >
+                        <Layout className="h-3 w-3" />
+                        Ouvrir dans l'éditeur
+                        <ExternalLink className="h-3 w-3" />
+                      </button>
+                    </section>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t px-6 py-4 bg-gray-50 flex justify-end">
+              <button
+                onClick={() => {
+                  setViewingProcedure(null);
+                  setProcedureDetailSchematic(null);
+                }}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Fermer
               </button>
             </div>
           </div>

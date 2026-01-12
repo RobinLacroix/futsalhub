@@ -2288,10 +2288,10 @@ function SchematicsPageContent() {
         />
       )}
 
-      {/* Panneau de propriétés en position fixe pour ne pas affecter le layout, juste en dessous de la toolbar */}
+      {/* Panneau de propriétés collé à la toolbar */}
       {selectedElements.length === 1 && (
         <div 
-          className="absolute top-16 left-0 right-0 z-50 border-b border-gray-200 shadow-sm bg-white"
+          className="absolute top-[44px] left-0 right-0 z-50 border-b border-gray-200 shadow-sm bg-white"
         >
           <ElementProperties
             element={selectedElements[0]}

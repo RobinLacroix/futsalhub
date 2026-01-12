@@ -12,6 +12,7 @@ interface SchematicElementsProps {
   onElementMouseDown?: (elementId: string, e: React.MouseEvent) => void;
   onElementContextMenu?: (elementId: string, position: Position) => void;
   fieldType?: 'futsal' | 'blank';
+  isPreview?: boolean;
 }
 
 // Dimensions des terrains
@@ -29,7 +30,8 @@ export function SchematicElements({
   onElementClick,
   onElementMouseDown,
   onElementContextMenu,
-  fieldType = 'futsal'
+  fieldType = 'futsal',
+  isPreview = false
 }: SchematicElementsProps) {
   // Calculer l'offset pour centrer le terrain (identique à Field)
   const FIELD_LENGTH_M = fieldType === 'futsal' ? FUTSAL_LENGTH_M : BLANK_LENGTH_M;
@@ -38,6 +40,12 @@ export function SchematicElements({
   const fieldWidth = FIELD_WIDTH_M * scale;
   const offsetX = (svgWidth - fieldLength) / 2;
   const offsetY = (svgHeight - fieldWidth) / 2;
+  
+  // Facteur de réduction pour les traits en mode prévisualisation (proportionnel à l'échelle réduite)
+  // L'échelle normale est 10, l'échelle de prévisualisation est 8, donc facteur = 8/10 = 0.8
+  const strokeWidthScale = isPreview ? scale / 10 : 1;
+  // Facteur de réduction pour la taille de la police (15-20% de réduction, on utilise 18%)
+  const fontSizeScale = isPreview ? 0.82 : 1;
   const getStrokeDashArray = (style: string) => {
     switch (style) {
       case 'dashed':
@@ -222,7 +230,7 @@ export function SchematicElements({
         const isSelected = selectedElementIds.includes(element.id);
         const commonProps = {
           stroke: element.color,
-          strokeWidth: element.strokeWidth,
+          strokeWidth: element.strokeWidth * strokeWidthScale,
           strokeDasharray: getStrokeDashArray(element.strokeStyle),
           fill: element.fillColor || 'none',
           fillOpacity: element.fillOpacity || 0,
@@ -292,7 +300,7 @@ export function SchematicElements({
                     <path
                       d={`M ${element.x * scale} ${element.y * scale} Q ${element.controlPoint.x * scale} ${element.controlPoint.y * scale} ${element.endX * scale} ${element.endY * scale}`}
                       stroke="rgba(0,0,0,0)"
-                      strokeWidth={Math.max(10, (element.strokeWidth || 2) * 2)}
+                      strokeWidth={Math.max(10, (element.strokeWidth || 2) * 2) * strokeWidthScale}
                       fill="none"
                       pointerEvents="stroke"
                       onClick={(e: React.MouseEvent) => {
@@ -335,7 +343,7 @@ export function SchematicElements({
                       x2={element.endX * scale}
                       y2={element.endY * scale}
                       stroke="rgba(0,0,0,0)"
-                      strokeWidth={Math.max(10, (element.strokeWidth || 2) * 2)}
+                      strokeWidth={Math.max(10, (element.strokeWidth || 2) * 2) * strokeWidthScale}
                       pointerEvents="stroke"
                       onClick={(e: React.MouseEvent) => {
                         e.stopPropagation();
@@ -398,7 +406,7 @@ export function SchematicElements({
                   x={element.x * scale}
                   y={element.y * scale}
                   fill={playerElement.textColor || '#ffffff'}
-                  fontSize={Math.max(8, playerRadius * 0.8)}
+                  fontSize={Math.max(8, playerRadius * 0.8) * fontSizeScale}
                   textAnchor="middle"
                   dominantBaseline="middle"
                   fontWeight="bold"
@@ -574,7 +582,7 @@ export function SchematicElements({
                     height={goalHeight}
                     fill={`url(#netPattern-${goalId})`}
                     stroke={element.color}
-                    strokeWidth={element.strokeWidth}
+                    strokeWidth={element.strokeWidth * strokeWidthScale}
                     strokeDasharray={getStrokeDashArray(element.strokeStyle)}
                     style={{ cursor: 'pointer' }}
                     onClick={(e: React.MouseEvent) => {
@@ -627,7 +635,6 @@ export function SchematicElements({
                   height={ladderWidth}
                   fill="none"
                   stroke={element.color}
-                  strokeWidth={element.strokeWidth}
                   strokeDasharray={getStrokeDashArray(element.strokeStyle)}
                   {...commonProps}
                 />

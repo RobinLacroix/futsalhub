@@ -112,10 +112,11 @@ export default function LibraryPage() {
   // Charger les schémas disponibles quand le modal s'ouvre
   useEffect(() => {
     const loadSchematics = async () => {
-      if ((isCreateModalOpen || isSchematicModalOpen) && activeTeam?.id) {
+      if (isCreateModalOpen || isSchematicModalOpen) {
         try {
-          console.log('Chargement des schémas pour l\'équipe:', activeTeam.id);
-          const schematics = await schematicsService.getSchematicsByTeam(activeTeam.id);
+          console.log('Chargement de tous les schémas disponibles');
+          // Récupérer tous les schémas (accessibles à toutes les équipes)
+          const schematics = await schematicsService.getSchematicsByTeam();
           console.log('Schémas chargés:', schematics);
           setAvailableSchematics(schematics);
         } catch (err) {
@@ -127,7 +128,7 @@ export default function LibraryPage() {
       }
     };
     loadSchematics();
-  }, [isCreateModalOpen, isSchematicModalOpen, activeTeam?.id]);
+  }, [isCreateModalOpen, isSchematicModalOpen]);
 
   // Charger le schéma pour la prévisualisation quand un procédé est sélectionné
   useEffect(() => {
@@ -794,7 +795,8 @@ export default function LibraryPage() {
                           if (activeTeam?.id) {
                             try {
                               // Recharger les schémas avant d'ouvrir le modal
-                              const schematics = await schematicsService.getSchematicsByTeam(activeTeam.id);
+                              // Récupérer tous les schémas (accessibles à toutes les équipes)
+                              const schematics = await schematicsService.getSchematicsByTeam();
                               setAvailableSchematics(schematics);
                               setIsSchematicModalOpen(true);
                             } catch (err) {
