@@ -1,20 +1,31 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { format } from 'date-fns';
+import { fr } from 'date-fns/locale';
 import {
   ArrowLeft,
   User,
   Calendar,
   Trophy,
   Activity,
-  Footprints
+  Footprints,
+  Check,
+  X,
+  AlertTriangle,
+  MessageSquare,
+  Stethoscope,
+  Ban,
+  Plus,
+  Trash2
 } from 'lucide-react';
 import { useActiveTeam } from '../../../hooks/useActiveTeam';
 import { playersService } from '@/lib/services/playersService';
 import { trainingsService } from '@/lib/services/trainingsService';
-import type { Player } from '@/types';
+import { playerEventsService } from '@/lib/services/playerEventsService';
+import type { Player, PlayerEvent, PlayerEventType } from '@/types';
 import {
   PieChart,
   Pie,
@@ -36,15 +47,29 @@ const MATCH_RESULT_COLORS = {
   defeats: '#ef4444'
 };
 
+type TrainingSessionStatus = 'present' | 'absent' | 'injured' | 'not_recorded';
+
 export default function PlayerProfilePage() {
   const params = useParams();
-  const router = useRouter();
   const { activeTeam } = useActiveTeam();
   const playerId = params.playerId as string;
 
   const [player, setPlayer] = useState<Player | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [recentSessions, setRecentSessions] = useState<{ date: string; status: TrainingSessionStatus; theme?: string }[]>([]);
+  const [events, setEvents] = useState<PlayerEvent[]>([]);
+  const [showEventForm, setShowEventForm] = useState(false);
+  const [eventFormType, setEventFormType] = useState<PlayerEventType>('interview');
+  const [eventForm, setEventForm] = useState({
+    event_date: format(new Date(), 'yyyy-MM-dd'),
+    report: '',
+    injury_type: '',
+    unavailability_days: '',
+    matches_suspended: ''
+  });
+  const [savingEvent, setSavingEvent] = useState(false);
 
   const [stats, setStats] = useState<{
     matches_played: number;
@@ -89,7 +114,13 @@ export default function PlayerProfilePage() {
         setPlayer(playerData);
         setStats(playerStats);
 
-        const trainingsData = await trainingsService.getTrainingsByTeam(activeTeam.id);
+        const [trainingsData, eventsData] = await Promise.all([
+          trainingsService.getTrainingsByTeam(activeTeam.id),
+          playerEventsService.getByPlayerId(playerId)
+        ]);
+
+        setEvents(eventsData);
+
         const allStats = trainingsService.calculateAttendanceStats(trainingsData);
         const playerAttendanceStats = allStats.find(s => s.player_id === playerId);
 
@@ -110,6 +141,20 @@ export default function PlayerProfilePage() {
             attendance_rate: 0
           });
         }
+
+        // Dernières séances d'entraînement (les 15 plus récentes, plus récentes en premier)
+        const sorted = [...(trainingsData || [])].sort(
+          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+        );
+        const last15 = sorted.slice(0, 15).map(t => {
+          const status = (t.attendance as Record<string, string>)?.[playerId] as TrainingSessionStatus | undefined;
+          return {
+            date: t.date,
+            status: (status || 'not_recorded') as TrainingSessionStatus,
+            theme: t.theme
+          };
+        });
+        setRecentSessions(last15);
       } catch (err) {
         console.error('Erreur chargement profil joueur:', err);
         setError(err instanceof Error ? err.message : 'Erreur lors du chargement');
@@ -120,6 +165,39 @@ export default function PlayerProfilePage() {
 
     loadData();
   }, [playerId, activeTeam]);
+
+  const handleAddEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!playerId) return;
+    setSavingEvent(true);
+    try {
+      const newEvent = await playerEventsService.create({
+        player_id: playerId,
+        event_type: eventFormType,
+        event_date: eventForm.event_date,
+        report: eventFormType === 'interview' ? eventForm.report || null : null,
+        injury_type: eventFormType === 'injury' ? eventForm.injury_type || null : null,
+        unavailability_days: eventFormType === 'injury' && eventForm.unavailability_days ? parseInt(eventForm.unavailability_days, 10) : null,
+        matches_suspended: eventFormType === 'suspension' && eventForm.matches_suspended ? parseInt(eventForm.matches_suspended, 10) : null
+      });
+      setEvents(prev => [newEvent, ...prev]);
+      setShowEventForm(false);
+      setEventForm({ event_date: format(new Date(), 'yyyy-MM-dd'), report: '', injury_type: '', unavailability_days: '', matches_suspended: '' });
+    } catch (err) {
+      console.error('Erreur création événement:', err);
+    } finally {
+      setSavingEvent(false);
+    }
+  };
+
+  const handleDeleteEvent = async (id: string) => {
+    try {
+      await playerEventsService.delete(id);
+      setEvents(prev => prev.filter(e => e.id !== id));
+    } catch (err) {
+      console.error('Erreur suppression événement:', err);
+    }
+  };
 
   if (loading) {
     return (
@@ -300,6 +378,49 @@ export default function PlayerProfilePage() {
                 <p>Aucune donnée de présence disponible</p>
               </div>
             )}
+
+            {recentSessions.length > 0 && (
+              <div className="mt-6 pt-4 border-t border-gray-100">
+                <p className="text-sm font-medium text-gray-700 mb-3">Dynamique récente (15 dernières séances)</p>
+                <div className="flex flex-wrap gap-2">
+                  {recentSessions.map((s, i) => {
+                    const title = `${format(new Date(s.date), 'd MMM yyyy', { locale: fr })}${s.theme ? ` - ${s.theme}` : ''}`;
+                    const statusLabel = s.status === 'present' ? 'Présent' : s.status === 'absent' ? 'Absent' : s.status === 'injured' ? 'Blessé' : 'Non renseigné';
+                    return (
+                      <div
+                        key={i}
+                        title={`${title} : ${statusLabel}`}
+                        className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                          s.status === 'present'
+                            ? 'bg-green-500 text-white'
+                            : s.status === 'absent'
+                              ? 'bg-amber-500 text-white'
+                              : s.status === 'injured'
+                                ? 'bg-red-500 text-white'
+                                : 'bg-gray-300 text-gray-600'
+                        }`}
+                      >
+                        {s.status === 'present' ? (
+                          <Check className="h-4 w-4" />
+                        ) : s.status === 'absent' ? (
+                          <X className="h-4 w-4" />
+                        ) : s.status === 'injured' ? (
+                          <AlertTriangle className="h-4 w-4" />
+                        ) : (
+                          <span className="text-xs">?</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex gap-4 mt-2 text-xs text-gray-600">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500" /> Présent</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Absent</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" /> Blessé</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-gray-300" /> Non renseigné</span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -394,6 +515,163 @@ export default function PlayerProfilePage() {
           </div>
         </div>
       )}
+
+      {/* Événements marquants */}
+      <div className="mt-8 bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
+        <div className="p-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-gray-900">Événements marquants</h3>
+          <button
+            type="button"
+            onClick={() => {
+              setShowEventForm(!showEventForm);
+              setEventFormType('interview');
+              setEventForm({ event_date: format(new Date(), 'yyyy-MM-dd'), report: '', injury_type: '', unavailability_days: '', matches_suspended: '' });
+            }}
+            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg"
+          >
+            <Plus className="h-4 w-4" />
+            Ajouter un événement
+          </button>
+        </div>
+
+        {showEventForm && (
+          <form onSubmit={handleAddEvent} className="p-4 bg-blue-50/50 border-b border-gray-100">
+            <div className="flex flex-wrap gap-2 mb-4">
+              {(['interview', 'injury', 'suspension'] as const).map(t => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setEventFormType(t)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium ${
+                    eventFormType === t ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  {t === 'interview' && <MessageSquare className="h-4 w-4" />}
+                  {t === 'injury' && <Stethoscope className="h-4 w-4" />}
+                  {t === 'suspension' && <Ban className="h-4 w-4" />}
+                  {t === 'interview' ? 'Entretien individuel' : t === 'injury' ? 'Blessure' : 'Suspension'}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-800 mb-1">Date *</label>
+                <input
+                  type="date"
+                  required
+                  value={eventForm.event_date}
+                  onChange={e => setEventForm(f => ({ ...f, event_date: e.target.value }))}
+                  className="w-full px-3 py-2 border-2 border-gray-400 rounded-lg text-gray-900 bg-white"
+                />
+              </div>
+              {eventFormType === 'interview' && (
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-800 mb-1">Compte rendu</label>
+                  <textarea
+                    value={eventForm.report}
+                    onChange={e => setEventForm(f => ({ ...f, report: e.target.value }))}
+                    rows={3}
+                    placeholder="Résumé de l'entretien..."
+                    className="w-full px-3 py-2 border-2 border-gray-400 rounded-lg text-gray-900 bg-white placeholder:text-gray-600"
+                  />
+                </div>
+              )}
+              {eventFormType === 'injury' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-800 mb-1">Type de blessure</label>
+                    <input
+                      type="text"
+                      value={eventForm.injury_type}
+                      onChange={e => setEventForm(f => ({ ...f, injury_type: e.target.value }))}
+                      placeholder="Ex: entorse cheville, claquage..."
+                      className="w-full px-3 py-2 border-2 border-gray-400 rounded-lg text-gray-900 bg-white placeholder:text-gray-600"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-800 mb-1">Durée indisponibilité (jours)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={eventForm.unavailability_days}
+                      onChange={e => setEventForm(f => ({ ...f, unavailability_days: e.target.value }))}
+                      placeholder="Ex: 14"
+                      className="w-full px-3 py-2 border-2 border-gray-400 rounded-lg text-gray-900 bg-white placeholder:text-gray-600"
+                    />
+                  </div>
+                </>
+              )}
+              {eventFormType === 'suspension' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-800 mb-1">Nombre de matchs</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={eventForm.matches_suspended}
+                    onChange={e => setEventForm(f => ({ ...f, matches_suspended: e.target.value }))}
+                    placeholder="Ex: 2"
+                    className="w-full px-3 py-2 border-2 border-gray-400 rounded-lg text-gray-900 bg-white placeholder:text-gray-600"
+                  />
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button
+                type="submit"
+                disabled={savingEvent}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
+              >
+                {savingEvent ? 'Enregistrement...' : 'Enregistrer'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowEventForm(false)}
+                className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 text-sm font-medium"
+              >
+                Annuler
+              </button>
+            </div>
+          </form>
+        )}
+
+        <div className="p-4">
+          {events.length === 0 ? (
+            <p className="text-gray-500 text-center py-8">Aucun événement enregistré. Ajoutez un entretien, une blessure ou une suspension.</p>
+          ) : (
+            <ul className="space-y-3">
+              {events.map(ev => (
+                <li key={ev.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                  <div className="flex-shrink-0 mt-0.5">
+                    {ev.event_type === 'interview' && <MessageSquare className="h-5 w-5 text-blue-600" />}
+                    {ev.event_type === 'injury' && <Stethoscope className="h-5 w-5 text-red-600" />}
+                    {ev.event_type === 'suspension' && <Ban className="h-5 w-5 text-amber-600" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-gray-900">
+                      {ev.event_type === 'interview' && 'Entretien individuel'}
+                      {ev.event_type === 'injury' && `Blessure${ev.injury_type ? ` - ${ev.injury_type}` : ''}`}
+                      {ev.event_type === 'suspension' && `Suspension - ${ev.matches_suspended} match${ev.matches_suspended && ev.matches_suspended > 1 ? 's' : ''}`}
+                    </p>
+                    <p className="text-sm text-gray-600">{format(new Date(ev.event_date), 'd MMMM yyyy', { locale: fr })}</p>
+                    {ev.report && <p className="text-sm text-gray-700 mt-1">{ev.report}</p>}
+                    {ev.event_type === 'injury' && ev.unavailability_days && (
+                      <p className="text-sm text-gray-600">Indisponible {ev.unavailability_days} jour{ev.unavailability_days > 1 ? 's' : ''}</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteEvent(ev.id)}
+                    className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                    title="Supprimer"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -71,6 +71,21 @@ export interface PlayerFormData {
 
 export type PlayerStatus = 'present' | 'absent' | 'injured';
 
+export type PlayerEventType = 'interview' | 'injury' | 'suspension';
+
+export interface PlayerEvent {
+  id: string;
+  player_id: string;
+  event_type: PlayerEventType;
+  event_date: string;
+  created_at?: string;
+  updated_at?: string;
+  report?: string | null;
+  injury_type?: string | null;
+  unavailability_days?: number | null;
+  matches_suspended?: number | null;
+}
+
 // ==================== MATCHS ====================
 export interface Match {
   id: string;
