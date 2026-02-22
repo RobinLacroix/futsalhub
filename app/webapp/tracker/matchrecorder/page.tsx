@@ -552,7 +552,7 @@ export default function MatchRecorderPage() {
   // Fonction pour obtenir l'icône de tri
   const getSortIcon = (key: string) => {
     if (sortConfig.key !== key) {
-      return <ChevronsUpDown className="h-4 w-4 text-gray-400" />;
+      return <ChevronsUpDown className="h-4 w-4 text-gray-600" />;
     }
     
     if (sortConfig.direction === 'desc') {
@@ -1764,7 +1764,7 @@ export default function MatchRecorderPage() {
             })}
           </div>
           {actionFilter.length === 0 && (
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+            <p className="text-xs text-gray-500 dark:text-gray-600 mt-2">
               Aucun filtre sélectionné. Sélectionnez au moins un type d'action pour afficher les résultats.
             </p>
           )}
@@ -3227,7 +3227,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                 <h2 className="text-2xl font-bold text-gray-900">Ajouter un nouveau match</h2>
                 <button
                   onClick={() => setShowAddMatchForm(false)}
-                  className="text-gray-500 hover:text-gray-700"
+                  className="text-gray-600 hover:text-gray-800"
                 >
                   ✕
                 </button>
@@ -3240,7 +3240,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                     type="text"
                     value={newMatch.title}
                     onChange={(e) => setNewMatch(prev => ({ ...prev, title: e.target.value }))}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                     placeholder="Ex: Match Amical vs Team X"
                   />
                 </div>
@@ -3251,7 +3251,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                     type="datetime-local"
                     value={newMatch.date}
                     onChange={(e) => setNewMatch(prev => ({ ...prev, date: e.target.value }))}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                   />
                 </div>
 
@@ -3260,7 +3260,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                   <select
                     value={newMatch.location}
                     onChange={(e) => setNewMatch(prev => ({ ...prev, location: e.target.value }))}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                   >
                     <option value="Domicile">Domicile</option>
                     <option value="Exterieur">Exterieur</option>
@@ -3272,7 +3272,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                   <select
                     value={newMatch.competition}
                     onChange={(e) => setNewMatch(prev => ({ ...prev, competition: e.target.value }))}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                   >
                     <option value="Championnat">Championnat</option>
                     <option value="Coupe">Coupe</option>
@@ -3287,7 +3287,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                     value={newMatch.opponent_team}
                     onChange={(e) => setNewMatch(prev => ({ ...prev, opponent_team: e.target.value }))}
                     placeholder="Ex: Team X (optionnel)"
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                   />
                 </div>
 
@@ -3299,7 +3299,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                       min="0"
                       value={newMatch.score_team}
                       onChange={(e) => setNewMatch(prev => ({ ...prev, score_team: parseInt(e.target.value) || 0 }))}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                      className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                     />
                   </div>
                   <div>
@@ -3309,7 +3309,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                       min="0"
                       value={newMatch.score_opponent}
                       onChange={(e) => setNewMatch(prev => ({ ...prev, score_opponent: parseInt(e.target.value) || 0 }))}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                      className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                     />
                   </div>
                 </div>
@@ -3331,7 +3331,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                             offensive: parseInt(e.target.value) || 0 
                           } 
                         }))}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                       />
                     </div>
                     <div>
@@ -3347,7 +3347,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                             transition: parseInt(e.target.value) || 0 
                           } 
                         }))}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                       />
                     </div>
                     <div>
@@ -3363,7 +3363,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                             cpa: parseInt(e.target.value) || 0 
                           } 
                         }))}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                       />
                     </div>
                     <div>
@@ -3379,7 +3379,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                             superiority: parseInt(e.target.value) || 0 
                           } 
                         }))}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                       />
                     </div>
                   </div>
@@ -3402,7 +3402,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                             offensive: parseInt(e.target.value) || 0 
                           } 
                         }))}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                       />
                     </div>
                     <div>
@@ -3418,7 +3418,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                             transition: parseInt(e.target.value) || 0 
                           } 
                         }))}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                       />
                     </div>
                     <div>
@@ -3434,7 +3434,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                             cpa: parseInt(e.target.value) || 0 
                           } 
                         }))}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                       />
                     </div>
                     <div>
@@ -3450,7 +3450,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                             superiority: parseInt(e.target.value) || 0 
                           } 
                         }))}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                       />
                     </div>
                   </div>
@@ -3487,7 +3487,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
               >
                 {/* Logo adversaire (placeholder) */}
                 <div className="h-32 bg-gray-100 flex items-center justify-center">
-                  <div className="text-gray-400 text-sm">Logo adversaire</div>
+                  <div className="text-gray-600 text-sm">Logo adversaire</div>
                 </div>
                 
                 {/* Détails du match */}
@@ -3523,7 +3523,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
 
           {matches.length === 0 && !showAddMatchForm && (
             <div className="text-center py-12">
-              <Trophy className="h-16 w-16 text-gray-400 mx-auto mb-6" />
+              <Trophy className="h-16 w-16 text-gray-600 mx-auto mb-6" />
               <p className="text-xl text-gray-600">Aucun match disponible</p>
               <p className="text-lg text-gray-500 mt-3">
                 Créez votre premier match pour commencer l&apos;enregistrement.
@@ -3545,7 +3545,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Informations du match</h2>
             <button
               onClick={() => setCurrentStep('match')}
-              className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              className="text-gray-600 hover:text-gray-800 dark:text-gray-600 dark:hover:text-gray-200"
             >
               <X className="h-6 w-6" />
             </button>
@@ -3562,7 +3562,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                   type="text"
                   value={matchInfo.title}
                   onChange={(e) => setMatchInfo(prev => ({ ...prev, title: e.target.value }))}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
+                  className="w-full px-4 py-3 border border-gray-400 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-600 dark:placeholder-gray-500"
                 />
               </div>
               
@@ -3574,7 +3574,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                   type="datetime-local"
                   value={matchInfo.date}
                   onChange={(e) => setMatchInfo(prev => ({ ...prev, date: e.target.value }))}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-4 py-3 border border-gray-400 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
               
@@ -3585,7 +3585,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                 <select
                   value={matchInfo.location}
                   onChange={(e) => setMatchInfo(prev => ({ ...prev, location: e.target.value }))}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-4 py-3 border border-gray-400 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
                   <option value="Domicile">Domicile</option>
                   <option value="Exterieur">Exterieur</option>
@@ -3599,7 +3599,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                 <select
                   value={matchInfo.competition}
                   onChange={(e) => setMatchInfo(prev => ({ ...prev, competition: e.target.value }))}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-4 py-3 border border-gray-400 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
                   <option value="Amical">Amical</option>
                   <option value="Championnat">Championnat</option>
@@ -3616,7 +3616,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                   type="text"
                   value={matchInfo.opponent}
                   onChange={(e) => setMatchInfo(prev => ({ ...prev, opponent: e.target.value }))}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
+                  className="w-full px-4 py-3 border border-gray-400 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-600 dark:placeholder-gray-500"
                   placeholder="Ex: Team X (optionnel)"
                 />
               </div>
@@ -3702,7 +3702,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
               <div>
                 <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Bilan du Match</h1>
                 {matchData.selectedMatch && (
-                  <div className="text-lg text-gray-600 dark:text-gray-400 mt-2">
+                  <div className="text-lg text-gray-600 dark:text-gray-600 mt-2">
                     {matchData.selectedMatch.title} - {matchData.selectedMatch.competition}
                   </div>
                 )}
@@ -3918,7 +3918,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                             </div>
                             <div>
                               <div className="font-medium text-gray-900 dark:text-white text-sm">{player.name}</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400">{player.position}</div>
+                              <div className="text-xs text-gray-500 dark:text-gray-600">{player.position}</div>
                             </div>
                           </div>
                         </td>
@@ -4040,7 +4040,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                 })}
               </div>
               {actionFilter.length === 0 && (
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                <p className="text-xs text-gray-500 dark:text-gray-600 mt-2">
                   Aucun filtre sélectionné. Sélectionnez au moins un type d'action pour afficher les résultats.
                 </p>
               )}
@@ -4209,7 +4209,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
             <div className="flex items-center gap-3">
               <h1 className="text-lg font-bold text-gray-900 dark:text-white">Enregistrement Match</h1>
               {matchData.selectedMatch && (
-                <div className="text-sm text-gray-600 dark:text-gray-400 font-medium">
+                <div className="text-sm text-gray-600 dark:text-gray-600 font-medium">
                   {matchData.selectedMatch.title} - {matchData.selectedMatch.competition}
                 </div>
               )}
@@ -4317,7 +4317,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
             <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-2">
               <div className="flex items-center justify-between mb-1">
                 <h3 className="text-xs font-semibold text-gray-900 dark:text-white">Chronomètre</h3>
-                <div className="text-xs text-gray-600 dark:text-gray-400">
+                <div className="text-xs text-gray-600 dark:text-gray-600">
                   MT {matchData.currentHalf}/2
                 </div>
               </div>
@@ -4524,8 +4524,8 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
           {activeView === 'recording' && (
             matchData.players.length === 0 ? (
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-8 text-center">
-                <Users className="h-16 w-16 text-gray-400 mx-auto mb-6" />
-                <p className="text-xl text-gray-600 dark:text-gray-400">Aucun joueur sélectionné</p>
+                <Users className="h-16 w-16 text-gray-600 mx-auto mb-6" />
+                <p className="text-xl text-gray-600 dark:text-gray-600">Aucun joueur sélectionné</p>
                 <p className="text-lg text-gray-500 dark:text-gray-500 mt-3">
                   Sélectionnez des joueurs pour commencer l&apos;enregistrement.
                 </p>
@@ -4595,7 +4595,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                                   {player.position === 'Gardien' && <span className="text-amber-500 mr-2">🧤</span>}
                                   {player.name}
                                 </div>
-                                <div className="text-xs text-gray-600 dark:text-gray-400">
+                                <div className="text-xs text-gray-600 dark:text-gray-600">
                                   #{player.number} - {player.position}
                                 </div>
                                 {selectedPlayerForChange === player.id && !isOverSequenceLimit && (
@@ -4613,8 +4613,8 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                               {/* Temps de jeu */}
                               <div className="text-center mb-3">
                                 <div className="flex justify-between text-xs">
-                                  <span className="text-gray-600 dark:text-gray-400">Total</span>
-                                  <span className="text-gray-600 dark:text-gray-400">Séquence</span>
+                                  <span className="text-gray-600 dark:text-gray-600">Total</span>
+                                  <span className="text-gray-600 dark:text-gray-600">Séquence</span>
                                 </div>
                                 <div className="flex justify-between font-mono text-sm font-bold">
                                   <span className="text-gray-900 dark:text-white">{formatTime(player.totalTime)}</span>
@@ -4622,7 +4622,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                                     {formatTime(player.currentSequenceTime)}
                                   </span>
                                 </div>
-                                <div className={`mt-1 text-xs font-semibold ${isOverSequenceLimit ? 'text-red-600 animate-pulse' : 'text-gray-500 dark:text-gray-400'}`}>
+                                <div className={`mt-1 text-xs font-semibold ${isOverSequenceLimit ? 'text-red-600 animate-pulse' : 'text-gray-500 dark:text-gray-600'}`}>
                                   Limite: {formatTime(player.sequenceTimeLimit)}
                                 </div>
                                 {isOverSequenceLimit && (
@@ -4760,7 +4760,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                           )}
                         </div>
                       </div>
-                      <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                      <div className="mt-2 text-xs text-gray-600 dark:text-gray-600">
                         {selectedLocation
                           ? `Position: x=${selectedLocation.x.toFixed(2)}, y=${selectedLocation.y.toFixed(2)}`
                           : 'Aucune position sélectionnée. Les actions seront enregistrées sans coordonnées.'}
@@ -4810,7 +4810,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                               {player.position === 'Gardien' && <span className="text-amber-500 mr-2">🧤</span>}
                               {player.name}
                             </div>
-                            <div className="text-xs text-gray-600 dark:text-gray-400">#{player.number}</div>
+                            <div className="text-xs text-gray-600 dark:text-gray-600">#{player.number}</div>
                             {selectedPlayerForChange === player.id && (
                               <div className="text-xs text-blue-600 font-bold mt-1">
                                 🔄 Sélectionné pour entrer
@@ -4820,7 +4820,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
 
                           {/* Temps de jeu */}
                           <div className="text-center mb-2">
-                            <div className="text-xs text-gray-600 dark:text-gray-400">Total</div>
+                            <div className="text-xs text-gray-600 dark:text-gray-600">Total</div>
                             <div className="font-mono text-xs font-bold text-gray-900 dark:text-white">
                               {formatTime(player.totalTime)}
                             </div>

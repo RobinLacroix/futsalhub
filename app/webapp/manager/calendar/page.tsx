@@ -1115,7 +1115,7 @@ export default function CalendarPage() {
                     }
                   }
                 }}
-                className="ml-2 text-gray-500 hover:text-red-600 cursor-pointer"
+                className="ml-2 text-gray-600 hover:text-red-600 cursor-pointer"
               >
                 <X className="h-3 w-3" />
               </div>
@@ -1715,10 +1715,10 @@ export default function CalendarPage() {
           <div className="bg-white rounded-lg w-full max-w-[600px] max-h-[90vh] flex flex-col">
             {/* Header fixe */}
             <div className="flex justify-between items-center p-6 border-b">
-              <h2 className="text-xl text-gray-700 font-semibold">Ajouter un match</h2>
+              <h2 className="text-xl text-gray-800 font-semibold">Ajouter un match</h2>
               <button
                 onClick={handleCloseModal}
-                className="text-gray-500 hover:text-gray-700"
+                className="text-gray-600 hover:text-gray-800"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1728,7 +1728,7 @@ export default function CalendarPage() {
             <div className="flex-1 overflow-y-auto p-6">
               <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Titre</label>
+                  <label className="block text-sm font-medium text-gray-800">Titre</label>
                   <Controller
                     name="title"
                     control={control}
@@ -1736,7 +1736,7 @@ export default function CalendarPage() {
                       <input
                         {...field}
                         type="text"
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                       />
                     )}
                   />
@@ -1746,7 +1746,7 @@ export default function CalendarPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Date</label>
+                  <label className="block text-sm font-medium text-gray-800">Date</label>
                   <Controller
                     name="date"
                     control={control}
@@ -1760,7 +1760,7 @@ export default function CalendarPage() {
                             onChange(date);
                           }
                         }}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                       />
                     )}
                   />
@@ -1770,7 +1770,7 @@ export default function CalendarPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Lieu</label>
+                  <label className="block text-sm font-medium text-gray-800">Lieu</label>
                   <Controller
                     name="location"
                     control={control}
@@ -1778,7 +1778,7 @@ export default function CalendarPage() {
                       <div className="mt-1">
                         <select
                           {...field}
-                          className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                          className="block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900"
                         >
                           <option value="Domicile">Domicile</option>
                           <option value="Exterieur">Exterieur</option>
@@ -1792,7 +1792,7 @@ export default function CalendarPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Type de compétition</label>
+                  <label className="block text-sm font-medium text-gray-800">Type de compétition</label>
                   <Controller
                     name="competition"
                     control={control}
@@ -1800,7 +1800,7 @@ export default function CalendarPage() {
                       <div className="mt-1">
                         <select
                           {...field}
-                          className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                          className="block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900"
                         >
                           <option value="Championnat">Championnat</option>
                           <option value="Coupe">Coupe</option>
@@ -1815,7 +1815,7 @@ export default function CalendarPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Nom de l'adversaire</label>
+                  <label className="block text-sm font-medium text-gray-800">Nom de l'adversaire</label>
                   <Controller
                     name="opponent_team"
                     control={control}
@@ -1824,7 +1824,7 @@ export default function CalendarPage() {
                         {...field}
                         type="text"
                         placeholder="Ex: Team X (optionnel)"
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                       />
                     )}
                   />
@@ -1832,7 +1832,7 @@ export default function CalendarPage() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">Score équipe</label>
+                    <label className="block text-sm font-medium text-gray-800">Score équipe</label>
                     <Controller
                       name="score_team"
                       control={control}
@@ -1840,14 +1840,14 @@ export default function CalendarPage() {
                         <input
                           type="number"
                           min="0"
-                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                          className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                           {...field}
                         />
                       )}
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">Score adversaire</label>
+                    <label className="block text-sm font-medium text-gray-800">Score adversaire</label>
                     <Controller
                       name="score_opponent"
                       control={control}
@@ -1855,7 +1855,7 @@ export default function CalendarPage() {
                         <input
                           type="number"
                           min="0"
-                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                          className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                           {...field}
                         />
                       )}
@@ -1868,7 +1868,7 @@ export default function CalendarPage() {
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Répartition des buts marqués</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Phase Offensive</label>
+                      <label className="block text-sm font-medium text-gray-800">Phase Offensive</label>
                       <Controller
                         name="goals_by_type.offensive"
                         control={control}
@@ -1876,14 +1876,14 @@ export default function CalendarPage() {
                           <input
                             type="number"
                             min="0"
-                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                             {...field}
                           />
                         )}
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Transition</label>
+                      <label className="block text-sm font-medium text-gray-800">Transition</label>
                       <Controller
                         name="goals_by_type.transition"
                         control={control}
@@ -1891,14 +1891,14 @@ export default function CalendarPage() {
                           <input
                             type="number"
                             min="0"
-                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                             {...field}
                           />
                         )}
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">CPA</label>
+                      <label className="block text-sm font-medium text-gray-800">CPA</label>
                       <Controller
                         name="goals_by_type.cpa"
                         control={control}
@@ -1906,14 +1906,14 @@ export default function CalendarPage() {
                           <input
                             type="number"
                             min="0"
-                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                             {...field}
                           />
                         )}
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Supériorité</label>
+                      <label className="block text-sm font-medium text-gray-800">Supériorité</label>
                       <Controller
                         name="goals_by_type.superiority"
                         control={control}
@@ -1921,7 +1921,7 @@ export default function CalendarPage() {
                           <input
                             type="number"
                             min="0"
-                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                             {...field}
                           />
                         )}
@@ -1935,7 +1935,7 @@ export default function CalendarPage() {
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Répartition des buts encaissés</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Phase Offensive</label>
+                      <label className="block text-sm font-medium text-gray-800">Phase Offensive</label>
                       <Controller
                         name="conceded_by_type.offensive"
                         control={control}
@@ -1943,14 +1943,14 @@ export default function CalendarPage() {
                           <input
                             type="number"
                             min="0"
-                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                             {...field}
                           />
                         )}
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Transition</label>
+                      <label className="block text-sm font-medium text-gray-800">Transition</label>
                       <Controller
                         name="conceded_by_type.transition"
                         control={control}
@@ -1958,14 +1958,14 @@ export default function CalendarPage() {
                           <input
                             type="number"
                             min="0"
-                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                             {...field}
                           />
                         )}
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">CPA</label>
+                      <label className="block text-sm font-medium text-gray-800">CPA</label>
                       <Controller
                         name="conceded_by_type.cpa"
                         control={control}
@@ -1973,14 +1973,14 @@ export default function CalendarPage() {
                           <input
                             type="number"
                             min="0"
-                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                             {...field}
                           />
                         )}
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Supériorité</label>
+                      <label className="block text-sm font-medium text-gray-800">Supériorité</label>
                       <Controller
                         name="conceded_by_type.superiority"
                         control={control}
@@ -1988,7 +1988,7 @@ export default function CalendarPage() {
                           <input
                             type="number"
                             min="0"
-                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                             {...field}
                           />
                         )}
@@ -1998,21 +1998,21 @@ export default function CalendarPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Joueurs participants</label>
+                  <label className="block text-sm font-medium text-gray-800 mb-2">Joueurs participants</label>
                   <div className="border rounded-md overflow-hidden">
                     {/* Header de la table */}
                     <div className="hidden sm:grid grid-cols-12 gap-4 bg-gray-50 p-3 border-b">
                       <div className="col-span-4">
-                        <span className="text-sm font-medium text-gray-700">Joueur</span>
+                        <span className="text-sm font-medium text-gray-800">Joueur</span>
                       </div>
                       <div className="col-span-2">
-                        <span className="text-sm font-medium text-gray-700">Buts marqués</span>
+                        <span className="text-sm font-medium text-gray-800">Buts marqués</span>
                       </div>
                       <div className="col-span-3">
-                        <span className="text-sm font-medium text-gray-700">Cartons jaunes</span>
+                        <span className="text-sm font-medium text-gray-800">Cartons jaunes</span>
                       </div>
                       <div className="col-span-3">
-                        <span className="text-sm font-medium text-gray-700">Cartons rouges</span>
+                        <span className="text-sm font-medium text-gray-800">Cartons rouges</span>
                       </div>
                     </div>
 
@@ -2037,7 +2037,7 @@ export default function CalendarPage() {
                                     type="checkbox"
                                     checked={value ?? false}
                                     onChange={(e) => onChange(e.target.checked)}
-                                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                    className="rounded border-gray-400 text-blue-600 focus:ring-blue-500"
                                   />
                                 )}
                               />
@@ -2048,7 +2048,7 @@ export default function CalendarPage() {
 
                             {/* Buts marqués */}
                             <div className="sm:col-span-2">
-                              <label className="text-xs font-medium text-gray-500 sm:hidden">Buts marqués</label>
+                              <label className="text-xs font-medium text-gray-600 sm:hidden">Buts marqués</label>
                               <Controller
                                 name={`players.${player.id}.goals`}
                                 control={control}
@@ -2060,8 +2060,8 @@ export default function CalendarPage() {
                                     value={value || 0}
                                     onChange={(e) => onChange(parseInt(e.target.value) || 0)}
                                     disabled={!isPlayerPresent}
-                                    className={`w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm ${
-                                      !isPlayerPresent ? 'bg-gray-100 cursor-not-allowed' : ''
+                                    className={`w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900 ${
+                                      !isPlayerPresent ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
                                     }`}
                                   />
                                 )}
@@ -2070,7 +2070,7 @@ export default function CalendarPage() {
 
                             {/* Cartons jaunes */}
                             <div className="sm:col-span-3">
-                              <label className="text-xs font-medium text-gray-500 sm:hidden">Cartons jaunes</label>
+                              <label className="text-xs font-medium text-gray-600 sm:hidden">Cartons jaunes</label>
                               <Controller
                                 name={`players.${player.id}.yellow_cards`}
                                 control={control}
@@ -2082,8 +2082,8 @@ export default function CalendarPage() {
                                     value={value || 0}
                                     onChange={(e) => onChange(parseInt(e.target.value) || 0)}
                                     disabled={!isPlayerPresent}
-                                    className={`w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm ${
-                                      !isPlayerPresent ? 'bg-gray-100 cursor-not-allowed' : ''
+                                    className={`w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900 ${
+                                      !isPlayerPresent ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
                                     }`}
                                   />
                                 )}
@@ -2092,7 +2092,7 @@ export default function CalendarPage() {
 
                             {/* Cartons rouges */}
                             <div className="sm:col-span-3">
-                              <label className="text-xs font-medium text-gray-500 sm:hidden">Cartons rouges</label>
+                              <label className="text-xs font-medium text-gray-600 sm:hidden">Cartons rouges</label>
                               <Controller
                                 name={`players.${player.id}.red_cards`}
                                 control={control}
@@ -2104,8 +2104,8 @@ export default function CalendarPage() {
                                     value={value || 0}
                                     onChange={(e) => onChange(parseInt(e.target.value) || 0)}
                                     disabled={!isPlayerPresent}
-                                    className={`w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm ${
-                                      !isPlayerPresent ? 'bg-gray-100 cursor-not-allowed' : ''
+                                    className={`w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900 ${
+                                      !isPlayerPresent ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
                                     }`}
                                   />
                                 )}
@@ -2125,7 +2125,7 @@ export default function CalendarPage() {
               <button
                 type="button"
                 onClick={handleCloseModal}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                className="px-4 py-2 text-sm font-medium text-gray-800 bg-white border border-gray-400 rounded-md hover:bg-gray-50"
               >
                 Annuler
               </button>
@@ -2150,7 +2150,7 @@ export default function CalendarPage() {
               <h2 className="text-lg font-semibold text-gray-900">Ajouter un entraînement</h2>
               <button
                 onClick={handleCloseTrainingModal}
-                className="text-gray-500 hover:text-gray-700"
+                className="text-gray-600 hover:text-gray-800"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -2168,7 +2168,7 @@ export default function CalendarPage() {
                 {trainingFormPage === 1 ? (
                   <>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Date</label>
+                  <label className="block text-xs font-medium text-gray-800 mb-1">Date</label>
                   <Controller
                     name="date"
                     control={trainingControl}
@@ -2182,7 +2182,7 @@ export default function CalendarPage() {
                             onChange(date);
                           }
                         }}
-                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm py-1.5"
+                        className="block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm py-1.5"
                       />
                     )}
                   />
@@ -2192,7 +2192,7 @@ export default function CalendarPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Lieu</label>
+                  <label className="block text-xs font-medium text-gray-800 mb-1">Lieu</label>
                   <Controller
                     name="location"
                     control={trainingControl}
@@ -2200,7 +2200,7 @@ export default function CalendarPage() {
                       <input
                         {...field}
                         type="text"
-                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm py-1.5"
+                        className="block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm py-1.5"
                       />
                     )}
                   />
@@ -2210,7 +2210,7 @@ export default function CalendarPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Thème</label>
+                  <label className="block text-xs font-medium text-gray-800 mb-1">Thème</label>
                   <Controller
                     name="theme"
                     control={trainingControl}
@@ -2218,7 +2218,7 @@ export default function CalendarPage() {
                       <div>
                         <select
                           {...field}
-                          className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900 text-sm py-1.5"
+                          className="block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900 text-sm py-1.5"
                         >
                           <option value="Offensif">Offensif</option>
                           <option value="Défensif">Défensif</option>
@@ -2234,7 +2234,7 @@ export default function CalendarPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Principe clé</label>
+                  <label className="block text-xs font-medium text-gray-800 mb-1">Principe clé</label>
                   <Controller
                     name="key_principle"
                     control={trainingControl}
@@ -2242,7 +2242,7 @@ export default function CalendarPage() {
                       <textarea
                         {...field}
                         rows={2}
-                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm py-1.5"
+                        className="block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm py-1.5"
                       />
                     )}
                   />
@@ -2252,7 +2252,7 @@ export default function CalendarPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1.5">Statut des joueurs</label>
+                  <label className="block text-xs font-medium text-gray-800 mb-1.5">Statut des joueurs</label>
                   <div className="border rounded-md overflow-hidden">
                     <div className="max-h-[200px] overflow-y-auto divide-y">
                       {players.map(player => (
@@ -2326,7 +2326,7 @@ export default function CalendarPage() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {/* Durée de la séance */}
                       <div>
-                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                        <label className="block text-xs font-medium text-gray-800 mb-1">
                           Durée de la séance (minutes)
                         </label>
                         <Controller
@@ -2360,7 +2360,7 @@ export default function CalendarPage() {
 
                       {/* Nombre de joueurs présents */}
                       <div>
-                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                        <label className="block text-xs font-medium text-gray-800 mb-1">
                           Nombre de joueurs présents
                         </label>
                         <Controller
@@ -2431,7 +2431,7 @@ export default function CalendarPage() {
 
                     {/* Organisation de la séance */}
                     <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                      <label className="block text-xs font-medium text-gray-800 mb-1.5">
                         Organisation de la séance
                       </label>
                       
@@ -2500,10 +2500,10 @@ export default function CalendarPage() {
                               } ${isDragging ? 'opacity-50 scale-95' : 'hover:shadow-md'}`}
                             >
                               <div className="flex items-center gap-2 flex-1">
-                                <GripVertical className="h-4 w-4 text-gray-400 cursor-grab active:cursor-grabbing" />
+                                <GripVertical className="h-4 w-4 text-gray-600 cursor-grab active:cursor-grabbing" />
                                 <div className="flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2">
                                   <span className="text-sm font-medium">{part.type}</span>
-                                  <span className="text-xs text-gray-500">
+                                  <span className="text-xs text-gray-600">
                                     {formatTime(startTime)} - {formatTime(endTime)}
                                   </span>
                                 </div>
@@ -2522,7 +2522,7 @@ export default function CalendarPage() {
                                       );
                                       setTrainingValue('sessionParts', updated);
                                     }}
-                                    className="w-14 px-1.5 py-0.5 text-xs rounded border border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                                    className="w-14 px-1.5 py-0.5 text-xs rounded border border-gray-400 focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900"
                                   />
                                 </div>
                               </div>
@@ -2581,7 +2581,7 @@ export default function CalendarPage() {
                       <div className="flex gap-2 mb-2">
                         <select
                           id="newPartType"
-                          className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm py-1 bg-white text-gray-900"
+                          className="flex-1 rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm py-1 bg-white text-gray-900"
                           defaultValue="Jeu"
                         >
                           <option value="Echauffement">Echauffement</option>
@@ -2621,7 +2621,7 @@ export default function CalendarPage() {
                       {/* Réglette unique pour toutes les jonctions */}
                       {(watchTraining('sessionParts') || []).length > 1 && (
                         <div className="mt-3 space-y-1.5">
-                          <h4 className="text-xs font-medium text-gray-700">
+                          <h4 className="text-xs font-medium text-gray-800">
                             Ajustez ici la durée de chaque partie de la séance
                           </h4>
                           <div className="relative h-12 bg-gray-200 rounded-lg overflow-hidden">
@@ -2734,7 +2734,7 @@ export default function CalendarPage() {
                       
                       {/* Message si aucune partie n'est définie */}
                       {(watchTraining('sessionParts') || []).length === 0 && (
-                        <div className="text-center py-8 text-gray-500 border-2 border-dashed border-gray-300 rounded-lg">
+                        <div className="text-center py-8 text-gray-600 border-2 border-dashed border-gray-400 rounded-lg">
                           <p className="text-sm">Aucune partie définie. Ajoutez des parties pour organiser votre séance.</p>
                         </div>
                       )}
@@ -2775,7 +2775,7 @@ export default function CalendarPage() {
                                   setProcedureSearchTerm('');
                                   setProcedureFilterTheme(null);
                                 }}
-                                className="text-gray-500 hover:text-gray-700 transition-colors p-1 rounded-lg hover:bg-white"
+                                className="text-gray-600 hover:text-gray-800 transition-colors p-1 rounded-lg hover:bg-white"
                               >
                                 <X className="h-5 w-5" />
                               </button>
@@ -2785,26 +2785,26 @@ export default function CalendarPage() {
                             <div className="px-6 py-4 border-b bg-gray-50 space-y-3">
                               {/* Barre de recherche */}
                               <div className="relative">
-                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-600" />
                                 <input
                                   type="text"
                                   placeholder="Rechercher par titre ou objectifs..."
                                   value={procedureSearchTerm}
                                   onChange={(e) => setProcedureSearchTerm(e.target.value)}
-                                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white placeholder-gray-400"
+                                  className="w-full pl-10 pr-4 py-2.5 border border-gray-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white placeholder-gray-600"
                                 />
                               </div>
 
                               {/* Filtres par thème */}
                               <div className="flex items-center gap-2 flex-wrap">
-                                <Filter className="h-4 w-4 text-gray-500" />
-                                <span className="text-sm font-medium text-gray-700">Filtrer par thème:</span>
+                                <Filter className="h-4 w-4 text-gray-600" />
+                                <span className="text-sm font-medium text-gray-800">Filtrer par thème:</span>
                                 <button
                                   onClick={() => setProcedureFilterTheme(null)}
                                   className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
                                     procedureFilterTheme === null
                                       ? 'bg-blue-600 text-white shadow-md'
-                                      : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-100'
+                                      : 'bg-white text-gray-800 border border-gray-400 hover:bg-gray-100'
                                   }`}
                                 >
                                   Tous
@@ -2816,7 +2816,7 @@ export default function CalendarPage() {
                                     className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
                                       procedureFilterTheme === theme
                                         ? 'bg-blue-600 text-white shadow-md'
-                                        : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-100'
+                                        : 'bg-white text-gray-800 border border-gray-400 hover:bg-gray-100'
                                     }`}
                                   >
                                     {theme}
@@ -2833,7 +2833,7 @@ export default function CalendarPage() {
                             {/* Liste des procédés */}
                             <div className="flex-1 overflow-y-auto p-6">
                               {filteredProcedures.length === 0 ? (
-                                <div className="text-center py-12 text-gray-500">
+                                <div className="text-center py-12 text-gray-600">
                                   <Search className="h-12 w-12 mx-auto mb-3 text-gray-300" />
                                   <p className="text-sm font-medium">Aucun procédé trouvé</p>
                                   <p className="text-xs mt-1">Essayez de modifier vos critères de recherche ou filtres</p>
@@ -2902,7 +2902,7 @@ export default function CalendarPage() {
               <button
                 type="button"
                 onClick={handleCloseTrainingModal}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                className="px-4 py-2 text-sm font-medium text-gray-800 bg-white border border-gray-400 rounded-md hover:bg-gray-50"
               >
                 Annuler
               </button>
@@ -2922,7 +2922,7 @@ export default function CalendarPage() {
                     <button
                       type="button"
                       onClick={() => setTrainingFormPage(1)}
-                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 flex items-center gap-2"
+                      className="px-4 py-2 text-sm font-medium text-gray-800 bg-white border border-gray-400 rounded-md hover:bg-gray-50 flex items-center gap-2"
                     >
                       <ChevronLeft className="h-4 w-4" />
                       Précédent
@@ -2981,7 +2981,7 @@ export default function CalendarPage() {
                   setViewingProcedure(null);
                   setProcedureDetailSchematic(null);
                 }}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
+                className="text-gray-600 hover:text-gray-600 transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -3003,14 +3003,14 @@ export default function CalendarPage() {
                   )}
 
                   <section>
-                    <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+                    <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wide">
                       Objectifs
                     </h3>
                     <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">{viewingProcedure.objectives}</p>
                   </section>
 
                   <section>
-                    <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+                    <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wide">
                       Consignes / Règles
                     </h3>
                     <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">{viewingProcedure.instructions}</p>
@@ -3018,7 +3018,7 @@ export default function CalendarPage() {
 
                   {viewingProcedure.variants && (
                     <section>
-                      <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+                      <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wide">
                         Variantes
                       </h3>
                       <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">{viewingProcedure.variants}</p>
@@ -3027,7 +3027,7 @@ export default function CalendarPage() {
 
                   {viewingProcedure.corrections && (
                     <section>
-                      <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+                      <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wide">
                         Correctifs / Comportements attendus
                       </h3>
                       <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">{viewingProcedure.corrections}</p>
@@ -3038,7 +3038,7 @@ export default function CalendarPage() {
                     <section className="grid gap-3 sm:grid-cols-3">
                       {viewingProcedure.field_dimensions && (
                         <div className="bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                          <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
                             Dimension du terrain
                           </div>
                           <div className="mt-1 text-sm text-gray-800">{viewingProcedure.field_dimensions}</div>
@@ -3046,7 +3046,7 @@ export default function CalendarPage() {
                       )}
                       {viewingProcedure.duration_minutes && (
                         <div className="bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                          <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
                             Durée indicative
                           </div>
                           <div className="mt-1 text-sm text-gray-800">{viewingProcedure.duration_minutes} minutes</div>
@@ -3054,7 +3054,7 @@ export default function CalendarPage() {
                       )}
                       {viewingProcedure.min_players && (
                         <div className="bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                          <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
                             Nombre de joueurs minimum
                           </div>
                           <div className="mt-1 text-sm text-gray-800">{viewingProcedure.min_players}</div>
@@ -3068,7 +3068,7 @@ export default function CalendarPage() {
                 <div className="space-y-4">
                   {viewingProcedure.schematic_id && procedureDetailSchematic && (
                     <section>
-                      <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">
+                      <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wide mb-2">
                         Schéma tactique
                       </h3>
                       <SchematicPreview data={procedureDetailSchematic} />

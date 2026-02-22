@@ -58,7 +58,7 @@ export default function TeamSelector({ selectedTeamId, onTeamChange, className =
   if (teams.length === 0) {
     return (
       <div className={`flex items-center gap-2 px-3 py-2 bg-gray-100 rounded-lg ${className}`}>
-        <Users className="h-4 w-4 text-gray-500" />
+        <Users className="h-4 w-4 text-gray-600" />
         <span className="text-sm text-gray-600">Aucune équipe</span>
       </div>
     );
@@ -79,7 +79,7 @@ export default function TeamSelector({ selectedTeamId, onTeamChange, className =
         <span className="text-sm font-medium text-gray-900 truncate flex-1 text-left">
           {selectedTeam ? selectedTeam.name : 'Sélectionner une équipe'}
         </span>
-        <ChevronDown className={`h-4 w-4 text-gray-500 transition-transform flex-shrink-0 ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`h-4 w-4 text-gray-600 transition-transform flex-shrink-0 ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
       {isOpen && (
@@ -100,7 +100,7 @@ export default function TeamSelector({ selectedTeamId, onTeamChange, className =
                 ></div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-gray-900 truncate">{team.name}</div>
-                  <div className="text-xs text-gray-500 truncate">
+                  <div className="text-xs text-gray-600 truncate">
                     {team.category} - Niveau {team.level}
                   </div>
                 </div>

@@ -147,7 +147,7 @@ export default function LandingPage() {
           <div className="bg-white p-8 rounded-lg max-w-md w-full relative">
             <button
               onClick={() => setIsLoginModalOpen(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+              className="absolute top-4 right-4 text-gray-600 hover:text-gray-800"
             >
               <X className="w-5 h-5" />
             </button>
@@ -161,7 +161,7 @@ export default function LandingPage() {
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <Mail className="h-5 w-5 text-gray-400" />
+                    <Mail className="h-5 w-5 text-gray-600" />
                   </div>
                   <input
                     type="email"
@@ -181,7 +181,7 @@ export default function LandingPage() {
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <Key className="h-5 w-5 text-gray-400" />
+                    <Key className="h-5 w-5 text-gray-600" />
                   </div>
                   <input
                     type="password"
@@ -325,7 +325,7 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
             <div>
               <h3 className="text-xl font-bold mb-4">FutsalHub</h3>
-              <p className="text-gray-400">
+              <p className="text-gray-300">
                 La plateforme digitale pour les coachs de futsal
               </p>
             </div>
@@ -333,12 +333,12 @@ export default function LandingPage() {
               <h4 className="text-lg font-semibold mb-4">Liens utiles</h4>
               <ul className="space-y-2">
                 <li>
-                  <Link href="/mentions-legales" className="text-gray-400 hover:text-white">
+                  <Link href="/mentions-legales" className="text-gray-300 hover:text-white">
                     Mentions légales
                   </Link>
                 </li>
                 <li>
-                  <Link href="/contact" className="text-gray-400 hover:text-white">
+                  <Link href="/contact" className="text-gray-300 hover:text-white">
                     Contact
                   </Link>
                 </li>
@@ -347,20 +347,20 @@ export default function LandingPage() {
             <div>
               <h4 className="text-lg font-semibold mb-4">Réseaux sociaux</h4>
               <div className="flex space-x-4">
-                <a href="#" className="text-gray-400 hover:text-white">
+                <a href="#" className="text-gray-300 hover:text-white">
                   <Twitter className="w-5 h-5" />
                 </a>
-                <a href="#" className="text-gray-400 hover:text-white">
+                <a href="#" className="text-gray-300 hover:text-white">
                   <Linkedin className="w-5 h-5" />
                 </a>
-                <a href="#" className="text-gray-400 hover:text-white">
+                <a href="#" className="text-gray-300 hover:text-white">
                   <Instagram className="w-5 h-5" />
                 </a>
               </div>
             </div>
             <div>
               <h4 className="text-lg font-semibold mb-4">Newsletter</h4>
-              <p className="text-gray-400 mb-4">
+              <p className="text-gray-300 mb-4">
                 Restez informé de nos actualités
               </p>
               <div className="flex">
@@ -375,7 +375,7 @@ export default function LandingPage() {
               </div>
             </div>
           </div>
-          <div className="mt-8 pt-8 border-t border-gray-700 text-center text-gray-400">
+          <div className="mt-8 pt-8 border-t border-gray-700 text-center text-gray-300">
             <p>&copy; {new Date().getFullYear()} FutsalHub. Tous droits réservés.</p>
           </div>
         </div>

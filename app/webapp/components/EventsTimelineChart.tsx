@@ -276,9 +276,9 @@ export default function EventsTimelineChart({ selectedMatchIds = [] }: Props) {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="text-center">
-          <div className="text-gray-400 text-6xl mb-4">📊</div>
+          <div className="text-gray-600 text-6xl mb-4">📊</div>
           <p className="text-gray-600 font-medium mb-2">Aucune donnée disponible</p>
-          <p className="text-gray-500 text-sm">
+          <p className="text-gray-600 text-sm">
             {selectedMatchIds.length > 0 
               ? 'Aucun événement trouvé pour les matches sélectionnés'
               : 'Aucun événement de match enregistré'

@@ -1,5 +1,27 @@
 // Types centralisés pour toute l'application
 
+// ==================== CLUBS ====================
+export interface Club {
+  id: string;
+  name: string;
+  description?: string;
+  logo_url?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type ClubMemberRole = 'admin' | 'coach' | 'viewer';
+
+export interface ClubMember {
+  id: string;
+  user_id: string;
+  club_id: string;
+  role: ClubMemberRole;
+  team_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
 // ==================== ÉQUIPES ====================
 export interface Team {
   id: string;
@@ -7,6 +29,7 @@ export interface Team {
   category: string;
   level: string;
   color: string;
+  club_id?: string;
   created_at?: string;
   updated_at?: string;
 }
@@ -22,7 +45,7 @@ export interface Player {
   status: string;
   number?: number;
   sequence_time_limit?: number;
-  team_id?: string;
+  team_id?: string; // Le club est hérité via team_id -> teams.club_id
   matches_played?: number;
   goals?: number;
   training_attendance?: number;
@@ -71,7 +94,7 @@ export interface Match {
     cpa: number;
     superiority: number;
   };
-  team_id?: string;
+  team_id?: string; // Le club est hérité via team_id -> teams.club_id
   created_at?: string;
 }
 
@@ -144,7 +167,7 @@ export interface Training {
   theme: string;
   key_principle?: string;
   attendance?: Record<string, PlayerStatus>; // JSONB: { player_id: 'present' | 'absent' | 'injured' }
-  team_id?: string;
+  team_id?: string; // Le club est hérité via team_id -> teams.club_id
   created_at?: string;
 }
 
@@ -182,7 +205,7 @@ export interface MatchEvent {
   player_id?: string | null;
   players_on_field?: string[];
   event_location?: string;
-  team_id?: string;
+  team_id?: string; // Le club est hérité via match_id -> matches.team_id -> teams.club_id
   created_at?: string;
 }
 

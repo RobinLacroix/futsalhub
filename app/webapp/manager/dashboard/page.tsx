@@ -346,7 +346,7 @@ export default function DashboardPage() {
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
-                <div className="h-full flex items-center justify-center text-gray-500">
+                <div className="h-full flex items-center justify-center text-gray-600">
                   Aucune donnée de présence disponible
                 </div>
               )}
@@ -428,7 +428,7 @@ export default function DashboardPage() {
                   </LineChart>
                 </ResponsiveContainer>
               ) : (
-                <div className="h-full flex items-center justify-center text-gray-500">
+                <div className="h-full flex items-center justify-center text-gray-600">
                   Aucune donnée d'entraînement disponible
                 </div>
               )}
@@ -451,7 +451,7 @@ export default function DashboardPage() {
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
-                <div className="h-full flex items-center justify-center text-gray-500">
+                <div className="h-full flex items-center justify-center text-gray-600">
                   Aucune donnée disponible
                 </div>
               )}
@@ -470,7 +470,7 @@ export default function DashboardPage() {
             <h3 className="text-lg font-semibold text-gray-900">Filtres des performances</h3>
             <button
               onClick={resetPerformanceFilters}
-              className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+              className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-400 rounded-md hover:bg-gray-50 transition-colors"
             >
               <RefreshCw className="h-4 w-4" />
               Réinitialiser
@@ -483,7 +483,7 @@ export default function DashboardPage() {
               <select
                 value={performanceFilters.matchLocationFilter}
                 onChange={(e) => handlePerformanceFilterChange('matchLocationFilter', e.target.value as 'Tous' | 'Domicile' | 'Exterieur')}
-                className="rounded-md border-gray-300 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                className="rounded-md border-gray-400 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-blue-500"
               >
                 <option value="Tous">Tous les matchs</option>
                 <option value="Domicile">Domicile</option>
@@ -510,7 +510,7 @@ export default function DashboardPage() {
                       type="checkbox"
                       checked={performanceFilters.selectedMatches.includes(match.id)}
                       onChange={() => toggleMatchSelection(match.id)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      className="rounded border-gray-400 text-blue-600 focus:ring-blue-500"
                     />
                     <span className="text-xs text-gray-700 truncate">{match.title}</span>
                   </label>
@@ -574,7 +574,7 @@ export default function DashboardPage() {
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
-                <div className="h-full flex items-center justify-center text-gray-500">
+                <div className="h-full flex items-center justify-center text-gray-600">
                   Aucune donnée disponible
                 </div>
               )}
@@ -602,7 +602,7 @@ export default function DashboardPage() {
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
-                <div className="h-full flex items-center justify-center text-gray-500">
+                <div className="h-full flex items-center justify-center text-gray-600">
                   Aucune donnée de match disponible
                 </div>
               )}
@@ -628,7 +628,7 @@ export default function DashboardPage() {
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
-                <div className="h-full flex items-center justify-center text-gray-500">
+                <div className="h-full flex items-center justify-center text-gray-600">
                   Aucune donnée de match disponible
                 </div>
               )}

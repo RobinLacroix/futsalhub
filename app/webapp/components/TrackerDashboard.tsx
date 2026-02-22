@@ -521,10 +521,10 @@ export default function TrackerDashboard({ matchId }: Props) {
             </select>
           </div>
 
-          <div className="text-sm text-gray-500">
+          <div className="text-sm text-gray-600">
             {loading ? 'Chargement…' : error ? `Erreur: ${error}` : `${events.length} événements chargés`}
             {allEventsForMax.length > 0 && (
-              <span className="ml-2 text-xs text-gray-400">
+              <span className="ml-2 text-xs text-gray-600">
                 (Max global: {allEventsForMax.length} événements)
               </span>
             )}
@@ -535,7 +535,7 @@ export default function TrackerDashboard({ matchId }: Props) {
         <div className="mt-4">
           <label className="block text-sm font-medium text-gray-700 mb-2">Matches</label>
           {matchId ? (
-            <div className="text-sm text-gray-500">Filtré sur le match sélectionné dans la page.</div>
+            <div className="text-sm text-gray-600">Filtré sur le match sélectionné dans la page.</div>
           ) : (
             <div className="flex flex-wrap gap-2">
               {matches.map((m) => {
@@ -559,7 +559,7 @@ export default function TrackerDashboard({ matchId }: Props) {
             </div>
           )}
           {!matchId && (
-            <div className="mt-2 text-xs text-gray-500">
+            <div className="mt-2 text-xs text-gray-600">
               Sélectionnez au moins un match pour charger les événements
             </div>
           )}
@@ -610,7 +610,7 @@ export default function TrackerDashboard({ matchId }: Props) {
             </ResponsiveContainer>
           </div>
         ) : (
-          <div className="py-10 text-center text-gray-500 text-sm">Choisissez un joueur pour afficher le radar</div>
+          <div className="py-10 text-center text-gray-600 text-sm">Choisissez un joueur pour afficher le radar</div>
         )}
       </div>
 
@@ -674,7 +674,7 @@ export default function TrackerDashboard({ matchId }: Props) {
             </ResponsiveContainer>
           </div>
         ) : (
-          <div className="py-6 text-center text-gray-500 text-sm">Sélectionnez un match pour afficher le radar</div>
+          <div className="py-6 text-center text-gray-600 text-sm">Sélectionnez un match pour afficher le radar</div>
         )}
       </div>
     </div>

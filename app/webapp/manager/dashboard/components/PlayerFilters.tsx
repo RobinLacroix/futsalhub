@@ -16,7 +16,7 @@ export function PlayerFilters({ filters, onFilterChange, onReset }: PlayerFilter
         <select
           value={filters.position}
           onChange={(e) => onFilterChange('position', e.target.value)}
-          className="rounded-md border-gray-300 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white"
+          className="rounded-md border-gray-400 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white"
         >
           <option value="">Tous les postes</option>
           <option value="Meneur">Meneur</option>
@@ -27,7 +27,7 @@ export function PlayerFilters({ filters, onFilterChange, onReset }: PlayerFilter
         <select
           value={filters.strongFoot}
           onChange={(e) => onFilterChange('strongFoot', e.target.value)}
-          className="rounded-md border-gray-300 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white"
+          className="rounded-md border-gray-400 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white"
         >
           <option value="">Tous les pieds</option>
           <option value="Droit">Droit</option>
@@ -38,7 +38,7 @@ export function PlayerFilters({ filters, onFilterChange, onReset }: PlayerFilter
         <select
           value={filters.status}
           onChange={(e) => onFilterChange('status', e.target.value)}
-          className="rounded-md border-gray-300 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white"
+          className="rounded-md border-gray-400 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white"
         >
           <option value="">Tous les statuts</option>
           <option value="Non-muté">Non-muté</option>
@@ -49,7 +49,7 @@ export function PlayerFilters({ filters, onFilterChange, onReset }: PlayerFilter
 
       <button
         onClick={onReset}
-        className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+        className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-400 rounded-md hover:bg-gray-50 transition-colors"
       >
         <RefreshCw className="h-4 w-4" />
         Réinitialiser

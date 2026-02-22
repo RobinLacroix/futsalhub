@@ -22,7 +22,7 @@ export function ElementProperties({ element, onClose, onUpdate }: ElementPropert
         <h3 className="text-sm font-semibold text-gray-900">Propriétés</h3>
         <button
           onClick={onClose}
-          className="text-gray-400 hover:text-gray-600"
+          className="text-gray-600 hover:text-gray-600"
         >
           <X className="h-4 w-4" />
         </button>
@@ -39,7 +39,7 @@ export function ElementProperties({ element, onClose, onUpdate }: ElementPropert
               type="text"
               value={element.number}
               onChange={(e) => onUpdate(element.id, { number: e.target.value })}
-              className="w-full px-2 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-2 py-1 text-sm border-2 border-gray-400 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
               maxLength={2}
             />
           </div>
@@ -55,7 +55,7 @@ export function ElementProperties({ element, onClose, onUpdate }: ElementPropert
               type="color"
               value={element.color}
               onChange={(e) => onUpdate(element.id, { color: e.target.value })}
-              className="w-full h-8 border border-gray-300 rounded-md cursor-pointer"
+              className="w-full h-8 border-2 border-gray-400 rounded-md cursor-pointer"
             />
           </div>
         )}
@@ -71,7 +71,7 @@ export function ElementProperties({ element, onClose, onUpdate }: ElementPropert
                 type="color"
                 value={element.fillColor || element.color}
                 onChange={(e) => onUpdate(element.id, { fillColor: e.target.value })}
-                className="w-full h-8 border border-gray-300 rounded-md cursor-pointer"
+                className="w-full h-8 border-2 border-gray-400 rounded-md cursor-pointer"
               />
             </div>
             <div className="flex-shrink-0 flex-grow-0" style={{minWidth: '70px'}}>
@@ -82,7 +82,7 @@ export function ElementProperties({ element, onClose, onUpdate }: ElementPropert
                 type="color"
                 value={(element as any).textColor || '#ffffff'}
                 onChange={(e) => onUpdate(element.id, { textColor: e.target.value })}
-                className="w-full h-8 border border-gray-300 rounded-md cursor-pointer"
+                className="w-full h-8 border-2 border-gray-400 rounded-md cursor-pointer"
               />
             </div>
           </>
@@ -99,7 +99,7 @@ export function ElementProperties({ element, onClose, onUpdate }: ElementPropert
                 type="color"
                 value={element.fillColor || '#000000'}
                 onChange={(e) => onUpdate(element.id, { fillColor: e.target.value })}
-                className="w-full h-8 border border-gray-300 rounded-md cursor-pointer"
+                className="w-full h-8 border-2 border-gray-400 rounded-md cursor-pointer"
               />
             </div>
             <div className="min-w-[150px]">
@@ -114,7 +114,7 @@ export function ElementProperties({ element, onClose, onUpdate }: ElementPropert
                 onChange={(e) => onUpdate(element.id, { fillOpacity: parseInt(e.target.value) / 100 })}
                 className="w-full"
               />
-              <span className="text-sm text-gray-500">{Math.round((element.fillOpacity || 0) * 100)}%</span>
+              <span className="text-sm text-gray-600">{Math.round((element.fillOpacity || 0) * 100)}%</span>
             </div>
           </>
         )}
@@ -128,7 +128,7 @@ export function ElementProperties({ element, onClose, onUpdate }: ElementPropert
             <select
               value={element.strokeStyle}
               onChange={(e) => onUpdate(element.id, { strokeStyle: e.target.value as StrokeStyle })}
-              className="w-full px-2 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-2 py-1 text-sm border-2 border-gray-400 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
             >
               <option value="solid">Continu</option>
               <option value="dashed">Pointillés</option>
@@ -151,7 +151,7 @@ export function ElementProperties({ element, onClose, onUpdate }: ElementPropert
               onChange={(e) => onUpdate(element.id, { strokeWidth: parseInt(e.target.value) })}
               className="w-full"
             />
-            <span className="text-sm text-gray-500">{element.strokeWidth}px</span>
+            <span className="text-sm text-gray-600">{element.strokeWidth}px</span>
           </div>
         )}
 
@@ -201,7 +201,7 @@ export function ElementProperties({ element, onClose, onUpdate }: ElementPropert
               onChange={(e) => onUpdate(element.id, { size: parseFloat(e.target.value) })}
               className="w-full"
             />
-            <span className="text-sm text-gray-500">{element.size.toFixed(1)}m</span>
+            <span className="text-sm text-gray-600">{element.size.toFixed(1)}m</span>
           </div>
         )}
 
@@ -232,7 +232,7 @@ export function ElementProperties({ element, onClose, onUpdate }: ElementPropert
               </button>
             </div>
             {element.rotation !== undefined && element.rotation !== 0 && (
-              <p className="text-xs text-gray-500 mt-0.5">
+              <p className="text-xs text-gray-600 mt-0.5">
                 {element.rotation}°
               </p>
             )}
@@ -256,7 +256,7 @@ export function ElementProperties({ element, onClose, onUpdate }: ElementPropert
                   const newWidth = parseFloat(e.target.value) || 0;
                   onUpdate(element.id, { width: newWidth });
                 }}
-                className="w-full px-2 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-2 py-1 text-sm border-2 border-gray-400 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
               />
             </div>
             <div className="min-w-[120px]">
@@ -273,7 +273,7 @@ export function ElementProperties({ element, onClose, onUpdate }: ElementPropert
                   const newHeight = parseFloat(e.target.value) || 0;
                   onUpdate(element.id, { height: newHeight });
                 }}
-                className="w-full px-2 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-2 py-1 text-sm border-2 border-gray-400 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
               />
             </div>
             {/* Rotation (pour les zones) */}
@@ -302,7 +302,7 @@ export function ElementProperties({ element, onClose, onUpdate }: ElementPropert
                 </button>
               </div>
               {element.rotation !== undefined && element.rotation !== 0 && (
-                <p className="text-xs text-gray-500 mt-0.5">
+                <p className="text-xs text-gray-600 mt-0.5">
                   {element.rotation}°
                 </p>
               )}

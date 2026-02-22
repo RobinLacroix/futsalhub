@@ -457,7 +457,7 @@ export default function TrackerPage() {
                 >
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="font-semibold text-lg">{match.title || 'Match sans titre'}</h3>
-                    <CheckCircle className="h-5 w-5 text-gray-400" />
+                    <CheckCircle className="h-5 w-5 text-gray-600" />
                   </div>
                   <div className="text-sm text-gray-600 mb-2">
                     {match.date ? new Date(match.date).toLocaleDateString('fr-FR', {
@@ -481,9 +481,9 @@ export default function TrackerPage() {
 
             {matches.length === 0 && (
               <div className="text-center py-8">
-                <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <Calendar className="h-12 w-12 text-gray-600 mx-auto mb-4" />
                 <p className="text-gray-600">Aucun match disponible</p>
-                <p className="text-sm text-gray-500 mt-2">
+                <p className="text-sm text-gray-600 mt-2">
                   Créez d&apos;abord un match dans le calendrier pour pouvoir le suivre.
                 </p>
               </div>
@@ -557,9 +557,9 @@ export default function TrackerPage() {
             {/* Grille des joueurs */}
       {!matchData.players || matchData.players.length === 0 ? (
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6 text-center">
-          <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+          <Users className="h-12 w-12 text-gray-600 mx-auto mb-4" />
           <p className="text-gray-600">Aucun joueur disponible</p>
-          <p className="text-sm text-gray-500 mt-2">
+          <p className="text-sm text-gray-600 mt-2">
             Assurez-vous d&apos;avoir des joueurs dans votre effectif.
           </p>
         </div>
@@ -646,19 +646,19 @@ export default function TrackerPage() {
                 placeholder="Nom de l'indicateur"
                 value={newIndicator.name}
                 onChange={(e) => setNewIndicator(prev => ({ ...prev, name: e.target.value }))}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="px-3 py-2 border-2 border-gray-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-900"
               />
               <input
                 type="text"
                 placeholder="Icône (optionnel)"
                 value={newIndicator.icon}
                 onChange={(e) => setNewIndicator(prev => ({ ...prev, icon: e.target.value }))}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="px-3 py-2 border-2 border-gray-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-900"
               />
               <select
                 value={newIndicator.color}
                 onChange={(e) => setNewIndicator(prev => ({ ...prev, color: e.target.value }))}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="px-3 py-2 border-2 border-gray-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-900"
               >
                 <option value="bg-blue-500">Bleu</option>
                 <option value="bg-green-500">Vert</option>

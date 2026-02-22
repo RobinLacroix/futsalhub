@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
 export default function SignInPage() {
@@ -11,6 +11,8 @@ export default function SignInPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirect = searchParams.get('redirect') || '/webapp';
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,7 +28,7 @@ export default function SignInPage() {
       if (error) throw error;
 
       if (data.user) {
-        router.push('/webapp');
+        router.push(redirect.startsWith('/') ? redirect : `/${redirect}`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur de connexion');
@@ -56,7 +58,7 @@ export default function SignInPage() {
           
           <div className="space-y-4">
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="email" className="block text-sm font-medium text-gray-800">
                 Adresse email
               </label>
               <input
@@ -65,13 +67,13 @@ export default function SignInPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                className="mt-1 appearance-none relative block w-full px-3 py-2 border-2 border-gray-400 placeholder-gray-600 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
                 placeholder="votre@email.com"
               />
             </div>
             
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="password" className="block text-sm font-medium text-gray-800">
                 Mot de passe
               </label>
               <input
@@ -80,7 +82,7 @@ export default function SignInPage() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                className="mt-1 appearance-none relative block w-full px-3 py-2 border-2 border-gray-400 placeholder-gray-600 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
                 placeholder="Votre mot de passe"
               />
             </div>
@@ -99,12 +101,12 @@ export default function SignInPage() {
           <div className="text-center space-y-2">
             <p className="text-sm text-gray-600">
               Pas encore de compte ?{' '}
-              <Link href="/signup" className="text-blue-600 hover:text-blue-500 font-medium">
+              <Link href={redirect ? `/signup?redirect=${encodeURIComponent(redirect)}` : '/signup'} className="text-blue-600 hover:text-blue-500 font-medium">
                 S&apos;inscrire
               </Link>
             </p>
             <p className="text-sm text-gray-600">
-              <Link href="/" className="text-gray-500 hover:text-gray-700">
+              <Link href="/" className="text-gray-600 hover:text-gray-800">
                 ← Retour à l&apos;accueil
               </Link>
             </p>

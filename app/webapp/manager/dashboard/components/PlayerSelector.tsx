@@ -52,7 +52,7 @@ export function PlayerSelector({
         ))}
       </div>
       <div className="flex items-center justify-between mt-2">
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-gray-600">
           {selectedPlayers.length === 0 
             ? 'Tous les joueurs sont sélectionnés' 
             : `${selectedPlayers.length} joueur(s) sélectionné(s)`

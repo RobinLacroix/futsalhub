@@ -32,7 +32,7 @@ export function ContextMenu({
 
   return (
     <div
-      className="fixed bg-white border border-gray-300 rounded-lg shadow-lg z-50 py-2 min-w-[180px]"
+      className="fixed bg-white border border-gray-400 rounded-lg shadow-lg z-50 py-2 min-w-[180px]"
       style={{ left: menu.x, top: menu.y }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -40,7 +40,7 @@ export function ContextMenu({
         <span className="text-sm font-semibold text-gray-700">Actions</span>
         <button
           onClick={onClose}
-          className="text-gray-400 hover:text-gray-600"
+          className="text-gray-600 hover:text-gray-600"
         >
           <X className="h-4 w-4" />
         </button>

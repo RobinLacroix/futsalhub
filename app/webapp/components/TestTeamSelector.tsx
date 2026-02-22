@@ -33,7 +33,7 @@ export default function TestTeamSelector() {
         <span className="text-sm font-medium text-gray-900 truncate flex-1 text-left">
           {selectedTeam ? selectedTeam.name : 'Sélectionner une équipe'}
         </span>
-        <div className={`h-4 w-4 text-gray-500 transition-transform flex-shrink-0 ${isOpen ? 'rotate-180' : ''}`}>
+        <div className={`h-4 w-4 text-gray-600 transition-transform flex-shrink-0 ${isOpen ? 'rotate-180' : ''}`}>
           ▼
         </div>
       </button>
@@ -56,7 +56,7 @@ export default function TestTeamSelector() {
                 ></div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-gray-900 truncate">{team.name}</div>
-                  <div className="text-xs text-gray-500 truncate">
+                  <div className="text-xs text-gray-600 truncate">
                     {team.category} - Niveau {team.level}
                   </div>
                 </div>

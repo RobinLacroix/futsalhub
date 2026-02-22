@@ -88,7 +88,7 @@ export function Toolbar({
   return (
     <div className="bg-white border-b border-gray-200 p-2 flex items-center gap-2 flex-wrap">
       {/* Sélecteur de type de terrain - sans texte */}
-      <div className="flex items-center gap-1 border-r border-gray-300 pr-2">
+      <div className="flex items-center gap-1 border-r border-gray-400 pr-2">
         <button
           onClick={() => onFieldTypeChange('futsal')}
           className={`p-1.5 rounded-md transition-colors ${
@@ -114,7 +114,7 @@ export function Toolbar({
       </div>
 
       {/* Outils */}
-      <div className="flex items-center gap-1 border-r border-gray-300 pr-2">
+      <div className="flex items-center gap-1 border-r border-gray-400 pr-2">
         {tools.map(tool => (
           <button
             key={tool.type}
@@ -132,7 +132,7 @@ export function Toolbar({
       </div>
 
       {/* Zoom */}
-      <div className="flex items-center gap-1 border-r border-gray-300 pr-2">
+      <div className="flex items-center gap-1 border-r border-gray-400 pr-2">
         <button
           onClick={onZoomOut}
           className="p-1.5 rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200"
@@ -153,7 +153,7 @@ export function Toolbar({
       </div>
 
       {/* Bouton Enregistrer/Charger */}
-      <div className="flex items-center border-r border-gray-300 pr-2">
+      <div className="flex items-center border-r border-gray-400 pr-2">
         <button
           onClick={onOpenSaveLoad}
           className="p-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700"
@@ -164,7 +164,7 @@ export function Toolbar({
       </div>
 
       {/* Gestion des séquences - AVANT les circuits */}
-      <div className="flex items-center gap-1 border-r border-gray-300 pr-2">
+      <div className="flex items-center gap-1 border-r border-gray-400 pr-2">
         <button
           onClick={onPlayPause}
           className={`p-1.5 rounded-md transition-colors ${
@@ -203,7 +203,7 @@ export function Toolbar({
             disabled={totalSequences <= 1 || currentSequence === 0}
             className={`px-1.5 py-0.5 rounded text-xs flex items-center justify-center ${
               totalSequences <= 1 || currentSequence === 0
-                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                ? 'bg-gray-200 text-gray-600 cursor-not-allowed'
                 : 'bg-red-500 text-white hover:bg-red-600'
             }`}
             title={currentSequence === 0 ? "Impossible de supprimer la séquence 0" : "Supprimer la séquence actuelle"}
@@ -250,7 +250,7 @@ export function Toolbar({
             disabled={circuits.length <= 1}
             className={`px-1.5 py-0.5 rounded text-xs flex items-center justify-center ${
               circuits.length <= 1
-                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                ? 'bg-gray-200 text-gray-600 cursor-not-allowed'
                 : 'bg-red-500 text-white hover:bg-red-600'
             }`}
             title="Supprimer le circuit courant"
@@ -262,7 +262,7 @@ export function Toolbar({
           type="text"
           value={circuitName}
           onChange={(e) => onCircuitNameChange(e.target.value)}
-          className="px-1.5 py-0.5 text-xs border border-gray-300 rounded-md w-24 focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 placeholder:text-gray-400"
+          className="px-1.5 py-0.5 text-xs border border-gray-400 rounded-md w-24 focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 placeholder:text-gray-600"
           placeholder="Nom"
         />
       </div>

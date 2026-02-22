@@ -51,12 +51,12 @@ export default function SimpleTeamSelector() {
               ></div>
               <span className="text-sm font-medium text-gray-700">{activeTeam.name}</span>
             </div>
-            <div className="text-xs text-gray-500">
+            <div className="text-xs text-gray-600">
               {activeTeam.category} - {activeTeam.level}
             </div>
           </div>
         ) : (
-          <div className="text-xs text-gray-500 mb-2">Aucune équipe</div>
+          <div className="text-xs text-gray-600 mb-2">Aucune équipe</div>
         )}
 
         {/* Sélecteur compact */}

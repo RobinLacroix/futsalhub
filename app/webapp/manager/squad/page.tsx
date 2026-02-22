@@ -1,7 +1,10 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import { playersService } from '@/lib/services/playersService';
 import {
   Plus,
   X,
@@ -69,6 +72,7 @@ const initialFilters: FilterState = {
 };
 
 export default function SquadPage() {
+  const router = useRouter();
   const { activeTeam, teams } = useActiveTeam();
   const [players, setPlayers] = useState<Player[]>([]);
   const [totalTrainings, setTotalTrainings] = useState<number>(0);
@@ -567,17 +571,14 @@ export default function SquadPage() {
 
     try {
       setError(null);
-      const { error } = await supabase
-        .from('players')
-        .delete()
-        .eq('id', playerId);
-
-      if (error) throw error;
+      await playersService.deletePlayer(playerId);
 
       setSuccess('Joueur supprimé avec succès');
       setPlayers(players.filter(player => player.id !== playerId));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erreur lors de la suppression');
+    } catch (err: any) {
+      console.error('Erreur lors de la suppression du joueur:', err);
+      const errorMessage = err?.message || err?.error?.message || 'Erreur lors de la suppression';
+      setError(errorMessage);
     }
   };
 
@@ -667,21 +668,21 @@ export default function SquadPage() {
         </div>
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Nom</label>
+            <label className="block text-sm font-medium text-gray-800 mb-1">Nom</label>
             <input
               type="text"
               value={filters.name}
               onChange={(e) => handleFilterChange('name', e.target.value)}
               placeholder="Rechercher par nom..."
-              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              className="w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Âge</label>
+            <label className="block text-sm font-medium text-gray-800 mb-1">Âge</label>
             <select
               value={filters.age}
               onChange={(e) => handleFilterChange('age', e.target.value)}
-              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              className="w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900"
             >
               <option value="">Tous les âges</option>
               {Array.from(new Set(players.map(p => p.age))).sort().map(age => (
@@ -690,11 +691,11 @@ export default function SquadPage() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Poste</label>
+            <label className="block text-sm font-medium text-gray-800 mb-1">Poste</label>
             <select
               value={filters.position}
               onChange={(e) => handleFilterChange('position', e.target.value)}
-              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              className="w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900"
             >
               <option value="">Tous les postes</option>
               <option value="Meneur">Meneur</option>
@@ -703,11 +704,11 @@ export default function SquadPage() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Pied fort</label>
+            <label className="block text-sm font-medium text-gray-800 mb-1">Pied fort</label>
             <select
               value={filters.strongFoot}
               onChange={(e) => handleFilterChange('strongFoot', e.target.value)}
-              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              className="w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900"
             >
               <option value="">Tous les pieds</option>
               <option value="Droit">Droit</option>
@@ -716,11 +717,11 @@ export default function SquadPage() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Statut</label>
+            <label className="block text-sm font-medium text-gray-800 mb-1">Statut</label>
             <select
               value={filters.status}
               onChange={(e) => handleFilterChange('status', e.target.value)}
-              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              className="w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900"
             >
               <option value="">Tous les statuts</option>
               <option value="Non-muté">Non-muté</option>
@@ -736,40 +737,40 @@ export default function SquadPage() {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                   #
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                   Nom
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                   Âge
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                   Poste
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                   Pied fort
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                   Statut
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                   Limite séquence (s)
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                   Matchs
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                   Buts
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                   Présences
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                   % Présence
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-600 uppercase tracking-wider">
                   Actions
                 </th>
               </tr>
@@ -777,7 +778,7 @@ export default function SquadPage() {
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredPlayers.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={12} className="px-6 py-8 text-center text-gray-600">
                     {players.length === 0 ? (
                       <div>
                         <p className="text-lg font-medium mb-2">Aucun joueur trouvé</p>
@@ -796,12 +797,22 @@ export default function SquadPage() {
                 </tr>
               ) : (
                 filteredPlayers.map((player) => (
-                  <tr key={player.id} className="hover:bg-gray-50">
+                  <tr
+                    key={player.id}
+                    className="hover:bg-gray-50 cursor-pointer group"
+                    onClick={() => router.push(`/webapp/manager/squad/${player.id}`)}
+                  >
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                       {player.number || '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {player.first_name} {player.last_name}
+                      <Link
+                        href={`/webapp/manager/squad/${player.id}`}
+                        className="text-blue-600 hover:text-blue-800 group-hover:underline"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {player.first_name} {player.last_name}
+                      </Link>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {player.age}
@@ -831,7 +842,7 @@ export default function SquadPage() {
                       {player.attendance_percentage}%
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <div className="flex justify-end gap-2">
+                      <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                         <button
                           onClick={() => handleOpenModal(player)}
                           className="text-blue-600 hover:text-blue-900"
@@ -894,7 +905,7 @@ export default function SquadPage() {
               </h2>
               <button
                 onClick={handleCloseModal}
-                className="text-gray-500 hover:text-gray-700"
+                className="text-gray-600 hover:text-gray-800"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -903,12 +914,12 @@ export default function SquadPage() {
             <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
               <div className="flex-1 overflow-y-auto p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700">Numéro</label>
+                <label className="block text-sm font-medium text-gray-800">Numéro</label>
                 <input
                   type="number"
                   value={formData.number}
                   onChange={(e) => setFormData({ ...formData, number: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   min="1"
                   max="99"
                   placeholder="Numéro de maillot"
@@ -916,34 +927,34 @@ export default function SquadPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">Prénom</label>
+                <label className="block text-sm font-medium text-gray-800">Prénom</label>
                 <input
                   type="text"
                   value={formData.first_name}
                   onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">Nom</label>
+                <label className="block text-sm font-medium text-gray-800">Nom</label>
                 <input
                   type="text"
                   value={formData.last_name}
                   onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">Âge</label>
+                <label className="block text-sm font-medium text-gray-800">Âge</label>
                 <input
                   type="number"
                   value={formData.age}
                   onChange={(e) => setFormData({ ...formData, age: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   required
                   min="15"
                   max="50"
@@ -951,11 +962,11 @@ export default function SquadPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">Poste</label>
+                <label className="block text-sm font-medium text-gray-800">Poste</label>
                 <select
                   value={formData.position}
                   onChange={(e) => setFormData({ ...formData, position: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   required
                 >
                   <option value="">Sélectionner un poste</option>
@@ -967,11 +978,11 @@ export default function SquadPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">Pied fort</label>
+                <label className="block text-sm font-medium text-gray-800">Pied fort</label>
                 <select
                   value={formData.strong_foot}
                   onChange={(e) => setFormData({ ...formData, strong_foot: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   required
                 >
                   <option value="">Sélectionner un pied</option>
@@ -982,11 +993,11 @@ export default function SquadPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">Statut</label>
+                <label className="block text-sm font-medium text-gray-800">Statut</label>
                 <select
                   value={formData.status}
                   onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   required
                 >
                   <option value="">Sélectionner un statut</option>
@@ -997,24 +1008,24 @@ export default function SquadPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">Limite de temps par séquence (secondes)</label>
+                <label className="block text-sm font-medium text-gray-800">Limite de temps par séquence (secondes)</label>
                 <input
                   type="number"
                   min="30"
                   step="10"
                   value={formData.sequence_time_limit}
                   onChange={(e) => setFormData({ ...formData, sequence_time_limit: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   required
                 />
-                <p className="mt-1 text-xs text-gray-500">Durée maximale avant alerte dans le match recorder (défaut 180 secondes).</p>
+                <p className="mt-1 text-xs text-gray-600">Durée maximale avant alerte dans le match recorder (défaut 180 secondes).</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Équipes <span className="text-gray-500 text-xs">(sélection multiple possible)</span>
+                <label className="block text-sm font-medium text-gray-800 mb-2">
+                  Équipes <span className="text-gray-600 text-xs">(sélection multiple possible)</span>
                 </label>
-                <div className="mt-2 space-y-2 max-h-48 overflow-y-auto border border-gray-300 rounded-md p-3">
+                <div className="mt-2 space-y-2 max-h-48 overflow-y-auto border border-gray-400 rounded-md p-3">
                   {teams.map((team) => (
                     <label key={team.id} className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
                       <input
@@ -1033,14 +1044,14 @@ export default function SquadPage() {
                             });
                           }
                         }}
-                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        className="rounded border-gray-400 text-blue-600 focus:ring-blue-500"
                       />
                       <div className="flex items-center gap-2 flex-1">
                         <div
                           className="w-4 h-4 rounded-full"
                           style={{ backgroundColor: team.color }}
                         ></div>
-                        <span className="text-sm text-gray-700">
+                        <span className="text-sm text-gray-800">
                           {team.name} {team.category && `(${team.category}${team.level ? ` - ${team.level}` : ''})`}
                         </span>
                       </div>
@@ -1051,7 +1062,7 @@ export default function SquadPage() {
                   <p className="mt-1 text-xs text-red-500">Veuillez sélectionner au moins une équipe</p>
                 )}
                 {formData.selectedTeams.length > 0 && (
-                  <p className="mt-1 text-xs text-gray-500">
+                  <p className="mt-1 text-xs text-gray-600">
                     {formData.selectedTeams.length} équipe{formData.selectedTeams.length > 1 ? 's' : ''} sélectionnée{formData.selectedTeams.length > 1 ? 's' : ''}
                   </p>
                 )}
@@ -1062,7 +1073,7 @@ export default function SquadPage() {
                 <button
                   type="button"
                   onClick={handleCloseModal}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                  className="px-4 py-2 text-sm font-medium text-gray-800 bg-white border border-gray-400 rounded-md hover:bg-gray-50"
                 >
                   Annuler
                 </button>

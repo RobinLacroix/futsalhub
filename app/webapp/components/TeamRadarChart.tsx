@@ -497,7 +497,7 @@ export default function TeamRadarChart({ matchId, selectedMatchIds: initialSelec
         <div className="text-center">
           <div className="text-blue-500 text-6xl mb-4">🏆</div>
           <div className="text-lg text-gray-600 mb-2">Aucune équipe sélectionnée</div>
-          <div className="text-sm text-gray-500">Veuillez sélectionner une équipe dans la sidebar pour voir les statistiques</div>
+          <div className="text-sm text-gray-600">Veuillez sélectionner une équipe dans la sidebar pour voir les statistiques</div>
         </div>
       </div>
     )
@@ -543,7 +543,7 @@ export default function TeamRadarChart({ matchId, selectedMatchIds: initialSelec
           <label className="block text-base font-bold text-gray-800">
             📅 Sélectionner des matchs (max {maxSelectedMatches})
           </label>
-          <div className="text-sm text-gray-500">
+          <div className="text-sm text-gray-600">
             {selectedMatchIds.length}/{maxSelectedMatches} sélectionnés
           </div>
         </div>
@@ -569,7 +569,7 @@ export default function TeamRadarChart({ matchId, selectedMatchIds: initialSelec
                       }` 
                     : hasStats 
                       ? 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-2 border-gray-300 hover:border-gray-400' 
-                      : 'bg-gray-50 text-gray-400 cursor-not-allowed border-2 border-gray-200'
+                      : 'bg-gray-50 text-gray-600 cursor-not-allowed border-2 border-gray-200'
                   }
                 `}
               >
@@ -618,7 +618,7 @@ export default function TeamRadarChart({ matchId, selectedMatchIds: initialSelec
               
               return (
                 <div key={key} className="text-center p-3 bg-gray-50 rounded-lg">
-                  <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">
+                  <div className="text-xs text-gray-600 uppercase tracking-wide mb-2">
                     {TEAM_LABELS[key]}
                   </div>
                   {selectedMatchesStats.map((matchData, index) => {

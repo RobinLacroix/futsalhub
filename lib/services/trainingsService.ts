@@ -205,6 +205,35 @@ export const trainingsService = {
     });
 
     return Object.values(playerStats);
+  },
+
+  /**
+   * Compte le nombre de fois qu'un procédé a été utilisé dans les entraînements
+   */
+  async getProcedureUsageCount(procedureId: string): Promise<number> {
+    // Récupérer tous les entraînements qui ont des session_parts
+    const { data, error } = await supabase
+      .from('trainings')
+      .select('session_parts')
+      .not('session_parts', 'is', null);
+
+    if (error) throw error;
+
+    if (!data || data.length === 0) return 0;
+
+    // Compter les occurrences du procedureId dans tous les session_parts
+    let count = 0;
+    data.forEach(training => {
+      if (training.session_parts && Array.isArray(training.session_parts)) {
+        training.session_parts.forEach((part: any) => {
+          if (part.procedureId === procedureId) {
+            count++;
+          }
+        });
+      }
+    });
+
+    return count;
   }
 };
 

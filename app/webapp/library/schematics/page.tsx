@@ -2036,10 +2036,9 @@ function SchematicsPageContent() {
     // Récupérer les éléments verrouillés pour les inclure dans toutes les séquences
     const lockedElements = elements.filter((el: SchematicElement) => el.isLocked);
 
-    // Sauvegarder l'état actuel et récupérer les circuits mis à jour
-    let updatedCircuits: Circuit[] = [];
-    setCircuits(prev => {
-      updatedCircuits = [...prev];
+    // Fonction pour calculer les circuits mis à jour
+    const calculateUpdatedCircuits = (currentCircuits: Circuit[]): Circuit[] => {
+      const updatedCircuits = [...currentCircuits];
       const circuit = updatedCircuits[currentCircuitIndex];
       if (circuit) {
         const seqs = [...circuit.sequences];
@@ -2067,7 +2066,13 @@ function SchematicsPageContent() {
         updatedCircuits[currentCircuitIndex] = { ...circuit, sequences: seqs };
       }
       return updatedCircuits;
-    });
+    };
+
+    // Calculer les circuits mis à jour directement depuis l'état actuel
+    const updatedCircuits = calculateUpdatedCircuits(circuits);
+    
+    // Mettre à jour l'état pour la cohérence
+    setCircuits(updatedCircuits);
 
     const data: SchematicData = {
       circuits: updatedCircuits.map(c => ({
@@ -2087,7 +2092,7 @@ function SchematicsPageContent() {
 
     setCurrentSchematicId(result.id);
     return result.id;
-  }, [activeTeam, currentCircuitIndex, currentSequenceIndex, elements, currentSchematicId]);
+  }, [activeTeam, currentCircuitIndex, currentSequenceIndex, elements, currentSchematicId, circuits]);
 
   // Charger un schéma
   const handleLoadSchematic = useCallback((data: SchematicData) => {

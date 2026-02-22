@@ -207,7 +207,7 @@ function Sidebar({ isExpanded, onToggle }: { isExpanded: boolean; onToggle: () =
               ) : (
                 <>
                   {isExpanded && (
-                    <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    <div className="px-3 py-2 text-xs font-semibold text-gray-600 uppercase tracking-wider">
                       {item.name}
                     </div>
                   )}
