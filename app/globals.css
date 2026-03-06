@@ -97,3 +97,11 @@ input, textarea, select {
 input::placeholder, textarea::placeholder {
   color: #4b5563; /* gray-600 - placeholder lisible sur blanc */
 }
+
+/* Safe area pour mobile (encoche, barre de gestes) */
+.safe-area-padding {
+  padding-top: env(safe-area-inset-top);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+}

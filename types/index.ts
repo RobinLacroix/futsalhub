@@ -46,6 +46,7 @@ export interface Player {
   number?: number;
   sequence_time_limit?: number;
   team_id?: string; // Le club est hérité via team_id -> teams.club_id
+  user_id?: string | null; // Compte utilisateur pour l'accès espace joueur
   matches_played?: number;
   goals?: number;
   training_attendance?: number;
@@ -69,7 +70,12 @@ export interface PlayerFormData {
   selectedTeams: string[];
 }
 
-export type PlayerStatus = 'present' | 'absent' | 'injured';
+// Statut de présence à l'entraînement
+// - present : présent à l'heure
+// - late    : présent mais en retard
+// - absent  : non présent
+// - injured : blessé (ne peut pas participer)
+export type PlayerStatus = 'present' | 'late' | 'absent' | 'injured';
 
 export type PlayerEventType = 'interview' | 'injury' | 'suspension';
 
@@ -234,6 +240,7 @@ export interface PlayerAttendanceStats {
   player_id: string;
   total_sessions: number;
   present_count: number;
+  late_count: number;
   absent_count: number;
   injured_count: number;
   attendance_rate: number;

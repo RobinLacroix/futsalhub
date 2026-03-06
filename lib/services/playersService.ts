@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient';
-import type { Player, PlayerFormData } from '@/types';
+import type { Player, PlayerFormData, PlayerStatus } from '@/types';
 
 export const playersService = {
   /**
@@ -31,6 +31,20 @@ export const playersService = {
       .select('*')
       .eq('id', playerId)
       .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * Récupère le joueur lié au compte utilisateur (pour l'espace joueur)
+   */
+  async getPlayerByUserId(userId: string): Promise<Player | null> {
+    const { data, error } = await supabase
+      .from('players')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
 
     if (error) throw error;
     return data;
@@ -196,7 +210,9 @@ export const playersService = {
     const trainingAttendance = (trainingsData || []).filter(training => {
       if (!training.attendance) return false;
       try {
-        return training.attendance[playerId] === 'present';
+        const status = training.attendance[playerId] as PlayerStatus | undefined;
+        // On considère présent et retard comme participation
+        return status === 'present' || status === 'late';
       } catch {
         return false;
       }

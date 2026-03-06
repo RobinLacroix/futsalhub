@@ -19,12 +19,18 @@ import {
   Stethoscope,
   Ban,
   Plus,
-  Trash2
+  Trash2,
+  Clock,
+  Link2,
+  Copy
 } from 'lucide-react';
 import { useActiveTeam } from '../../../hooks/useActiveTeam';
 import { playersService } from '@/lib/services/playersService';
 import { trainingsService } from '@/lib/services/trainingsService';
 import { playerEventsService } from '@/lib/services/playerEventsService';
+import { getPlayerTrainingFeedback, type PlayerTrainingFeedbackRow } from '@/lib/services/trainingFeedbackService';
+import { createPlayerLinkCode } from '@/lib/services/playerConvocationsService';
+import { supabase } from '@/lib/supabaseClient';
 import type { Player, PlayerEvent, PlayerEventType } from '@/types';
 import {
   PieChart,
@@ -32,11 +38,17 @@ import {
   Cell,
   Tooltip,
   Legend,
-  ResponsiveContainer
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid
 } from 'recharts';
 
 const ATTENDANCE_COLORS = {
   present: '#22c55e',
+  late: '#ea580c',
   absent: '#f59e0b',
   injured: '#ef4444'
 };
@@ -47,7 +59,7 @@ const MATCH_RESULT_COLORS = {
   defeats: '#ef4444'
 };
 
-type TrainingSessionStatus = 'present' | 'absent' | 'injured' | 'not_recorded';
+type TrainingSessionStatus = 'present' | 'late' | 'absent' | 'injured' | 'not_recorded';
 
 export default function PlayerProfilePage() {
   const params = useParams();
@@ -83,11 +95,21 @@ export default function PlayerProfilePage() {
 
   const [attendanceDetail, setAttendanceDetail] = useState<{
     present_count: number;
+    late_count: number;
     absent_count: number;
     injured_count: number;
     total_sessions: number;
     attendance_rate: number;
   } | null>(null);
+
+  const [feedbackHistory, setFeedbackHistory] = useState<PlayerTrainingFeedbackRow[]>([]);
+  const [feedbackMetric, setFeedbackMetric] = useState<'auto_evaluation' | 'rpe' | 'physical_form' | 'pleasure'>('auto_evaluation');
+
+  const [linkCode, setLinkCode] = useState<string | null>(null);
+  const [linkCodeLoading, setLinkCodeLoading] = useState(false);
+  const [linkCodeError, setLinkCodeError] = useState<string | null>(null);
+  const [linkCodeCopied, setLinkCodeCopied] = useState(false);
+  const [unlinkLoading, setUnlinkLoading] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
@@ -127,6 +149,7 @@ export default function PlayerProfilePage() {
         if (playerAttendanceStats) {
           setAttendanceDetail({
             present_count: playerAttendanceStats.present_count,
+            late_count: playerAttendanceStats.late_count,
             absent_count: playerAttendanceStats.absent_count,
             injured_count: playerAttendanceStats.injured_count,
             total_sessions: playerAttendanceStats.total_sessions,
@@ -135,6 +158,7 @@ export default function PlayerProfilePage() {
         } else {
           setAttendanceDetail({
             present_count: 0,
+            late_count: 0,
             absent_count: 0,
             injured_count: 0,
             total_sessions: 0,
@@ -155,6 +179,13 @@ export default function PlayerProfilePage() {
           };
         });
         setRecentSessions(last15);
+
+        try {
+          const feedback = await getPlayerTrainingFeedback(playerId);
+          setFeedbackHistory(feedback);
+        } catch {
+          setFeedbackHistory([]);
+        }
       } catch (err) {
         console.error('Erreur chargement profil joueur:', err);
         setError(err instanceof Error ? err.message : 'Erreur lors du chargement');
@@ -245,6 +276,7 @@ export default function PlayerProfilePage() {
   const attendanceChartData = attendanceDetail
     ? [
         { name: 'Présent', value: attendanceDetail.present_count, color: ATTENDANCE_COLORS.present },
+        { name: 'En retard', value: attendanceDetail.late_count, color: ATTENDANCE_COLORS.late },
         { name: 'Absent', value: attendanceDetail.absent_count, color: ATTENDANCE_COLORS.absent },
         { name: 'Blessé', value: attendanceDetail.injured_count, color: ATTENDANCE_COLORS.injured }
       ].filter(d => d.value > 0)
@@ -345,7 +377,7 @@ export default function PlayerProfilePage() {
               <p className="text-sm text-gray-600 mt-1">
                 Taux de présence : <strong>{attendanceDetail.attendance_rate}%</strong>
                 {attendanceDetail.total_sessions > 0 && (
-                  <> ({attendanceDetail.present_count}/{attendanceDetail.total_sessions} séances)</>
+                  <> ({attendanceDetail.present_count + attendanceDetail.late_count}/{attendanceDetail.total_sessions} séances)</>
                 )}
               </p>
             )}
@@ -385,7 +417,7 @@ export default function PlayerProfilePage() {
                 <div className="flex flex-wrap gap-2">
                   {recentSessions.map((s, i) => {
                     const title = `${format(new Date(s.date), 'd MMM yyyy', { locale: fr })}${s.theme ? ` - ${s.theme}` : ''}`;
-                    const statusLabel = s.status === 'present' ? 'Présent' : s.status === 'absent' ? 'Absent' : s.status === 'injured' ? 'Blessé' : 'Non renseigné';
+                    const statusLabel = s.status === 'present' ? 'Présent' : s.status === 'late' ? 'En retard' : s.status === 'absent' ? 'Absent' : s.status === 'injured' ? 'Blessé' : 'Non renseigné';
                     return (
                       <div
                         key={i}
@@ -393,15 +425,19 @@ export default function PlayerProfilePage() {
                         className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
                           s.status === 'present'
                             ? 'bg-green-500 text-white'
-                            : s.status === 'absent'
-                              ? 'bg-amber-500 text-white'
-                              : s.status === 'injured'
-                                ? 'bg-red-500 text-white'
-                                : 'bg-gray-300 text-gray-600'
+                            : s.status === 'late'
+                              ? 'bg-orange-500 text-white'
+                              : s.status === 'absent'
+                                ? 'bg-amber-500 text-white'
+                                : s.status === 'injured'
+                                  ? 'bg-red-500 text-white'
+                                  : 'bg-gray-300 text-gray-600'
                         }`}
                       >
                         {s.status === 'present' ? (
                           <Check className="h-4 w-4" />
+                        ) : s.status === 'late' ? (
+                          <Clock className="h-4 w-4" />
                         ) : s.status === 'absent' ? (
                           <X className="h-4 w-4" />
                         ) : s.status === 'injured' ? (
@@ -413,8 +449,9 @@ export default function PlayerProfilePage() {
                     );
                   })}
                 </div>
-                <div className="flex gap-4 mt-2 text-xs text-gray-600">
+                <div className="flex gap-4 mt-2 text-xs text-gray-600 flex-wrap">
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500" /> Présent</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500" /> En retard</span>
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Absent</span>
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" /> Blessé</span>
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-gray-300" /> Non renseigné</span>
@@ -491,6 +528,50 @@ export default function PlayerProfilePage() {
         </div>
       </div>
 
+      {/* Évolution des indicateurs d'entraînement */}
+      <div className="mt-8 bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
+        <div className="p-4 border-b border-gray-100 bg-gray-50 flex flex-wrap items-center gap-3">
+          <h3 className="text-lg font-semibold text-gray-900">Résultats des questionnaires d&apos;entraînement</h3>
+          <select
+            value={feedbackMetric}
+            onChange={e => setFeedbackMetric(e.target.value as typeof feedbackMetric)}
+            className="rounded-lg border-2 border-gray-400 bg-white text-gray-900 text-sm font-medium px-3 py-1.5"
+          >
+            <option value="auto_evaluation">Auto-évaluation globale</option>
+            <option value="pleasure">Plaisir</option>
+            <option value="rpe">RPE (intensité perçue)</option>
+            <option value="physical_form">Forme physique ressentie</option>
+          </select>
+        </div>
+        <div className="p-6">
+          {feedbackHistory.length === 0 ? (
+            <p className="text-gray-500 text-center py-12">Aucune donnée de questionnaire pour l&apos;instant. Les réponses apparaîtront ici après que le joueur ait rempli des questionnaires de fin de séance.</p>
+          ) : (
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart
+                  data={feedbackHistory.map((row, i) => ({
+                    session: format(new Date(row.date), 'd MMM yy', { locale: fr }),
+                    index: i + 1,
+                    value: row[feedbackMetric] ?? 0
+                  }))}
+                  margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="session" tick={{ fontSize: 11 }} />
+                  <YAxis domain={[1, 10]} tick={{ fontSize: 11 }} allowDecimals={false} />
+                  <Tooltip
+                    formatter={(value: number) => [value, { auto_evaluation: 'Auto-éval.', rpe: 'RPE', physical_form: 'Forme', pleasure: 'Plaisir' }[feedbackMetric]]}
+                    labelFormatter={label => `Séance : ${label}`}
+                  />
+                  <Line type="monotone" dataKey="value" stroke="#2563eb" strokeWidth={2} dot={{ r: 4 }} name="Valeur" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Résumé stats */}
       {stats && (
         <div className="mt-8 bg-white rounded-xl shadow border border-gray-200 p-6">
@@ -515,6 +596,105 @@ export default function PlayerProfilePage() {
           </div>
         </div>
       )}
+
+      {/* Compte joueur */}
+      <div className="mt-8 bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
+        <div className="p-4 border-b border-gray-100 bg-gray-50">
+          <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            <Link2 className="h-5 w-5 text-blue-600" />
+            Compte joueur
+          </h3>
+          <p className="text-sm text-gray-600 mt-1">
+            Permet au joueur d&apos;accéder au calendrier (présences) et aux questionnaires depuis son compte.
+          </p>
+        </div>
+        <div className="p-6">
+          {linkCodeError && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
+              {linkCodeError}
+            </div>
+          )}
+          {player.user_id ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-green-100 text-green-800 text-sm font-medium">
+                <Check className="h-4 w-4" />
+                Compte lié
+              </span>
+              <button
+                type="button"
+                disabled={unlinkLoading}
+                onClick={async () => {
+                  setLinkCodeError(null);
+                  setUnlinkLoading(true);
+                  const { error } = await supabase.from('players').update({ user_id: null }).eq('id', playerId);
+                  setUnlinkLoading(false);
+                  if (error) {
+                    setLinkCodeError(error.message);
+                    return;
+                  }
+                  setPlayer((p: Player | null) => p ? { ...p, user_id: undefined } : null);
+                }}
+                className="text-sm text-amber-600 hover:text-amber-800 font-medium disabled:opacity-50"
+              >
+                {unlinkLoading ? 'Déliage...' : 'Délier le compte'}
+              </button>
+            </div>
+          ) : linkCode ? (
+            <div className="space-y-3">
+              <p className="text-sm font-medium text-gray-700">Code à transmettre au joueur (valide 24 h) :</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <code className="px-4 py-2 bg-gray-100 rounded-lg text-lg font-mono tracking-wider">
+                  {linkCode}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(linkCode);
+                    setLinkCodeCopied(true);
+                    setTimeout(() => setLinkCodeCopied(false), 2000);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium"
+                >
+                  {linkCodeCopied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                  {linkCodeCopied ? 'Copié' : 'Copier'}
+                </button>
+              </div>
+              <p className="text-sm text-gray-600">
+                Le joueur doit se connecter puis aller dans <strong>Paramètres</strong> → <strong>Lier mon compte joueur</strong> et saisir ce code.
+              </p>
+              <button
+                type="button"
+                onClick={() => { setLinkCode(null); setLinkCodeError(null); }}
+                className="text-sm text-gray-500 hover:text-gray-700"
+              >
+                Fermer
+              </button>
+            </div>
+          ) : (
+            <div>
+              <p className="text-sm text-gray-600 mb-3">Aucun compte lié. Générez un code que le joueur saisira dans Paramètres.</p>
+              <button
+                type="button"
+                disabled={linkCodeLoading}
+                onClick={async () => {
+                  setLinkCodeError(null);
+                  setLinkCodeLoading(true);
+                  const result = await createPlayerLinkCode(playerId);
+                  setLinkCodeLoading(false);
+                  if (result.ok && result.code) {
+                    setLinkCode(result.code);
+                  } else {
+                    setLinkCodeError(result.error ?? 'Erreur');
+                  }
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+              >
+                {linkCodeLoading ? 'Génération...' : 'Générer un code de liaison'}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Événements marquants */}
       <div className="mt-8 bg-white rounded-xl shadow border border-gray-200 overflow-hidden">

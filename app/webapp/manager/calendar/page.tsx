@@ -16,6 +16,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
 import { schematicsService, type SchematicData } from '@/lib/services/schematicsService';
+import { createTokensForTraining, getFeedbackLinksForTraining } from '@/lib/services/trainingFeedbackService';
 import { SchematicPreview } from '../../library/components/SchematicPreview';
 import {
   X,
@@ -65,7 +66,7 @@ interface Match {
   type: 'match';
 }
 
-type PlayerStatus = 'present' | 'absent' | 'injured';
+type PlayerStatus = 'present' | 'late' | 'absent' | 'injured';
 
 interface Training {
   id: string;
@@ -208,7 +209,10 @@ const trainingSchema = yup.object().shape({
     (value) => {
       if (!value) return false;
       return Object.values(value).some(player => 
-        player && typeof player === 'object' && 'status' in player && player.status === 'present'
+        player &&
+        typeof player === 'object' &&
+        'status' in player &&
+        (player.status === 'present' || player.status === 'late')
       );
     }
   ),
@@ -258,6 +262,9 @@ export default function CalendarPage() {
   const [procedureDetailSchematic, setProcedureDetailSchematic] = useState<any | null>(null);
   const [procedureSearchTerm, setProcedureSearchTerm] = useState('');
   const [procedureFilterTheme, setProcedureFilterTheme] = useState<string | null>(null);
+  const [feedbackLinks, setFeedbackLinks] = useState<{ player_name: string; url: string }[]>([]);
+  const [feedbackLinksLoading, setFeedbackLinksLoading] = useState(false);
+  const [feedbackLinksGenerating, setFeedbackLinksGenerating] = useState(false);
 
 
 
@@ -320,6 +327,58 @@ export default function CalendarPage() {
       fetchProcedures();
     }
   }, [isTrainingModalOpen]);
+
+  useEffect(() => {
+    if (!isTrainingModalOpen || !isEditing || editingEvent?.type !== 'training' || !editingEvent?.id) {
+      setFeedbackLinks([]);
+      return;
+    }
+    let cancelled = false;
+    setFeedbackLinksLoading(true);
+    getFeedbackLinksForTraining(editingEvent.id)
+      .then(links => {
+        if (!cancelled) setFeedbackLinks(links.map(l => ({ player_name: l.player_name, url: l.url })));
+      })
+      .catch(() => { if (!cancelled) setFeedbackLinks([]); })
+      .finally(() => { if (!cancelled) setFeedbackLinksLoading(false); });
+    return () => { cancelled = true; };
+  }, [isTrainingModalOpen, isEditing, editingEvent?.id, editingEvent?.type]);
+
+  const refreshFeedbackLinks = async () => {
+    if (!editingEvent || editingEvent.type !== 'training' || !editingEvent.id) return;
+    setFeedbackLinksLoading(true);
+    try {
+      const links = await getFeedbackLinksForTraining(editingEvent.id);
+      setFeedbackLinks(links.map(l => ({ player_name: l.player_name, url: l.url })));
+    } catch {
+      setFeedbackLinks([]);
+    } finally {
+      setFeedbackLinksLoading(false);
+    }
+  };
+
+  const handleGenerateFeedbackLinks = async () => {
+    if (!editingEvent || editingEvent.type !== 'training' || !editingEvent.id) return;
+    const attendance = (editingEvent as any).attendance || {};
+    const presentOrLate = Object.entries(attendance).filter(([, s]) => s === 'present' || s === 'late');
+    if (presentOrLate.length === 0) {
+      setError('Marquez au moins un joueur Présent ou Retard puis enregistrez l\'entraînement avant de générer les liens.');
+      return;
+    }
+    setFeedbackLinksGenerating(true);
+    setError(null);
+    try {
+      await createTokensForTraining(editingEvent.id, attendance);
+      await refreshFeedbackLinks();
+      setSuccess('Liens générés. Vous pouvez les copier ci-dessous.');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      console.error('Génération des liens questionnaire:', err);
+      setError(err instanceof Error ? err.message : 'Erreur lors de la génération des liens');
+    } finally {
+      setFeedbackLinksGenerating(false);
+    }
+  };
 
   // Chargement des données
   useEffect(() => {
@@ -960,6 +1019,12 @@ export default function CalendarPage() {
 
       if (trainingError) throw trainingError;
 
+      try {
+        await createTokensForTraining(editingEvent.id, attendanceData);
+      } catch (tokenErr) {
+        console.warn('Mise à jour des liens questionnaire:', tokenErr);
+      }
+
       handleCloseTrainingModal();
       fetchMatches();
       fetchTrainings();
@@ -1248,13 +1313,23 @@ export default function CalendarPage() {
         console.log('Données de l\'entraînement à enregistrer:', trainingData);
 
         // Enregistrement de l'entraînement
-        const { error: trainingError } = await supabase
+        const { data: inserted, error: trainingError } = await supabase
           .from('trainings')
-          .insert([trainingData]);
+          .insert([trainingData])
+          .select('id')
+          .single();
 
         if (trainingError) {
           console.error('Erreur lors de l\'enregistrement de l\'entraînement:', trainingError);
           throw trainingError;
+        }
+
+        if (inserted?.id) {
+          try {
+            await createTokensForTraining(inserted.id, attendanceData);
+          } catch (tokenErr) {
+            console.warn('Création des liens questionnaire:', tokenErr);
+          }
         }
 
         handleCloseTrainingModal();
@@ -2306,6 +2381,18 @@ export default function CalendarPage() {
                                     />
                                     <span className="text-orange-700">🩹</span>
                                   </label>
+
+                                  <label className="flex items-center gap-1 text-xs">
+                                    <input
+                                      type="radio"
+                                      name={`status-${player.id}`}
+                                      value="late"
+                                      checked={value === "late"}
+                                      onChange={(e) => onChange(e.target.value as PlayerStatus)}
+                                      className="text-yellow-600 focus:ring-yellow-500"
+                                    />
+                                    <span className="text-yellow-700">⏰ Retard</span>
+                                  </label>
                                 </div>
                               )}
                             />
@@ -2315,6 +2402,41 @@ export default function CalendarPage() {
                     </div>
                   </div>
                 </div>
+
+                {isEditing && editingEvent?.type === 'training' && (
+                  <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                    <p className="text-xs font-medium text-blue-900 mb-2">Liens questionnaire (présents / retards)</p>
+                    <p className="text-xs text-blue-800 mb-2">Envoyez ces liens aux joueurs pour qu&apos;ils remplissent le questionnaire de fin de séance.</p>
+                    <button
+                      type="button"
+                      onClick={handleGenerateFeedbackLinks}
+                      disabled={feedbackLinksGenerating || feedbackLinksLoading}
+                      className="mb-3 text-xs font-medium text-blue-700 hover:text-blue-900 underline disabled:opacity-50"
+                    >
+                      {feedbackLinksGenerating ? 'Génération…' : 'Générer / actualiser les liens'}
+                    </button>
+                    {feedbackLinksLoading ? (
+                      <p className="text-xs text-blue-700">Chargement…</p>
+                    ) : feedbackLinks.length === 0 ? (
+                      <p className="text-xs text-blue-700">Cliquez sur « Générer / actualiser les liens » ci-dessus (au moins un joueur doit être Présent ou Retard et l&apos;entraînement enregistré).</p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {feedbackLinks.map((link, i) => (
+                          <li key={i} className="flex items-center gap-2">
+                            <span className="text-xs text-gray-800 truncate flex-1">{link.player_name}</span>
+                            <button
+                              type="button"
+                              onClick={() => { navigator.clipboard.writeText(link.url); setSuccess('Lien copié'); setTimeout(() => setSuccess(null), 2000); }}
+                              className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                            >
+                              Copier
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
                   </>
                 ) : (
                   <>
@@ -2367,7 +2489,9 @@ export default function CalendarPage() {
                           name="players"
                           control={trainingControl}
                           render={({ field }) => {
-                            const presentCount = Object.values(field.value || {}).filter((p: any) => p?.status === 'present').length;
+                            const presentCount = Object.values(field.value || {}).filter((p: any) => 
+                              p?.status === 'present' || p?.status === 'late'
+                            ).length;
                             const totalPlayers = players.length;
                             
                             return (
@@ -2379,13 +2503,15 @@ export default function CalendarPage() {
                                   value={presentCount}
                                   onChange={(e) => {
                                     const targetCount = parseInt(e.target.value);
-                                    const currentPresent = Object.entries(field.value || {}).filter(([_, p]: [string, any]) => p?.status === 'present');
+                                    const currentPresent = Object.entries(field.value || {}).filter(([_, p]: [string, any]) => 
+                                      p?.status === 'present' || p?.status === 'late'
+                                    );
                                     
                                     if (targetCount > currentPresent.length) {
                                       // Ajouter des joueurs présents
                                       const absentPlayers = players.filter(p => {
                                         const playerData = field.value?.[p.id];
-                                        return !playerData || playerData.status !== 'present';
+                                        return !playerData || (playerData.status !== 'present' && playerData.status !== 'late');
                                       });
                                       const toAdd = targetCount - currentPresent.length;
                                       const newValue = { ...field.value };

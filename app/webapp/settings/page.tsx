@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useUserClub } from '../hooks/useUserClub';
+import { usePlayerProfile } from '../hooks/usePlayerProfile';
+import { claimPlayerLinkCode } from '@/lib/services/playerConvocationsService';
 import {
   Building2,
   Plus,
@@ -13,7 +15,8 @@ import {
   UserPlus,
   Copy,
   Check,
-  X
+  X,
+  Link2
 } from 'lucide-react';
 import type { ClubMemberRole } from '@/types';
 
@@ -47,6 +50,12 @@ export default function SettingsPage() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+
+  const { player: linkedPlayer } = usePlayerProfile();
+  const [linkCodeInput, setLinkCodeInput] = useState('');
+  const [linkClaimLoading, setLinkClaimLoading] = useState(false);
+  const [linkClaimError, setLinkClaimError] = useState<string | null>(null);
+  const [linkClaimSuccess, setLinkClaimSuccess] = useState(false);
 
   useEffect(() => {
     if (club) {
@@ -332,6 +341,64 @@ export default function SettingsPage() {
             {club.description && <p className="text-gray-600 text-sm mt-1">{club.description}</p>}
           </div>
         )}
+      </section>
+
+      {/* Lier mon compte joueur */}
+      <section className="bg-white rounded-xl shadow-sm border p-6 mb-6">
+        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <Link2 className="h-5 w-5" />
+          Lier mon compte joueur
+        </h2>
+        <p className="text-gray-600 text-sm mb-4">
+          Si vous êtes joueur, votre coach peut vous donner un code à saisir ici pour accéder au calendrier (présences) et aux questionnaires.
+        </p>
+        {linkedPlayer ? (
+          <div className="flex items-center gap-2 text-green-700">
+            <Check className="h-5 w-5 flex-shrink-0" />
+            <span>Votre compte est lié au joueur <strong>{linkedPlayer.first_name} {linkedPlayer.last_name}</strong>. Vous avez accès à l&apos;espace Joueur dans le menu.</span>
+          </div>
+        ) : (
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setLinkClaimError(null);
+              setLinkClaimSuccess(false);
+              setLinkClaimLoading(true);
+              const result = await claimPlayerLinkCode(linkCodeInput.trim());
+              setLinkClaimLoading(false);
+              if (result.ok) {
+                setLinkClaimSuccess(true);
+                setLinkCodeInput('');
+                setTimeout(() => window.location.reload(), 800);
+              } else {
+                const msg = result.error === 'code_not_found' ? 'Code invalide.' : result.error === 'code_expired' ? 'Ce code a expiré.' : result.error === 'already_linked_other' ? 'Votre compte est déjà lié à un autre joueur.' : result.error || 'Erreur';
+                setLinkClaimError(msg);
+              }
+            }}
+            className="flex flex-wrap items-end gap-3"
+          >
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-sm font-medium text-gray-800 mb-1">Code reçu de votre coach</label>
+              <input
+                type="text"
+                value={linkCodeInput}
+                onChange={(e) => setLinkCodeInput(e.target.value.toUpperCase())}
+                placeholder="Ex: AB12CD34"
+                className="w-full px-3 py-2 border border-gray-400 rounded-lg text-gray-900 bg-white placeholder:text-gray-500 font-mono tracking-wider"
+                maxLength={12}
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={linkClaimLoading || !linkCodeInput.trim()}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              {linkClaimLoading ? 'Vérification...' : 'Lier mon compte'}
+            </button>
+          </form>
+        )}
+        {linkClaimError && <p className="mt-3 text-red-600 text-sm">{linkClaimError}</p>}
+        {linkClaimSuccess && <p className="mt-3 text-green-600 text-sm">Compte lié avec succès. Rechargez la page si le menu Joueur n’apparaît pas.</p>}
       </section>
 
       {isAdmin && (

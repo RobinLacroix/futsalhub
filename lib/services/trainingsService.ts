@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient';
-import type { Training, TrainingFormData, TrainingStats, PlayerAttendanceStats } from '@/types';
+import type { Training, TrainingFormData, TrainingStats, PlayerAttendanceStats, PlayerStatus } from '@/types';
 import { format } from 'date-fns';
 
 export const trainingsService = {
@@ -36,7 +36,7 @@ export const trainingsService = {
    */
   async createTraining(trainingData: TrainingFormData, teamId: string): Promise<Training> {
     // Convertir les joueurs en format JSONB
-    const attendance: Record<string, 'present' | 'absent' | 'injured'> = {};
+    const attendance: Record<string, PlayerStatus> = {};
     Object.values(trainingData.players).forEach(player => {
       if (player.status) {
         attendance[player.id] = player.status;
@@ -72,7 +72,7 @@ export const trainingsService = {
     if (trainingData.key_principle) updateData.key_principle = trainingData.key_principle;
 
     if (trainingData.players) {
-      const attendance: Record<string, 'present' | 'absent' | 'injured'> = {};
+      const attendance: Record<string, PlayerStatus> = {};
       Object.values(trainingData.players).forEach(player => {
         if (player.status) {
           attendance[player.id] = player.status;
@@ -125,7 +125,7 @@ export const trainingsService = {
 
     return trainings.map(training => {
       const attendance = training.attendance || {};
-      const presentCount = Object.values(attendance).filter(status => status === 'present').length;
+      const presentCount = Object.values(attendance).filter(status => status === 'present' || status === 'late').length;
       const absentCount = Object.values(attendance).filter(status => status === 'absent').length;
       const injuredCount = Object.values(attendance).filter(status => status === 'injured').length;
 
@@ -156,6 +156,7 @@ export const trainingsService = {
               player_id: playerId,
               total_sessions: 0,
               present_count: 0,
+              late_count: 0,
               absent_count: 0,
               injured_count: 0,
               attendance_rate: 0,
@@ -169,9 +170,12 @@ export const trainingsService = {
           
           playerStats[playerId].total_sessions++;
           
-          switch (status) {
+          switch (status as PlayerStatus) {
             case 'present':
               playerStats[playerId].present_count++;
+              break;
+            case 'late':
+              playerStats[playerId].late_count++;
               break;
             case 'absent':
               playerStats[playerId].absent_count++;
@@ -187,8 +191,9 @@ export const trainingsService = {
     // Calculer les pourcentages pour chaque joueur
     Object.values(playerStats).forEach(stats => {
       if (stats.total_sessions > 0) {
-        stats.attendance_rate = Math.round((stats.present_count / stats.total_sessions) * 100);
-        stats.present_percentage = Math.round((stats.present_count / stats.total_sessions) * 100);
+        const presentOrLate = stats.present_count + stats.late_count;
+        stats.attendance_rate = Math.round((presentOrLate / stats.total_sessions) * 100);
+        stats.present_percentage = Math.round((presentOrLate / stats.total_sessions) * 100);
         stats.absent_percentage = Math.round((stats.absent_count / stats.total_sessions) * 100);
         stats.injured_percentage = Math.round((stats.injured_count / stats.total_sessions) * 100);
         

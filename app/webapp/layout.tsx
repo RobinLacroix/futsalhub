@@ -3,9 +3,11 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import { ActiveTeamProvider } from './contexts/ActiveTeamContext';
 import SimpleTeamSelector from './components/SimpleTeamSelector';
 import DebugTeamSelector from './components/DebugTeamSelector';
 import TeamChangeTester from './components/TeamChangeTester';
+import { usePlayerProfile } from './hooks/usePlayerProfile';
 import {
   Home,
   Calendar,
@@ -21,7 +23,8 @@ import {
   LogOut,
   PieChart,
   Shield,
-  Layout
+  Layout,
+  UserCircle
 } from 'lucide-react';
 
 // Composant UserMenu pour la sidebar
@@ -81,12 +84,24 @@ function UserMenu() {
 
 // Composant Sidebar
 function Sidebar({ isExpanded, onToggle }: { isExpanded: boolean; onToggle: () => void }) {
+  const { player: playerProfile } = usePlayerProfile();
+
   const navigation = [
     {
       name: 'Accueil',
       href: '/webapp',
       icon: Home
     },
+    ...(playerProfile
+      ? [{
+          name: 'Joueur',
+          items: [
+            { name: 'Calendrier / Présences', href: '/webapp/player/calendar', icon: Calendar },
+            { name: 'Questionnaires', href: '/webapp/player/questionnaires', icon: MessageSquare }
+          ] as const
+        }]
+      : []
+    ),
     {
       name: 'Manager',
       items: [
@@ -243,16 +258,18 @@ export default function WebAppLayout({
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Sidebar isExpanded={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />
-      
-      <main
-        className={`transition-all duration-300 ${
-          sidebarOpen ? 'ml-64' : 'ml-16'
-        } min-h-screen`}
-      >
-        {children}
-      </main>
-    </div>
+    <ActiveTeamProvider>
+      <div className="min-h-screen bg-gray-50">
+        <Sidebar isExpanded={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />
+        
+        <main
+          className={`transition-all duration-300 ${
+            sidebarOpen ? 'ml-64' : 'ml-16'
+          } min-h-screen`}
+        >
+          {children}
+        </main>
+      </div>
+    </ActiveTeamProvider>
   );
 } 
