@@ -1719,15 +1719,9 @@ export default function CalendarPage() {
         <div className="space-y-2">
           <h1 className="text-2xl font-bold text-gray-900">Calendrier</h1>
           {activeTeam && (
-            <div className="flex items-center gap-2">
-              <div 
-                className="w-4 h-4 rounded-full"
-                style={{ backgroundColor: activeTeam.color }}
-              ></div>
-              <span className="text-sm text-gray-600">
-                Équipe active : <strong>{activeTeam.name}</strong> ({activeTeam.category} - Niveau {activeTeam.level})
-              </span>
-            </div>
+            <p className="text-sm text-gray-600">
+              Équipe active : <strong>{activeTeam.name}</strong> ({activeTeam.category} - Niveau {activeTeam.level})
+            </p>
           )}
         </div>
         <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 w-full sm:w-auto">

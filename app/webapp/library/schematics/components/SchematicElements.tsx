@@ -10,6 +10,7 @@ interface SchematicElementsProps {
   selectedElementIds?: string[];
   onElementClick?: (elementId: string) => void;
   onElementMouseDown?: (elementId: string, e: React.MouseEvent) => void;
+  onElementTouchStart?: (elementId: string, e: React.TouchEvent) => void;
   onElementContextMenu?: (elementId: string, position: Position) => void;
   fieldType?: 'futsal' | 'blank';
   isPreview?: boolean;
@@ -29,6 +30,7 @@ export function SchematicElements({
   selectedElementIds = [],
   onElementClick,
   onElementMouseDown,
+  onElementTouchStart,
   onElementContextMenu,
   fieldType = 'futsal',
   isPreview = false
@@ -251,6 +253,10 @@ export function SchematicElements({
             e.stopPropagation();
             onElementMouseDown?.(element.id, e);
           },
+          onTouchStart: (e: React.TouchEvent) => {
+            e.stopPropagation();
+            onElementTouchStart?.(element.id, e);
+          },
           onContextMenu: (e: React.MouseEvent) => handleContextMenu(e, element.id)
         };
 
@@ -311,6 +317,10 @@ export function SchematicElements({
                         e.stopPropagation();
                         onElementMouseDown?.(element.id, e);
                       }}
+                      onTouchStart={(e: React.TouchEvent) => {
+                        e.stopPropagation();
+                        onElementTouchStart?.(element.id, e);
+                      }}
                       onContextMenu={(e: React.MouseEvent) => handleContextMenu(e, element.id)}
                     />
                     {renderHighlight(element)}
@@ -352,6 +362,10 @@ export function SchematicElements({
                       onMouseDown={(e: React.MouseEvent) => {
                         e.stopPropagation();
                         onElementMouseDown?.(element.id, e);
+                      }}
+                      onTouchStart={(e: React.TouchEvent) => {
+                        e.stopPropagation();
+                        onElementTouchStart?.(element.id, e);
                       }}
                       onContextMenu={(e: React.MouseEvent) => handleContextMenu(e, element.id)}
                     />
@@ -400,6 +414,10 @@ export function SchematicElements({
                     e.stopPropagation();
                     onElementMouseDown?.(element.id, e);
                   }}
+                  onTouchStart={(e: React.TouchEvent) => {
+                    e.stopPropagation();
+                    onElementTouchStart?.(element.id, e);
+                  }}
                   onContextMenu={(e: React.MouseEvent) => handleContextMenu(e, element.id)}
                 />
                 <text
@@ -434,6 +452,10 @@ export function SchematicElements({
                 onMouseDown={(e: React.MouseEvent) => {
                   e.stopPropagation();
                   onElementMouseDown?.(element.id, e);
+                }}
+                onTouchStart={(e: React.TouchEvent) => {
+                  e.stopPropagation();
+                  onElementTouchStart?.(element.id, e);
                 }}
                 onContextMenu={(e: React.MouseEvent) => handleContextMenu(e, element.id)}
               >
@@ -592,6 +614,10 @@ export function SchematicElements({
                     onMouseDown={(e: React.MouseEvent) => {
                       e.stopPropagation();
                       onElementMouseDown?.(element.id, e);
+                    }}
+                    onTouchStart={(e: React.TouchEvent) => {
+                      e.stopPropagation();
+                      onElementTouchStart?.(element.id, e);
                     }}
                     onContextMenu={(e: React.MouseEvent) => handleContextMenu(e, element.id)}
                   />

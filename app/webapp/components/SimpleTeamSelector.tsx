@@ -65,13 +65,13 @@ export default function SimpleTeamSelector() {
             <button
               key={team.id}
               onClick={() => changeActiveTeam(team.id)}
-              className={`w-full px-2 py-1 text-xs rounded transition-all ${
+              className={`w-full px-2 py-2 min-h-[44px] text-xs rounded transition-all touch-manipulation flex items-center justify-center ${
                 activeTeam?.id === team.id
                   ? 'bg-blue-100 text-blue-700 border border-blue-300'
                   : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
               }`}
             >
-              <div className="flex items-center justify-center gap-1">
+              <div className="flex items-center justify-center gap-1 w-full">
                 <div 
                   className="w-2 h-2 rounded-full"
                   style={{ backgroundColor: team.color }}

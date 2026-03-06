@@ -42,7 +42,6 @@ export default function TeamChangeTester() {
         {/* État actuel */}
         <div className="mb-3 p-2 bg-white text-orange-700 rounded text-xs">
           <div>🏆 Équipe active: {activeTeam ? activeTeam.name : 'Aucune'}</div>
-          <div>ID: {activeTeam?.id || 'N/A'}</div>
           <div>Compteur de changements: {changeCount}</div>
           <div>Dernier changement: {lastChange ? new Date(lastChange).toLocaleTimeString() : 'Aucun'}</div>
         </div>

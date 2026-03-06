@@ -31,10 +31,8 @@ export default function DebugTeamSelector() {
         {activeTeam && (
           <div className="mb-3 p-2 bg-white text-purple-700 rounded text-xs">
             <div>🏆 Équipe active: {activeTeam.name}</div>
-            <div>ID: {activeTeam.id}</div>
             <div>Catégorie: {activeTeam.category}</div>
             <div>Niveau: {activeTeam.level}</div>
-            <div>Couleur: {activeTeam.color}</div>
           </div>
         )}
 

@@ -603,11 +603,6 @@ export default function SquadPage() {
             <div className="text-sm text-blue-600">
               {activeTeam ? `${activeTeam.category} - Niveau ${activeTeam.level}` : 'Sélectionnez une équipe dans la sidebar'}
             </div>
-            {activeTeam && (
-              <div className="text-xs text-blue-500 mt-1">
-                ID: {activeTeam.id} | Couleur: {activeTeam.color}
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -630,15 +625,9 @@ export default function SquadPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Effectif</h1>
           {activeTeam && (
-            <div className="flex items-center gap-2 mt-2">
-              <div 
-                className="w-4 h-4 rounded-full"
-                style={{ backgroundColor: activeTeam.color }}
-              ></div>
-              <span className="text-sm text-gray-600">
-                Équipe active : <strong>{activeTeam.name}</strong> ({activeTeam.category} - Niveau {activeTeam.level})
-              </span>
-            </div>
+            <p className="text-sm text-gray-600 mt-2">
+              Équipe active : <strong>{activeTeam.name}</strong> ({activeTeam.category} - Niveau {activeTeam.level})
+            </p>
           )}
         </div>
         <button

@@ -76,6 +76,7 @@ function SchematicsPageContent() {
   const [resizingHandle, setResizingHandle] = useState<{ id: string; handleType: string; initialPos: Position; initialElement: SchematicElement } | null>(null);
   const resizingHandleRef = useRef<{ id: string; handleType: string; initialPos: Position; initialElement: SchematicElement } | null>(null);
   const isMultiDragRef = useRef<boolean>(false);
+  const activeTouchIdRef = useRef<number | null>(null);
   const [copiedElement, setCopiedElement] = useState<SchematicElement | null>(null);
   const [copiedElements, setCopiedElements] = useState<SchematicElement[]>([]);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -704,10 +705,13 @@ function SchematicsPageContent() {
     return null;
   }, [scale, distanceToLineSegment]);
 
-  // Gérer le clic sur un élément
-  const handleElementMouseDown = useCallback((elementId: string, e: React.MouseEvent) => {
-    if (e.button !== 0) return; // Seulement clic gauche
-    e.preventDefault(); // Empêcher la sélection de texte
+  // Type pour souris ou événement tactile synthétique (tablette)
+  type ElementPointerEvent = React.MouseEvent | { clientX: number; clientY: number; button?: number; shiftKey?: boolean; preventDefault?: () => void; stopPropagation?: () => void };
+
+  // Gérer le clic sur un élément (souris ou touch)
+  const handleElementMouseDown = useCallback((elementId: string, e: ElementPointerEvent) => {
+    if ('button' in e && e.button !== 0) return; // Seulement clic gauche (ignorer pour touch)
+    e.preventDefault?.(); // Empêcher la sélection de texte / scroll tactile
     
     const element = elements.find(el => el.id === elementId);
     if (!element) return;
@@ -717,7 +721,7 @@ function SchematicsPageContent() {
       // Permettre seulement la sélection
       const pos = getFieldCoordinates(e.clientX, e.clientY);
       if (e.shiftKey) {
-        e.stopPropagation(); // Empêcher la propagation vers handleMouseDown
+        e.stopPropagation?.(); // Empêcher la propagation vers handleMouseDown
         setSelectedElements(prev => {
           const isSelected = prev.some(el => el.id === elementId);
           if (isSelected) {
@@ -727,7 +731,7 @@ function SchematicsPageContent() {
           }
         });
       } else {
-        e.stopPropagation(); // Empêcher la propagation vers handleMouseDown
+        e.stopPropagation?.(); // Empêcher la propagation vers handleMouseDown
         setSelectedElements([element]);
       }
       return;
@@ -737,8 +741,8 @@ function SchematicsPageContent() {
     
     // Gérer Maj+clic pour sélection multiple
     if (e.shiftKey) {
-      e.stopPropagation(); // Empêcher la propagation vers handleMouseDown
-      e.preventDefault(); // Empêcher le comportement par défaut
+      e.stopPropagation?.(); // Empêcher la propagation vers handleMouseDown
+      e.preventDefault?.(); // Empêcher le comportement par défaut
       setSelectedElements(prev => {
         const isSelected = prev.some(el => el.id === elementId);
         if (isSelected) {
@@ -981,6 +985,22 @@ function SchematicsPageContent() {
     setSelectedTool('select'); // Passer en mode sélection quand on clique sur un élément
   }, [elements, getFieldCoordinates]);
 
+  // Démarrer le drag depuis un touch (tablette)
+  const handleElementTouchStart = useCallback((elementId: string, e: React.TouchEvent) => {
+    if (e.touches.length === 0) return;
+    const touch = e.touches[0];
+    activeTouchIdRef.current = touch.identifier;
+    handleElementMouseDown(elementId, {
+      clientX: touch.clientX,
+      clientY: touch.clientY,
+      button: 0,
+      shiftKey: false,
+      preventDefault: () => e.preventDefault(),
+      stopPropagation: () => e.stopPropagation(),
+    });
+    e.preventDefault();
+  }, [handleElementMouseDown]);
+
   // Créer un nouvel élément
   const createElement = useCallback((
     tool: ToolType,
@@ -1193,42 +1213,25 @@ function SchematicsPageContent() {
     }
   }, [roundToDecimeter]);
 
-  // Gérer le clic sur le terrain
-  const handleMouseDown = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
-    if (e.button !== 0) return; // Seulement clic gauche
+  // Logique commune clic/touch sur le terrain (souris ou tablette)
+  const handlePointerDownOnField = useCallback((clientX: number, clientY: number, shiftKey: boolean) => {
+    const pos = getFieldCoordinates(clientX, clientY);
     
-    // Si l'événement a été stoppé (par exemple par handleElementMouseDown), ne rien faire
-    if (e.defaultPrevented) return;
-    
-    const pos = getFieldCoordinates(e.clientX, e.clientY);
-    
-    // Si on est en mode sélection, vérifier d'abord si on a cliqué sur un élément
     if (selectedTool === 'select') {
       const clickedElement = findElementAtPosition(pos, elements);
-      if (clickedElement) {
-        // Si on clique sur un élément, handleElementMouseDown devrait gérer cela via onElementMouseDown
-        // On ne fait rien ici pour éviter les conflits avec la sélection multiple
-        // handleElementMouseDown sera appelé via onElementMouseDown dans SchematicElements
-        // et gérera la sélection multiple avec Maj+clic ainsi que le déplacement
-        return;
-      } else {
-        // Sinon, commencer une zone de sélection si pas de Maj
-        if (!e.shiftKey) {
-          setSelectedElements([]);
-          setIsSelecting(true);
-          setSelectionBox({ start: pos, end: pos });
-        } else {
-          // Avec Maj+clic sur le terrain vide, ne rien faire (garder la sélection actuelle)
-        }
-        return;
+      if (clickedElement) return;
+      if (!shiftKey) {
+        setSelectedElements([]);
+        setIsSelecting(true);
+        setSelectionBox({ start: pos, end: pos });
       }
+      return;
     }
 
-    // Si on est déjà en train de dessiner (ligne/flèche depuis un élément), terminer le dessin
     if (isDrawing && drawStart && (selectedTool === 'line' || selectedTool === 'arrow')) {
-      const newElement = createElement(selectedTool, drawStart, pos, e.shiftKey);
+      const newElement = createElement(selectedTool, drawStart, pos, shiftKey);
       if (newElement) {
-        saveToHistory(elements); // Sauvegarder avant l'ajout
+        saveToHistory(elements);
         setElements(prev => [...prev, newElement]);
       }
       setIsDrawing(false);
@@ -1238,28 +1241,41 @@ function SchematicsPageContent() {
       return;
     }
 
-    // Pour les éléments ponctuels (joueur, ballon, matériel), créer directement
     const pointElements: ToolType[] = ['player', 'ball', 'goal', 'cone', 'ladder'];
     if (pointElements.includes(selectedTool)) {
       const newElement = createElement(selectedTool, pos, pos);
       if (newElement) {
-        saveToHistory(elements); // Sauvegarder avant l'ajout
+        saveToHistory(elements);
         setElements(prev => [...prev, newElement]);
       }
       return;
     }
 
-    // Commencer le dessin pour les zones et lignes
     setIsDrawing(true);
     setDrawStart(pos);
     setDrawCurrent(pos);
   }, [selectedTool, getFieldCoordinates, elements, findElementAtPosition, isDrawing, drawStart, createElement]);
 
-  // Gestion du mouvement de la souris (global pour le drag and drop)
-  const handleGlobalMouseMove = useCallback((e: MouseEvent) => {
+  const handleMouseDown = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    if (e.button !== 0) return;
+    if (e.defaultPrevented) return;
+    handlePointerDownOnField(e.clientX, e.clientY, e.shiftKey);
+  }, [handlePointerDownOnField]);
+
+  const handleTouchStartOnField = useCallback((e: React.TouchEvent<SVGSVGElement>) => {
+    if (e.defaultPrevented) return;
+    if (e.touches.length === 0) return;
+    const touch = e.touches[0];
+    activeTouchIdRef.current = touch.identifier;
+    handlePointerDownOnField(touch.clientX, touch.clientY, false);
+    e.preventDefault();
+  }, [handlePointerDownOnField]);
+
+  // Logique de déplacement global (souris ou tactile) — partagée pour tablette
+  const applyGlobalMove = useCallback((clientX: number, clientY: number) => {
     if (!svgRef.current) return;
     
-    const pos = getFieldCoordinates(e.clientX, e.clientY);
+    const pos = getFieldCoordinates(clientX, clientY);
     
     // Si on redimensionne un élément (vérifier que resizingHandle existe toujours via la ref)
     const currentResizingHandle = resizingHandleRef.current;
@@ -1623,11 +1639,27 @@ function SchematicsPageContent() {
       return;
     }
     
+    // Zone de sélection (tactile)
+    if (isSelecting && selectionBox) {
+      setSelectionBox(prev => prev ? { ...prev, end: pos } : null);
+      return;
+    }
     // Si on dessine
     if (isDrawing && drawStart) {
       setDrawCurrent(pos);
     }
-  }, [isDrawing, drawStart, draggedElement, getFieldCoordinates, elements]);
+  }, [isDrawing, drawStart, draggedElement, draggedElements, isSelecting, selectionBox, resizingHandleRef, getFieldCoordinates, elements, findPlayerNearPosition]);
+
+  const handleGlobalMouseMove = useCallback((e: MouseEvent) => {
+    applyGlobalMove(e.clientX, e.clientY);
+  }, [applyGlobalMove]);
+
+  const handleGlobalTouchMove = useCallback((e: TouchEvent) => {
+    e.preventDefault();
+    const t = Array.from(e.touches).find(touch => touch.identifier === activeTouchIdRef.current);
+    if (!t) return;
+    applyGlobalMove(t.clientX, t.clientY);
+  }, [applyGlobalMove]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     const pos = getFieldCoordinates(e.clientX, e.clientY);
@@ -1639,6 +1671,19 @@ function SchematicsPageContent() {
     }
     
     // Si on dessine (pas de drag)
+    if (isDrawing && drawStart && !draggedElement && !draggedElements) {
+      setDrawCurrent(pos);
+    }
+  }, [isDrawing, drawStart, draggedElement, draggedElements, isSelecting, selectionBox, getFieldCoordinates]);
+
+  const handleTouchMoveOnField = useCallback((e: React.TouchEvent<SVGSVGElement>) => {
+    const t = Array.from(e.touches).find(touch => touch.identifier === activeTouchIdRef.current);
+    if (!t) return;
+    const pos = getFieldCoordinates(t.clientX, t.clientY);
+    if (isSelecting && selectionBox) {
+      setSelectionBox(prev => prev ? { ...prev, end: pos } : null);
+      return;
+    }
     if (isDrawing && drawStart && !draggedElement && !draggedElements) {
       setDrawCurrent(pos);
     }
@@ -1750,20 +1795,16 @@ function SchematicsPageContent() {
     // Ne rien faire ici, handleMouseUp s'en occupe
   }, [isDrawing, drawStart, drawCurrent, selectedTool, draggedElement, draggedElements]);
 
-  const handleMouseUp = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
-    // Finaliser la zone de sélection
+  // Finalisation sélection / dessin (partagée souris et tactile)
+  const finalizePointerUp = useCallback((shiftKey: boolean) => {
     if (isSelecting && selectionBox) {
       const minX = Math.min(selectionBox.start.x, selectionBox.end.x);
       const maxX = Math.max(selectionBox.start.x, selectionBox.end.x);
       const minY = Math.min(selectionBox.start.y, selectionBox.end.y);
       const maxY = Math.max(selectionBox.start.y, selectionBox.end.y);
-      
-      // Trouver tous les éléments dans la zone de sélection
-      // Un élément est sélectionné si son bounding box intersecte avec la zone de sélection
       const selectedInBox = elements.filter(element => {
         if (element.type === 'rectangle' || element.type === 'circle') {
           const zone = element as ZoneElement;
-          // Vérifier si le rectangle de l'élément intersecte avec la zone de sélection
           const elemMinX = zone.x;
           const elemMaxX = zone.x + zone.width;
           const elemMinY = zone.y;
@@ -1771,37 +1812,48 @@ function SchematicsPageContent() {
           return !(elemMaxX < minX || elemMinX > maxX || elemMaxY < minY || elemMinY > maxY);
         } else if (element.type === 'line' || element.type === 'arrow') {
           const line = element as LineElement;
-          // Vérifier si la ligne intersecte avec la zone de sélection
           const lineMinX = Math.min(line.x, line.endX);
           const lineMaxX = Math.max(line.x, line.endX);
           const lineMinY = Math.min(line.y, line.endY);
           const lineMaxY = Math.max(line.y, line.endY);
           return !(lineMaxX < minX || lineMinX > maxX || lineMaxY < minY || lineMinY > maxY);
         } else {
-          // Pour les éléments ponctuels, vérifier si le point est dans la zone
           return element.x >= minX && element.x <= maxX && element.y >= minY && element.y <= maxY;
         }
       });
-      
       setSelectedElements(selectedInBox);
       setIsSelecting(false);
       setSelectionBox(null);
       return;
     }
-    
-    // Si on dessine (pas de drag)
     if (isDrawing && drawStart && drawCurrent && !draggedElement && !draggedElements) {
-      const newElement = createElement(selectedTool, drawStart, drawCurrent, e.shiftKey);
+      const newElement = createElement(selectedTool, drawStart, drawCurrent, shiftKey);
       if (newElement) {
-        saveToHistory(elements); // Sauvegarder avant l'ajout
+        saveToHistory(elements);
         setElements(prev => [...prev, newElement]);
       }
-
       setIsDrawing(false);
       setDrawStart(null);
       setDrawCurrent(null);
     }
   }, [isDrawing, drawStart, drawCurrent, selectedTool, draggedElement, draggedElements, isSelecting, selectionBox, elements, createElement, saveToHistory]);
+
+  const handleMouseUp = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    finalizePointerUp(e.shiftKey);
+  }, [finalizePointerUp]);
+
+  const handleTouchEndOnField = useCallback(() => {
+    finalizePointerUp(false);
+  }, [finalizePointerUp]);
+
+  const handleGlobalTouchEnd = useCallback((e: TouchEvent) => {
+    const released = Array.from(e.changedTouches).some(t => t.identifier === activeTouchIdRef.current);
+    if (released) {
+      activeTouchIdRef.current = null;
+      handleGlobalMouseUp();
+      handleTouchEndOnField();
+    }
+  }, [handleGlobalMouseUp, handleTouchEndOnField]);
 
   // Gérer le menu contextuel
   const handleElementContextMenu = useCallback((elementId: string, position: Position) => {
@@ -2140,17 +2192,23 @@ function SchematicsPageContent() {
     }
   }, []);
 
-  // Gérer les événements globaux pour le drag and drop et le redimensionnement
+  // Gérer les événements globaux pour le drag and drop, redimensionnement, sélection et dessin (souris + tactile tablette)
   useEffect(() => {
-    if (draggedElement || draggedElements || resizingHandle) {
+    if (draggedElement || draggedElements || resizingHandle || isSelecting || isDrawing) {
       document.addEventListener('mousemove', handleGlobalMouseMove);
       document.addEventListener('mouseup', handleGlobalMouseUp);
+      document.addEventListener('touchmove', handleGlobalTouchMove, { passive: false });
+      document.addEventListener('touchend', handleGlobalTouchEnd, { passive: false });
+      document.addEventListener('touchcancel', handleGlobalTouchEnd, { passive: false });
       return () => {
         document.removeEventListener('mousemove', handleGlobalMouseMove);
         document.removeEventListener('mouseup', handleGlobalMouseUp);
+        document.removeEventListener('touchmove', handleGlobalTouchMove);
+        document.removeEventListener('touchend', handleGlobalTouchEnd);
+        document.removeEventListener('touchcancel', handleGlobalTouchEnd);
       };
     }
-  }, [draggedElement, draggedElements, resizingHandle, handleGlobalMouseMove, handleGlobalMouseUp]);
+  }, [draggedElement, draggedElements, resizingHandle, isSelecting, isDrawing, handleGlobalMouseMove, handleGlobalMouseUp, handleGlobalTouchMove, handleGlobalTouchEnd]);
 
   // Fermer le menu contextuel en cliquant ailleurs
   useEffect(() => {
@@ -2310,14 +2368,16 @@ function SchematicsPageContent() {
         <div className="flex-1 relative bg-gray-100 min-h-0 overflow-hidden" style={{ zIndex: 1 }}>
           <svg
             ref={svgRef}
-            className="w-full h-full"
+            className="w-full h-full touch-none"
             viewBox="0 0 1000 600"
             preserveAspectRatio="xMidYMid meet"
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
-            style={{ pointerEvents: 'auto' }}
+            onTouchStart={handleTouchStartOnField}
+            onTouchMove={handleTouchMoveOnField}
+            style={{ pointerEvents: 'auto', touchAction: 'none' }}
           >
             <Field width={1000} height={600} scale={scale} fieldType={fieldType} />
             {/* Trajets entre la séquence N et la séquence N+1 */}
@@ -2366,6 +2426,7 @@ function SchematicsPageContent() {
                 }
               }}
               onElementMouseDown={handleElementMouseDown}
+              onElementTouchStart={handleElementTouchStart}
               onElementContextMenu={handleElementContextMenu}
             />
             

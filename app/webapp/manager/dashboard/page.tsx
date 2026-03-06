@@ -147,15 +147,9 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
           {activeTeam && (
-            <div className="flex items-center gap-2 mt-2">
-              <div 
-                className="w-4 h-4 rounded-full"
-                style={{ backgroundColor: activeTeam.color }}
-              ></div>
-              <span className="text-sm text-gray-600">
-                Équipe active : <strong>{activeTeam.name}</strong> ({activeTeam.category} - Niveau {activeTeam.level})
-              </span>
-            </div>
+            <p className="text-sm text-gray-600 mt-2">
+              Équipe active : <strong>{activeTeam.name}</strong> ({activeTeam.category} - Niveau {activeTeam.level})
+            </p>
           )}
         </div>
       </div>

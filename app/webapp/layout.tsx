@@ -24,7 +24,8 @@ import {
   PieChart,
   Shield,
   Layout,
-  UserCircle
+  UserCircle,
+  Menu
 } from 'lucide-react';
 
 // Composant UserMenu pour la sidebar
@@ -62,15 +63,17 @@ function UserMenu() {
         {isUserMenuOpen && (
           <div className="absolute bottom-full left-0 mb-2 w-48 bg-white rounded-md shadow-lg py-1 ring-1 ring-black ring-opacity-5">
             <button
+              type="button"
               onClick={() => router.push('/webapp/settings')}
-              className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+              className="flex items-center w-full px-4 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-100"
             >
               <Settings className="h-4 w-4 mr-2" />
               Paramètres
             </button>
             <button
+              type="button"
               onClick={handleLogout}
-              className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+              className="flex items-center w-full px-4 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-100"
             >
               <LogOut className="h-4 w-4 mr-2" />
               Se déconnecter
@@ -83,8 +86,24 @@ function UserMenu() {
 }
 
 // Composant Sidebar
-function Sidebar({ isExpanded, onToggle }: { isExpanded: boolean; onToggle: () => void }) {
+function Sidebar({
+  isExpanded,
+  onToggle,
+  isMobileOpen,
+  onMobileClose
+}: {
+  isExpanded: boolean;
+  onToggle: () => void;
+  isMobileOpen: boolean;
+  onMobileClose: () => void;
+}) {
   const { player: playerProfile } = usePlayerProfile();
+  const router = useRouter();
+
+  const handleNavClick = (href: string) => {
+    onMobileClose();
+    router.push(href);
+  };
 
   const navigation = [
     {
@@ -180,74 +199,85 @@ function Sidebar({ isExpanded, onToggle }: { isExpanded: boolean; onToggle: () =
   ];
 
   return (
-    <aside
-      className={`fixed top-0 left-0 h-full bg-white border-r border-gray-200 transition-all duration-300 flex flex-col ${
-        isExpanded ? 'w-64' : 'w-16'
-      }`}
-    >
-      <button
-        onClick={onToggle}
-        className="absolute -right-3 top-6 bg-white border border-gray-200 rounded-full p-1 hover:bg-gray-50"
+    <>
+      {/* Backdrop mobile */}
+      <div
+        aria-hidden
+        onClick={onMobileClose}
+        className={`fixed inset-0 bg-black/50 z-40 transition-opacity md:hidden ${
+          isMobileOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        }`}
+      />
+
+      <aside
+        className={`fixed top-0 left-0 h-full bg-white border-r border-gray-200 flex flex-col z-40 overflow-hidden min-w-0
+          transition-[transform,width] duration-300 ease-out
+          ${isExpanded ? 'w-64 md:!w-64' : 'w-16 md:!w-16'}
+          ${isMobileOpen ? 'translate-x-0 max-md:w-64' : '-translate-x-full md:translate-x-0'}
+        `}
       >
-        {isExpanded ? (
-          <ChevronLeft className="h-4 w-4" />
-        ) : (
-          <ChevronRight className="h-4 w-4" />
-        )}
-      </button>
-
-      {/* Sélecteur d'équipe */}
-      <div className="px-3 py-2 border-b border-gray-200">
-        {isExpanded ? (
-          <SimpleTeamSelector />
-        ) : (
-          <div className="text-center">
-            <div className="text-blue-600 text-lg">🏆</div>
-          </div>
-        )}
-      </div>
-
-      <nav className="flex-1 py-4 overflow-y-auto">
-        <div className="px-3 space-y-1 h-full">
-          {navigation.map((item) => (
-            <div key={item.name}>
-              {item.href ? (
-                <a
-                  href={item.href}
-                  className="flex items-center px-3 py-2 text-sm font-medium rounded-md text-gray-700 hover:bg-gray-50"
-                >
-                  <item.icon className={`${isExpanded ? 'h-5 w-5 mr-3' : 'h-6 w-6'} transition-all duration-200`} />
-                  {isExpanded && <span>{item.name}</span>}
-                </a>
-              ) : (
-                <>
-                  {isExpanded && (
-                    <div className="px-3 py-2 text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                      {item.name}
-                    </div>
-                  )}
-                  {item.items?.map((subItem) => (
-                    <a
-                      key={subItem.name}
-                      href={subItem.href}
-                      className="flex items-center px-3 py-2 text-sm font-medium rounded-md text-gray-700 hover:bg-gray-50"
-                    >
-                      <subItem.icon className={`${isExpanded ? 'h-5 w-5 mr-3' : 'h-6 w-6'} transition-all duration-200`} />
-                      {isExpanded && <span>{subItem.name}</span>}
-                    </a>
-                  ))}
-                </>
-              )}
+        {/* Sélecteur d'équipe */}
+        <div className="px-3 py-2 border-b border-gray-200 flex-shrink-0">
+          {isExpanded || isMobileOpen ? (
+            <SimpleTeamSelector />
+          ) : (
+            <div className="text-center">
+              <div className="text-blue-600 text-lg">🏆</div>
             </div>
-          ))}
+          )}
         </div>
-      </nav>
-      
-      {/* UserMenu en bas de la sidebar */}
-      <UserMenu />
-    </aside>
+
+        <nav className="flex-1 py-4 overflow-y-auto overflow-x-hidden">
+          <div className="px-3 space-y-1 h-full">
+            {navigation.map((item) => (
+              <div key={item.name}>
+                {item.href ? (
+                  <button
+                    type="button"
+                    onClick={() => handleNavClick(item.href!)}
+                    className={`flex items-center w-full px-3 py-3 min-h-[44px] text-sm font-medium rounded-md text-gray-700 hover:bg-gray-50 active:bg-gray-100 md:py-2 md:min-h-0 ${
+                      isExpanded || isMobileOpen ? 'justify-start text-left' : 'justify-center px-0'
+                    }`}
+                  >
+                    <item.icon className={`h-5 w-5 flex-shrink-0 ${isExpanded || isMobileOpen ? 'mr-3' : ''}`} />
+                    {(isExpanded || isMobileOpen) && <span>{item.name}</span>}
+                  </button>
+                ) : (
+                  <>
+                    {(isExpanded || isMobileOpen) && (
+                      <div className="px-3 py-2 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        {item.name}
+                      </div>
+                    )}
+                    {item.items?.map((subItem) => (
+                      <button
+                        key={subItem.name}
+                        type="button"
+                        onClick={() => handleNavClick(subItem.href)}
+                        className={`flex items-center w-full px-3 py-3 min-h-[44px] text-sm font-medium rounded-md text-gray-700 hover:bg-gray-50 active:bg-gray-100 md:py-2 md:min-h-0 ${
+                          isExpanded || isMobileOpen ? 'justify-start text-left' : 'justify-center px-0'
+                        }`}
+                      >
+                        <subItem.icon className={`h-5 w-5 flex-shrink-0 ${isExpanded || isMobileOpen ? 'mr-3' : ''}`} />
+                        {(isExpanded || isMobileOpen) && <span>{subItem.name}</span>}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </nav>
+
+        {/* UserMenu en bas de la sidebar */}
+        <UserMenu />
+      </aside>
+    </>
   );
 }
+
+// Breakpoint desktop (aligné avec Tailwind md)
+const DESKTOP_BREAKPOINT = 768;
 
 // Layout principal
 export default function WebAppLayout({
@@ -256,18 +286,64 @@ export default function WebAppLayout({
   children: React.ReactNode;
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsDesktop(window.innerWidth >= DESKTOP_BREAKPOINT);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
+  const mainMarginLeft = isDesktop ? (sidebarOpen ? '16rem' : '4rem') : '0';
 
   return (
     <ActiveTeamProvider>
-      <div className="min-h-screen bg-gray-50">
-        <Sidebar isExpanded={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />
-        
+      <div className="min-h-screen bg-gray-50 min-h-[100dvh]">
+        <Sidebar
+          isExpanded={sidebarOpen}
+          onToggle={() => setSidebarOpen(!sidebarOpen)}
+          isMobileOpen={mobileMenuOpen}
+          onMobileClose={() => setMobileMenuOpen(false)}
+        />
+
+        {/* Barre mobile : hamburger + espace */}
+        <header className="fixed top-0 left-0 right-0 h-14 min-h-[3.5rem] bg-white border-b border-gray-200 z-30 flex items-center px-4 md:hidden safe-area-inset-top">
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(true)}
+            className="flex items-center justify-center w-11 h-11 -ml-1 rounded-lg text-gray-600 hover:bg-gray-100 active:bg-gray-200 touch-manipulation"
+            aria-label="Ouvrir le menu"
+          >
+            <Menu className="h-6 w-6" />
+          </button>
+        </header>
+
         <main
-          className={`transition-all duration-300 ${
-            sidebarOpen ? 'ml-64' : 'ml-16'
-          } min-h-screen`}
+          className="transition-all duration-300 min-h-screen pt-14 md:pt-0 relative"
+          style={{ marginLeft: mainMarginLeft }}
         >
-          {children}
+          {/* Bouton réduire/agrandir la sidebar (desktop) : dans main pour être au-dessus de la sidebar (ordre DOM + z-index) */}
+          <button
+            type="button"
+            onClick={() => setSidebarOpen((v) => !v)}
+            aria-label={sidebarOpen ? 'Réduire le menu' : 'Agrandir le menu'}
+            className="fixed top-6 z-[60] w-8 h-8 flex items-center justify-center rounded-full bg-white border border-gray-200 shadow-md hover:bg-gray-50 hover:shadow-lg transition-all duration-300 ease-out max-md:hidden"
+            style={{
+              left: sidebarOpen ? 'calc(16rem - 1rem)' : 'calc(4rem - 1rem)',
+            }}
+          >
+            {sidebarOpen ? (
+              <ChevronLeft className="h-4 w-4 text-gray-600" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-gray-600" />
+            )}
+          </button>
+
+          <div className="p-4 md:p-6 max-w-full overflow-x-hidden min-h-[calc(100dvh-3.5rem)] md:min-h-screen">
+            {children}
+          </div>
         </main>
       </div>
     </ActiveTeamProvider>

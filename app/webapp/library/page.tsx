@@ -1049,7 +1049,7 @@ export default function LibraryPage() {
                   <Layout className="h-12 w-12 mx-auto mb-4 text-gray-300" />
                   <p>Aucun schéma disponible.</p>
                   <p className="text-sm mt-2">Créez d'abord un schéma dans l'éditeur de schémas tactiques.</p>
-                  <p className="text-xs mt-2 text-gray-600">Équipe: {activeTeam.name || activeTeam.id}</p>
+                  <p className="text-xs mt-2 text-gray-600">Équipe: {activeTeam.name}</p>
                 </div>
               ) : (
                 <div className="space-y-2">
