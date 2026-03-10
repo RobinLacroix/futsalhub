@@ -1,9 +1,44 @@
 'use client';
 
+import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 import { useActiveTeam } from '../hooks/useActiveTeam';
+import { usePlayerProfile } from '../hooks/usePlayerProfile';
 
 export default function SimpleTeamSelector() {
   const { activeTeam, teams, loading, changeActiveTeam } = useActiveTeam();
+  const { player } = usePlayerProfile();
+  const [playerClubName, setPlayerClubName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!player?.id) {
+      setPlayerClubName(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data: pt } = await supabase
+        .from('player_teams')
+        .select('team_id')
+        .eq('player_id', player.id)
+        .limit(1)
+        .maybeSingle();
+      if (!pt?.team_id || cancelled) return;
+      const { data: team } = await supabase
+        .from('teams')
+        .select('club_id')
+        .eq('id', pt.team_id)
+        .maybeSingle();
+      if (!team?.club_id || cancelled) return;
+      const { data: club } = await supabase
+        .from('clubs')
+        .select('name')
+        .eq('id', team.club_id)
+        .maybeSingle();
+      if (!cancelled && club?.name) setPlayerClubName(club.name);
+    })();
+    return () => { cancelled = true; };
+  }, [player?.id]);
 
   // Debug: afficher les informations du hook
   console.log('SimpleTeamSelector - Hook data:', {
@@ -26,14 +61,18 @@ export default function SimpleTeamSelector() {
 
   if (teams.length === 0) {
     return (
-      <div className="w-full p-4 bg-red-500 border-2 border-red-700 rounded-lg shadow-lg">
-        <div className="text-center text-white">
-          <div className="text-lg font-bold mb-2">⚠️ AUCUNE ÉQUIPE</div>
-          <div className="text-sm mb-3">Aucune équipe trouvée</div>
-          <div className="text-xs">
-            Exécutez la migration SQL dans Supabase
+      <div className="w-full p-4 bg-gray-100 border border-gray-200 rounded-lg">
+        <div className="text-left text-gray-600 text-sm">Aucune équipe</div>
+        {player && (
+          <div className="text-left mt-2 text-xs">
+            <div className="text-gray-800 font-medium">
+              Joueur : {player.first_name} {player.last_name}
+            </div>
+            {playerClubName && (
+              <div className="text-gray-600 mt-0.5">[{playerClubName}]</div>
+            )}
           </div>
-        </div>
+        )}
       </div>
     );
   }

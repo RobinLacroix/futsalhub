@@ -41,18 +41,18 @@ Pour publier sur l’App Store / Play Store plus tard :
 
 ### Phase 1 — Projet de base
 - [x] **Étape 1.1** — Créer le projet Expo (TypeScript, template “blank”) → dossier `mobile/`
-- [ ] **Étape 1.2** — Configurer Supabase (même URL + clé anon, fichier env)
-- [ ] **Étape 1.3** — Afficher un écran simple + appel Supabase (ex : liste ou auth)
+- [x] **Étape 1.2** — Configurer Supabase (même URL + clé anon, fichier env) → `mobile/lib/supabase.ts`, `.env.example`
+- [x] **Étape 1.3** — Afficher un écran simple + appel Supabase (état de session auth)
 
 ### Phase 2 — Auth et navigation
-- [ ] **Étape 2.1** — Écran de connexion (email/mot de passe ou magic link) avec Supabase Auth
-- [ ] **Étape 2.2** — Navigation (onglets ou drawer) : Accueil, Calendrier, Équipe, etc.
-- [ ] **Étape 2.3** — Protéger les écrans (redirection si non connecté)
+- [x] **Étape 2.1** — Écran de connexion (email/mot de passe) avec Supabase Auth → `app/sign-in.tsx`
+- [x] **Étape 2.2** — Navigation onglets (Accueil, Calendrier, Équipe) → Expo Router `app/(tabs)/`
+- [x] **Étape 2.3** — Protection des écrans (redirection si non connecté) + déconnexion → `app/index.tsx` + bouton Accueil
 
 ### Phase 3 — Fonctionnalités métier
-- [ ] **Étape 3.1** — Écrans prioritaires (ex : calendrier, effectif, un écran “player”)
-- [ ] **Étape 3.2** — Réutiliser la logique / types existants (services, types partagés depuis le monorepo ou copie maîtrisée)
-- [ ] **Étape 3.3** — Adapter l’UI au tactile et aux petites écrans (déjà prévu avec React Native)
+- [x] **Étape 3.1** — Écrans prioritaires : Calendrier (liste entraînements), Équipe (liste joueurs), sélecteur d’équipe sur Accueil
+- [x] **Étape 3.2** — Types et services alignés webapp : `mobile/types`, `mobile/lib/services` (teams, trainings, players)
+- [x] **Étape 3.3** — UI tactile (FlatList, RefreshControl, boutons / modale)
 
 ### Phase 4 — Build et distribution
 - [ ] **Étape 4.1** — Build de test (Expo EAS ou en local)
@@ -61,13 +61,6 @@ Pour publier sur l’App Store / Play Store plus tard :
 
 ---
 
-## Prochaine action : **Étape 1.2**
+## Prochaine action : **Phase 4 — Build et distribution**
 
-Le projet Expo est dans **`mobile/`**. Pour tester tout de suite :
-
-```bash
-cd mobile
-npm start
-```
-
-Puis scanne le QR code avec **Expo Go** (même Wi‑Fi). Ensuite on enchaîne avec **1.2** (Supabase) et **1.3** (premier écran + appel API).
+Phase 3 terminée. L’app affiche les entraînements et l’effectif de l’équipe active (données Supabase), avec changement d’équipe depuis l’Accueil. Suite : **4.1** (build de test), **4.2** (TestFlight / internal testing), **4.3** (stores).

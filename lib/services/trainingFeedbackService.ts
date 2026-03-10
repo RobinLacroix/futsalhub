@@ -38,6 +38,20 @@ export async function createTokensForTraining(
 }
 
 /**
+ * Envoie les questionnaires pour une séance (RPC : crée les tokens pour présents/retard).
+ * À appeler en fin de séance par le coach.
+ */
+export async function sendQuestionnairesForTraining(trainingId: string): Promise<{ ok: boolean; count?: number; error?: string }> {
+  const { data, error } = await supabase.rpc('create_feedback_tokens_for_training', {
+    p_training_id: trainingId
+  });
+  if (error) return { ok: false, error: error.message };
+  const r = data as { ok?: boolean; count?: number; error?: string } | null;
+  if (r?.ok) return { ok: true, count: r.count };
+  return { ok: false, error: (r?.error as string) || 'Erreur' };
+}
+
+/**
  * Récupère les infos d'une séance par token (pour la page questionnaire).
  * Utilise l'RPC qui peut être appelée sans auth.
  */

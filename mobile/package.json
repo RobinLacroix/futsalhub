@@ -1,21 +1,40 @@
 {
   "name": "mobile",
   "version": "1.0.0",
-  "main": "index.ts",
+  "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
+    "start:clear": "expo start --clear",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "build:preview": "eas build --profile preview --platform all",
+    "build:preview:ios": "eas build --profile preview --platform ios",
+    "build:preview:android": "eas build --profile preview --platform android",
+    "build:production": "eas build --profile production --platform all",
+    "build:production:ios": "eas build --profile production --platform ios",
+    "build:production:android": "eas build --profile production --platform android",
+    "submit:ios": "eas submit --platform ios --latest",
+    "submit:android": "eas submit --platform android --latest"
   },
   "dependencies": {
-    "expo": "~55.0.5",
-    "expo-status-bar": "~55.0.4",
-    "react": "19.2.0",
-    "react-native": "0.83.2"
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-native-community/datetimepicker": "8.4.4",
+    "@supabase/supabase-js": "^2.98.0",
+    "date-fns": "^4.1.0",
+    "expo": "~54.0.0",
+    "expo-constants": "~18.0.13",
+    "expo-linking": "~8.0.11",
+    "expo-router": "~6.0.23",
+    "expo-status-bar": "~3.0.9",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-gesture-handler": "^2.30.0",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-screens": "~4.16.0"
   },
   "devDependencies": {
-    "@types/react": "~19.2.2",
+    "@types/react": "~19.1.0",
     "typescript": "~5.9.2"
   },
   "private": true

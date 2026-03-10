@@ -8,6 +8,7 @@ import SimpleTeamSelector from './components/SimpleTeamSelector';
 import DebugTeamSelector from './components/DebugTeamSelector';
 import TeamChangeTester from './components/TeamChangeTester';
 import { usePlayerProfile } from './hooks/usePlayerProfile';
+import { useActiveTeam } from './hooks/useActiveTeam';
 import {
   Home,
   Calendar,
@@ -28,63 +29,6 @@ import {
   Menu
 } from 'lucide-react';
 
-// Composant UserMenu pour la sidebar
-function UserMenu() {
-  const router = useRouter();
-  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const [userInitial, setUserInitial] = useState('');
-
-  // Récupérer l'initiale de l'utilisateur
-  useEffect(() => {
-    const getUserInitial = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user?.user_metadata?.first_name) {
-        setUserInitial(user.user_metadata.first_name[0].toUpperCase());
-      }
-    };
-    getUserInitial();
-  }, []);
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push('/');
-  };
-
-  return (
-    <div className="mt-auto px-3 pb-8">
-      <div className="relative">
-        <button
-          onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-          className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-600 text-white font-medium hover:bg-blue-700 focus:outline-none transition-colors duration-200"
-        >
-          {userInitial || '?'}
-        </button>
-
-        {isUserMenuOpen && (
-          <div className="absolute bottom-full left-0 mb-2 w-48 bg-white rounded-md shadow-lg py-1 ring-1 ring-black ring-opacity-5">
-            <button
-              type="button"
-              onClick={() => router.push('/webapp/settings')}
-              className="flex items-center w-full px-4 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-100"
-            >
-              <Settings className="h-4 w-4 mr-2" />
-              Paramètres
-            </button>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="flex items-center w-full px-4 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-100"
-            >
-              <LogOut className="h-4 w-4 mr-2" />
-              Se déconnecter
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // Composant Sidebar
 function Sidebar({
   isExpanded,
@@ -98,11 +42,20 @@ function Sidebar({
   onMobileClose: () => void;
 }) {
   const { player: playerProfile } = usePlayerProfile();
+  const { teams } = useActiveTeam();
   const router = useRouter();
+
+  const isPlayerOnly = !!playerProfile && teams.length === 0;
 
   const handleNavClick = (href: string) => {
     onMobileClose();
     router.push(href);
+  };
+
+  const handleLogout = async () => {
+    onMobileClose();
+    await supabase.auth.signOut();
+    router.push('/');
   };
 
   const navigation = [
@@ -116,12 +69,13 @@ function Sidebar({
           name: 'Joueur',
           items: [
             { name: 'Calendrier / Présences', href: '/webapp/player/calendar', icon: Calendar },
+            { name: 'Ma fiche', href: '/webapp/player/profile', icon: UserCircle },
             { name: 'Questionnaires', href: '/webapp/player/questionnaires', icon: MessageSquare }
           ] as const
         }]
       : []
     ),
-    {
+    ...(isPlayerOnly ? [] : [{
       name: 'Manager',
       items: [
         {
@@ -161,8 +115,7 @@ function Sidebar({
         }
       ]
     },
-    {
-      name: 'Scout',
+    { name: 'Scout',
       items: [
         {
           name: 'Annonce',
@@ -176,8 +129,7 @@ function Sidebar({
         }
       ]
     },
-    {
-      name: 'Share',
+    { name: 'Share',
       items: [
         {
           name: 'Librairie',
@@ -196,6 +148,9 @@ function Sidebar({
         }
       ]
     }
+  ]),
+    { name: 'Paramètres', href: '/webapp/settings', icon: Settings },
+    { name: 'Se déconnecter', icon: LogOut, action: 'logout' as const }
   ];
 
   return (
@@ -231,7 +186,18 @@ function Sidebar({
           <div className="px-3 space-y-1 h-full">
             {navigation.map((item) => (
               <div key={item.name}>
-                {item.href ? (
+                {'action' in item && item.action === 'logout' ? (
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className={`flex items-center w-full px-3 py-3 min-h-[44px] text-sm font-medium rounded-md text-gray-700 hover:bg-gray-50 active:bg-gray-100 md:py-2 md:min-h-0 ${
+                      isExpanded || isMobileOpen ? 'justify-start text-left' : 'justify-center px-0'
+                    }`}
+                  >
+                    <item.icon className={`h-5 w-5 flex-shrink-0 ${isExpanded || isMobileOpen ? 'mr-3' : ''}`} />
+                    {(isExpanded || isMobileOpen) && <span>{item.name}</span>}
+                  </button>
+                ) : item.href ? (
                   <button
                     type="button"
                     onClick={() => handleNavClick(item.href!)}
@@ -268,9 +234,6 @@ function Sidebar({
             ))}
           </div>
         </nav>
-
-        {/* UserMenu en bas de la sidebar */}
-        <UserMenu />
       </aside>
     </>
   );

@@ -1,0 +1,34 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "ios": { "simulator": false },
+      "android": { "buildType": "apk" },
+      "channel": "preview"
+    },
+    "production": {
+      "distribution": "store",
+      "channel": "production",
+      "autoIncrement": true
+    }
+  },
+  "submit": {
+    "preview": {
+      "ios": {
+        "ascAppId": "__REMPLACER_PAR_APP_ID_APP_STORE_CONNECT__",
+        "appleId": "__OPTIONNEL_EMAIL_APPLE__"
+      }
+    },
+    "production": {
+      "ios": {
+        "ascAppId": "__REMPLACER_PAR_APP_ID_APP_STORE_CONNECT__",
+        "appleId": "__OPTIONNEL_EMAIL_APPLE__"
+      },
+      "android": { "track": "internal" }
+    }
+  }
+}

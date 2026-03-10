@@ -19,6 +19,16 @@ export interface MyPendingFeedbackRow {
   url: string;
 }
 
+export interface MyUpcomingMatchRow {
+  match_id: string;
+  match_date: string;
+  title: string | null;
+  location: string | null;
+  competition: string | null;
+  opponent_team: string | null;
+  team_name: string | null;
+}
+
 /**
  * Liste des convocations (entraînements à venir) pour le joueur connecté.
  */
@@ -35,6 +45,47 @@ export async function getMyConvocations(): Promise<MyConvolutionRow[]> {
     feedback_token: row.feedback_token ?? null,
     feedback_url: row.feedback_url ?? null
   }));
+}
+
+/** Une seule RPC : entraînements + matchs en JSON (aligné avec l'app mobile). */
+export async function getMyCalendarEvents(): Promise<{
+  trainings: MyConvolutionRow[];
+  matches: MyUpcomingMatchRow[];
+}> {
+  const { data, error } = await supabase.rpc('get_my_calendar_events');
+  if (error) throw error;
+  const obj = (data ?? {}) as Record<string, unknown>;
+  const trainingsRaw = Array.isArray(obj.trainings) ? obj.trainings : [];
+  const matchesRaw = Array.isArray(obj.matches) ? obj.matches : [];
+  return {
+    trainings: trainingsRaw.map((row: any) => ({
+      training_id: String(row.training_id ?? ''),
+      training_date: row.training_date != null ? String(row.training_date) : '',
+      location: row.location ?? null,
+      theme: row.theme ?? null,
+      team_name: row.team_name ?? null,
+      my_status: row.my_status ?? null,
+      feedback_token: row.feedback_token ?? null,
+      feedback_url: row.feedback_url ?? null,
+    })),
+    matches: matchesRaw.map((row: any) => ({
+      match_id: String(row.match_id ?? ''),
+      match_date: row.match_date != null ? String(row.match_date) : '',
+      title: row.title ?? null,
+      location: row.location ?? null,
+      competition: row.competition ?? null,
+      opponent_team: row.opponent_team ?? null,
+      team_name: row.team_name ?? null,
+    })),
+  };
+}
+
+/** Équipes auxquelles le joueur connecté appartient (pour Ma fiche / stats). */
+export async function getMyPlayerTeamIds(): Promise<string[]> {
+  const { data, error } = await supabase.rpc('get_my_player_team_ids');
+  if (error) throw error;
+  const arr = (data ?? []) as Array<string | { team_id: string }>;
+  return arr.map((x) => (typeof x === 'string' ? x : x?.team_id)).filter(Boolean);
 }
 
 /**

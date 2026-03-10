@@ -211,16 +211,26 @@ export const playersService = {
       if (!training.attendance) return false;
       try {
         const status = training.attendance[playerId] as PlayerStatus | undefined;
-        // On considère présent et retard comme participation
         return status === 'present' || status === 'late';
       } catch {
         return false;
       }
     }).length;
 
-    const totalTrainings = trainingsData?.length || 0;
-    const attendance_percentage = totalTrainings > 0 
-      ? Math.round((trainingAttendance / totalTrainings) * 100) 
+    // Dénominateur = séances "réalisables" (où le joueur a répondu) — aligné avec l'app mobile
+    // Si arrivé en cours d'année, seules comptent les séances où il a pu/do répondre
+    const totalRecordedTrainings = (trainingsData || []).filter(training => {
+      if (!training.attendance) return false;
+      try {
+        const status = training.attendance[playerId] as PlayerStatus | undefined;
+        return status === 'present' || status === 'late' || status === 'absent' || status === 'injured';
+      } catch {
+        return false;
+      }
+    }).length;
+
+    const attendance_percentage = totalRecordedTrainings > 0
+      ? Math.round((trainingAttendance / totalRecordedTrainings) * 100)
       : 0;
 
     let victories = 0;

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { MessageSquare, FileText, ExternalLink } from 'lucide-react';
+import { FileText, ExternalLink } from 'lucide-react';
 import { getMyPendingFeedbackTokens, type MyPendingFeedbackRow } from '@/lib/services/playerConvocationsService';
 
 export default function PlayerQuestionnairesPage() {
@@ -27,18 +27,18 @@ export default function PlayerQuestionnairesPage() {
 
   if (loading) {
     return (
-      <div className="p-6 flex items-center justify-center min-h-[40vh]">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-600 border-t-transparent" />
+      <div className="p-4 md:p-6 flex items-center justify-center min-h-[40vh]">
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#16a34a] border-t-transparent" />
       </div>
     );
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div className="p-4 md:p-6 max-w-xl mx-auto">
       <div className="flex items-center gap-3 mb-6">
-        <MessageSquare className="h-8 w-8 text-blue-600" />
+        <FileText className="h-8 w-8 text-[#16a34a]" />
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Questionnaires</h1>
+          <h1 className="text-xl md:text-2xl font-bold text-gray-900">Questionnaires</h1>
           <p className="text-gray-600 text-sm">
             Répondez aux questionnaires de fin de séance pour aider l&apos;équipe à suivre votre ressenti.
           </p>
@@ -46,8 +46,8 @@ export default function PlayerQuestionnairesPage() {
       </div>
 
       {pending.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-500">
-          <FileText className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-500 shadow-sm">
+          <FileText className="h-12 w-12 mx-auto mb-3 text-gray-300" />
           <p>Aucun questionnaire en attente.</p>
           <p className="text-sm mt-1">
             Les liens de questionnaire apparaissent après une séance (ou depuis le calendrier).
@@ -62,7 +62,7 @@ export default function PlayerQuestionnairesPage() {
             return (
               <li
                 key={row.training_id + row.token}
-                className="bg-white rounded-xl border border-gray-200 p-4 flex flex-wrap items-center justify-between gap-3"
+                className="bg-white rounded-xl border-l-4 border-[#16a34a] border border-gray-200 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-sm"
               >
                 <div>
                   <p className="font-semibold text-gray-900">{date}</p>
@@ -72,7 +72,7 @@ export default function PlayerQuestionnairesPage() {
                   href={row.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+                  className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-[#16a34a] text-white rounded-xl text-sm font-medium hover:bg-[#15803d] min-h-[44px] touch-manipulation shrink-0"
                 >
                   <ExternalLink className="h-4 w-4" />
                   Remplir le questionnaire

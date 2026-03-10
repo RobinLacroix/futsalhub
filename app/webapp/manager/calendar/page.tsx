@@ -344,6 +344,18 @@ export default function CalendarPage() {
     return () => { cancelled = true; };
   }, [isTrainingModalOpen, isEditing, editingEvent?.id, editingEvent?.type]);
 
+  const playersFormData = watch('players');
+  const sortedPlayersForMatch = useMemo(() => {
+    if (!players?.length) return [];
+    const present = playersFormData || {};
+    return [...players].sort((a, b) => {
+      const aPresent = !!present[a.id]?.present;
+      const bPresent = !!present[b.id]?.present;
+      if (aPresent !== bPresent) return aPresent ? -1 : 1;
+      return (a.last_name || '').localeCompare(b.last_name || '', 'fr');
+    });
+  }, [players, playersFormData]);
+
   const refreshFeedbackLinks = async () => {
     if (!editingEvent || editingEvent.type !== 'training' || !editingEvent.id) return;
     setFeedbackLinksLoading(true);
@@ -941,6 +953,12 @@ export default function CalendarPage() {
         return newPlayer;
       });
 
+      // Trier : convoqués en premier, puis ordre alphabétique
+      const playerNameMap = new Map(players.map(p => [p.id, (p.last_name || '').toLowerCase()]));
+      mergedPlayers.sort((a, b) =>
+        (playerNameMap.get(a.id) || '').localeCompare(playerNameMap.get(b.id) || '', 'fr')
+      );
+
       console.log('🔍 Joueurs fusionnés avec time_played préservé:', mergedPlayers);
 
       const matchData = {
@@ -1284,22 +1302,26 @@ export default function CalendarPage() {
         
         console.log('🏆 Calendar - Ajout d\'entraînement pour l\'équipe:', activeTeam.name);
 
-        // Préparer les données de présence au format JSONB
+        // Joueurs convoqués = ceux qui ont un statut dans le formulaire (seuls eux verront la séance)
         const attendanceData: Record<string, string> = {};
+        const convokedPlayerIds: string[] = [];
         Object.entries(data.players).forEach(([playerId, player]) => {
           if (player && typeof player === 'object' && player.status) {
             attendanceData[playerId] = player.status;
+            convokedPlayerIds.push(playerId);
           }
         });
+        const convoked_players = convokedPlayerIds.map((id) => ({ id }));
 
-        // Créer l'entraînement avec les présences directement dans le JSONB
+        // Créer l'entraînement avec convoked_players et présences
         const trainingData: any = {
           date: data.date.toISOString(),
           location: data.location,
           theme: data.theme,
           key_principle: data.key_principle,
-          attendance: attendanceData, // Stockage direct dans le JSONB
-          team_id: activeTeam.id // Ajouter automatiquement le team_id
+          attendance: attendanceData,
+          convoked_players,
+          team_id: activeTeam.id
         };
 
         // Ajouter les données de la page 2 si disponibles
@@ -1325,11 +1347,7 @@ export default function CalendarPage() {
         }
 
         if (inserted?.id) {
-          try {
-            await createTokensForTraining(inserted.id, attendanceData);
-          } catch (tokenErr) {
-            console.warn('Création des liens questionnaire:', tokenErr);
-          }
+          // Les questionnaires s'envoient en fin de séance via le bouton "Envoyer les questionnaires"
         }
 
         handleCloseTrainingModal();
@@ -2087,7 +2105,7 @@ export default function CalendarPage() {
 
                     {/* Liste des joueurs */}
                     <div className="max-h-[300px] overflow-y-auto divide-y">
-                      {players.map(player => {
+                      {sortedPlayersForMatch.map(player => {
                         const isPlayerPresent = watch(`players.${player.id}.present`);
                         
                         return (

@@ -32,14 +32,15 @@ export const trainingsService = {
   },
 
   /**
-   * Crée un nouvel entraînement
+   * Crée un nouvel entraînement (convoked_players = joueurs avec un statut = ceux qui voient la séance)
    */
   async createTraining(trainingData: TrainingFormData, teamId: string): Promise<Training> {
-    // Convertir les joueurs en format JSONB
     const attendance: Record<string, PlayerStatus> = {};
+    const convoked_players: { id: string }[] = [];
     Object.values(trainingData.players).forEach(player => {
-      if (player.status) {
+      if (player?.status) {
         attendance[player.id] = player.status;
+        convoked_players.push({ id: player.id });
       }
     });
 
@@ -50,7 +51,8 @@ export const trainingsService = {
         location: trainingData.location,
         theme: trainingData.theme,
         key_principle: trainingData.key_principle,
-        attendance: attendance,
+        attendance,
+        convoked_players: convoked_players.length ? convoked_players : [],
         team_id: teamId
       })
       .select()
