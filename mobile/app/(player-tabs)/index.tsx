@@ -21,7 +21,7 @@ import {
   type MyUpcomingMatchRow,
 } from '../../lib/services/playerConvocations';
 
-type Status = 'present' | 'absent' | 'late';
+type Status = 'present' | 'absent' | 'late' | 'injured';
 
 type CalendarItem =
   | { type: 'training'; data: MyConvolutionRow }
@@ -192,9 +192,12 @@ export default function PlayerConvocationsScreen() {
           if (item.type === 'match') {
             const m = item.data;
             const matchDate = m.match_date ? parseISO(m.match_date) : new Date();
+            const otherTeam = !!m.is_other_team;
             return (
-              <View style={[styles.card, styles.cardMatch]}>
-                <Text style={[styles.badge, styles.badgeMatch]}>Match</Text>
+              <View style={[styles.card, styles.cardMatch, otherTeam && styles.cardOtherTeam]}>
+                <Text style={[styles.badge, styles.badgeMatch, otherTeam && styles.badgeOtherTeam]}>
+                  Match{otherTeam ? ' (autre équipe)' : ''}
+                </Text>
                 <Text style={styles.date}>{format(matchDate, 'EEEE d MMMM yyyy', { locale: fr })}</Text>
                 <Text style={styles.time}>{format(matchDate, 'HH:mm', { locale: fr })}</Text>
                 <Text style={styles.theme}>{m.title || 'Match'}</Text>
@@ -211,47 +214,62 @@ export default function PlayerConvocationsScreen() {
           const date = c.training_date ? parseISO(c.training_date) : new Date();
           const status = (c.my_status as Status) || null;
           const isUpdating = updatingId === c.training_id;
+          const otherTeam = !!c.is_other_team;
           return (
-            <View style={styles.card}>
-              <Text style={styles.badge}>Entraînement</Text>
+            <View style={[styles.card, otherTeam && styles.cardOtherTeamTraining]}>
+              <Text style={[styles.badge, otherTeam && styles.badgeOtherTeamTraining]}>
+                Entraînement{otherTeam ? ' (autre équipe)' : ''}
+              </Text>
               <Text style={styles.date}>{format(date, 'EEEE d MMMM yyyy', { locale: fr })}</Text>
               <Text style={styles.time}>{format(date, 'HH:mm', { locale: fr })}</Text>
-              {c.theme ? <Text style={styles.theme}>Thème : {c.theme}</Text> : null}
               {c.team_name ? <Text style={styles.meta}>Équipe : {c.team_name}</Text> : null}
               {c.location ? <Text style={styles.meta}>Lieu : {c.location}</Text> : null}
 
-              <Text style={styles.label}>Je serai :</Text>
-              <View style={styles.buttons}>
-                <TouchableOpacity
-                  style={[styles.btn, status === 'present' && styles.btnPresent]}
-                  onPress={() => handleSetAttendance(c.training_id, 'present')}
-                  disabled={isUpdating}
-                >
-                  <Text style={[styles.btnText, status === 'present' && styles.btnTextActive]}>
-                    {isUpdating ? '…' : 'Présent'}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.btn, status === 'late' && styles.btnLate]}
-                  onPress={() => handleSetAttendance(c.training_id, 'late')}
-                  disabled={isUpdating}
-                >
-                  <Text style={[styles.btnText, status === 'late' && styles.btnTextActive]}>
-                    En retard
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.btn, status === 'absent' && styles.btnAbsent]}
-                  onPress={() => handleSetAttendance(c.training_id, 'absent')}
-                  disabled={isUpdating}
-                >
-                  <Text style={[styles.btnText, status === 'absent' && styles.btnTextActive]}>
-                    Absent
-                  </Text>
-                </TouchableOpacity>
-              </View>
+              {!otherTeam ? (
+                <>
+                  <Text style={styles.label}>Je serai :</Text>
+                  <View style={styles.buttons}>
+                    <TouchableOpacity
+                      style={[styles.btn, status === 'present' && styles.btnPresent]}
+                      onPress={() => handleSetAttendance(c.training_id, 'present')}
+                      disabled={isUpdating}
+                    >
+                      <Text style={[styles.btnText, status === 'present' && styles.btnTextActive]}>
+                        {isUpdating ? '…' : 'Présent'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.btn, status === 'late' && styles.btnLate]}
+                      onPress={() => handleSetAttendance(c.training_id, 'late')}
+                      disabled={isUpdating}
+                    >
+                      <Text style={[styles.btnText, status === 'late' && styles.btnTextActive]}>
+                        En retard
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.btn, status === 'absent' && styles.btnAbsent]}
+                      onPress={() => handleSetAttendance(c.training_id, 'absent')}
+                      disabled={isUpdating}
+                    >
+                      <Text style={[styles.btnText, status === 'absent' && styles.btnTextActive]}>
+                        Absent
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.btn, status === 'injured' && styles.btnInjured]}
+                      onPress={() => handleSetAttendance(c.training_id, 'injured')}
+                      disabled={isUpdating}
+                    >
+                      <Text style={[styles.btnText, status === 'injured' && styles.btnTextActive]}>
+                        Blessé
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              ) : null}
 
-              {c.feedback_token && c.feedback_url ? (
+              {c.feedback_token && c.feedback_url && !otherTeam ? (
                 <TouchableOpacity
                   style={styles.questionnaireLink}
                   onPress={() => openQuestionnaire(c.feedback_url!)}
@@ -291,6 +309,20 @@ const styles = StyleSheet.create({
   cardMatch: {
     borderLeftColor: '#2563eb',
   },
+  cardOtherTeam: {
+    backgroundColor: '#fffbeb',
+    borderLeftColor: '#d97706',
+  },
+  cardOtherTeamTraining: {
+    backgroundColor: '#f5f3ff',
+    borderLeftColor: '#7c3aed',
+  },
+  badgeOtherTeam: {
+    backgroundColor: '#d97706',
+  },
+  badgeOtherTeamTraining: {
+    backgroundColor: '#7c3aed',
+  },
   badge: {
     fontSize: 11,
     fontWeight: '700',
@@ -321,6 +353,7 @@ const styles = StyleSheet.create({
   btnPresent: { backgroundColor: '#16a34a' },
   btnLate: { backgroundColor: '#ea580c' },
   btnAbsent: { backgroundColor: '#d97706' },
+  btnInjured: { backgroundColor: '#e11d48' },
   btnText: { fontSize: 14, fontWeight: '600', color: '#374151' },
   btnTextActive: { color: '#fff' },
   questionnaireLink: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#e5e7eb' },

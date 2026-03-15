@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "8743d84d-a1c9-4e2a-bd34-a63449cf14af"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.robin.lacroix.futsalhub3",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    }
+  }
+}

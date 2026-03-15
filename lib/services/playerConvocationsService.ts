@@ -4,11 +4,12 @@ export interface MyConvolutionRow {
   training_id: string;
   training_date: string;
   location: string | null;
-  theme: string | null;
   team_name: string | null;
   my_status: string | null;
   feedback_token: string | null;
   feedback_url: string | null;
+  /** true = convoqué par une autre équipe (affichage couleur) */
+  is_other_team?: boolean;
 }
 
 export interface MyPendingFeedbackRow {
@@ -27,6 +28,8 @@ export interface MyUpcomingMatchRow {
   competition: string | null;
   opponent_team: string | null;
   team_name: string | null;
+  /** true = convoqué par une autre équipe (affichage couleur) */
+  is_other_team?: boolean;
 }
 
 /**
@@ -39,11 +42,11 @@ export async function getMyConvocations(): Promise<MyConvolutionRow[]> {
     training_id: row.training_id,
     training_date: row.training_date,
     location: row.location ?? null,
-    theme: row.theme ?? null,
     team_name: row.team_name ?? null,
     my_status: row.my_status ?? null,
     feedback_token: row.feedback_token ?? null,
-    feedback_url: row.feedback_url ?? null
+    feedback_url: row.feedback_url ?? null,
+    is_other_team: row.is_other_team ?? false,
   }));
 }
 
@@ -62,11 +65,11 @@ export async function getMyCalendarEvents(): Promise<{
       training_id: String(row.training_id ?? ''),
       training_date: row.training_date != null ? String(row.training_date) : '',
       location: row.location ?? null,
-      theme: row.theme ?? null,
       team_name: row.team_name ?? null,
       my_status: row.my_status ?? null,
       feedback_token: row.feedback_token ?? null,
       feedback_url: row.feedback_url ?? null,
+      is_other_team: row.is_other_team ?? false,
     })),
     matches: matchesRaw.map((row: any) => ({
       match_id: String(row.match_id ?? ''),
@@ -76,6 +79,7 @@ export async function getMyCalendarEvents(): Promise<{
       competition: row.competition ?? null,
       opponent_team: row.opponent_team ?? null,
       team_name: row.team_name ?? null,
+      is_other_team: row.is_other_team ?? false,
     })),
   };
 }
@@ -89,11 +93,11 @@ export async function getMyPlayerTeamIds(): Promise<string[]> {
 }
 
 /**
- * Met à jour la présence du joueur connecté pour un entraînement (présent / absent / en retard).
+ * Met à jour la présence du joueur connecté pour un entraînement (présent / absent / en retard / blessé).
  */
 export async function setMyTrainingAttendance(
   trainingId: string,
-  status: 'present' | 'absent' | 'late'
+  status: 'present' | 'absent' | 'late' | 'injured'
 ): Promise<{ ok: boolean; error?: string }> {
   const { data, error } = await supabase.rpc('set_my_training_attendance', {
     p_training_id: trainingId,

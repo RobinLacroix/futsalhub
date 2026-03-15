@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { Calendar, Check, X, Clock, FileText, Loader2 } from 'lucide-react';
+import { Calendar, Check, X, Clock, FileText, Loader2, Bandage } from 'lucide-react';
 import {
   getMyCalendarEvents,
   setMyTrainingAttendance,
@@ -11,7 +11,7 @@ import {
   type MyUpcomingMatchRow
 } from '@/lib/services/playerConvocationsService';
 
-type AttendanceStatus = 'present' | 'absent' | 'late';
+type AttendanceStatus = 'present' | 'absent' | 'late' | 'injured';
 
 type CalendarItem =
   | { type: 'training'; data: MyConvolutionRow }
@@ -114,10 +114,15 @@ export default function PlayerCalendarPage() {
               const m = item.data;
               const matchDate = m.match_date ? format(new Date(m.match_date), 'EEEE d MMMM yyyy', { locale: fr }) : '';
               const matchTime = m.match_date ? format(new Date(m.match_date), 'HH:mm', { locale: fr }) : '';
+              const otherTeam = !!m.is_other_team;
               return (
                 <li
                   key={`m-${m.match_id}`}
-                  className="bg-white rounded-xl border-l-4 border-blue-500 border border-gray-200 overflow-hidden shadow-sm"
+                  className={`rounded-xl border overflow-hidden shadow-sm ${
+                    otherTeam
+                      ? 'bg-amber-50/80 border-amber-400 border-l-4 border-l-amber-500'
+                      : 'bg-white border-l-4 border-blue-500 border border-gray-200'
+                  }`}
                 >
                   <div className="p-4">
                     <div className="flex items-center gap-2 mb-2">
@@ -142,24 +147,29 @@ export default function PlayerCalendarPage() {
             const time = c.training_date ? format(new Date(c.training_date), 'HH:mm', { locale: fr }) : '';
             const status = (c.my_status as AttendanceStatus) || null;
             const isUpdating = updatingId === c.training_id;
+            const otherTeam = !!c.is_other_team;
 
             return (
               <li
                 key={`t-${c.training_id}`}
-                className="bg-white rounded-xl border-l-4 border-[#16a34a] border border-gray-200 overflow-hidden shadow-sm"
+                className={`rounded-xl border overflow-hidden shadow-sm ${
+                  otherTeam
+                    ? 'bg-violet-50/80 border-violet-400 border-l-4 border-l-violet-500'
+                    : 'bg-white border-l-4 border-[#16a34a] border border-gray-200'
+                }`}
               >
                 <div className="p-4">
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-[#16a34a] text-white">
-                      Entraînement
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${otherTeam ? 'bg-violet-500 text-white' : 'bg-[#16a34a] text-white'}`}>
+                      Entraînement{otherTeam ? ' (autre équipe)' : ''}
                     </span>
                   </div>
                   <p className="font-semibold text-gray-900 capitalize">{date}</p>
                   {time && <p className="text-sm text-gray-500">{time}</p>}
-                  {c.theme && <p className="text-sm text-gray-600 mt-1">Thème : {c.theme}</p>}
                   {c.team_name && <p className="text-xs text-gray-500 mt-0.5">Équipe : {c.team_name}</p>}
                   {c.location && <p className="text-xs text-gray-500">Lieu : {c.location}</p>}
 
+                  {!otherTeam && (
                   <div className="mt-4 flex flex-wrap items-center gap-2">
                     <span className="text-sm font-medium text-gray-700 w-full md:w-auto">Je serai :</span>
                     <button
@@ -192,9 +202,20 @@ export default function PlayerCalendarPage() {
                       <X className="h-4 w-4" />
                       Absent
                     </button>
+                    <button
+                      onClick={() => handleSetAttendance(c.training_id, 'injured')}
+                      disabled={isUpdating}
+                      className={`inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium min-h-[44px] touch-manipulation transition ${
+                        status === 'injured' ? 'bg-rose-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-rose-100'
+                      }`}
+                    >
+                      <Bandage className="h-4 w-4" />
+                      Blessé
+                    </button>
                   </div>
+                  )}
 
-                  {c.feedback_token && c.feedback_url && (
+                  {c.feedback_token && c.feedback_url && !otherTeam && (
                     <div className="mt-3 pt-3 border-t border-gray-100">
                       <a
                         href={

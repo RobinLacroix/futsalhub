@@ -202,19 +202,19 @@ const matchSchema = yup.object().shape({
 // Schéma de validation pour l'entraînement
 const trainingSchema = yup.object().shape({
   date: yup.date().required('La date est requise'),
-  location: yup.string().required('Le lieu est requis'),
+  location: yup.string().optional(),
   theme: yup.string().oneOf(['Offensif', 'Défensif', 'Transition', 'Supériorité'] as const, 'Veuillez sélectionner un thème').required('Le thème est requis'),
-  key_principle: yup.string().required('Le principe clé est requis'),
+  key_principle: yup.string().optional(),
   players: yup.object().test(
     'at-least-one-player',
-    'Au moins un joueur doit être sélectionné',
+    'Au moins un joueur doit être convoqué ou marqué blessé',
     (value) => {
       if (!value) return false;
-      return Object.values(value).some(player => 
+      return Object.values(value).some(player =>
         player &&
         typeof player === 'object' &&
         'status' in player &&
-        (player.status === 'present' || player.status === 'late')
+        (player.status === 'present' || player.status === 'late' || player.status === 'injured')
       );
     }
   ),
@@ -2696,75 +2696,115 @@ export default function CalendarPage() {
                   <label className="block text-xs font-medium text-gray-800 mb-1.5">Statut des joueurs</label>
                   <div className="border rounded-md overflow-hidden">
                     <div className="max-h-[200px] overflow-y-auto divide-y">
-                      {players.map(player => (
-                        <div 
-                          key={player.id} 
+                      {players.map(player => {
+                        const formPlayers = watchTraining('players') || {} as Record<string, { id: string; status: PlayerStatus }>;
+                        const isInForm = player.id in formPlayers;
+                        return (
+                        <div
+                          key={player.id}
                           className="flex flex-col sm:flex-row sm:items-center gap-2 p-2 hover:bg-gray-50"
                         >
                           <span className="text-sm text-gray-900 flex-1">
                             {player.first_name} {player.last_name}
                           </span>
-                          
-                          <div className="flex flex-wrap items-center gap-3 sm:gap-4 sm:justify-end">
-                            <Controller
-                              name={`players.${player.id}.status`}
-                              control={trainingControl}
-                              defaultValue="present"
-                              render={({ field: { value, onChange } }) => (
-                                <div className="flex items-center gap-3">
-                                  <label className="flex items-center gap-1 text-xs">
-                                    <input
-                                      type="radio"
-                                      name={`status-${player.id}`}
-                                      value="present"
-                                      checked={value === "present"}
-                                      onChange={(e) => onChange(e.target.value as PlayerStatus)}
-                                      className="text-green-600 focus:ring-green-500"
-                                    />
-                                    <span className="text-green-700">✅</span>
-                                  </label>
-                                  
-                                  <label className="flex items-center gap-1 text-xs">
-                                    <input
-                                      type="radio"
-                                      name={`status-${player.id}`}
-                                      value="absent"
-                                      checked={value === "absent"}
-                                      onChange={(e) => onChange(e.target.value as PlayerStatus)}
-                                      className="text-red-600 focus:ring-red-500"
-                                    />
-                                    <span className="text-red-700">❌</span>
-                                  </label>
-                                  
-                                  <label className="flex items-center gap-1 text-xs">
-                                    <input
-                                      type="radio"
-                                      name={`status-${player.id}`}
-                                      value="injured"
-                                      checked={value === "injured"}
-                                      onChange={(e) => onChange(e.target.value as PlayerStatus)}
-                                      className="text-orange-600 focus:ring-orange-500"
-                                    />
-                                    <span className="text-orange-700">🩹</span>
-                                  </label>
-
-                                  <label className="flex items-center gap-1 text-xs">
-                                    <input
-                                      type="radio"
-                                      name={`status-${player.id}`}
-                                      value="late"
-                                      checked={value === "late"}
-                                      onChange={(e) => onChange(e.target.value as PlayerStatus)}
-                                      className="text-yellow-600 focus:ring-yellow-500"
-                                    />
-                                    <span className="text-yellow-700">⏰ Retard</span>
-                                  </label>
-                                </div>
-                              )}
-                            />
-                          </div>
+                          {isInForm ? (
+                            <div className="flex flex-wrap items-center gap-3 sm:gap-4 sm:justify-end">
+                              <Controller
+                                name={`players.${player.id}.status`}
+                                control={trainingControl}
+                                render={({ field: { value, onChange } }) => (
+                                  <div className="flex items-center gap-3">
+                                    <label className="flex items-center gap-1 text-xs">
+                                      <input
+                                        type="radio"
+                                        name={`status-${player.id}`}
+                                        value="present"
+                                        checked={value === "present"}
+                                        onChange={(e) => onChange(e.target.value as PlayerStatus)}
+                                        className="text-green-600 focus:ring-green-500"
+                                      />
+                                      <span className="text-green-700">✅</span>
+                                    </label>
+                                    <label className="flex items-center gap-1 text-xs">
+                                      <input
+                                        type="radio"
+                                        name={`status-${player.id}`}
+                                        value="absent"
+                                        checked={value === "absent"}
+                                        onChange={(e) => onChange(e.target.value as PlayerStatus)}
+                                        className="text-red-600 focus:ring-red-500"
+                                      />
+                                      <span className="text-red-700">❌</span>
+                                    </label>
+                                    <label className="flex items-center gap-1 text-xs">
+                                      <input
+                                        type="radio"
+                                        name={`status-${player.id}`}
+                                        value="injured"
+                                        checked={value === "injured"}
+                                        onChange={(e) => onChange(e.target.value as PlayerStatus)}
+                                        className="text-orange-600 focus:ring-orange-500"
+                                      />
+                                      <span className="text-orange-700">🩹</span>
+                                    </label>
+                                    <label className="flex items-center gap-1 text-xs">
+                                      <input
+                                        type="radio"
+                                        name={`status-${player.id}`}
+                                        value="late"
+                                        checked={value === "late"}
+                                        onChange={(e) => onChange(e.target.value as PlayerStatus)}
+                                        className="text-yellow-600 focus:ring-yellow-500"
+                                      />
+                                      <span className="text-yellow-700">⏰ Retard</span>
+                                    </label>
+                                  </div>
+                                )}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const current = getTrainingValues('players') || {};
+                                  const next = { ...current };
+                                  delete next[player.id];
+                                  setTrainingValue('players', next);
+                                }}
+                                className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                                title="Retirer"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div
+                              className="flex items-center gap-2 touch-manipulation"
+                              onTouchStart={(e) => (e.currentTarget as HTMLElement).dataset.touchX = String(e.changedTouches?.[0]?.clientX ?? 0)}
+                              onTouchEnd={(e) => {
+                                const el = e.currentTarget as HTMLElement;
+                                const start = Number(el.dataset.touchX) || 0;
+                                const end = e.changedTouches?.[0]?.clientX ?? 0;
+                                if (end - start > 60) setTrainingValue('players', { ...getTrainingValues('players'), [player.id]: { id: player.id, status: 'injured' } });
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => setTrainingValue('players', { ...getTrainingValues('players'), [player.id]: { id: player.id, status: 'present' } })}
+                                className="text-xs px-3 py-1.5 rounded bg-[#16a34a] text-white hover:bg-[#15803d]"
+                              >
+                                Convoquer
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setTrainingValue('players', { ...getTrainingValues('players'), [player.id]: { id: player.id, status: 'injured' } })}
+                                className="text-xs px-3 py-1.5 rounded bg-rose-500 text-white hover:bg-rose-600"
+                                title="Marquer blessé (glisser à droite sur mobile)"
+                              >
+                                Marquer blessé
+                              </button>
+                            </div>
+                          )}
                         </div>
-                      ))}
+                      ); })}
                     </div>
                   </div>
                 </div>
@@ -2792,42 +2832,19 @@ export default function CalendarPage() {
                           className="flex flex-col sm:flex-row sm:items-center gap-2 p-2 hover:bg-gray-50"
                         >
                           <span className="text-sm text-gray-900 flex-1">{getPlayerDisplayName(playerId)}</span>
-                          <div className="flex items-center gap-3 sm:justify-end">
-                            <Controller
-                              name={`players.${playerId}.status`}
-                              control={trainingControl}
-                              defaultValue="present"
-                              render={({ field: { value, onChange } }) => (
-                                <div className="flex items-center gap-3">
-                                  {(['present', 'absent', 'late', 'injured'] as const).map((s) => (
-                                    <label key={s} className="flex items-center gap-1 text-xs cursor-pointer">
-                                      <input
-                                        type="radio"
-                                        name={`invite-status-${playerId}`}
-                                        checked={value === s}
-                                        onChange={() => onChange(s)}
-                                        className="text-green-600 focus:ring-green-500"
-                                      />
-                                      <span>{s === 'present' ? '✅' : s === 'absent' ? '❌' : s === 'late' ? '⏰ Retard' : '🩹'}</span>
-                                    </label>
-                                  ))}
-                                </div>
-                              )}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const current = getTrainingValues('players') || {};
-                                const next = { ...current };
-                                delete next[playerId];
-                                setTrainingValue('players', next);
-                              }}
-                              className="p-1.5 text-red-600 hover:bg-red-50 rounded"
-                              title="Retirer"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const current = getTrainingValues('players') || {};
+                              const next = { ...current };
+                              delete next[playerId];
+                              setTrainingValue('players', next);
+                            }}
+                            className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                            title="Retirer"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
                         </div>
                       ))}
                     </div>
