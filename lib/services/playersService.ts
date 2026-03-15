@@ -200,6 +200,40 @@ export const playersService = {
   },
 
   /**
+   * Liste des équipes auxquelles le joueur est associé (ids)
+   */
+  async getPlayerTeamIds(playerId: string): Promise<string[]> {
+    const { data, error } = await supabase
+      .from('player_teams')
+      .select('team_id')
+      .eq('player_id', playerId);
+    if (error) throw error;
+    return (data || []).map((r: { team_id: string }) => r.team_id);
+  },
+
+  /**
+   * Associe un joueur à une équipe
+   */
+  async addPlayerToTeam(playerId: string, teamId: string): Promise<void> {
+    const { error } = await supabase
+      .from('player_teams')
+      .insert({ player_id: playerId, team_id: teamId });
+    if (error) throw error;
+  },
+
+  /**
+   * Dissocie un joueur d'une équipe
+   */
+  async removePlayerFromTeam(playerId: string, teamId: string): Promise<void> {
+    const { error } = await supabase
+      .from('player_teams')
+      .delete()
+      .eq('player_id', playerId)
+      .eq('team_id', teamId);
+    if (error) throw error;
+  },
+
+  /**
    * Récupère les statistiques d'un joueur
    */
   async getPlayerStats(playerId: string, teamId: string): Promise<{
