@@ -15,6 +15,8 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
+import { useUserClub } from '../../hooks/useUserClub';
+import { playersService } from '@/lib/services/playersService';
 import { schematicsService, type SchematicData } from '@/lib/services/schematicsService';
 import { createTokensForTraining, getFeedbackLinksForTraining } from '@/lib/services/trainingFeedbackService';
 import { SchematicPreview } from '../../library/components/SchematicPreview';
@@ -235,7 +237,8 @@ const DragAndDropCalendar = withDragAndDrop<RBCalendarEvent>(ReactBigCalendar);
 
 export default function CalendarPage() {
   const router = useRouter();
-  const { activeTeam } = useActiveTeam();
+  const { activeTeam, teams } = useActiveTeam();
+  const { club } = useUserClub();
   const [matches, setMatches] = useState<Match[]>([]);
   const [trainings, setTrainings] = useState<Training[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -264,11 +267,18 @@ export default function CalendarPage() {
   const [procedureFilterTheme, setProcedureFilterTheme] = useState<string | null>(null);
   const [feedbackLinks, setFeedbackLinks] = useState<{ player_name: string; url: string }[]>([]);
   const [feedbackLinksLoading, setFeedbackLinksLoading] = useState(false);
+  // Joueurs d'autres équipes (convocations exceptionnelles)
+  const [clubPlayersWithTeams, setClubPlayersWithTeams] = useState<{ player: Player; teamIds: string[]; teamNames: string[] }[]>([]);
+  const [inviteFilterTeamId, setInviteFilterTeamId] = useState<string>('all');
+  const [inviteTrainingModalOpen, setInviteTrainingModalOpen] = useState(false);
+  const [inviteTrainingModalSelectedIds, setInviteTrainingModalSelectedIds] = useState<Record<string, boolean>>({});
+  const [inviteMatchModalOpen, setInviteMatchModalOpen] = useState(false);
+  const [inviteModalSelectedIds, setInviteModalSelectedIds] = useState<Record<string, boolean>>({});
   const [feedbackLinksGenerating, setFeedbackLinksGenerating] = useState(false);
 
 
 
-  const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<MatchFormData>({
+  const { control, handleSubmit, reset, watch, setValue, getValues, formState: { errors } } = useForm<MatchFormData>({
     resolver: yupResolver(matchSchema) as any,
     defaultValues: {
       title: '',
@@ -294,7 +304,7 @@ export default function CalendarPage() {
     }
   });
 
-  const { control: trainingControl, handleSubmit: handleTrainingSubmit, reset: resetTraining, watch: watchTraining, setValue: setTrainingValue, formState: { errors: trainingErrors } } = useForm<TrainingFormData>({
+  const { control: trainingControl, handleSubmit: handleTrainingSubmit, reset: resetTraining, watch: watchTraining, setValue: setTrainingValue, getValues: getTrainingValues, formState: { errors: trainingErrors } } = useForm<TrainingFormData>({
     resolver: yupResolver(trainingSchema),
     defaultValues: {
       date: new Date(),
@@ -355,6 +365,45 @@ export default function CalendarPage() {
       return (a.last_name || '').localeCompare(b.last_name || '', 'fr');
     });
   }, [players, playersFormData]);
+
+  // Joueurs du club (autres équipes) pour convocations exceptionnelles
+  useEffect(() => {
+    if (!club?.id) {
+      setClubPlayersWithTeams([]);
+      return;
+    }
+    playersService.getPlayersByClubWithTeams(club.id).then(setClubPlayersWithTeams).catch(() => setClubPlayersWithTeams([]));
+  }, [club?.id]);
+
+  const otherTeamPlayersForForm = useMemo(() => {
+    if (!activeTeam) return [];
+    const squadIds = new Set(players.map((p) => p.id));
+    return clubPlayersWithTeams.filter(({ player }) => !squadIds.has(player.id));
+  }, [clubPlayersWithTeams, players, activeTeam]);
+
+  const otherTeamPlayersFiltered = useMemo(() => {
+    if (inviteFilterTeamId === 'all') return otherTeamPlayersForForm;
+    return otherTeamPlayersForForm.filter(({ teamIds }) => teamIds.includes(inviteFilterTeamId));
+  }, [otherTeamPlayersForForm, inviteFilterTeamId]);
+
+  const squadIdsSet = useMemo(() => new Set(players.map((p) => p.id)), [players]);
+  const invitedPlayerIdsInForm = useMemo(() => {
+    const p = playersFormData;
+    if (!p || typeof p !== 'object') return [];
+    return Object.keys(p).filter((id) => !squadIdsSet.has(id));
+  }, [playersFormData, squadIdsSet]);
+  const getPlayerDisplayName = (playerId: string) => {
+    const found = clubPlayersWithTeams.find(({ player }) => player.id === playerId);
+    if (found) return `${found.player.first_name} ${found.player.last_name}`;
+    return `Joueur ${playerId.slice(0, 8)}`;
+  };
+
+  const trainingPlayersFormData = watchTraining('players');
+  const invitedTrainingPlayerIdsInForm = useMemo(() => {
+    const p = trainingPlayersFormData;
+    if (!p || typeof p !== 'object') return [];
+    return Object.keys(p).filter((id) => !squadIdsSet.has(id));
+  }, [trainingPlayersFormData, squadIdsSet]);
 
   const refreshFeedbackLinks = async () => {
     if (!editingEvent || editingEvent.type !== 'training' || !editingEvent.id) return;
@@ -663,9 +712,12 @@ export default function CalendarPage() {
 
   const handleCloseModal = () => {
     setIsModalOpen(false);
+    setInviteMatchModalOpen(false);
+    setInviteModalSelectedIds({});
     setIsEditing(false);
     setEditingEvent(null);
     reset({});
+    setInvitedMatchPlayerIds({});
   };
 
   const handleOpenTrainingModal = () => {
@@ -688,6 +740,8 @@ export default function CalendarPage() {
     setEditingEvent(null);
     setTrainingFormPage(1);
     resetTraining({});
+    setInviteTrainingModalOpen(false);
+    setInviteTrainingModalSelectedIds({});
   };
 
   const updatePlayerStats = async (players: { id: string; goals: number; yellow_cards: number; red_cards: number }[]) => {
@@ -1244,7 +1298,7 @@ export default function CalendarPage() {
             red_cards: Number(player.red_cards) || 0
           })) : [];
 
-        console.log('Joueurs nettoyés:', cleanedPlayers);
+        console.log('Joueurs (effectif + invités):', cleanedPlayers);
 
         const matchData = {
           title: data.title,
@@ -1272,7 +1326,7 @@ export default function CalendarPage() {
           throw matchError;
         }
 
-        // Mise à jour des stats des joueurs
+        // Mise à jour des stats de tous les joueurs (effectif + invités)
         console.log('Mise à jour des stats pour les joueurs:', cleanedPlayers);
         await updatePlayerStats(cleanedPlayers);
 
@@ -2204,6 +2258,136 @@ export default function CalendarPage() {
                     </div>
                   </div>
                 </div>
+
+                {otherTeamPlayersForForm.length > 0 && (
+                  <div className="mt-4">
+                    <button
+                      type="button"
+                      onClick={() => setInviteMatchModalOpen(true)}
+                      className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Ajouter joueurs autres équipes
+                    </button>
+                  </div>
+                )}
+
+                {invitedPlayerIdsInForm.length > 0 && (
+                  <div className="mt-4">
+                    <label className="block text-sm font-medium text-gray-800 mb-2">Joueurs d&apos;autres équipes convoqués</label>
+                    <div className="border rounded-md overflow-hidden">
+                      <div className="hidden sm:grid grid-cols-12 gap-4 bg-gray-50 p-3 border-b">
+                        <div className="col-span-4">
+                          <span className="text-sm font-medium text-gray-800">Joueur</span>
+                        </div>
+                        <div className="col-span-2">
+                          <span className="text-sm font-medium text-gray-800">Buts</span>
+                        </div>
+                        <div className="col-span-3">
+                          <span className="text-sm font-medium text-gray-800">Cartons jaunes</span>
+                        </div>
+                        <div className="col-span-2">
+                          <span className="text-sm font-medium text-gray-800">Cartons rouges</span>
+                        </div>
+                        <div className="col-span-1" />
+                      </div>
+                      <div className="divide-y">
+                        {invitedPlayerIdsInForm.map((playerId) => {
+                          const isPlayerPresent = watch(`players.${playerId}.present`);
+                          return (
+                            <div
+                              key={playerId}
+                              className="grid grid-cols-1 sm:grid-cols-12 gap-4 p-3 hover:bg-gray-50 items-center"
+                            >
+                              <div className="flex items-center gap-3 sm:col-span-4">
+                                <Controller
+                                  name={`players.${playerId}.present`}
+                                  control={control}
+                                  defaultValue={true}
+                                  render={({ field: { value, onChange } }) => (
+                                    <input
+                                      type="checkbox"
+                                      checked={value ?? true}
+                                      onChange={(e) => onChange(e.target.checked)}
+                                      className="rounded border-gray-400 text-blue-600 focus:ring-blue-500"
+                                    />
+                                  )}
+                                />
+                                <span className="text-sm text-gray-900">{getPlayerDisplayName(playerId)}</span>
+                              </div>
+                              <div className="sm:col-span-2">
+                                <Controller
+                                  name={`players.${playerId}.goals`}
+                                  control={control}
+                                  defaultValue={0}
+                                  render={({ field: { value, onChange } }) => (
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={value ?? 0}
+                                      onChange={(e) => onChange(parseInt(e.target.value) || 0)}
+                                      disabled={!isPlayerPresent}
+                                      className="w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900 bg-white py-1.5"
+                                    />
+                                  )}
+                                />
+                              </div>
+                              <div className="sm:col-span-3">
+                                <Controller
+                                  name={`players.${playerId}.yellow_cards`}
+                                  control={control}
+                                  defaultValue={0}
+                                  render={({ field: { value, onChange } }) => (
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={value ?? 0}
+                                      onChange={(e) => onChange(parseInt(e.target.value) || 0)}
+                                      disabled={!isPlayerPresent}
+                                      className="w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900 bg-white py-1.5"
+                                    />
+                                  )}
+                                />
+                              </div>
+                              <div className="sm:col-span-2">
+                                <Controller
+                                  name={`players.${playerId}.red_cards`}
+                                  control={control}
+                                  defaultValue={0}
+                                  render={({ field: { value, onChange } }) => (
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={value ?? 0}
+                                      onChange={(e) => onChange(parseInt(e.target.value) || 0)}
+                                      disabled={!isPlayerPresent}
+                                      className="w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900 bg-white py-1.5"
+                                    />
+                                  )}
+                                />
+                              </div>
+                              <div className="sm:col-span-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const current = getValues('players') || {};
+                                    const next = { ...current };
+                                    delete next[playerId];
+                                    setValue('players', next);
+                                  }}
+                                  className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                                  title="Retirer"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </form>
             </div>
 
@@ -2222,6 +2406,176 @@ export default function CalendarPage() {
                 className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
               >
                 Ajouter
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal "page" pour ajouter des joueurs d'autres équipes */}
+      {inviteMatchModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-lg w-full max-w-lg max-h-[85vh] flex flex-col shadow-xl">
+            <div className="flex justify-between items-center p-4 border-b">
+              <h2 className="text-lg font-semibold text-gray-900">Ajouter des joueurs d&apos;autres équipes</h2>
+              <button
+                type="button"
+                onClick={() => { setInviteMatchModalOpen(false); setInviteModalSelectedIds({}); }}
+                className="text-gray-600 hover:text-gray-800 p-1"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-4 border-b bg-gray-50">
+              <label className="block text-sm font-medium text-gray-800 mb-1.5">Filtrer par équipe</label>
+              <select
+                value={inviteFilterTeamId}
+                onChange={(e) => setInviteFilterTeamId(e.target.value)}
+                className="block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900 text-sm py-2"
+              >
+                <option value="all">Toutes les équipes</option>
+                {teams.filter((t) => t.id !== activeTeam?.id).map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              <div className="border rounded-md divide-y max-h-[320px] overflow-y-auto">
+                {otherTeamPlayersFiltered.map(({ player, teamNames }) => (
+                  <label
+                    key={player.id}
+                    className="flex items-center justify-between gap-3 p-3 hover:bg-gray-50 cursor-pointer"
+                  >
+                    <span className="text-sm text-gray-900">
+                      {player.first_name} {player.last_name}
+                      {teamNames.length > 0 && (
+                        <span className="text-xs text-gray-500 ml-1">({teamNames.join(', ')})</span>
+                      )}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={!!inviteModalSelectedIds[player.id]}
+                      onChange={(e) => {
+                        setInviteModalSelectedIds((prev) => ({ ...prev, [player.id]: e.target.checked }));
+                      }}
+                      className="rounded border-gray-400 text-green-600 focus:ring-green-500"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 p-4 border-t bg-gray-50">
+              <button
+                type="button"
+                onClick={() => { setInviteMatchModalOpen(false); setInviteModalSelectedIds({}); }}
+                className="px-4 py-2 text-sm font-medium text-gray-800 bg-white border border-gray-400 rounded-md hover:bg-gray-50"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const current = getValues('players') || {};
+                  const toAdd = Object.entries(inviteModalSelectedIds)
+                    .filter(([, checked]) => checked)
+                    .map(([id]) => id)
+                    .filter((id) => !current[id]);
+                  const next = { ...current };
+                  toAdd.forEach((id) => {
+                    next[id] = { id, present: true, goals: 0, yellow_cards: 0, red_cards: 0 };
+                  });
+                  setValue('players', next, { shouldDirty: true });
+                  setInviteMatchModalOpen(false);
+                  setInviteModalSelectedIds({});
+                }}
+                className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700"
+              >
+                Ajouter la sélection
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal "page" pour ajouter des joueurs d'autres équipes (entraînement) */}
+      {inviteTrainingModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-lg w-full max-w-lg max-h-[85vh] flex flex-col shadow-xl">
+            <div className="flex justify-between items-center p-4 border-b">
+              <h2 className="text-lg font-semibold text-gray-900">Ajouter des joueurs d&apos;autres équipes</h2>
+              <button
+                type="button"
+                onClick={() => { setInviteTrainingModalOpen(false); setInviteTrainingModalSelectedIds({}); }}
+                className="text-gray-600 hover:text-gray-800 p-1"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-4 border-b bg-gray-50">
+              <label className="block text-sm font-medium text-gray-800 mb-1.5">Filtrer par équipe</label>
+              <select
+                value={inviteFilterTeamId}
+                onChange={(e) => setInviteFilterTeamId(e.target.value)}
+                className="block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900 text-sm py-2"
+              >
+                <option value="all">Toutes les équipes</option>
+                {teams.filter((t) => t.id !== activeTeam?.id).map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              <div className="border rounded-md divide-y max-h-[320px] overflow-y-auto">
+                {otherTeamPlayersFiltered.map(({ player, teamNames }) => (
+                  <label
+                    key={player.id}
+                    className="flex items-center justify-between gap-3 p-3 hover:bg-gray-50 cursor-pointer"
+                  >
+                    <span className="text-sm text-gray-900">
+                      {player.first_name} {player.last_name}
+                      {teamNames.length > 0 && (
+                        <span className="text-xs text-gray-500 ml-1">({teamNames.join(', ')})</span>
+                      )}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={!!inviteTrainingModalSelectedIds[player.id]}
+                      onChange={(e) => {
+                        setInviteTrainingModalSelectedIds((prev) => ({ ...prev, [player.id]: e.target.checked }));
+                      }}
+                      className="rounded border-gray-400 text-green-600 focus:ring-green-500"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 p-4 border-t bg-gray-50">
+              <button
+                type="button"
+                onClick={() => { setInviteTrainingModalOpen(false); setInviteTrainingModalSelectedIds({}); }}
+                className="px-4 py-2 text-sm font-medium text-gray-800 bg-white border border-gray-400 rounded-md hover:bg-gray-50"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const current = getTrainingValues('players') || {};
+                  const toAdd = Object.entries(inviteTrainingModalSelectedIds)
+                    .filter(([, checked]) => checked)
+                    .map(([id]) => id)
+                    .filter((id) => !current[id]);
+                  const next = { ...current } as Record<string, { id: string; status: PlayerStatus }>;
+                  toAdd.forEach((id) => {
+                    next[id] = { id, status: 'present' as PlayerStatus };
+                  });
+                  setTrainingValue('players', next, { shouldDirty: true });
+                  setInviteTrainingModalOpen(false);
+                  setInviteTrainingModalSelectedIds({});
+                }}
+                className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700"
+              >
+                Ajouter la sélection
               </button>
             </div>
           </div>
@@ -2414,6 +2768,71 @@ export default function CalendarPage() {
                     </div>
                   </div>
                 </div>
+
+                {otherTeamPlayersForForm.length > 0 && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setInviteTrainingModalOpen(true)}
+                      className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Ajouter joueurs autres équipes
+                    </button>
+                  </div>
+                )}
+
+                {invitedTrainingPlayerIdsInForm.length > 0 && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-800 mb-1.5">Joueurs d&apos;autres équipes convoqués</label>
+                    <div className="border rounded-md divide-y">
+                      {invitedTrainingPlayerIdsInForm.map((playerId) => (
+                        <div
+                          key={playerId}
+                          className="flex flex-col sm:flex-row sm:items-center gap-2 p-2 hover:bg-gray-50"
+                        >
+                          <span className="text-sm text-gray-900 flex-1">{getPlayerDisplayName(playerId)}</span>
+                          <div className="flex items-center gap-3 sm:justify-end">
+                            <Controller
+                              name={`players.${playerId}.status`}
+                              control={trainingControl}
+                              defaultValue="present"
+                              render={({ field: { value, onChange } }) => (
+                                <div className="flex items-center gap-3">
+                                  {(['present', 'absent', 'late', 'injured'] as const).map((s) => (
+                                    <label key={s} className="flex items-center gap-1 text-xs cursor-pointer">
+                                      <input
+                                        type="radio"
+                                        name={`invite-status-${playerId}`}
+                                        checked={value === s}
+                                        onChange={() => onChange(s)}
+                                        className="text-green-600 focus:ring-green-500"
+                                      />
+                                      <span>{s === 'present' ? '✅' : s === 'absent' ? '❌' : s === 'late' ? '⏰ Retard' : '🩹'}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const current = getTrainingValues('players') || {};
+                                const next = { ...current };
+                                delete next[playerId];
+                                setTrainingValue('players', next);
+                              }}
+                              className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                              title="Retirer"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {isEditing && editingEvent?.type === 'training' && (
                   <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">

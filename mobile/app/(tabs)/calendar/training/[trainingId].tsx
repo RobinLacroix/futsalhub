@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,13 +7,15 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Alert,
+  Modal,
+  Pressable,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useActiveTeam } from '../../../../contexts/ActiveTeamContext';
 import { getTrainingById, updateTrainingAttendance, sendQuestionnairesForTraining } from '../../../../lib/services/trainings';
-import { getPlayersByTeam } from '../../../../lib/services/players';
+import { getPlayersByTeam, getPlayersByClubWithTeams, type PlayerWithTeams } from '../../../../lib/services/players';
 import type { Training, Player, PlayerStatus } from '../../../../types';
 
 const STATUS_OPTIONS: { value: PlayerStatus; label: string }[] = [
@@ -25,8 +27,7 @@ const STATUS_OPTIONS: { value: PlayerStatus; label: string }[] = [
 
 export default function TrainingDetailScreen() {
   const { trainingId } = useLocalSearchParams<{ trainingId: string }>();
-  const router = useRouter();
-  const { activeTeamId } = useActiveTeam();
+  const { activeTeamId, activeTeam, teams } = useActiveTeam();
   const [training, setTraining] = useState<Training | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [attendance, setAttendance] = useState<Record<string, PlayerStatus>>({});
@@ -35,6 +36,11 @@ export default function TrainingDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [showGoalkeepers, setShowGoalkeepers] = useState(true);
   const [sendingQuestionnaires, setSendingQuestionnaires] = useState(false);
+
+  const [clubPlayersWithTeams, setClubPlayersWithTeams] = useState<PlayerWithTeams[]>([]);
+  const [inviteFilterTeamId, setInviteFilterTeamId] = useState<string>('all');
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [inviteModalSelectedIds, setInviteModalSelectedIds] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     if (!trainingId || !activeTeamId) {
@@ -67,6 +73,39 @@ export default function TrainingDetailScreen() {
     load();
   }, [load]);
 
+  const clubId = activeTeam?.club_id;
+  useEffect(() => {
+    if (!clubId) {
+      setClubPlayersWithTeams([]);
+      return;
+    }
+    let mounted = true;
+    getPlayersByClubWithTeams(clubId)
+      .then((data) => mounted && setClubPlayersWithTeams(data))
+      .catch(() => mounted && setClubPlayersWithTeams([]));
+    return () => { mounted = false; };
+  }, [clubId]);
+
+  const squadIds = useMemo(() => new Set(players.map((p) => p.id)), [players]);
+  const otherTeamPlayersForForm = useMemo(
+    () => clubPlayersWithTeams.filter(({ player }) => !squadIds.has(player.id)),
+    [clubPlayersWithTeams, squadIds]
+  );
+  const otherTeamPlayersFiltered = useMemo(() => {
+    if (inviteFilterTeamId === 'all') return otherTeamPlayersForForm;
+    return otherTeamPlayersForForm.filter(({ teamIds }) => teamIds.includes(inviteFilterTeamId));
+  }, [otherTeamPlayersForForm, inviteFilterTeamId]);
+  const invitedPlayerIds = useMemo(
+    () => Object.keys(attendance).filter((id) => !squadIds.has(id)),
+    [attendance, squadIds]
+  );
+
+  const getPlayerDisplayName = (playerId: string) => {
+    const found = clubPlayersWithTeams.find(({ player }) => player.id === playerId);
+    if (found) return `${found.player.first_name} ${found.player.last_name}`;
+    return `Joueur ${playerId.slice(0, 8)}`;
+  };
+
   const setPlayerStatus = (playerId: string, status: PlayerStatus) => {
     setAttendance((prev) => ({ ...prev, [playerId]: status }));
   };
@@ -75,8 +114,9 @@ export default function TrainingDetailScreen() {
     if (!trainingId) return;
     setSaving(true);
     try {
-      await updateTrainingAttendance(trainingId, attendance);
-      setTraining((t) => (t ? { ...t, attendance } : null));
+      const convokedPlayerIds = Object.keys(attendance);
+      await updateTrainingAttendance(trainingId, attendance, convokedPlayerIds);
+      setTraining((t) => (t ? { ...t, attendance, convoked_players: convokedPlayerIds.map((id) => ({ id })) } : null));
       Alert.alert('Enregistré', 'Les présences ont été mises à jour.');
     } catch (e) {
       Alert.alert('Erreur', e instanceof Error ? e.message : 'Impossible d\'enregistrer');
@@ -127,11 +167,11 @@ export default function TrainingDetailScreen() {
     }
   };
 
-  const presentOnlyCount = filteredPlayers.filter((p) => attendance[p.id] === 'present').length;
-  const lateCount = filteredPlayers.filter((p) => attendance[p.id] === 'late').length;
+  const presentOnlyCount = Object.entries(attendance).filter(([, s]) => s === 'present').length;
+  const lateCount = Object.entries(attendance).filter(([, s]) => s === 'late').length;
   const presentCount = presentOnlyCount + lateCount;
-  const absentCount = filteredPlayers.filter(
-    (p) => attendance[p.id] === 'absent' || attendance[p.id] === 'injured'
+  const absentCount = Object.entries(attendance).filter(
+    ([, s]) => s === 'absent' || s === 'injured'
   ).length;
 
   return (
@@ -221,6 +261,60 @@ export default function TrainingDetailScreen() {
               </View>
             </View>
           ))}
+          {otherTeamPlayersForForm.length > 0 && (
+            <TouchableOpacity
+              style={styles.addOtherTeamsBtn}
+              onPress={() => setInviteModalOpen(true)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.addOtherTeamsBtnText}>+ Ajouter joueurs autres équipes</Text>
+            </TouchableOpacity>
+          )}
+
+          {invitedPlayerIds.length > 0 && (
+            <View style={styles.invitedSection}>
+              <Text style={styles.invitedSectionTitle}>Joueurs d&apos;autres équipes convoqués</Text>
+              {invitedPlayerIds.map((playerId) => (
+                <View key={playerId} style={styles.invitedRow}>
+                  <Text style={styles.invitedPlayerName}>{getPlayerDisplayName(playerId)}</Text>
+                  <View style={styles.statusRow}>
+                    {STATUS_OPTIONS.map((opt) => (
+                      <TouchableOpacity
+                        key={opt.value}
+                        onPress={() => setPlayerStatus(playerId, opt.value)}
+                        style={[
+                          styles.statusBtn,
+                          attendance[playerId] === opt.value && styles.statusBtnActive,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.statusBtnText,
+                            attendance[playerId] === opt.value && styles.statusBtnTextActive,
+                          ]}
+                        >
+                          {opt.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setAttendance((prev) => {
+                        const next = { ...prev };
+                        delete next[playerId];
+                        return next;
+                      });
+                    }}
+                    style={styles.removeInvitedBtn}
+                  >
+                    <Text style={styles.removeInvitedText}>Retirer</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
+
           <TouchableOpacity
             style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
             onPress={saveAttendance}
@@ -246,6 +340,84 @@ export default function TrainingDetailScreen() {
           </Text>
         </>
       )}
+
+      <Modal visible={inviteModalOpen} transparent animationType="slide">
+        <Pressable style={styles.modalOverlay} onPress={() => setInviteModalOpen(false)}>
+          <View style={styles.inviteModalContent} onStartShouldSetResponder={() => true}>
+            <View style={styles.inviteModalHeader}>
+              <Text style={styles.inviteModalTitle}>Ajouter des joueurs d&apos;autres équipes</Text>
+              <Pressable onPress={() => { setInviteModalOpen(false); setInviteModalSelectedIds({}); }}>
+                <Text style={styles.modalDone}>Fermer</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.label}>Filtrer par équipe</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
+              <TouchableOpacity
+                style={[styles.filterChipInvite, inviteFilterTeamId === 'all' && styles.filterChipInviteActive]}
+                onPress={() => setInviteFilterTeamId('all')}
+              >
+                <Text style={[styles.filterChipText, inviteFilterTeamId === 'all' && styles.filterChipTextActive]}>
+                  Toutes
+                </Text>
+              </TouchableOpacity>
+              {teams.filter((t) => t.id !== activeTeamId).map((t) => (
+                <TouchableOpacity
+                  key={t.id}
+                  style={[styles.filterChipInvite, inviteFilterTeamId === t.id && styles.filterChipInviteActive]}
+                  onPress={() => setInviteFilterTeamId(t.id)}
+                >
+                  <Text style={[styles.filterChipText, inviteFilterTeamId === t.id && styles.filterChipTextActive]}>
+                    {t.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <ScrollView style={styles.inviteModalList}>
+              {otherTeamPlayersFiltered.map(({ player, teamNames }) => (
+                <TouchableOpacity
+                  key={player.id}
+                  style={styles.inviteModalPlayerRow}
+                  onPress={() =>
+                    setInviteModalSelectedIds((prev) => ({ ...prev, [player.id]: !prev[player.id] }))
+                  }
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.inviteModalPlayerName}>
+                    {player.first_name} {player.last_name}
+                    {teamNames.length > 0 ? ` (${teamNames.join(', ')})` : ''}
+                  </Text>
+                  <View style={[styles.checkbox, inviteModalSelectedIds[player.id] && styles.checkboxChecked]}>
+                    {inviteModalSelectedIds[player.id] ? <Text style={styles.checkboxText}>✓</Text> : null}
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <View style={styles.inviteModalFooter}>
+              <TouchableOpacity style={styles.inviteModalCancelBtn} onPress={() => { setInviteModalOpen(false); setInviteModalSelectedIds({}); }}>
+                <Text style={styles.inviteModalCancelText}>Annuler</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.inviteModalAddBtn}
+                onPress={() => {
+                  const toAdd = Object.entries(inviteModalSelectedIds)
+                    .filter(([, v]) => v)
+                    .map(([id]) => id)
+                    .filter((id) => !attendance[id]);
+                  setAttendance((prev) => {
+                    const next = { ...prev };
+                    toAdd.forEach((id) => (next[id] = 'present'));
+                    return next;
+                  });
+                  setInviteModalOpen(false);
+                  setInviteModalSelectedIds({});
+                }}
+              >
+                <Text style={styles.inviteModalAddText}>Ajouter la sélection</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
     </ScrollView>
   );
 }
@@ -339,4 +511,81 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   questionnairesHint: { fontSize: 12, color: '#6b7280', marginTop: 8, marginBottom: 16 },
+  addOtherTeamsBtn: {
+    marginTop: 12,
+    padding: 14,
+    backgroundColor: '#16a34a',
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  addOtherTeamsBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
+  invitedSection: { marginTop: 16, marginBottom: 8 },
+  invitedSectionTitle: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 10 },
+  invitedRow: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  invitedPlayerName: { fontSize: 15, fontWeight: '600', color: '#111', marginBottom: 8 },
+  removeInvitedBtn: { alignSelf: 'flex-start', paddingVertical: 4 },
+  removeInvitedText: { fontSize: 13, color: '#dc2626', fontWeight: '500' },
+  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
+  inviteModalContent: {
+    backgroundColor: '#fff',
+    marginTop: 80,
+    marginHorizontal: 16,
+    borderRadius: 16,
+    maxHeight: '80%',
+    padding: 16,
+  },
+  inviteModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  inviteModalTitle: { fontSize: 18, fontWeight: '700', color: '#111', flex: 1 },
+  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 6 },
+  filterRow: { marginBottom: 12, maxHeight: 44 },
+  filterChipInvite: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: '#e5e7eb',
+    marginRight: 8,
+  },
+  filterChipInviteActive: { backgroundColor: '#16a34a' },
+  filterChipText: { fontSize: 14, fontWeight: '500', color: '#374151' },
+  filterChipTextActive: { color: '#fff' },
+  inviteModalList: { maxHeight: 280, marginBottom: 16 },
+  inviteModalPlayerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  inviteModalPlayerName: { fontSize: 15, color: '#111', flex: 1 },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#d1d5db',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: { backgroundColor: '#16a34a', borderColor: '#16a34a' },
+  checkboxText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  inviteModalFooter: { flexDirection: 'row', gap: 12, justifyContent: 'flex-end' },
+  inviteModalCancelBtn: { paddingVertical: 12, paddingHorizontal: 20 },
+  inviteModalCancelText: { fontSize: 16, color: '#6b7280', fontWeight: '500' },
+  inviteModalAddBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    backgroundColor: '#16a34a',
+    borderRadius: 10,
+  },
+  inviteModalAddText: { fontSize: 16, color: '#fff', fontWeight: '600' },
+  modalDone: { fontSize: 17, fontWeight: '600', color: '#3b82f6' },
 });

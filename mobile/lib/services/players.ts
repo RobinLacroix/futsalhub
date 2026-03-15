@@ -1,6 +1,51 @@
 import { supabase } from '../supabase';
 import type { Player, PlayerStatus, Team } from '../../types';
 
+export interface PlayerWithTeams {
+  player: Player;
+  teamIds: string[];
+  teamNames: string[];
+}
+
+/** Tous les joueurs du club avec leurs équipes (pour convocations cross-équipes). */
+export async function getPlayersByClubWithTeams(clubId: string): Promise<PlayerWithTeams[]> {
+  const { data: teamsData, error: teamsError } = await supabase
+    .from('teams')
+    .select('id, name')
+    .eq('club_id', clubId);
+  if (teamsError) throw teamsError;
+  const teamIds = (teamsData ?? []).map((t: { id: string }) => t.id);
+  const teamNamesById = new Map((teamsData ?? []).map((t: { id: string; name: string }) => [t.id, t.name]));
+  if (teamIds.length === 0) return [];
+
+  const { data: ptData, error: ptError } = await supabase
+    .from('player_teams')
+    .select(
+      'player_id, team_id, players (id, first_name, last_name, age, position, strong_foot, status, number)'
+    )
+    .in('team_id', teamIds);
+  if (ptError) throw ptError;
+
+  const byPlayer = new Map<string, { player: Player; teamIds: Set<string> }>();
+  for (const row of ptData ?? []) {
+    const r = row as { players: Player | null; player_id: string; team_id: string };
+    if (!r.players) continue;
+    const playerId = r.player_id;
+    const teamId = r.team_id;
+    if (!byPlayer.has(playerId)) {
+      byPlayer.set(playerId, { player: r.players as Player, teamIds: new Set() });
+    }
+    byPlayer.get(playerId)!.teamIds.add(teamId);
+  }
+  return Array.from(byPlayer.entries())
+    .map(([, { player, teamIds: ids }]) => ({
+      player,
+      teamIds: Array.from(ids),
+      teamNames: Array.from(ids).map((id) => teamNamesById.get(id) ?? '').filter(Boolean),
+    }))
+    .sort((a, b) => (a.player.last_name || '').localeCompare(b.player.last_name || '', 'fr'));
+}
+
 export async function getPlayersByTeam(teamId: string): Promise<Player[]> {
   const { data, error } = await supabase
     .from('player_teams')

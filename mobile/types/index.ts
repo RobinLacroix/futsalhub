@@ -6,6 +6,7 @@ export interface Team {
   category: string;
   level: string;
   color: string;
+  club_id?: string;
 }
 
 export interface Player {

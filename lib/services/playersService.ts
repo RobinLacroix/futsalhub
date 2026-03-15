@@ -3,6 +3,48 @@ import type { Player, PlayerFormData, PlayerStatus } from '@/types';
 
 export const playersService = {
   /**
+   * Récupère tous les joueurs du club avec leurs équipes (pour convocations cross-équipes).
+   * Retourne chaque joueur avec les ids et noms des équipes auxquelles il appartient.
+   */
+  async getPlayersByClubWithTeams(clubId: string): Promise<{ player: Player; teamIds: string[]; teamNames: string[] }[]> {
+    const { data: teamsData, error: teamsError } = await supabase
+      .from('teams')
+      .select('id, name')
+      .eq('club_id', clubId);
+    if (teamsError) throw teamsError;
+    const teamIds = (teamsData || []).map((t: { id: string }) => t.id);
+    const teamNamesById = new Map((teamsData || []).map((t: { id: string; name: string }) => [t.id, t.name]));
+    if (teamIds.length === 0) return [];
+
+    const { data: ptData, error: ptError } = await supabase
+      .from('player_teams')
+      .select(`
+        player_id,
+        team_id,
+        players (id, first_name, last_name, age, position, strong_foot, status, number)
+      `)
+      .in('team_id', teamIds);
+    if (ptError) throw ptError;
+
+    const byPlayer = new Map<string, { player: Player; teamIds: Set<string> }>();
+    for (const row of ptData || []) {
+      const p = (row as any).players;
+      if (!p) continue;
+      const playerId = (row as any).player_id;
+      const teamId = (row as any).team_id;
+      if (!byPlayer.has(playerId)) {
+        byPlayer.set(playerId, { player: p as Player, teamIds: new Set() });
+      }
+      byPlayer.get(playerId)!.teamIds.add(teamId);
+    }
+    return Array.from(byPlayer.values()).map(({ player, teamIds: ids }) => ({
+      player,
+      teamIds: Array.from(ids),
+      teamNames: Array.from(ids).map((id) => teamNamesById.get(id) || '').filter(Boolean)
+    })).sort((a, b) => (a.player.last_name || '').localeCompare(b.player.last_name || ''));
+  },
+
+  /**
    * Récupère tous les joueurs d'une équipe
    */
   async getPlayersByTeam(teamId: string): Promise<Player[]> {

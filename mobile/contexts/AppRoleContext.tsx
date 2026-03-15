@@ -33,16 +33,16 @@ export function AppRoleProvider({ children }: { children: React.ReactNode }) {
   const [appRole, setAppRoleState] = useState<AppRole | null>(null);
 
   const load = useCallback(async () => {
-    const { data: { session: s } } = await supabase.auth.getSession();
-    setSession(s);
-    if (!s) {
-      setPlayer(null);
-      setTeams([]);
-      setAppRoleState(null);
-      setLoading(false);
-      return;
-    }
     try {
+      const { data: { session: s } } = await supabase.auth.getSession();
+      setSession(s);
+      if (!s) {
+        setPlayer(null);
+        setTeams([]);
+        setAppRoleState(null);
+        setLoading(false);
+        return;
+      }
       const [playerData, teamsData] = await Promise.all([
         getPlayerByUserId(s.user.id),
         getTeams(),
@@ -57,6 +57,7 @@ export function AppRoleProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (e) {
       console.error('AppRoleContext load', e);
+      setSession(null);
       setPlayer(null);
       setTeams([]);
       setAppRoleState(null);

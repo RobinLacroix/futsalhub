@@ -58,11 +58,18 @@ export async function deleteTraining(trainingId: string): Promise<void> {
 
 export async function updateTrainingAttendance(
   trainingId: string,
-  attendance: Record<string, PlayerStatus>
+  attendance: Record<string, PlayerStatus>,
+  convokedPlayerIds?: string[]
 ): Promise<Training> {
+  const updateData: { attendance: Record<string, PlayerStatus>; convoked_players?: { id: string }[] } = {
+    attendance,
+  };
+  if (convokedPlayerIds !== undefined) {
+    updateData.convoked_players = convokedPlayerIds.map((id) => ({ id }));
+  }
   const { data, error } = await supabase
     .from('trainings')
-    .update({ attendance })
+    .update(updateData)
     .eq('id', trainingId)
     .select()
     .single();

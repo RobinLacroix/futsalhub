@@ -14,7 +14,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.futsalhub.app"
+      "bundleIdentifier": "com.futsalhub.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.futsalhub.app",
@@ -32,6 +35,20 @@
     "plugins": [
       "expo-router",
       "@react-native-community/datetimepicker"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "2afbec73-b31a-463f-98b7-1f8cfe8f2024"
+      }
+    },
+    "owner": "robin.lacroix",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/2afbec73-b31a-463f-98b7-1f8cfe8f2024",
+      "checkAutomatically": "NEVER"
+    }
   }
 }

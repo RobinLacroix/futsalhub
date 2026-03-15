@@ -20,6 +20,8 @@ export interface CreateMatchInput {
   score_team: number;
   score_opponent: number;
   opponent_team?: string;
+  /** Optionnel : buts / cartons par joueur (sinon 0 pour tous). */
+  playerStats?: Record<string, { goals: number; yellow_cards: number; red_cards: number }>;
 }
 
 function toPlayersArray(convoquedIds: string[], stats?: Record<string, { goals: number; yellow_cards: number; red_cards: number }>): MatchPlayer[] {
@@ -32,7 +34,7 @@ function toPlayersArray(convoquedIds: string[], stats?: Record<string, { goals: 
 }
 
 export async function createMatch(teamId: string, input: CreateMatchInput): Promise<Match> {
-  const playersArray = toPlayersArray(input.convoquedPlayerIds);
+  const playersArray = toPlayersArray(input.convoquedPlayerIds, input.playerStats);
   const { data, error } = await supabase
     .from('matches')
     .insert({
