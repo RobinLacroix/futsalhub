@@ -1,38 +1,25 @@
 {
   "cli": {
-    "version": ">= 16.0.0",
+    "version": ">= 18.3.0",
     "appVersionSource": "remote"
   },
   "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
     "preview": {
-      "node": "20.19.4",
-      "env": { "NPM_CONFIG_LEGACY_PEER_DEPS": "true" },
-      "distribution": "internal",
-      "ios": { "simulator": false },
-      "android": { "buildType": "apk" },
-      "channel": "preview"
+      "distribution": "internal"
     },
     "production": {
-      "node": "20.19.4",
-      "env": { "NPM_CONFIG_LEGACY_PEER_DEPS": "true" },
-      "distribution": "store",
-      "channel": "production",
       "autoIncrement": true
     }
   },
   "submit": {
-    "preview": {
-      "ios": {
-        "ascAppId": "6760584228",
-        "appleId": "robin.lacroix@gmail.com"
-      }
-    },
     "production": {
       "ios": {
-        "ascAppId": "6760584228",
-        "appleId": "robin.lacroix@gmail.com"
-      },
-      "android": { "track": "internal" }
+        "ascAppId": "6760584228"
+      }
     }
   }
 }

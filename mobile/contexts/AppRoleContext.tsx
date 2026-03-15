@@ -67,20 +67,31 @@ export function AppRoleProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    load();
+    const id = setTimeout(() => load(), 0);
+    return () => clearTimeout(id);
   }, [load]);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => {
-      if (s) load();
-      else {
-        setSession(null);
-        setPlayer(null);
-        setTeams([]);
-        setAppRoleState(null);
-      }
-    });
-    return () => subscription.unsubscribe();
+    let subscription: { unsubscribe: () => void } | null = null;
+    try {
+      const { data } = supabase.auth.onAuthStateChange((_e, s) => {
+        try {
+          if (s) load();
+          else {
+            setSession(null);
+            setPlayer(null);
+            setTeams([]);
+            setAppRoleState(null);
+          }
+        } catch (err) {
+          console.error('AppRoleContext onAuthStateChange', err);
+        }
+      });
+      subscription = data.subscription;
+    } catch (err) {
+      console.error('AppRoleContext onAuthStateChange setup', err);
+    }
+    return () => subscription?.unsubscribe();
   }, [load]);
 
   const setAppRole = useCallback(async (role: AppRole) => {

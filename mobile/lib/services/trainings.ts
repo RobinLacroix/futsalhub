@@ -13,11 +13,11 @@ export async function getTrainingsByTeam(teamId: string): Promise<Training[]> {
 
 export interface CreateTrainingInput {
   date: Date;
-  location: string;
+  location?: string;
   /** Un des 4 thèmes : Offensif, Défensif, Transition, Supériorité */
   theme: 'Offensif' | 'Défensif' | 'Transition' | 'Supériorité';
-  /** Principe clé (obligatoire en base) */
-  key_principle: string;
+  /** Principe clé (optionnel) */
+  key_principle?: string;
   /** Ids des joueurs convoqués (seuls eux verront la séance dans leur calendrier). */
   convoked_player_ids: string[];
 }
@@ -29,9 +29,9 @@ export async function createTraining(teamId: string, input: CreateTrainingInput)
     .insert({
       team_id: teamId,
       date: input.date.toISOString(),
-      location: input.location.trim() || null,
+      location: (input.location ?? '').trim() || null,
       theme: input.theme,
-      key_principle: input.key_principle.trim(),
+      key_principle: (input.key_principle ?? '').trim() || null,
       attendance: {},
       convoked_players,
     })

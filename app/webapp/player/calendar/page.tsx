@@ -169,7 +169,6 @@ export default function PlayerCalendarPage() {
                   {c.team_name && <p className="text-xs text-gray-500 mt-0.5">Équipe : {c.team_name}</p>}
                   {c.location && <p className="text-xs text-gray-500">Lieu : {c.location}</p>}
 
-                  {!otherTeam && (
                   <div className="mt-4 flex flex-wrap items-center gap-2">
                     <span className="text-sm font-medium text-gray-700 w-full md:w-auto">Je serai :</span>
                     <button
@@ -213,7 +212,6 @@ export default function PlayerCalendarPage() {
                       Blessé
                     </button>
                   </div>
-                  )}
 
                   {c.feedback_token && c.feedback_url && !otherTeam && (
                     <div className="mt-3 pt-3 border-t border-gray-100">

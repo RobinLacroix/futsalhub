@@ -225,49 +225,45 @@ export default function PlayerConvocationsScreen() {
               {c.team_name ? <Text style={styles.meta}>Équipe : {c.team_name}</Text> : null}
               {c.location ? <Text style={styles.meta}>Lieu : {c.location}</Text> : null}
 
-              {!otherTeam ? (
-                <>
-                  <Text style={styles.label}>Je serai :</Text>
-                  <View style={styles.buttons}>
-                    <TouchableOpacity
-                      style={[styles.btn, status === 'present' && styles.btnPresent]}
-                      onPress={() => handleSetAttendance(c.training_id, 'present')}
-                      disabled={isUpdating}
-                    >
-                      <Text style={[styles.btnText, status === 'present' && styles.btnTextActive]}>
-                        {isUpdating ? '…' : 'Présent'}
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.btn, status === 'late' && styles.btnLate]}
-                      onPress={() => handleSetAttendance(c.training_id, 'late')}
-                      disabled={isUpdating}
-                    >
-                      <Text style={[styles.btnText, status === 'late' && styles.btnTextActive]}>
-                        En retard
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.btn, status === 'absent' && styles.btnAbsent]}
-                      onPress={() => handleSetAttendance(c.training_id, 'absent')}
-                      disabled={isUpdating}
-                    >
-                      <Text style={[styles.btnText, status === 'absent' && styles.btnTextActive]}>
-                        Absent
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.btn, status === 'injured' && styles.btnInjured]}
-                      onPress={() => handleSetAttendance(c.training_id, 'injured')}
-                      disabled={isUpdating}
-                    >
-                      <Text style={[styles.btnText, status === 'injured' && styles.btnTextActive]}>
-                        Blessé
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </>
-              ) : null}
+              <Text style={styles.label}>Je serai :</Text>
+              <View style={styles.buttons}>
+                <TouchableOpacity
+                  style={[styles.btn, status === 'present' && styles.btnPresent]}
+                  onPress={() => handleSetAttendance(c.training_id, 'present')}
+                  disabled={isUpdating}
+                >
+                  <Text style={[styles.btnText, status === 'present' && styles.btnTextActive]}>
+                    {isUpdating ? '…' : 'Présent'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.btn, status === 'late' && styles.btnLate]}
+                  onPress={() => handleSetAttendance(c.training_id, 'late')}
+                  disabled={isUpdating}
+                >
+                  <Text style={[styles.btnText, status === 'late' && styles.btnTextActive]}>
+                    En retard
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.btn, status === 'absent' && styles.btnAbsent]}
+                  onPress={() => handleSetAttendance(c.training_id, 'absent')}
+                  disabled={isUpdating}
+                >
+                  <Text style={[styles.btnText, status === 'absent' && styles.btnTextActive]}>
+                    Absent
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.btn, status === 'injured' && styles.btnInjured]}
+                  onPress={() => handleSetAttendance(c.training_id, 'injured')}
+                  disabled={isUpdating}
+                >
+                  <Text style={[styles.btnText, status === 'injured' && styles.btnTextActive]}>
+                    Blessé
+                  </Text>
+                </TouchableOpacity>
+              </View>
 
               {c.feedback_token && c.feedback_url && !otherTeam ? (
                 <TouchableOpacity

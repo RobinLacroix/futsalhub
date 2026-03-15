@@ -1,11 +1,9 @@
 import 'react-native-gesture-handler';
 import React from 'react';
 import { Stack } from 'expo-router';
-import { useFonts } from 'expo-font';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { View, ActivityIndicator, Text, StyleSheet, ScrollView } from 'react-native';
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { ActiveTeamProvider } from '../contexts/ActiveTeamContext';
 import { AppRoleProvider } from '../contexts/AppRoleContext';
 import { isSupabaseConfigured } from '../lib/supabase';
@@ -41,10 +39,6 @@ class RootErrorBoundary extends React.Component<
 }
 
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts(
-    Ionicons.font ? { ...Ionicons.font } : {}
-  );
-
   if (!isSupabaseConfigured) {
     return (
       <View style={styles.centered}>
@@ -53,14 +47,6 @@ export default function RootLayout() {
           Les variables Supabase ne sont pas définies pour ce build.{'\n\n'}
           Vérifiez les secrets EAS (EXPO_PUBLIC_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_ANON_KEY) puis relancez un build.
         </Text>
-      </View>
-    );
-  }
-
-  if (Ionicons.font && !fontsLoaded) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#3b82f6" />
       </View>
     );
   }

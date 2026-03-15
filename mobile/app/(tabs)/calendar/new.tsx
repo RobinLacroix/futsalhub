@@ -26,7 +26,7 @@ import { format, parse, isValid } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 import { getPlayersByTeam, getPlayersByClubWithTeams, type PlayerWithTeams } from '../../../lib/services/players';
-import { createTraining } from '../../../lib/services/trainings';
+import { createTraining, updateTrainingAttendance } from '../../../lib/services/trainings';
 import type { Player, PlayerStatus } from '../../../types';
 
 const THEME_OPTIONS = ['Offensif', 'Défensif', 'Transition', 'Supériorité'] as const;
@@ -64,7 +64,8 @@ export default function NewTrainingScreen() {
   const [location, setLocation] = useState('');
   const [keyPrinciple, setKeyPrinciple] = useState('');
   const [theme, setTheme] = useState<TrainingTheme>('Offensif');
-  const [convoqued, setConvoqued] = useState<Record<string, boolean>>({});
+  /** Pour l'effectif : id -> statut (présent/absent/retard/blessé). Absent = pas convoqué. */
+  const [attendanceSquad, setAttendanceSquad] = useState<Record<string, PlayerStatus>>({});
 
   const [clubPlayersWithTeams, setClubPlayersWithTeams] = useState<PlayerWithTeams[]>([]);
   const [inviteFilterTeamId, setInviteFilterTeamId] = useState<string>('all');
@@ -120,8 +121,18 @@ export default function NewTrainingScreen() {
     return `Joueur ${playerId.slice(0, 8)}`;
   };
 
-  const toggleConvoqued = (playerId: string) => {
-    setConvoqued((prev) => ({ ...prev, [playerId]: !prev[playerId] }));
+  const addSquadPlayer = (playerId: string, status: PlayerStatus) => {
+    setAttendanceSquad((prev) => ({ ...prev, [playerId]: status }));
+  };
+  const removeSquadPlayer = (playerId: string) => {
+    setAttendanceSquad((prev) => {
+      const next = { ...prev };
+      delete next[playerId];
+      return next;
+    });
+  };
+  const setSquadPlayerStatus = (playerId: string, status: PlayerStatus) => {
+    setAttendanceSquad((prev) => ({ ...prev, [playerId]: status }));
   };
 
   const onDateChange = (_: unknown, value?: Date) => {
@@ -163,18 +174,14 @@ export default function NewTrainingScreen() {
       Alert.alert('Date ou heure invalide', 'Date : JJ/MM/AAAA. Heure : HH:MM (ex. 18:30).');
       return;
     }
-    if (!keyPrinciple.trim()) {
-      Alert.alert('Champ requis', 'Veuillez renseigner le principe clé.');
-      return;
-    }
     setSaving(true);
     setError(null);
     try {
-      const squadConvoquedIds = players.filter((p) => convoqued[p.id]).map((p) => p.id);
+      const squadIdsInSession = Object.keys(attendanceSquad);
       const invitedIds = Object.keys(invitedTrainingPlayers);
-      const convokedPlayerIds = [...squadConvoquedIds, ...invitedIds];
+      const convokedPlayerIds = [...squadIdsInSession, ...invitedIds];
       if (convokedPlayerIds.length === 0) {
-        Alert.alert('Joueurs convoqués', 'Sélectionnez au moins un joueur convoqué pour cette séance.');
+        Alert.alert('Joueurs convoqués', 'Sélectionnez au moins un joueur (convoquer ou marquer blessé) pour cette séance.');
         setSaving(false);
         return;
       }
@@ -185,6 +192,11 @@ export default function NewTrainingScreen() {
         key_principle: keyPrinciple.trim(),
         convoked_player_ids: convokedPlayerIds,
       });
+      const initialAttendance: Record<string, PlayerStatus> = {
+        ...attendanceSquad,
+        ...Object.fromEntries(invitedIds.map((id) => [id, 'present' as PlayerStatus])),
+      };
+      await updateTrainingAttendance(training.id, initialAttendance, convokedPlayerIds);
       Alert.alert('Entraînement créé', undefined, [
         {
           text: 'Voir le détail',
@@ -271,22 +283,12 @@ export default function NewTrainingScreen() {
             style={styles.input}
             value={location}
             onChangeText={setLocation}
-            placeholder="ex: Gymnase Jean Jaurès"
+            placeholder="ex: Gymnase Jean Jaurès (optionnel)"
             placeholderTextColor="#9ca3af"
           />
         </View>
         <View style={styles.field}>
-          <Text style={styles.label}>Principe clé (obligatoire)</Text>
-          <TextInput
-            style={styles.input}
-            value={keyPrinciple}
-            onChangeText={setKeyPrinciple}
-            placeholder="ex: Conserver le ballon, contre-attaque..."
-            placeholderTextColor="#9ca3af"
-          />
-        </View>
-        <View style={styles.field}>
-          <Text style={styles.label}>Thème</Text>
+          <Text style={styles.label}>Thème de séance</Text>
           <Text style={styles.themeHint}>Choisir parmi :</Text>
           <View style={styles.themeRow}>
             {THEME_OPTIONS.map((t) => (
@@ -302,6 +304,16 @@ export default function NewTrainingScreen() {
             ))}
           </View>
         </View>
+        <View style={styles.field}>
+          <Text style={styles.label}>Principe clé (optionnel)</Text>
+          <TextInput
+            style={styles.input}
+            value={keyPrinciple}
+            onChangeText={setKeyPrinciple}
+            placeholder="ex: Conserver le ballon, contre-attaque..."
+            placeholderTextColor="#9ca3af"
+          />
+        </View>
 
         <Text style={styles.sectionTitle}>Joueurs convoqués</Text>
         <Text style={styles.themeHint}>
@@ -312,28 +324,50 @@ export default function NewTrainingScreen() {
         ) : players.length === 0 ? (
           <Text style={styles.emptyText}>Aucun joueur dans cette équipe</Text>
         ) : (
-          players.map((p) => (
-            <TouchableOpacity
-              key={p.id}
-              style={[styles.playerRow, convoqued[p.id] && styles.playerRowConvoqued]}
-              onPress={() => toggleConvoqued(p.id)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.playerInfo}>
-                {p.number != null && (
-                  <View style={styles.numberBadge}>
-                    <Text style={styles.numberText}>{p.number}</Text>
+          players.map((p) => {
+            const status = attendanceSquad[p.id];
+            return (
+              <View key={p.id} style={[styles.playerRow, status && styles.playerRowConvoqued]}>
+                <View style={styles.playerInfo}>
+                  {p.number != null && (
+                    <View style={styles.numberBadge}>
+                      <Text style={styles.numberText}>{p.number}</Text>
+                    </View>
+                  )}
+                  <Text style={styles.playerName}>
+                    {p.first_name} {p.last_name}
+                  </Text>
+                </View>
+                {status != null ? (
+                  <>
+                    <View style={styles.statusRow}>
+                      {STATUS_OPTIONS.map((opt) => (
+                        <TouchableOpacity
+                          key={opt.value}
+                          onPress={() => setSquadPlayerStatus(p.id, opt.value)}
+                          style={[styles.statusChip, status === opt.value && styles.statusChipActive]}
+                        >
+                          <Text style={styles.statusChipText}>{opt.label}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    <TouchableOpacity onPress={() => removeSquadPlayer(p.id)} style={styles.removeInvitedBtn}>
+                      <Text style={styles.removeInvitedText}>Retirer</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <View style={styles.convoqueActions}>
+                    <TouchableOpacity style={styles.convoqueBtn} onPress={() => addSquadPlayer(p.id, 'present')} activeOpacity={0.8}>
+                      <Text style={styles.convoqueBtnText}>Convoquer</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.marquerBlesseBtn} onPress={() => addSquadPlayer(p.id, 'injured')} activeOpacity={0.8}>
+                      <Text style={styles.convoqueBtnText}>Marquer blessé</Text>
+                    </TouchableOpacity>
                   </View>
                 )}
-                <Text style={styles.playerName}>
-                  {p.first_name} {p.last_name}
-                </Text>
               </View>
-              <View style={styles.convoqueCheck}>
-                <Text style={styles.convoqueText}>{convoqued[p.id] ? 'Convoqué' : 'Non convoqué'}</Text>
-              </View>
-            </TouchableOpacity>
-          ))
+            );
+          })
         )}
 
         {otherTeamPlayersForForm.length > 0 && (
@@ -351,22 +385,9 @@ export default function NewTrainingScreen() {
         {Object.keys(invitedTrainingPlayers).length > 0 && (
           <View style={styles.invitedSection}>
             <Text style={styles.invitedSectionTitle}>Joueurs d&apos;autres équipes convoqués</Text>
-            {Object.entries(invitedTrainingPlayers).map(([playerId, status]) => (
+            {Object.keys(invitedTrainingPlayers).map((playerId) => (
               <View key={playerId} style={styles.invitedRow}>
                 <Text style={styles.invitedPlayerName}>{getPlayerDisplayName(playerId)}</Text>
-                <View style={styles.statusRow}>
-                  {STATUS_OPTIONS.map((opt) => (
-                    <TouchableOpacity
-                      key={opt.value}
-                      onPress={() =>
-                        setInvitedTrainingPlayers((prev) => ({ ...prev, [playerId]: opt.value }))
-                      }
-                      style={[styles.statusChip, status === opt.value && styles.statusChipActive]}
-                    >
-                      <Text style={styles.statusChipText}>{opt.label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
                 <TouchableOpacity
                   onPress={() => {
                     setInvitedTrainingPlayers((prev) => {
@@ -609,6 +630,10 @@ const styles = StyleSheet.create({
   playerInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
   convoqueCheck: { marginTop: 4 },
   convoqueText: { fontSize: 13, color: '#6b7280', fontWeight: '500' },
+  convoqueActions: { flexDirection: 'row', gap: 8, marginTop: 4, flexWrap: 'wrap' },
+  convoqueBtn: { paddingVertical: 8, paddingHorizontal: 14, backgroundColor: '#16a34a', borderRadius: 8 },
+  marquerBlesseBtn: { paddingVertical: 8, paddingHorizontal: 14, backgroundColor: '#e11d48', borderRadius: 8 },
+  convoqueBtnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
   numberBadge: {
     width: 28,
     height: 28,

@@ -46,10 +46,20 @@ export function ActiveTeamProvider({ children }: { children: React.ReactNode }) 
 
   // Recharger les équipes après connexion (au premier chargement on peut ne pas avoir de session)
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) refetchTeams();
-    });
-    return () => subscription.unsubscribe();
+    let subscription: { unsubscribe: () => void } | null = null;
+    try {
+      const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+        try {
+          if (session) refetchTeams();
+        } catch (err) {
+          console.error('ActiveTeamContext onAuthStateChange', err);
+        }
+      });
+      subscription = data.subscription;
+    } catch (err) {
+      console.error('ActiveTeamContext onAuthStateChange setup', err);
+    }
+    return () => subscription?.unsubscribe();
   }, [refetchTeams]);
 
   useEffect(() => {

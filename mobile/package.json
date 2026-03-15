@@ -5,17 +5,19 @@
   "scripts": {
     "start": "expo start",
     "start:clear": "expo start --clear",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web",
-    "build:preview": "eas build --profile preview --platform all",
-    "build:preview:ios": "eas build --profile preview --platform ios",
-    "build:preview:android": "eas build --profile preview --platform android",
-    "build:production": "eas build --profile production --platform all",
-    "build:production:ios": "eas build --profile production --platform ios",
-    "build:production:android": "eas build --profile production --platform android",
-    "submit:ios": "eas submit --platform ios --latest",
-    "submit:android": "eas submit --platform android --latest"
+    "build:preview": "npx eas-cli build --profile preview --platform all",
+    "build:preview:ios": "npx eas-cli build --profile preview --platform ios",
+    "build:preview:android": "npx eas-cli build --profile preview --platform android",
+    "build:production": "npx eas-cli build --profile production --platform all",
+    "build:production:ios": "npx eas-cli build --profile production --platform ios",
+    "build:production:android": "npx eas-cli build --profile production --platform android",
+    "build:ios:latest": "npx eas-cli@latest build --platform ios --profile production",
+    "submit:ios": "npx eas-cli submit --platform ios --latest",
+    "submit:android": "npx eas-cli submit --platform android --latest",
+    "prebuild:ios": "npx expo prebuild --platform ios --clean"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
@@ -30,7 +32,7 @@
     "expo-updates": "~29.0.16",
     "react": "19.1.0",
     "react-native": "0.81.5",
-    "react-native-gesture-handler": "^2.30.0",
+    "react-native-gesture-handler": "~2.28.0",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0"
   },

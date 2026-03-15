@@ -277,27 +277,6 @@ export default function TrainingDetailScreen() {
               {invitedPlayerIds.map((playerId) => (
                 <View key={playerId} style={styles.invitedRow}>
                   <Text style={styles.invitedPlayerName}>{getPlayerDisplayName(playerId)}</Text>
-                  <View style={styles.statusRow}>
-                    {STATUS_OPTIONS.map((opt) => (
-                      <TouchableOpacity
-                        key={opt.value}
-                        onPress={() => setPlayerStatus(playerId, opt.value)}
-                        style={[
-                          styles.statusBtn,
-                          attendance[playerId] === opt.value && styles.statusBtnActive,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.statusBtnText,
-                            attendance[playerId] === opt.value && styles.statusBtnTextActive,
-                          ]}
-                        >
-                          {opt.label}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
                   <TouchableOpacity
                     onPress={() => {
                       setAttendance((prev) => {
