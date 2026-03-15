@@ -5,12 +5,16 @@
   },
   "build": {
     "preview": {
+      "node": "20.19.4",
+      "env": { "NPM_CONFIG_LEGACY_PEER_DEPS": "true" },
       "distribution": "internal",
       "ios": { "simulator": false },
       "android": { "buildType": "apk" },
       "channel": "preview"
     },
     "production": {
+      "node": "20.19.4",
+      "env": { "NPM_CONFIG_LEGACY_PEER_DEPS": "true" },
       "distribution": "store",
       "channel": "production",
       "autoIncrement": true
@@ -19,14 +23,14 @@
   "submit": {
     "preview": {
       "ios": {
-        "ascAppId": "__REMPLACER_PAR_APP_ID_APP_STORE_CONNECT__",
-        "appleId": "__OPTIONNEL_EMAIL_APPLE__"
+        "ascAppId": "6760584228",
+        "appleId": "robin.lacroix@gmail.com"
       }
     },
     "production": {
       "ios": {
-        "ascAppId": "__REMPLACER_PAR_APP_ID_APP_STORE_CONNECT__",
-        "appleId": "__OPTIONNEL_EMAIL_APPLE__"
+        "ascAppId": "6760584228",
+        "appleId": "robin.lacroix@gmail.com"
       },
       "android": { "track": "internal" }
     }
