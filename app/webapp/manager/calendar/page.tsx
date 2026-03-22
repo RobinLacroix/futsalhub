@@ -717,7 +717,6 @@ export default function CalendarPage() {
     setIsEditing(false);
     setEditingEvent(null);
     reset({});
-    setInvitedMatchPlayerIds({});
   };
 
   const handleOpenTrainingModal = () => {
@@ -1054,20 +1053,23 @@ export default function CalendarPage() {
       setError(null);
       if (!editingEvent || editingEvent.type !== 'training') return;
 
-      // Préparer les données de présence au format JSONB
+      // Préparer les données de présence au format JSONB (y compris joueurs d'autres équipes convoqués)
       const attendanceData: Record<string, string> = {};
       Object.entries(data.players).forEach(([playerId, player]) => {
         if (player && typeof player === 'object' && player.status) {
           attendanceData[playerId] = player.status;
         }
       });
+      const convokedPlayerIds = Object.keys(attendanceData);
+      const convoked_players = convokedPlayerIds.map((id) => ({ id }));
 
       const trainingData: any = {
         date: data.date.toISOString(),
         location: data.location,
         theme: data.theme,
         key_principle: data.key_principle,
-        attendance: attendanceData // Mise à jour du champ JSONB
+        attendance: attendanceData,
+        convoked_players,
       };
 
       // Ajouter les données de la page 2 si disponibles
@@ -2825,6 +2827,7 @@ export default function CalendarPage() {
                 {invitedTrainingPlayerIdsInForm.length > 0 && (
                   <div>
                     <label className="block text-xs font-medium text-gray-800 mb-1.5">Joueurs d&apos;autres équipes convoqués</label>
+                    <p className="text-xs text-gray-600 mb-1.5">Indiquez présence, retard, absent ou blessé en fin de séance.</p>
                     <div className="border rounded-md divide-y">
                       {invitedTrainingPlayerIdsInForm.map((playerId) => (
                         <div
@@ -2832,19 +2835,73 @@ export default function CalendarPage() {
                           className="flex flex-col sm:flex-row sm:items-center gap-2 p-2 hover:bg-gray-50"
                         >
                           <span className="text-sm text-gray-900 flex-1">{getPlayerDisplayName(playerId)}</span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const current = getTrainingValues('players') || {};
-                              const next = { ...current };
-                              delete next[playerId];
-                              setTrainingValue('players', next);
-                            }}
-                            className="p-1.5 text-red-600 hover:bg-red-50 rounded"
-                            title="Retirer"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          <div className="flex flex-wrap items-center gap-3 sm:gap-4 sm:justify-end">
+                            <Controller
+                              name={`players.${playerId}.status`}
+                              control={trainingControl}
+                              render={({ field: { value, onChange } }) => (
+                                <div className="flex items-center gap-3">
+                                  <label className="flex items-center gap-1 text-xs">
+                                    <input
+                                      type="radio"
+                                      name={`status-invited-${playerId}`}
+                                      value="present"
+                                      checked={value === 'present'}
+                                      onChange={(e) => onChange(e.target.value as PlayerStatus)}
+                                      className="text-green-600 focus:ring-green-500"
+                                    />
+                                    <span className="text-green-700">✅ Présent</span>
+                                  </label>
+                                  <label className="flex items-center gap-1 text-xs">
+                                    <input
+                                      type="radio"
+                                      name={`status-invited-${playerId}`}
+                                      value="late"
+                                      checked={value === 'late'}
+                                      onChange={(e) => onChange(e.target.value as PlayerStatus)}
+                                      className="text-yellow-600 focus:ring-yellow-500"
+                                    />
+                                    <span className="text-yellow-700">⏰ Retard</span>
+                                  </label>
+                                  <label className="flex items-center gap-1 text-xs">
+                                    <input
+                                      type="radio"
+                                      name={`status-invited-${playerId}`}
+                                      value="absent"
+                                      checked={value === 'absent'}
+                                      onChange={(e) => onChange(e.target.value as PlayerStatus)}
+                                      className="text-red-600 focus:ring-red-500"
+                                    />
+                                    <span className="text-red-700">❌ Absent</span>
+                                  </label>
+                                  <label className="flex items-center gap-1 text-xs">
+                                    <input
+                                      type="radio"
+                                      name={`status-invited-${playerId}`}
+                                      value="injured"
+                                      checked={value === 'injured'}
+                                      onChange={(e) => onChange(e.target.value as PlayerStatus)}
+                                      className="text-orange-600 focus:ring-orange-500"
+                                    />
+                                    <span className="text-orange-700">🩹 Blessé</span>
+                                  </label>
+                                </div>
+                              )}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const current = getTrainingValues('players') || {};
+                                const next = { ...current };
+                                delete next[playerId];
+                                setTrainingValue('players', next);
+                              }}
+                              className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                              title="Retirer"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>

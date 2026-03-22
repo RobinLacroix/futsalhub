@@ -68,7 +68,19 @@ export function AppRoleProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const id = setTimeout(() => load(), 0);
-    return () => clearTimeout(id);
+    const timeoutId = setTimeout(() => {
+      setLoading((prev) => {
+        if (prev) {
+          console.warn('AppRoleContext: timeout après 15s, déblocage');
+          return false;
+        }
+        return prev;
+      });
+    }, 15000);
+    return () => {
+      clearTimeout(id);
+      clearTimeout(timeoutId);
+    };
   }, [load]);
 
   useEffect(() => {

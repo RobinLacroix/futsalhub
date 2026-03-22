@@ -122,6 +122,29 @@ const ACTIONS = [
 
 const DEFAULT_SEQUENCE_TIME_LIMIT = 180;
 
+async function insertMatchEvent(params: {
+  match_id: string;
+  event_type: string;
+  match_time_seconds: number;
+  half: number;
+  player_id: string | null;
+  players_on_field: string[];
+  location_x?: number | null;
+  location_y?: number | null;
+}) {
+  const { data, error } = await supabase.rpc('insert_match_event', {
+    p_match_id: params.match_id,
+    p_event_type: params.event_type,
+    p_match_time_seconds: params.match_time_seconds,
+    p_half: params.half,
+    p_player_id: params.player_id,
+    p_players_on_field: params.players_on_field,
+    p_location_x: params.location_x ?? null,
+    p_location_y: params.location_y ?? null,
+  });
+  return { data, error };
+}
+
 export default function MatchRecorderPage() {
   const { activeTeam } = useActiveTeam();
   const [matchData, setMatchData] = useState<MatchData>({
@@ -696,16 +719,16 @@ export default function MatchRecorderPage() {
     try {
       // Tenter de sauvegarder chaque événement non synchronisé
       for (const event of unsyncedEvents) {
-        const { error } = await supabase
-          .from('match_events')
-          .insert({
-            match_id: event.match_id,
-            event_type: event.event_type,
-            match_time_seconds: event.match_time_seconds,
-            half: event.half,
-            player_id: event.player_id,
-            players_on_field: event.players_on_field
-          });
+        const { error } = await insertMatchEvent({
+          match_id: event.match_id,
+          event_type: event.event_type,
+          match_time_seconds: event.match_time_seconds,
+          half: event.half,
+          player_id: event.player_id,
+          players_on_field: event.players_on_field ?? [],
+          location_x: event.location_x ?? null,
+          location_y: event.location_y ?? null
+        });
 
         if (!error) {
           // Marquer comme synchronisé dans la liste locale
@@ -725,7 +748,6 @@ export default function MatchRecorderPage() {
           localStorage.setItem('matchRecorder_localData', JSON.stringify(snapshot));
           console.log(`✅ Événement ${event.id} synchronisé`);
         } else {
-          console.error(`❌ Erreur lors de la synchronisation de l'événement ${event.id}:`, error);
           break; // Arrêter si erreur
         }
       }
@@ -1039,23 +1061,20 @@ export default function MatchRecorderPage() {
       };
 
       // Essayer de sauvegarder en ligne
-      const { error: insertError } = await supabase
-        .from('match_events')
-        .insert({
-          match_id: matchData.selectedMatch.id,
-          event_type: eventType,
-          match_time_seconds: matchData.matchTime,
-          half: matchData.currentHalf,
-          player_id: playerId,
-          players_on_field: playersOnField,
-          location_x: selectedLocation?.x ?? null,
-          location_y: selectedLocation?.y ?? null
-        });
+      const { error: insertError } = await insertMatchEvent({
+        match_id: matchData.selectedMatch.id,
+        event_type: eventType,
+        match_time_seconds: matchData.matchTime,
+        half: matchData.currentHalf,
+        player_id: playerId,
+        players_on_field: playersOnField,
+        location_x: selectedLocation?.x ?? null,
+        location_y: selectedLocation?.y ?? null
+      });
 
       if (insertError) {
         console.error(`Erreur lors de l'insertion de l'événement ${statKey}:`, insertError);
-        console.log('💾 Enregistrement local en cours...');
-        // Sauvegarder localement si erreur
+        alert(`Impossible d'enregistrer l'événement: ${insertError.message}\n\nVérifiez la console (F12) pour plus de détails.`);
         saveToLocalStorage(localEvent);
       } else {
         console.log(`[DEBUG] ${statKey} enregistré avec succès`);
@@ -1158,22 +1177,20 @@ export default function MatchRecorderPage() {
         location_y: selectedLocation?.y ?? null
       };
 
-      const { error: insertError } = await supabase
-        .from('match_events')
-        .insert({
-          match_id: matchData.selectedMatch.id,
-          event_type: 'opponent_goal',
-          match_time_seconds: matchData.matchTime,
-          half: matchData.currentHalf,
-          player_id: null, // NULL pour l'adversaire
-          players_on_field: playersOnField,
-          location_x: selectedLocation?.x ?? null,
-          location_y: selectedLocation?.y ?? null
-        });
+      const { error: insertError } = await insertMatchEvent({
+        match_id: matchData.selectedMatch.id,
+        event_type: 'opponent_goal',
+        match_time_seconds: matchData.matchTime,
+        half: matchData.currentHalf,
+        player_id: null,
+        players_on_field: playersOnField,
+        location_x: selectedLocation?.x ?? null,
+        location_y: selectedLocation?.y ?? null
+      });
 
       if (insertError) {
         console.error('Erreur lors de l\'insertion de l\'événement but adverse:', insertError);
-        console.log('💾 Enregistrement local en cours...');
+        alert(`Impossible d'enregistrer le but adverse: ${insertError.message}`);
         saveToLocalStorage(localEvent);
       } else {
         console.log(`[DEBUG] But adverse enregistré avec succès`);
@@ -1259,22 +1276,20 @@ export default function MatchRecorderPage() {
         location_y: selectedLocation?.y ?? null
       };
 
-      const { error: insertError } = await supabase
-        .from('match_events')
-        .insert({
-          match_id: matchData.selectedMatch.id,
-          event_type: eventType,
-          match_time_seconds: matchData.matchTime,
-          half: matchData.currentHalf,
-          player_id: null, // NULL pour l'adversaire
-          players_on_field: playersOnField,
-          location_x: selectedLocation?.x ?? null,
-          location_y: selectedLocation?.y ?? null
-        });
+      const { error: insertError } = await insertMatchEvent({
+        match_id: matchData.selectedMatch.id,
+        event_type: eventType,
+        match_time_seconds: matchData.matchTime,
+        half: matchData.currentHalf,
+        player_id: null,
+        players_on_field: playersOnField,
+        location_x: selectedLocation?.x ?? null,
+        location_y: selectedLocation?.y ?? null
+      });
 
       if (insertError) {
         console.error('Erreur lors de l\'insertion de l\'événement adverse:', insertError);
-        console.log('💾 Enregistrement local en cours...');
+        alert(`Impossible d'enregistrer l'événement adverse: ${insertError.message}`);
         saveToLocalStorage(localEvent);
       } else {
         localEvent.synced = true;
@@ -1980,20 +1995,18 @@ export default function MatchRecorderPage() {
         synced: false
       };
 
-      const { error: insertError } = await supabase
-        .from('match_events')
-        .insert({
-          match_id: matchData.selectedMatch.id,
-          event_type: eventType,
-          match_time_seconds: matchData.matchTime,
-          half: matchData.currentHalf,
-          player_id: playerId,
-          players_on_field: playersOnField
-        });
+      const { error: insertError } = await insertMatchEvent({
+        match_id: matchData.selectedMatch.id,
+        event_type: eventType,
+        match_time_seconds: matchData.matchTime,
+        half: matchData.currentHalf,
+        player_id: playerId,
+        players_on_field: playersOnField
+      });
 
       if (insertError) {
         console.error('Erreur lors de l\'insertion de l\'événement carte:', insertError);
-        console.log('💾 Enregistrement local en cours...');
+        alert(`Impossible d'enregistrer la carte: ${insertError.message}`);
         saveToLocalStorage(localEvent);
       } else {
         localEvent.synced = true;
@@ -3211,13 +3224,15 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
           {/* Header */}
           <div className="flex items-center justify-between mb-8">
             <h1 className="text-3xl font-bold text-gray-900">Choix du match</h1>
-            <button
-              onClick={() => setShowAddMatchForm(true)}
-              className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <Trophy className="h-5 w-5" />
-              Ajouter un match
-            </button>
+            {!showAddMatchForm && (
+              <button
+                onClick={() => setShowAddMatchForm(true)}
+                className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                <Trophy className="h-5 w-5" />
+                Ajouter un match
+              </button>
+            )}
           </div>
 
           {/* Formulaire d'ajout de match */}

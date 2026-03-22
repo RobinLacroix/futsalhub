@@ -1,5 +1,6 @@
 import { Stack, useRouter } from 'expo-router';
 import { TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { useIsTablet } from '../../hooks/useIsTablet';
 
 function HeaderAddButton() {
   const router = useRouter();
@@ -15,9 +16,11 @@ function HeaderAddButton() {
 }
 
 export default function SquadLayout() {
+  const isTablet = useIsTablet();
   return (
     <Stack
       screenOptions={{
+        headerShown: !isTablet,
         headerStyle: { backgroundColor: '#3b82f6' },
         headerTintColor: '#fff',
         headerTitleStyle: { fontWeight: '600', fontSize: 18 },

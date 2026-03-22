@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Stack, useRouter } from 'expo-router';
+import { useIsTablet } from '../../hooks/useIsTablet';
 import {
   TouchableOpacity,
   Text,
@@ -56,9 +57,11 @@ function HeaderAddButton() {
 }
 
 export default function CalendarLayout() {
+  const isTablet = useIsTablet();
   return (
     <Stack
       screenOptions={{
+        headerShown: !isTablet,
         headerStyle: { backgroundColor: '#3b82f6' },
         headerTintColor: '#fff',
         headerTitleStyle: { fontWeight: '600', fontSize: 18 },
@@ -74,6 +77,7 @@ export default function CalendarLayout() {
       <Stack.Screen name="new" options={{ title: 'Nouvel entraînement' }} />
       <Stack.Screen name="new-match" options={{ title: 'Nouveau match' }} />
       <Stack.Screen name="training/[trainingId]" options={{ title: 'Entraînement' }} />
+      <Stack.Screen name="training/edit/[trainingId]" options={{ title: "Modifier l'entraînement" }} />
       <Stack.Screen name="matchDetail/[matchId]" options={{ title: 'Match' }} />
     </Stack>
   );

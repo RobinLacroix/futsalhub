@@ -54,3 +54,27 @@ export interface MatchPlayer {
   yellow_cards?: number;
   red_cards?: number;
 }
+
+export type MatchEventType =
+  | 'goal'
+  | 'shot'
+  | 'shot_on_target'
+  | 'recovery'
+  | 'yellow_card'
+  | 'red_card'
+  | 'dribble'
+  | 'ball_loss'
+  | 'opponent_goal'
+  | 'opponent_shot'
+  | 'opponent_shot_on_target';
+
+export interface MatchEvent {
+  id: string;
+  match_id: string;
+  event_type: MatchEventType;
+  match_time_seconds: number;
+  half: 1 | 2;
+  player_id?: string | null;
+  players_on_field?: string[];
+  created_at?: string;
+}

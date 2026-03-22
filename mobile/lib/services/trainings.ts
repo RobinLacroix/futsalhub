@@ -56,6 +56,29 @@ export async function deleteTraining(trainingId: string): Promise<void> {
   if (error) throw error;
 }
 
+export interface UpdateTrainingInput {
+  date?: Date;
+  location?: string;
+  theme?: 'Offensif' | 'Défensif' | 'Transition' | 'Supériorité';
+  key_principle?: string;
+}
+
+export async function updateTraining(trainingId: string, input: UpdateTrainingInput): Promise<Training> {
+  const updateData: Record<string, unknown> = {};
+  if (input.date != null) updateData.date = input.date.toISOString();
+  if (input.location !== undefined) updateData.location = (input.location ?? '').trim() || null;
+  if (input.theme != null) updateData.theme = input.theme;
+  if (input.key_principle !== undefined) updateData.key_principle = (input.key_principle ?? '').trim() || null;
+  const { data, error } = await supabase
+    .from('trainings')
+    .update(updateData)
+    .eq('id', trainingId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Training;
+}
+
 export async function updateTrainingAttendance(
   trainingId: string,
   attendance: Record<string, PlayerStatus>,

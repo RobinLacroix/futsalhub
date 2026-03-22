@@ -11,12 +11,14 @@ import {
 } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useRouter } from 'expo-router';
+import { useIsTablet } from '../../../hooks/useIsTablet';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 import { getPlayersByTeam, deletePlayer } from '../../../lib/services/players';
 import type { Player } from '../../../types';
 
 export default function SquadScreen() {
   const router = useRouter();
+  const isTablet = useIsTablet();
   const { activeTeamId } = useActiveTeam();
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,6 +103,18 @@ export default function SquadScreen() {
 
   return (
     <View style={styles.container}>
+      {isTablet && (
+        <View style={styles.tabletBar}>
+          <Text style={styles.tabletBarTitle}>Équipe</Text>
+          <TouchableOpacity
+            style={styles.tabletAddBtn}
+            onPress={() => router.push('/(tabs)/squad/new-player')}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.tabletAddBtnText}>+</Text>
+          </TouchableOpacity>
+        </View>
+      )}
       <FlatList
         data={players}
         keyExtractor={(item) => item.id}
@@ -195,4 +209,24 @@ const styles = StyleSheet.create({
   playerInfo: { flex: 1 },
   playerName: { fontSize: 16, fontWeight: '600', color: '#111' },
   playerMeta: { fontSize: 12, color: '#6b7280', marginTop: 2 },
+  tabletBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#3b82f6',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(0,0,0,0.1)',
+  },
+  tabletBarTitle: { fontSize: 18, fontWeight: '600', color: '#fff' },
+  tabletAddBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tabletAddBtnText: { color: '#fff', fontSize: 22, fontWeight: '600', lineHeight: 24 },
 });

@@ -234,9 +234,14 @@ export const playersService = {
   },
 
   /**
-   * Récupère les statistiques d'un joueur
+   * Récupère les statistiques d'un joueur.
+   * Optionnellement, on peut filtrer par type de compétition (Championnat, Coupe, Amical).
    */
-  async getPlayerStats(playerId: string, teamId: string): Promise<{
+  async getPlayerStats(
+    playerId: string,
+    teamId: string,
+    matchTypeFilter: 'all' | 'Championnat' | 'Coupe' | 'Amical' = 'all'
+  ): Promise<{
     matches_played: number;
     goals: number;
     training_attendance: number;
@@ -248,7 +253,7 @@ export const playersService = {
     // Récupérer les matchs de l'équipe
     const { data: matchesData, error: matchesError } = await supabase
       .from('matches')
-      .select('players, score_team, score_opponent')
+      .select('competition, players, score_team, score_opponent')
       .eq('team_id', teamId);
 
     if (matchesError) throw matchesError;
@@ -261,8 +266,15 @@ export const playersService = {
 
     if (trainingsError) throw trainingsError;
 
+    // Filtrer par type de compétition (Championnat, Coupe, Amical)
+    const filteredMatches = (matchesData || []).filter(match => {
+      if (matchTypeFilter === 'all') return true;
+      const comp = ((match as any).competition ?? '').toString().trim();
+      return comp.toLowerCase() === matchTypeFilter.toLowerCase();
+    });
+
     // Calculer les stats
-    const matchesPlayed = (matchesData || []).filter(match => {
+    const matchesPlayed = filteredMatches.filter(match => {
       if (!match.players) return false;
       try {
         const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
@@ -272,7 +284,7 @@ export const playersService = {
       }
     }).length;
 
-    const goals = (matchesData || []).reduce((sum, match) => {
+    const goals = filteredMatches.reduce((sum, match) => {
       if (!match.players) return sum;
       try {
         const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
@@ -313,7 +325,7 @@ export const playersService = {
     let draws = 0;
     let defeats = 0;
 
-    (matchesData || []).forEach(match => {
+    filteredMatches.forEach(match => {
       if (!match.players) return;
       try {
         const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);

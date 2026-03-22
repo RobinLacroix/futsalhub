@@ -116,6 +116,7 @@ export default function PlayerProfilePage() {
 
   const [feedbackHistory, setFeedbackHistory] = useState<PlayerTrainingFeedbackRow[]>([]);
   const [feedbackMetric, setFeedbackMetric] = useState<'auto_evaluation' | 'rpe' | 'physical_form' | 'pleasure'>('auto_evaluation');
+  const [matchTypeFilter, setMatchTypeFilter] = useState<'all' | 'Championnat' | 'Coupe' | 'Amical'>('all');
 
   const [linkCode, setLinkCode] = useState<string | null>(null);
   const [linkCodeLoading, setLinkCodeLoading] = useState(false);
@@ -134,10 +135,7 @@ export default function PlayerProfilePage() {
       setError(null);
 
       try {
-        const [playerData, playerStats] = await Promise.all([
-          playersService.getPlayerById(playerId),
-          playersService.getPlayerStats(playerId, activeTeam.id)
-        ]);
+        const playerData = await playersService.getPlayerById(playerId);
 
         if (!playerData) {
           setError('Joueur introuvable');
@@ -146,7 +144,6 @@ export default function PlayerProfilePage() {
         }
 
         setPlayer(playerData);
-        setStats(playerStats);
 
         const [trainingsData, eventsData] = await Promise.all([
           trainingsService.getTrainingsByTeam(activeTeam.id),
@@ -208,6 +205,20 @@ export default function PlayerProfilePage() {
 
     loadData();
   }, [playerId, activeTeam]);
+
+  // Recharger les stats matchs quand le filtre de type de match change
+  useEffect(() => {
+    const loadMatchStats = async () => {
+      if (!playerId || !activeTeam) return;
+      try {
+        const playerStats = await playersService.getPlayerStats(playerId, activeTeam.id, matchTypeFilter);
+        setStats(playerStats);
+      } catch {
+        // on laisse les anciennes stats si erreur ponctuelle
+      }
+    };
+    loadMatchStats();
+  }, [playerId, activeTeam, matchTypeFilter]);
 
   useEffect(() => {
     if (!club?.id) {
@@ -627,6 +638,19 @@ export default function PlayerProfilePage() {
                 {stats.matches_played > 1 ? 's' : ''} · {stats.goals} but{stats.goals > 1 ? 's' : ''}
               </p>
             )}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-gray-700">Compétition :</span>
+              <select
+                value={matchTypeFilter}
+                onChange={e => setMatchTypeFilter(e.target.value as 'all' | 'Championnat' | 'Coupe' | 'Amical')}
+                className="rounded-lg border-2 border-gray-300 bg-white text-gray-900 text-sm font-medium px-3 py-2 min-w-[140px]"
+              >
+                <option value="all">Tous les matchs</option>
+                <option value="Championnat">Championnat</option>
+                <option value="Coupe">Coupe</option>
+                <option value="Amical">Amical</option>
+              </select>
+            </div>
           </div>
           <div className="p-6">
             {matchResultsChartData.length > 0 ? (

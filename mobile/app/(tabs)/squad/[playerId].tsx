@@ -19,6 +19,7 @@ import {
   getPlayerTeams,
   addPlayerToTeam,
   removePlayerFromTeam,
+  type MatchTypeFilter,
 } from '../../../lib/services/players';
 import { getTrainingsByTeam } from '../../../lib/services/trainings';
 import type { Player, Team } from '../../../types';
@@ -44,6 +45,7 @@ export default function PlayerDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [assignModalVisible, setAssignModalVisible] = useState(false);
   const [updatingTeamId, setUpdatingTeamId] = useState<string | null>(null);
+  const [matchTypeFilter, setMatchTypeFilter] = useState<MatchTypeFilter>('all');
 
   const loadPlayerAndTeams = useCallback(async () => {
     if (!playerId) return;
@@ -60,11 +62,7 @@ export default function PlayerDetailScreen() {
         return;
       }
       if (activeTeamId) {
-        const [statsData, trainingsData] = await Promise.all([
-          getPlayerStats(playerId, activeTeamId),
-          getTrainingsByTeam(activeTeamId),
-        ]);
-        setStats(statsData);
+        const trainingsData = await getTrainingsByTeam(activeTeamId);
         const sorted = [...(trainingsData ?? [])].sort(
           (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
         );
@@ -84,6 +82,11 @@ export default function PlayerDetailScreen() {
       setLoading(false);
     }
   }, [playerId, activeTeamId]);
+
+  useEffect(() => {
+    if (!playerId || !activeTeamId) return;
+    getPlayerStats(playerId, activeTeamId, matchTypeFilter).then(setStats).catch(() => {});
+  }, [playerId, activeTeamId, matchTypeFilter]);
 
   useEffect(() => {
     if (!playerId) {
@@ -220,35 +223,63 @@ export default function PlayerDetailScreen() {
         </TouchableOpacity>
       </View>
 
-      {stats && (
+      {activeTeamId && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Statistiques</Text>
-          <View style={styles.statsGrid}>
-            <View style={styles.statBox}>
-              <Text style={styles.statValue}>{stats.matches_played}</Text>
-              <Text style={styles.statLabel}>Matchs</Text>
-            </View>
-            <View style={styles.statBox}>
-              <Text style={styles.statValue}>{stats.goals}</Text>
-              <Text style={styles.statLabel}>Buts</Text>
-            </View>
-            <View style={styles.statBox}>
-              <Text style={styles.statValue}>{stats.attendance_percentage}%</Text>
-              <Text style={styles.statLabel}>Présence</Text>
-            </View>
-            <View style={styles.statBox}>
-              <Text style={styles.statValue}>{stats.victories}</Text>
-              <Text style={styles.statLabel}>Victoires</Text>
-            </View>
-            <View style={styles.statBox}>
-              <Text style={styles.statValue}>{stats.draws}</Text>
-              <Text style={styles.statLabel}>Nuls</Text>
-            </View>
-            <View style={styles.statBox}>
-              <Text style={styles.statValue}>{stats.defeats}</Text>
-              <Text style={styles.statLabel}>Défaites</Text>
-            </View>
+          <Text style={styles.filterLabel}>Compétition</Text>
+          <View style={styles.filterRow}>
+            {(['all', 'Championnat', 'Coupe', 'Amical'] as const).map((value) => (
+              <TouchableOpacity
+                key={value}
+                style={[
+                  styles.filterChip,
+                  matchTypeFilter === value && styles.filterChipActive,
+                ]}
+                onPress={() => setMatchTypeFilter(value)}
+              >
+                <Text
+                  style={[
+                    styles.filterChipText,
+                    matchTypeFilter === value && styles.filterChipTextActive,
+                  ]}
+                >
+                  {value === 'all' ? 'Tous' : value}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
+          {stats ? (
+            <View style={styles.statsGrid}>
+              <View style={styles.statBox}>
+                <Text style={styles.statValue}>{stats.matches_played}</Text>
+                <Text style={styles.statLabel}>Matchs</Text>
+              </View>
+              <View style={styles.statBox}>
+                <Text style={styles.statValue}>{stats.goals}</Text>
+                <Text style={styles.statLabel}>Buts</Text>
+              </View>
+              <View style={styles.statBox}>
+                <Text style={styles.statValue}>{stats.attendance_percentage}%</Text>
+                <Text style={styles.statLabel}>Présence</Text>
+              </View>
+              <View style={styles.statBox}>
+                <Text style={styles.statValue}>{stats.victories}</Text>
+                <Text style={styles.statLabel}>Victoires</Text>
+              </View>
+              <View style={styles.statBox}>
+                <Text style={styles.statValue}>{stats.draws}</Text>
+                <Text style={styles.statLabel}>Nuls</Text>
+              </View>
+              <View style={styles.statBox}>
+                <Text style={styles.statValue}>{stats.defeats}</Text>
+                <Text style={styles.statLabel}>Défaites</Text>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.statsGrid}>
+              <ActivityIndicator size="small" color="#3b82f6" style={{ marginVertical: 12 }} />
+            </View>
+          )}
         </View>
       )}
 
@@ -361,6 +392,17 @@ const styles = StyleSheet.create({
   info: { fontSize: 14, color: '#374151', marginBottom: 4 },
   section: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 16 },
   sectionTitle: { fontSize: 16, fontWeight: '600', marginBottom: 12 },
+  filterLabel: { fontSize: 12, color: '#6b7280', marginBottom: 8 },
+  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  filterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#e5e7eb',
+  },
+  filterChipActive: { backgroundColor: '#3b82f6' },
+  filterChipText: { fontSize: 13, color: '#374151', fontWeight: '500' },
+  filterChipTextActive: { color: '#fff' },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   statBox: {
     minWidth: '30%',

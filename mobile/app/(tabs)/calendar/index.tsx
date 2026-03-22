@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useLayoutEffect } from 'react';
 import {
   View,
   Text,
@@ -8,9 +8,12 @@ import {
   RefreshControl,
   TouchableOpacity,
   Alert,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
-import { useRouter } from 'expo-router';
+import { useRouter, useNavigation } from 'expo-router';
+import { useIsTablet } from '../../../hooks/useIsTablet';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
@@ -25,12 +28,16 @@ type CalendarEvent =
 
 export default function CalendarScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
+  const isTablet = useIsTablet();
   const { activeTeamId } = useActiveTeam();
   const [trainings, setTrainings] = useState<Training[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [addMenuVisible, setAddMenuVisible] = useState(false);
 
   const load = useCallback(async () => {
     if (!activeTeamId) {
@@ -96,6 +103,22 @@ export default function CalendarScreen() {
     );
   }, []);
 
+  useLayoutEffect(() => {
+    if (!isTablet) {
+      navigation.setOptions({
+        headerLeft: () => (
+          <TouchableOpacity
+            onPress={() => setEditMode((m) => !m)}
+            style={styles.headerLeftBtn}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.headerLeftText}>{editMode ? 'Terminer' : 'Modifier'}</Text>
+          </TouchableOpacity>
+        ),
+      });
+    }
+  }, [navigation, editMode, isTablet]);
+
   const events = useMemo((): CalendarEvent[] => {
     const list: CalendarEvent[] = [];
     trainings.forEach((t) => {
@@ -136,6 +159,56 @@ export default function CalendarScreen() {
 
   return (
     <View style={styles.container}>
+      {isTablet && (
+        <View style={styles.tabletBar}>
+          <TouchableOpacity
+            onPress={() => setEditMode((m) => !m)}
+            style={styles.tabletBarBtn}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.tabletBarBtnText}>{editMode ? 'Terminer' : 'Modifier'}</Text>
+          </TouchableOpacity>
+          <Text style={styles.tabletBarTitle}>Calendrier</Text>
+          <TouchableOpacity
+            style={styles.tabletAddBtn}
+            onPress={() => setAddMenuVisible(true)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.tabletAddBtnText}>+</Text>
+          </TouchableOpacity>
+          <Modal
+            visible={addMenuVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setAddMenuVisible(false)}
+          >
+            <Pressable style={styles.menuOverlay} onPress={() => setAddMenuVisible(false)}>
+              <View style={styles.menuBox}>
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => {
+                    setAddMenuVisible(false);
+                    router.push('/(tabs)/calendar/new');
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.menuItemText}>Entraînement</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => {
+                    setAddMenuVisible(false);
+                    router.push('/(tabs)/calendar/new-match');
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.menuItemText}>Match</Text>
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          </Modal>
+        </View>
+      )}
       <FlatList
         data={events}
         keyExtractor={(item) => `${item.type}-${item.id}`}
@@ -169,7 +242,11 @@ export default function CalendarScreen() {
               <Swipeable renderRightActions={renderRightActions} overshootRight={false}>
                 <TouchableOpacity
                   style={[styles.card, styles.cardTraining]}
-                  onPress={() => router.push(`/(tabs)/calendar/training/${t.id}`)}
+                  onPress={() =>
+                    editMode
+                      ? router.push(`/(tabs)/calendar/training/edit/${t.id}`)
+                      : router.push(`/(tabs)/calendar/training/${t.id}`)
+                  }
                   activeOpacity={0.7}
                 >
                   <Text style={styles.date}>{format(date, 'EEEE d MMMM yyyy', { locale: fr })}</Text>
@@ -206,6 +283,8 @@ export default function CalendarScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  headerLeftBtn: { paddingVertical: 8, paddingLeft: 4, paddingRight: 12 },
+  headerLeftText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   listContent: { padding: 16, paddingBottom: 32 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   emptyText: { fontSize: 16, color: '#6b7280' },
@@ -236,4 +315,43 @@ const styles = StyleSheet.create({
   date: { fontSize: 16, fontWeight: '600', color: '#111', marginBottom: 4 },
   theme: { fontSize: 14, color: '#374151', marginBottom: 2 },
   location: { fontSize: 12, color: '#6b7280' },
+  tabletBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#3b82f6',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(0,0,0,0.1)',
+  },
+  tabletBarTitle: { fontSize: 18, fontWeight: '600', color: '#fff' },
+  tabletBarBtn: { paddingVertical: 8, paddingHorizontal: 12 },
+  tabletBarBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  tabletAddBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tabletAddBtnText: { color: '#fff', fontSize: 22, fontWeight: '600', lineHeight: 24 },
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  menuBox: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    minWidth: 200,
+    overflow: 'hidden',
+  },
+  menuItem: {
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+  },
+  menuItemText: { fontSize: 16, color: '#111' },
 });

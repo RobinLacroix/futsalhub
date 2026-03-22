@@ -151,9 +151,12 @@ export async function getPlayerByUserId(userId: string): Promise<Player | null> 
   return data;
 }
 
+export type MatchTypeFilter = 'all' | 'Championnat' | 'Coupe' | 'Amical';
+
 export async function getPlayerStats(
   playerId: string,
-  teamId: string
+  teamId: string,
+  matchTypeFilter: MatchTypeFilter = 'all'
 ): Promise<{
   matches_played: number;
   goals: number;
@@ -165,7 +168,7 @@ export async function getPlayerStats(
 }> {
   const { data: matchesData, error: matchesError } = await supabase
     .from('matches')
-    .select('players, score_team, score_opponent')
+    .select('competition, players, score_team, score_opponent')
     .eq('team_id', teamId);
   if (matchesError) throw matchesError;
 
@@ -175,7 +178,14 @@ export async function getPlayerStats(
     .eq('team_id', teamId);
   if (trainingsError) throw trainingsError;
 
-  const matches = matchesData ?? [];
+  const allMatches = matchesData ?? [];
+  const matches =
+    matchTypeFilter === 'all'
+      ? allMatches
+      : allMatches.filter((m) => {
+          const comp = (m.competition ?? '').toString().trim();
+          return comp.toLowerCase() === matchTypeFilter.toLowerCase();
+        });
   const trainings = trainingsData ?? [];
 
   const matchesPlayed = matches.filter((m) => {

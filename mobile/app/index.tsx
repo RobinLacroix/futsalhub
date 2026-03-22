@@ -16,6 +16,7 @@ export default function Index() {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color="#3B82F6" />
+        <Text style={styles.loadingText}>Chargement…</Text>
       </View>
     );
   }
@@ -40,5 +41,16 @@ export default function Index() {
 }
 
 const styles = StyleSheet.create({
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    padding: 24,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#64748b',
+  },
 });

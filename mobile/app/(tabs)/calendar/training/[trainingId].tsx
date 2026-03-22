@@ -167,11 +167,11 @@ export default function TrainingDetailScreen() {
     }
   };
 
-  const presentOnlyCount = Object.entries(attendance).filter(([, s]) => s === 'present').length;
-  const lateCount = Object.entries(attendance).filter(([, s]) => s === 'late').length;
+  const presentOnlyCount = filteredPlayers.filter((p) => attendance[p.id] === 'present').length;
+  const lateCount = filteredPlayers.filter((p) => attendance[p.id] === 'late').length;
   const presentCount = presentOnlyCount + lateCount;
-  const absentCount = Object.entries(attendance).filter(
-    ([, s]) => s === 'absent' || s === 'injured'
+  const absentCount = filteredPlayers.filter(
+    (p) => attendance[p.id] === 'absent' || attendance[p.id] === 'injured'
   ).length;
 
   return (
@@ -180,6 +180,21 @@ export default function TrainingDetailScreen() {
         <Text style={styles.date}>{format(date, 'EEEE d MMMM yyyy', { locale: fr })}</Text>
         <Text style={styles.theme}>{training.theme}</Text>
         {training.location ? <Text style={styles.location}>{training.location}</Text> : null}
+      </View>
+
+      <View style={styles.statsRow}>
+        <View style={[styles.statBox, styles.statBoxPresent]}>
+          <Text style={styles.statNumber}>{presentCount}</Text>
+          <Text style={styles.statLabel}>Présents</Text>
+          <Text style={styles.statHint}>
+            {presentOnlyCount} présent{presentOnlyCount !== 1 ? 's' : ''}, {lateCount} retard{lateCount !== 1 ? 's' : ''}
+          </Text>
+        </View>
+        <View style={[styles.statBox, styles.statBoxAbsent]}>
+          <Text style={styles.statNumber}>{absentCount}</Text>
+          <Text style={styles.statLabel}>Absents</Text>
+          <Text style={styles.statHint}>blessé + absent</Text>
+        </View>
       </View>
 
       {players.length > 0 && (
@@ -202,21 +217,6 @@ export default function TrainingDetailScreen() {
           </TouchableOpacity>
         </View>
       )}
-
-      <View style={styles.statsRow}>
-        <View style={[styles.statBox, styles.statBoxPresent]}>
-          <Text style={styles.statNumber}>{presentCount}</Text>
-          <Text style={styles.statLabel}>Présents</Text>
-          <Text style={styles.statHint}>
-            {presentOnlyCount} présent{presentOnlyCount !== 1 ? 's' : ''}, {lateCount} retard{lateCount !== 1 ? 's' : ''}
-          </Text>
-        </View>
-        <View style={[styles.statBox, styles.statBoxAbsent]}>
-          <Text style={styles.statNumber}>{absentCount}</Text>
-          <Text style={styles.statLabel}>Absents</Text>
-          <Text style={styles.statHint}>blessé + absent</Text>
-        </View>
-      </View>
 
       <Text style={styles.sectionTitle}>Présences</Text>
 
@@ -274,21 +274,45 @@ export default function TrainingDetailScreen() {
           {invitedPlayerIds.length > 0 && (
             <View style={styles.invitedSection}>
               <Text style={styles.invitedSectionTitle}>Joueurs d&apos;autres équipes convoqués</Text>
+              <Text style={styles.invitedSectionHint}>Indiquez présence, retard, absent ou blessé en fin de séance.</Text>
               {invitedPlayerIds.map((playerId) => (
                 <View key={playerId} style={styles.invitedRow}>
-                  <Text style={styles.invitedPlayerName}>{getPlayerDisplayName(playerId)}</Text>
-                  <TouchableOpacity
-                    onPress={() => {
-                      setAttendance((prev) => {
-                        const next = { ...prev };
-                        delete next[playerId];
-                        return next;
-                      });
-                    }}
-                    style={styles.removeInvitedBtn}
-                  >
-                    <Text style={styles.removeInvitedText}>Retirer</Text>
-                  </TouchableOpacity>
+                  <View style={styles.invitedRowHeader}>
+                    <Text style={styles.invitedPlayerName}>{getPlayerDisplayName(playerId)}</Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setAttendance((prev) => {
+                          const next = { ...prev };
+                          delete next[playerId];
+                          return next;
+                        });
+                      }}
+                      style={styles.removeInvitedBtn}
+                    >
+                      <Text style={styles.removeInvitedText}>Retirer</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.statusRow}>
+                    {STATUS_OPTIONS.map((opt) => (
+                      <TouchableOpacity
+                        key={opt.value}
+                        style={[
+                          styles.statusBtn,
+                          attendance[playerId] === opt.value && styles.statusBtnActive,
+                        ]}
+                        onPress={() => setPlayerStatus(playerId, opt.value)}
+                      >
+                        <Text
+                          style={[
+                            styles.statusBtnText,
+                            attendance[playerId] === opt.value && styles.statusBtnTextActive,
+                          ]}
+                        >
+                          {opt.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
                 </View>
               ))}
             </View>
@@ -431,18 +455,24 @@ const styles = StyleSheet.create({
   statNumber: { fontSize: 28, fontWeight: '700', color: '#111' },
   statLabel: { fontSize: 14, fontWeight: '600', color: '#374151', marginTop: 4 },
   statHint: { fontSize: 11, color: '#6b7280', marginTop: 2 },
-  sectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 12 },
-  filterRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  sectionTitle: { fontSize: 18, fontWeight: '600', marginTop: 40, marginBottom: 12 },
+  filterRow: {
+    flexDirection: 'column',
+    gap: 8,
+    marginTop: 12,
+    marginBottom: 4,
+  },
   filterChip: {
+    width: '100%',
     paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
+    paddingHorizontal: 20,
+    borderRadius: 999,
     backgroundColor: '#e5e7eb',
-    borderWidth: 2,
-    borderColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
   },
   filterChipActive: { backgroundColor: '#dbeafe', borderColor: '#3b82f6' },
-  filterChipText: { fontSize: 14, fontWeight: '500', color: '#374151' },
+  filterChipText: { fontSize: 15, fontWeight: '500', color: '#374151' },
   filterChipTextActive: { color: '#1d4ed8', fontWeight: '600' },
   emptyText: { fontSize: 14, color: '#6b7280', marginBottom: 16 },
   playerRow: {
@@ -499,7 +529,8 @@ const styles = StyleSheet.create({
   },
   addOtherTeamsBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
   invitedSection: { marginTop: 16, marginBottom: 8 },
-  invitedSectionTitle: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 10 },
+  invitedSectionTitle: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 4 },
+  invitedSectionHint: { fontSize: 12, color: '#6b7280', marginBottom: 10 },
   invitedRow: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -508,8 +539,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e5e7eb',
   },
-  invitedPlayerName: { fontSize: 15, fontWeight: '600', color: '#111', marginBottom: 8 },
-  removeInvitedBtn: { alignSelf: 'flex-start', paddingVertical: 4 },
+  invitedRowHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  invitedPlayerName: { fontSize: 15, fontWeight: '600', color: '#111', flex: 1 },
+  removeInvitedBtn: { paddingVertical: 4, paddingHorizontal: 8 },
   removeInvitedText: { fontSize: 13, color: '#dc2626', fontWeight: '500' },
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
   inviteModalContent: {

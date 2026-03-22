@@ -65,6 +65,7 @@ export default function RootLayout() {
                 <Stack.Screen name="choose-role" />
                 <Stack.Screen name="join-club" options={{ title: 'Rejoindre le club' }} />
                 <Stack.Screen name="(tabs)" />
+                <Stack.Screen name="teams" options={{ title: 'Équipes du club' }} />
                 <Stack.Screen name="(player-tabs)" />
               </Stack>
             </ActiveTeamProvider>

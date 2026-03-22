@@ -58,6 +58,10 @@ export default function HomeScreen() {
     Alert.alert('Équipe sélectionnée', `${teamName} est maintenant l’équipe active.`);
   };
 
+  const handleAddTeam = () => {
+    router.push('/teams');
+  };
+
   return (
     <ScrollView
       style={styles.scroll}
@@ -86,7 +90,16 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
         ) : teams.length === 0 ? (
-          <Text style={styles.teamEmpty}>Aucune équipe</Text>
+          <View style={styles.noTeamBox}>
+            <Text style={styles.teamEmpty}>Aucune équipe</Text>
+            <TouchableOpacity
+              style={styles.addTeamButton}
+              onPress={handleAddTeam}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.addTeamButtonText}>Ajouter une équipe</Text>
+            </TouchableOpacity>
+          </View>
         ) : (
           <>
             {activeTeam ? (
@@ -112,6 +125,13 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+            <TouchableOpacity
+              style={[styles.addTeamButton, { marginTop: 12 }]}
+              onPress={handleAddTeam}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.addTeamButtonText}>Ajouter une équipe</Text>
+            </TouchableOpacity>
           </>
         )}
       </View>
@@ -157,6 +177,23 @@ const styles = StyleSheet.create({
   teamRowText: { fontSize: 17, fontWeight: '500', color: '#111' },
   teamRowCheck: { fontSize: 20, color: '#3b82f6', fontWeight: '700' },
   teamEmpty: { fontSize: 14, color: '#9ca3af' },
+  noTeamBox: {
+    width: '100%',
+    maxWidth: 320,
+    alignItems: 'center',
+  },
+  addTeamButton: {
+    marginTop: 12,
+    backgroundColor: '#3b82f6',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 999,
+  },
+  addTeamButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 14,
+  },
   noClubBox: {
     width: '100%',
     maxWidth: 320,

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { useAppRole } from '../contexts/AppRoleContext';
 
@@ -19,9 +20,20 @@ export default function SignInScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rememberMe, setRememberMe] = useState(true);
 
   const router = useRouter();
   const { refetch } = useAppRole();
+
+  useEffect(() => {
+    // Pré-remplir l'email si l'utilisateur a choisi "Se souvenir de moi"
+    AsyncStorage.getItem('futsalhub.rememberEmail').then((value) => {
+      if (value) {
+        setEmail(value);
+        setRememberMe(true);
+      }
+    });
+  }, []);
 
   const handleSignIn = async () => {
     setError(null);
@@ -33,6 +45,11 @@ export default function SignInScreen() {
     try {
       const { error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       if (err) throw err;
+      if (rememberMe) {
+        await AsyncStorage.setItem('futsalhub.rememberEmail', email.trim());
+      } else {
+        await AsyncStorage.removeItem('futsalhub.rememberEmail');
+      }
       await refetch();
       router.replace('/');
     } catch (e) {
@@ -85,6 +102,17 @@ export default function SignInScreen() {
           disabled={loading}
         >
           <Text style={styles.forgotLinkText}>Mot de passe oublié ?</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.rememberRow}
+          onPress={() => setRememberMe((v) => !v)}
+          disabled={loading}
+        >
+          <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
+            {rememberMe && <Text style={styles.checkboxMark}>✓</Text>}
+          </View>
+          <Text style={styles.rememberText}>Rester connecté</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -189,6 +217,36 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#3b82f6',
     fontWeight: '500',
+  },
+  rememberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#d1d5db',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+    backgroundColor: '#fff',
+  },
+  checkboxChecked: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#3b82f6',
+  },
+  checkboxMark: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  rememberText: {
+    fontSize: 14,
+    color: '#4b5563',
   },
   signUpLink: {
     alignSelf: 'center',
