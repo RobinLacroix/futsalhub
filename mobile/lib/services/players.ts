@@ -56,7 +56,7 @@ export async function getPlayersByTeam(teamId: string): Promise<Player[]> {
 
   const players = (data ?? [])
     .map((item: { players: Player | null }) => item.players)
-    .filter(Boolean) as Player[];
+    .filter((p): p is Player => p != null && p.status !== 'left');
 
   return players.sort((a, b) => (a.last_name || '').localeCompare(b.last_name || ''));
 }
@@ -95,8 +95,11 @@ export async function createPlayer(teamId: string, input: CreatePlayerInput): Pr
   return player;
 }
 
+/** Soft delete : marque le joueur comme "left" au lieu de supprimer.
+ * Le joueur reste en base pour préserver les stats des matchs (Analytics).
+ * Il est masqué de l'Effectif et du Dashboard. */
 export async function deletePlayer(playerId: string): Promise<void> {
-  const { error } = await supabase.from('players').delete().eq('id', playerId);
+  const { error } = await supabase.from('players').update({ status: 'left' }).eq('id', playerId);
   if (error) throw error;
 }
 

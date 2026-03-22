@@ -21,9 +21,11 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { name: 'Accueil', path: '/(tabs)', icon: 'home-outline', iconFocused: 'home' },
   { name: 'Calendrier', path: '/(tabs)/calendar', icon: 'calendar-outline', iconFocused: 'calendar' },
-  { name: 'Équipe', path: '/(tabs)/squad', icon: 'people-outline', iconFocused: 'people' },
+  { name: 'Effectif', path: '/(tabs)/squad', icon: 'people-outline', iconFocused: 'people' },
+  { name: 'Équipes', path: '/(tabs)/teams', icon: 'flag-outline', iconFocused: 'flag' },
   { name: 'Dashboard', path: '/(tabs)/dashboard', icon: 'bar-chart-outline', iconFocused: 'bar-chart' },
   { name: 'Tracker', path: '/(tabs)/tracker', icon: 'stats-chart-outline', iconFocused: 'stats-chart' },
+  { name: 'Analytics', path: '/(tabs)/analytics', icon: 'analytics-outline', iconFocused: 'analytics' },
 ];
 
 function isActive(segments: string[], item: NavItem): boolean {
@@ -33,6 +35,8 @@ function isActive(segments: string[], item: NavItem): boolean {
   if (item.path === '/(tabs)/squad') return first === 'squad';
   if (item.path === '/(tabs)/dashboard') return first === 'dashboard';
   if (item.path === '/(tabs)/tracker') return first === 'tracker';
+  if (item.path === '/(tabs)/analytics') return first === 'analytics';
+  if (item.path === '/(tabs)/teams') return first === 'teams';
   return false;
 }
 
@@ -101,6 +105,10 @@ export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {
                 <Text style={styles.footerBtnText}>Espace joueur</Text>
               </TouchableOpacity>
             )}
+            <TouchableOpacity onPress={() => router.push('/(tabs)/choose-team')} style={styles.footerBtn}>
+              <Ionicons name="swap-horizontal-outline" size={20} color="#475569" />
+              <Text style={styles.footerBtnText}>Changer d'équipe</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={handleSignOut} style={styles.footerBtn}>
               <Ionicons name="log-out-outline" size={20} color="#475569" />
               <Text style={styles.footerBtnText}>Déconnexion</Text>

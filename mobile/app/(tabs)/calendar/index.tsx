@@ -1,24 +1,26 @@
-import { useEffect, useState, useCallback, useMemo, useLayoutEffect } from 'react';
+import { useEffect, useState, useCallback, useMemo, useLayoutEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
-  ActivityIndicator,
   RefreshControl,
   TouchableOpacity,
   Alert,
   Modal,
   Pressable,
+  ScrollView,
 } from 'react-native';
+import { PhoneNavMenu } from '../../../components/PhoneNavMenu';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useRouter, useNavigation } from 'expo-router';
 import { useIsTablet } from '../../../hooks/useIsTablet';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
-import { getTrainingsByTeam, deleteTraining } from '../../../lib/services/trainings';
-import { getMatchesByTeam, deleteMatch } from '../../../lib/services/matches';
+import { deleteTraining } from '../../../lib/services/trainings';
+import { deleteMatch } from '../../../lib/services/matches';
+import { CalendarSkeleton } from '../../../components/CalendarSkeleton';
 import type { Training } from '../../../types';
 import type { Match } from '../../../types';
 
@@ -30,90 +32,88 @@ export default function CalendarScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const isTablet = useIsTablet();
-  const { activeTeamId } = useActiveTeam();
-  const [trainings, setTrainings] = useState<Training[]>([]);
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    activeTeamId,
+    calendarTrainings: trainings,
+    calendarMatches: matches,
+    calendarLoading: loading,
+    refetchCalendar,
+  } = useActiveTeam();
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [addMenuVisible, setAddMenuVisible] = useState(false);
 
-  const load = useCallback(async () => {
-    if (!activeTeamId) {
-      setTrainings([]);
-      setMatches([]);
-      setLoading(false);
-      return;
+  // Recharger le calendrier uniquement quand on change d'équipe (pas au premier mount)
+  const prevTeamIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      activeTeamId &&
+      prevTeamIdRef.current !== null &&
+      prevTeamIdRef.current !== activeTeamId
+    ) {
+      refetchCalendar();
     }
+    prevTeamIdRef.current = activeTeamId;
+  }, [activeTeamId, refetchCalendar]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setError(null);
     try {
-      setError(null);
-      const [trainingsData, matchesData] = await Promise.all([
-        getTrainingsByTeam(activeTeamId),
-        getMatchesByTeam(activeTeamId),
-      ]);
-      setTrainings(trainingsData);
-      setMatches(matchesData);
+      await refetchCalendar();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur chargement');
-      setTrainings([]);
-      setMatches([]);
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
-  }, [activeTeamId]);
+  }, [refetchCalendar]);
 
-  useEffect(() => {
-    setLoading(true);
-    load();
-  }, [load]);
-
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    load();
-  }, [load]);
-
-  const handleDeleteEvent = useCallback((event: CalendarEvent, close: () => void) => {
-    const label = event.type === 'training' ? "l'entraînement" : 'le match';
-    Alert.alert(
-      'Supprimer',
-      `Voulez-vous vraiment supprimer ${label} ?`,
-      [
-        { text: 'Annuler', style: 'cancel', onPress: close },
-        {
-          text: 'Supprimer',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              if (event.type === 'training') {
-                await deleteTraining(event.id);
-                setTrainings((prev) => prev.filter((t) => t.id !== event.id));
-              } else {
-                await deleteMatch(event.id);
-                setMatches((prev) => prev.filter((m) => m.id !== event.id));
+  const handleDeleteEvent = useCallback(
+    (event: CalendarEvent, close: () => void) => {
+      const label = event.type === 'training' ? "l'entraînement" : 'le match';
+      Alert.alert(
+        'Supprimer',
+        `Voulez-vous vraiment supprimer ${label} ?`,
+        [
+          { text: 'Annuler', style: 'cancel', onPress: close },
+          {
+            text: 'Supprimer',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                if (event.type === 'training') {
+                  await deleteTraining(event.id);
+                } else {
+                  await deleteMatch(event.id);
+                }
+                close();
+                await refetchCalendar();
+              } catch (e) {
+                setError(e instanceof Error ? e.message : 'Erreur lors de la suppression');
               }
-              close();
-            } catch (e) {
-              setError(e instanceof Error ? e.message : 'Erreur lors de la suppression');
-            }
+            },
           },
-        },
-      ]
-    );
-  }, []);
+        ]
+      );
+    },
+    [refetchCalendar]
+  );
 
   useLayoutEffect(() => {
     if (!isTablet) {
       navigation.setOptions({
         headerLeft: () => (
-          <TouchableOpacity
-            onPress={() => setEditMode((m) => !m)}
-            style={styles.headerLeftBtn}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.headerLeftText}>{editMode ? 'Terminer' : 'Modifier'}</Text>
-          </TouchableOpacity>
+          <View style={styles.headerLeftRow}>
+            <PhoneNavMenu />
+            <TouchableOpacity
+              onPress={() => setEditMode((m) => !m)}
+              style={styles.headerLeftBtn}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.headerLeftText}>{editMode ? 'Terminer' : 'Modifier'}</Text>
+            </TouchableOpacity>
+          </View>
         ),
       });
     }
@@ -143,8 +143,19 @@ export default function CalendarScreen() {
 
   if (loading && events.length === 0) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3b82f6" />
+      <View style={styles.container}>
+        {isTablet && (
+          <View style={styles.tabletBar}>
+            <TouchableOpacity style={styles.tabletBarBtn} activeOpacity={0.7}>
+              <Text style={styles.tabletBarBtnText}>Modifier</Text>
+            </TouchableOpacity>
+            <Text style={styles.tabletBarTitle}>Calendrier</Text>
+            <View style={styles.tabletAddBtn} />
+          </View>
+        )}
+        <ScrollView contentContainerStyle={styles.listContent} scrollEventThrottle={16}>
+          <CalendarSkeleton />
+        </ScrollView>
       </View>
     );
   }
@@ -283,6 +294,7 @@ export default function CalendarScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  headerLeftRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   headerLeftBtn: { paddingVertical: 8, paddingLeft: 4, paddingRight: 12 },
   headerLeftText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   listContent: { padding: 16, paddingBottom: 32 },

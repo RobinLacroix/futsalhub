@@ -14,11 +14,18 @@ import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 import { useIsTablet } from '../../../hooks/useIsTablet';
 import TabletMatchRecorder from '../../../components/TabletMatchRecorder';
 import { getMatchesByTeam, getMatchById, updateMatch } from '../../../lib/services/matches';
-import { getEventsByMatchId, createMatchEvent } from '../../../lib/services/matchEvents';
+import { getEventsByMatchId, createMatchEvent, type GoalType } from '../../../lib/services/matchEvents';
 import { getPlayersByTeam } from '../../../lib/services/players';
 import type { Match, MatchPlayer } from '../../../types';
 import type { Player } from '../../../types';
 import type { MatchEventType } from '../../../types';
+
+const GOAL_TYPES: { value: GoalType; label: string }[] = [
+  { value: 'offensive', label: 'Phase offensive' },
+  { value: 'transition', label: 'Transition' },
+  { value: 'cpa', label: 'CPA' },
+  { value: 'superiority', label: 'Supériorité' },
+];
 
 function parseMatchPlayers(m: Match): MatchPlayer[] {
   if (!m.players) return [];
@@ -164,26 +171,61 @@ export default function MatchRecorderScreen() {
   }, [isRunning]);
 
   const recordEvent = useCallback(
-    async (eventType: MatchEventType, playerId?: string | null) => {
+    async (eventType: MatchEventType, playerId?: string | null, goalType?: GoalType | null) => {
       if (!selectedMatchId) return;
       const playersOnField = convoquedPlayerIds;
+      const basePayload = {
+        match_id: selectedMatchId,
+        match_time_seconds: seconds,
+        half,
+        players_on_field: playersOnField,
+      };
       try {
         await createMatchEvent({
-          match_id: selectedMatchId,
+          ...basePayload,
           event_type: eventType,
-          match_time_seconds: seconds,
-          half,
           player_id: playerId ?? null,
-          players_on_field: playersOnField,
+          goal_type: (eventType === 'goal' || eventType === 'opponent_goal') ? goalType ?? null : undefined,
         });
-        if (eventType === 'goal') setScoreUs((n) => n + 1);
-        if (eventType === 'opponent_goal') setScoreOpponent((n) => n + 1);
+        if (eventType === 'goal') {
+          setScoreUs((n) => n + 1);
+          await createMatchEvent({
+            ...basePayload,
+            event_type: 'shot_on_target',
+            player_id: playerId ?? null,
+          });
+        }
+        if (eventType === 'opponent_goal') {
+          setScoreOpponent((n) => n + 1);
+          await createMatchEvent({
+            ...basePayload,
+            event_type: 'opponent_shot_on_target',
+            player_id: null,
+          });
+        }
       } catch (e) {
         console.error('[Tracker] createMatchEvent failed:', e);
         Alert.alert('Erreur enregistrement', e instanceof Error ? e.message : "Impossible d'enregistrer l'événement");
       }
     },
     [selectedMatchId, seconds, half, convoquedPlayerIds]
+  );
+
+  const showGoalTypePicker = useCallback(
+    (eventType: 'goal' | 'opponent_goal', playerId?: string | null) => {
+      Alert.alert(
+        eventType === 'goal' ? 'Type de but marqué' : 'Type de but encaissé',
+        'Choisissez le type de but',
+        [
+          ...GOAL_TYPES.map((g) => ({
+            text: g.label,
+            onPress: () => recordEvent(eventType, playerId ?? null, g.value),
+          })),
+          { text: 'Annuler', style: 'cancel' as const },
+        ]
+      );
+    },
+    [recordEvent]
   );
 
   const saveAndExit = useCallback(async () => {
@@ -352,7 +394,11 @@ export default function MatchRecorderScreen() {
                   return;
                 }
               }
-              recordEvent(a.type, selectedPlayerId ?? undefined);
+              if (a.type === 'goal') {
+                showGoalTypePicker('goal', selectedPlayerId);
+              } else {
+                recordEvent(a.type, selectedPlayerId ?? undefined);
+              }
             }}
           >
             <Ionicons name={a.icon} size={22} color="#1e293b" />
@@ -367,7 +413,9 @@ export default function MatchRecorderScreen() {
           <TouchableOpacity
             key={a.type}
             style={styles.opponentBtn}
-            onPress={() => recordEvent(a.type)}
+            onPress={() =>
+              a.type === 'opponent_goal' ? showGoalTypePicker('opponent_goal') : recordEvent(a.type)
+            }
           >
             <Text style={styles.opponentBtnText}>{a.label}</Text>
           </TouchableOpacity>

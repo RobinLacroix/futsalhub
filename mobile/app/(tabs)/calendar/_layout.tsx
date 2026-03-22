@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Stack, useRouter } from 'expo-router';
-import { useIsTablet } from '../../hooks/useIsTablet';
+import { useIsTablet } from '../../../hooks/useIsTablet';
+import { PhoneNavMenu } from '../../../components/PhoneNavMenu';
 import {
   TouchableOpacity,
   Text,
@@ -71,6 +72,7 @@ export default function CalendarLayout() {
         name="index"
         options={{
           title: 'Calendrier',
+          headerLeft: isTablet ? undefined : () => <PhoneNavMenu />,
           headerRight: () => <HeaderAddButton />,
         }}
       />

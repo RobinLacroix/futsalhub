@@ -36,9 +36,9 @@ Objectif : avoir **toutes les fonctionnalités de la webapp** dans l’app mobil
 | **Joueur**  | `(player-tabs)/index`, profile, questionnaires | OK |
 | **Manager** | `(tabs)/calendar` (liste, détail entraînement, match, création) | OK |
 |            | `(tabs)/squad` (liste, détail joueur, nouveau joueur) | OK (fiche joueur sans bloc Équipes comme en webapp) |
-|            | Dashboard manager               | À faire        |
-|            | Équipes du club                 | À faire        |
-| **Tracker** | Dashboard + Enregistrer match    | À faire        |
+|            | Dashboard manager               | OK            |
+|            | Équipes du club                 | OK (sidebar + /teams) |
+| **Tracker** | Dashboard + Enregistrer match    | OK (TabletMatchRecorder) |
 | **Scout**   | Annonce + Recrutement            | À faire        |
 | **Share**   | Librairie, Schémas, Forum       | À faire        |
 | **Commun**  | Paramètres (compte, club, équipes, déco) | À faire  |
@@ -58,8 +58,8 @@ Objectif : avoir **toutes les fonctionnalités de la webapp** dans l’app mobil
 ### Phase 1 – Fondations iPad (actuelle)
 - [x] Hook `useIsTablet` + constantes `LAYOUT`.
 - [x] Sidebar navigation sur tablette (remplace les tabs en bas) — `TabletSidebar` + layout conditionnel dans `(tabs)/_layout.tsx`.
-- [ ] Padding / largeur max du contenu sur tablette pour lisibilité (utiliser `LAYOUT.CONTENT_PADDING` / `MAX_CONTENT_WIDTH` dans les écrans).
-- [ ] Étendre la sidebar avec Dashboard, Équipes, Tracker, Paramètres au fur et à mesure des écrans.
+- [x] Padding du contenu sur tablette (`LAYOUT.CONTENT_PADDING` dans le layout).
+- [x] Sidebar étendue : Accueil, Calendrier, Effectif, Équipes, Dashboard, Tracker + Changer d'équipe, Déconnexion.
 
 ### Phase 2 – Parité Manager
 - [x] **Équipes** : écran liste des équipes du club (création / édition / suppression) — `(tabs)/teams/index.tsx` + `lib/services/teams.ts` (getTeamsByClubId, createTeam, updateTeam, deleteTeam).
@@ -67,15 +67,16 @@ Objectif : avoir **toutes les fonctionnalités de la webapp** dans l’app mobil
 - [x] Fiche joueur : bloc « Équipes » (associer / dissocier) — déjà présent dans `(tabs)/squad/[playerId].tsx` (Gestion équipes + modal Assigner).
 
 ### Phase 3 – Tracker
-- [ ] Dashboard tracker.
-- [ ] Enregistrer match (saisie score, joueurs, buts).
+- [x] Dashboard tracker (`(tabs)/tracker/index.tsx`).
+- [x] Enregistrer match : `TabletMatchRecorder` sur tablette (5 cartes joueurs, banc, substitution, bilan).
 
 ### Phase 4 – Scout + Share
 - [ ] Scout : annonce, recrutement / profils.
 - [ ] Librairie, Schémas tactiques, Forum (selon priorité produit).
 
 ### Phase 5 – Paramètres & polish
-- [ ] Écran Paramètres (profil, club, équipes, déconnexion).
+- [x] Accès rapide : Changer d'équipe + Déconnexion dans la sidebar.
+- [ ] Écran Paramètres complet (profil, club).
 - [ ] Master-detail sur iPad où pertinent (ex. liste joueurs | fiche joueur).
 - [ ] Grilles 2 colonnes sur tablette pour listes (effectif, calendrier, équipes).
 

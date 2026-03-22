@@ -9,6 +9,7 @@ import {
   Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useIsTablet } from '../../hooks/useIsTablet';
 import { supabase } from '../../lib/supabase';
 import { useActiveTeam } from '../../contexts/ActiveTeamContext';
 import { getUserClubId } from '../../lib/services/clubs';
@@ -17,6 +18,7 @@ export default function HomeScreen() {
   const [email, setEmail] = useState<string | null>(null);
   const [hasNoClub, setHasNoClub] = useState<boolean | null>(null);
   const router = useRouter();
+  const isTablet = useIsTablet();
   const { activeTeam, teams, loading: teamsLoading, setActiveTeamId, refetchTeams } = useActiveTeam();
 
   useEffect(() => {
@@ -59,7 +61,7 @@ export default function HomeScreen() {
   };
 
   const handleAddTeam = () => {
-    router.push('/teams');
+    router.push('/(tabs)/teams');
   };
 
   return (
@@ -125,13 +127,15 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-            <TouchableOpacity
-              style={[styles.addTeamButton, { marginTop: 12 }]}
-              onPress={handleAddTeam}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.addTeamButtonText}>Ajouter une équipe</Text>
-            </TouchableOpacity>
+            {isTablet && (
+              <TouchableOpacity
+                style={[styles.addTeamButton, { marginTop: 12 }]}
+                onPress={handleAddTeam}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.addTeamButtonText}>Ajouter une équipe</Text>
+              </TouchableOpacity>
+            )}
           </>
         )}
       </View>

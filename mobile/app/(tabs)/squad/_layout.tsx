@@ -1,6 +1,7 @@
 import { Stack, useRouter } from 'expo-router';
 import { TouchableOpacity, Text, StyleSheet } from 'react-native';
-import { useIsTablet } from '../../hooks/useIsTablet';
+import { useIsTablet } from '../../../hooks/useIsTablet';
+import { PhoneNavMenu } from '../../../components/PhoneNavMenu';
 
 function HeaderAddButton() {
   const router = useRouter();
@@ -30,6 +31,7 @@ export default function SquadLayout() {
         name="index"
         options={{
           title: 'Équipe',
+          headerLeft: isTablet ? undefined : () => <PhoneNavMenu />,
           headerRight: () => <HeaderAddButton />,
         }}
       />

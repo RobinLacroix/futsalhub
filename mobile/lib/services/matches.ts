@@ -11,6 +11,18 @@ export async function getMatchesByTeam(teamId: string): Promise<Match[]> {
   return data ?? [];
 }
 
+/** Liste légère pour le calendrier (sans players JSONB). Réduit fortement le payload. */
+export async function getMatchesForCalendar(teamId: string): Promise<Match[]> {
+  const { data, error } = await supabase
+    .from('matches')
+    .select('id, date, title, location, competition, score_team, score_opponent, team_id')
+    .eq('team_id', teamId)
+    .order('date', { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  return data ?? [];
+}
+
 export interface CreateMatchInput {
   title: string;
   date: Date;
@@ -20,16 +32,20 @@ export interface CreateMatchInput {
   score_team: number;
   score_opponent: number;
   opponent_team?: string;
-  /** Optionnel : buts / cartons par joueur (sinon 0 pour tous). */
-  playerStats?: Record<string, { goals: number; yellow_cards: number; red_cards: number }>;
+  /** Optionnel : buts / cartons / temps de jeu par joueur (sinon 0 pour tous). */
+  playerStats?: Record<string, { goals: number; yellow_cards: number; red_cards: number; time_played?: number }>;
 }
 
-function toPlayersArray(convoquedIds: string[], stats?: Record<string, { goals: number; yellow_cards: number; red_cards: number }>): MatchPlayer[] {
+function toPlayersArray(
+  convoquedIds: string[],
+  stats?: Record<string, { goals: number; yellow_cards: number; red_cards: number; time_played?: number }>
+): MatchPlayer[] {
   return convoquedIds.map((id) => ({
     id,
     goals: stats?.[id]?.goals ?? 0,
     yellow_cards: stats?.[id]?.yellow_cards ?? 0,
     red_cards: stats?.[id]?.red_cards ?? 0,
+    time_played: stats?.[id]?.time_played ?? 0,
   }));
 }
 
@@ -64,11 +80,15 @@ export async function getMatchById(matchId: string): Promise<Match | null> {
   return data;
 }
 
+export type GoalsByType = Record<'offensive' | 'transition' | 'cpa' | 'superiority', number>;
+
 export interface UpdateMatchInput {
   convoquedPlayerIds?: string[];
   score_team?: number;
   score_opponent?: number;
-  playerStats?: Record<string, { goals: number; yellow_cards: number; red_cards: number }>;
+  playerStats?: Record<string, { goals: number; yellow_cards: number; red_cards: number; time_played?: number }>;
+  goals_by_type?: GoalsByType;
+  conceded_by_type?: GoalsByType;
 }
 
 export async function deleteMatch(matchId: string): Promise<void> {
@@ -80,6 +100,8 @@ export async function updateMatch(matchId: string, input: UpdateMatchInput): Pro
   const updateData: Record<string, unknown> = {};
   if (input.score_team !== undefined) updateData.score_team = input.score_team;
   if (input.score_opponent !== undefined) updateData.score_opponent = input.score_opponent;
+  if (input.goals_by_type !== undefined) updateData.goals_by_type = input.goals_by_type;
+  if (input.conceded_by_type !== undefined) updateData.conceded_by_type = input.conceded_by_type;
 
   if (input.convoquedPlayerIds !== undefined) {
     const stats = input.playerStats ?? {};

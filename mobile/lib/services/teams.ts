@@ -1,4 +1,5 @@
 import { supabase } from '../supabase';
+import { isClubAdmin, setTeamMainCoach } from './clubs';
 import type { Team } from '../../types';
 
 export async function getTeams(): Promise<Team[]> {
@@ -57,6 +58,14 @@ export async function updateTeam(teamId: string, data: Partial<TeamFormData>): P
     .select()
     .single();
   if (error) throw error;
+  if (data.mainCoachUserId !== undefined) {
+    try {
+      await setTeamMainCoach(teamId, data.mainCoachUserId);
+    } catch (e) {
+      /* RLS may block if not admin */
+      throw e;
+    }
+  }
   return team;
 }
 

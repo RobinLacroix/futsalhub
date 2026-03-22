@@ -91,7 +91,6 @@ export default function DashboardScreen() {
         getMatchesByTeam(activeTeamId),
         getPlayersByTeam(activeTeamId),
       ]);
-      setTrainingsAll(trainingsData);
       setMatchesAll(matchesData);
       setPlayerCount(players.length);
 

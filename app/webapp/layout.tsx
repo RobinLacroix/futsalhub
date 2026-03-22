@@ -165,8 +165,10 @@ function Sidebar({
       />
 
       <aside
-        className={`fixed top-0 left-0 h-full bg-white border-r border-gray-200 flex flex-col z-40 overflow-hidden min-w-0
+        className={`fixed left-0 bg-white border-r border-gray-200 flex flex-col z-40 overflow-hidden min-w-0
           transition-[transform,width] duration-300 ease-out
+          top-0 max-md:h-full
+          md:top-[calc(env(safe-area-inset-top,0px)+0.5rem)] md:h-[calc(100vh-calc(env(safe-area-inset-top,0px)+0.5rem))]
           ${isExpanded ? 'w-64 md:!w-64' : 'w-16 md:!w-16'}
           ${isMobileOpen ? 'translate-x-0 max-md:w-64' : '-translate-x-full md:translate-x-0'}
         `}
@@ -271,6 +273,12 @@ export default function WebAppLayout({
           onMobileClose={() => setMobileMenuOpen(false)}
         />
 
+        {/* Barre top : réserve l'espace pour la barre de statut (heure, wifi, etc.) sur iPad / desktop */}
+        <div
+          className="fixed top-0 left-0 right-0 z-30 bg-white/95 border-b border-gray-100 max-md:hidden"
+          style={{ minHeight: 'calc(env(safe-area-inset-top, 0px) + 0.5rem)' }}
+        />
+
         {/* Barre mobile : hamburger + espace */}
         <header className="fixed top-0 left-0 right-0 h-14 min-h-[3.5rem] bg-white border-b border-gray-200 z-30 flex items-center px-4 md:hidden safe-area-inset-top">
           <button
@@ -285,16 +293,20 @@ export default function WebAppLayout({
 
         <main
           className="transition-all duration-300 min-h-screen pt-14 md:pt-0 relative"
-          style={{ marginLeft: mainMarginLeft }}
+          style={{
+            marginLeft: mainMarginLeft,
+            ...(isDesktop && { paddingTop: 'calc(env(safe-area-inset-top, 0px) + 0.5rem)' }),
+          }}
         >
           {/* Bouton réduire/agrandir la sidebar (desktop) : dans main pour être au-dessus de la sidebar (ordre DOM + z-index) */}
           <button
             type="button"
             onClick={() => setSidebarOpen((v) => !v)}
             aria-label={sidebarOpen ? 'Réduire le menu' : 'Agrandir le menu'}
-            className="fixed top-6 z-[60] w-8 h-8 flex items-center justify-center rounded-full bg-white border border-gray-200 shadow-md hover:bg-gray-50 hover:shadow-lg transition-all duration-300 ease-out max-md:hidden"
+            className="fixed z-[60] w-8 h-8 flex items-center justify-center rounded-full bg-white border border-gray-200 shadow-md hover:bg-gray-50 hover:shadow-lg transition-all duration-300 ease-out max-md:hidden"
             style={{
               left: sidebarOpen ? 'calc(16rem - 1rem)' : 'calc(4rem - 1rem)',
+              top: 'calc(env(safe-area-inset-top, 0px) + 0.5rem + 0.25rem)',
             }}
           >
             {sidebarOpen ? (

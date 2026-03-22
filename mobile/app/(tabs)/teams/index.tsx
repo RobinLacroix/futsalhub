@@ -12,16 +12,22 @@ import {
   RefreshControl,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useActiveTeam } from '../../contexts/ActiveTeamContext';
-import { getUserClubId } from '../../lib/services/clubs';
+import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
+import {
+  getUserClubId,
+  isClubAdmin,
+  getClubMembersWithProfiles,
+  getTeamMainCoach,
+  type ClubMemberWithUser,
+} from '../../../lib/services/clubs';
 import {
   getTeamsByClubId,
   createTeam,
   updateTeam,
   deleteTeam,
   type TeamFormData,
-} from '../../lib/services/teams';
-import type { Team } from '../../types';
+} from '../../../lib/services/teams';
+import type { Team } from '../../../types';
 
 const DEFAULT_FORM: TeamFormData = {
   name: '',
@@ -31,6 +37,11 @@ const DEFAULT_FORM: TeamFormData = {
 };
 
 const COLOR_OPTIONS = ['#3b82f6', '#16a34a', '#ea580c', '#dc2626', '#7c3aed', '#0891b2'];
+
+function memberLabel(m: ClubMemberWithUser): string {
+  const name = [m.first_name, m.last_name].filter(Boolean).join(' ').trim();
+  return name || m.email || m.user_id.slice(0, 8);
+}
 
 export default function TeamsScreen() {
   const { teams: activeTeamList, activeTeamId, setActiveTeamId, refetchTeams } = useActiveTeam();
@@ -43,6 +54,10 @@ export default function TeamsScreen() {
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
   const [form, setForm] = useState<TeamFormData>(DEFAULT_FORM);
   const [saving, setSaving] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [clubMembers, setClubMembers] = useState<ClubMemberWithUser[]>([]);
+  const [mainCoachUserId, setMainCoachUserId] = useState<string | null>(null);
+  const [teamCoaches, setTeamCoaches] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     try {
@@ -50,12 +65,23 @@ export default function TeamsScreen() {
       setClubId(cid);
       if (!cid) {
         setTeams([]);
+        setTeamCoaches({});
         setError(null);
         return;
       }
       setError(null);
       const data = await getTeamsByClubId(cid);
       setTeams(data);
+      const coaches: Record<string, string> = {};
+      await Promise.all(
+        data.map(async (t) => {
+          const coach = await getTeamMainCoach(t.id);
+          if (coach?.label) {
+            coaches[t.id] = coach.label;
+          }
+        })
+      );
+      setTeamCoaches(coaches);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur chargement');
       setTeams([]);
@@ -78,10 +104,11 @@ export default function TeamsScreen() {
   const openCreate = useCallback(() => {
     setEditingTeam(null);
     setForm(DEFAULT_FORM);
+    setMainCoachUserId(null);
     setModalVisible(true);
   }, []);
 
-  const openEdit = useCallback((team: Team) => {
+  const openEdit = useCallback(async (team: Team) => {
     setEditingTeam(team);
     setForm({
       name: team.name,
@@ -90,12 +117,24 @@ export default function TeamsScreen() {
       color: team.color || '#3b82f6',
     });
     setModalVisible(true);
-  }, []);
+    if (clubId) {
+      const [adminRes, membersRes, coachRes] = await Promise.all([
+        isClubAdmin(clubId),
+        getClubMembersWithProfiles(clubId),
+        getTeamMainCoach(team.id),
+      ]);
+      setIsAdmin(adminRes);
+      setClubMembers(membersRes);
+      const coachId = coachRes?.user_id ?? membersRes.find((m) => m.role === 'admin')?.user_id ?? null;
+      setMainCoachUserId(coachId);
+    }
+  }, [clubId]);
 
   const closeModal = useCallback(() => {
     setModalVisible(false);
     setEditingTeam(null);
     setForm(DEFAULT_FORM);
+    setMainCoachUserId(null);
   }, []);
 
   const handleSave = useCallback(async () => {
@@ -110,13 +149,27 @@ export default function TeamsScreen() {
     setSaving(true);
     try {
       if (editingTeam) {
-        await updateTeam(editingTeam.id, form);
+        const updateData = { ...form };
+        if (isAdmin && mainCoachUserId) updateData.mainCoachUserId = mainCoachUserId;
+        await updateTeam(editingTeam.id, updateData);
         setTeams((prev) =>
           prev.map((t) => (t.id === editingTeam.id ? { ...t, ...form } : t))
         );
+        if (isAdmin && mainCoachUserId) {
+          const m = clubMembers.find((cm) => cm.user_id === mainCoachUserId);
+          if (m) {
+            setTeamCoaches((prev) => ({ ...prev, [editingTeam.id]: memberLabel(m) }));
+          }
+        }
       } else if (clubId) {
-        const created = await createTeam(clubId, form);
+        const createData = { ...form };
+        if (isAdmin && mainCoachUserId) createData.mainCoachUserId = mainCoachUserId;
+        const created = await createTeam(clubId, createData);
         setTeams((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+        const coach = await getTeamMainCoach(created.id);
+        if (coach?.label) {
+          setTeamCoaches((prev) => ({ ...prev, [created.id]: coach.label }));
+        }
       }
       refetchTeams();
       closeModal();
@@ -125,7 +178,7 @@ export default function TeamsScreen() {
     } finally {
       setSaving(false);
     }
-  }, [form, clubId, editingTeam, closeModal, refetchTeams]);
+  }, [form, clubId, editingTeam, closeModal, refetchTeams, isAdmin, mainCoachUserId, clubMembers]);
 
   const handleDelete = useCallback(
     (team: Team) => {
@@ -224,6 +277,9 @@ export default function TeamsScreen() {
                     <Text style={styles.teamMeta}>
                       {team.category} – Niveau {team.level}
                     </Text>
+                    {teamCoaches[team.id] && (
+                      <Text style={styles.coachLabel}>Entraîneur : {teamCoaches[team.id]}</Text>
+                    )}
                     {activeTeamId === team.id && (
                       <View style={styles.activeBadge}>
                         <Text style={styles.activeBadgeText}>Équipe active</Text>
@@ -311,6 +367,32 @@ export default function TeamsScreen() {
                 />
               ))}
             </View>
+
+            {editingTeam && isAdmin && clubMembers.length > 0 && (
+              <>
+                <Text style={styles.label}>Entraîneur principal</Text>
+                <ScrollView style={styles.coachPicker} nestedScrollEnabled>
+                  {clubMembers.map((m) => (
+                    <TouchableOpacity
+                      key={m.id}
+                      style={[
+                        styles.coachOption,
+                        mainCoachUserId === m.user_id && styles.coachOptionActive,
+                      ]}
+                      onPress={() => setMainCoachUserId(m.user_id)}
+                    >
+                      <Text style={styles.coachOptionText}>{memberLabel(m)}</Text>
+                      {m.role === 'admin' && (
+                        <Text style={styles.coachOptionBadge}>Admin</Text>
+                      )}
+                      {mainCoachUserId === m.user_id && (
+                        <Ionicons name="checkmark-circle" size={20} color="#3b82f6" />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            )}
 
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.cancelBtn} onPress={closeModal}>
@@ -404,6 +486,7 @@ const styles = StyleSheet.create({
   cardMain: { flex: 1 },
   teamName: { fontSize: 17, fontWeight: '600', color: '#1e293b' },
   teamMeta: { fontSize: 13, color: '#64748b', marginTop: 2 },
+  coachLabel: { fontSize: 12, color: '#64748b', marginTop: 4 },
   activeBadge: {
     alignSelf: 'flex-start',
     backgroundColor: '#dbeafe',
@@ -463,6 +546,39 @@ const styles = StyleSheet.create({
   colorDotSelected: {
     borderColor: '#1e293b',
     borderWidth: 3,
+  },
+  coachPicker: {
+    maxHeight: 140,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 8,
+  },
+  coachOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e2e8f0',
+    gap: 8,
+  },
+  coachOptionActive: {
+    backgroundColor: '#eff6ff',
+  },
+  coachOptionText: {
+    flex: 1,
+    fontSize: 15,
+    color: '#1e293b',
+    fontWeight: '500',
+  },
+  coachOptionBadge: {
+    fontSize: 11,
+    color: '#64748b',
+    backgroundColor: '#f1f5f9',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
   },
   modalActions: {
     flexDirection: 'row',

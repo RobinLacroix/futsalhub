@@ -1,10 +1,11 @@
 import { TrackerAnalyticsView } from '../../../components/TrackerAnalyticsView';
 
-export default function TrackerDashboardScreen() {
+export default function AnalyticsScreen() {
   return (
     <TrackerAnalyticsView
-      title="Tracker"
-      showRecordButton={true}
+      title="Analytics"
+      showRecordButton={false}
+      showMatchList={false}
     />
   );
 }

@@ -11,6 +11,18 @@ export async function getTrainingsByTeam(teamId: string): Promise<Training[]> {
   return data ?? [];
 }
 
+/** Liste légère pour le calendrier (sans attendance, convoked_players). Réduit le payload. */
+export async function getTrainingsForCalendar(teamId: string): Promise<Training[]> {
+  const { data, error } = await supabase
+    .from('trainings')
+    .select('id, date, theme, location, team_id')
+    .eq('team_id', teamId)
+    .order('date', { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  return data ?? [];
+}
+
 export interface CreateTrainingInput {
   date: Date;
   location?: string;

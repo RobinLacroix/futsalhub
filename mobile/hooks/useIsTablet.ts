@@ -31,7 +31,7 @@ export function useIsTablet(): boolean {
 
 export const LAYOUT = {
   /** Largeur de la sidebar sur tablette (dp) */
-  SIDEBAR_WIDTH: 260,
+  SIDEBAR_WIDTH: 200,
   /** Largeur sidebar réduite (icônes seuls) */
   SIDEBAR_WIDTH_COLLAPSED: 72,
   /** Espacement contenu principal sur tablette */

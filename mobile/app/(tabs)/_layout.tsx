@@ -1,27 +1,24 @@
 import { useState } from 'react';
-import { Tabs, useSegments } from 'expo-router';
+import { Tabs } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { View } from 'react-native';
-import { useIsTablet } from '../../hooks/useIsTablet';
+import { View, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useIsTablet, LAYOUT } from '../../hooks/useIsTablet';
 import { TabletSidebar } from '../../components/TabletSidebar';
+import { PhoneNavMenu } from '../../components/PhoneNavMenu';
 import { SwitchToPlayerButton, SignOutIconButton } from '../../components/SwitchSpaceButton';
 
 function TabsLayoutContent() {
-  const segments = useSegments();
   const isTablet = useIsTablet();
+  const insets = useSafeAreaInsets();
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
-  const isDetailScreen =
-    (segments[1] === 'calendar' && segments[2]) ||
-    (segments[1] === 'squad' && segments[2]) ||
-    (segments[1] === 'tracker' && segments[2] === 'record');
-  const hideTabBar = isDetailScreen || isTablet;
-
   const tabScreenOptions = {
     headerStyle: { backgroundColor: '#3b82f6' },
     headerTintColor: '#fff',
     tabBarActiveTintColor: '#3b82f6',
-    tabBarStyle: { display: hideTabBar ? 'none' : 'flex' },
+    tabBarStyle: { display: 'none' },
     headerShown: isTablet ? false : true,
+    headerLeft: isTablet ? undefined : () => <PhoneNavMenu />,
     headerRight: isTablet ? undefined : () => (
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
         <SwitchToPlayerButton />
@@ -72,7 +69,7 @@ function TabsLayoutContent() {
           title: 'Dashboard',
           tabBarLabel: 'Dashboard',
           tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? 'bar-chart' : 'bar-chart-outline'} size={size} color={color} />
+            <Ionicons name={focused ? 'grid' : 'grid-outline'} size={size} color={color} />
           ),
         }}
       />
@@ -81,10 +78,20 @@ function TabsLayoutContent() {
         options={{
           title: 'Tracker',
           tabBarLabel: 'Tracker',
-          headerShown: !isTablet,
+          headerShown: false,
           href: isTablet ? '/(tabs)/tracker' : null,
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? 'stats-chart' : 'stats-chart-outline'} size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="analytics"
+        options={{
+          title: 'Analytics',
+          tabBarLabel: 'Analytics',
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'pie-chart' : 'pie-chart-outline'} size={size} color={color} />
           ),
         }}
       />
@@ -126,23 +133,44 @@ function TabsLayoutContent() {
           title: 'Créer un club',
         }}
       />
+      <Tabs.Screen
+        name="teams"
+        options={{
+          href: null,
+          title: 'Équipes du club',
+        }}
+      />
     </Tabs>
   );
 
   if (isTablet) {
+    const headerHeight = Math.max(insets.top, 8) + 8;
     return (
-      <View style={{ flex: 1, flexDirection: 'row' }}>
-        <TabletSidebar
-          isExpanded={sidebarExpanded}
-          onToggle={() => setSidebarExpanded((v) => !v)}
-        />
-        <View style={{ flex: 1 }}>{content}</View>
+      <View style={{ flex: 1 }}>
+        <View style={[styles.tabletHeader, { height: headerHeight }]} />
+        <View style={{ flex: 1, flexDirection: 'row' }}>
+          <TabletSidebar
+            isExpanded={sidebarExpanded}
+            onToggle={() => setSidebarExpanded((v) => !v)}
+          />
+          <View style={{ flex: 1, paddingHorizontal: LAYOUT.CONTENT_PADDING }}>
+            {content}
+          </View>
+        </View>
       </View>
     );
   }
 
   return content;
 }
+
+const styles = StyleSheet.create({
+  tabletHeader: {
+    backgroundColor: '#f8fafc',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e2e8f0',
+  },
+});
 
 export default function TabsLayout() {
   return <TabsLayoutContent />;

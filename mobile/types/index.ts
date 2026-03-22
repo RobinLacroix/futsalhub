@@ -35,6 +35,8 @@ export interface Training {
   team_id?: string;
 }
 
+export type GoalsByTypeRecord = Record<'offensive' | 'transition' | 'cpa' | 'superiority', number>;
+
 export interface Match {
   id: string;
   title: string;
@@ -46,6 +48,8 @@ export interface Match {
   opponent_team?: string;
   players?: MatchPlayer[] | string;
   team_id?: string;
+  goals_by_type?: GoalsByTypeRecord;
+  conceded_by_type?: GoalsByTypeRecord;
 }
 
 export interface MatchPlayer {
@@ -53,6 +57,7 @@ export interface MatchPlayer {
   goals?: number;
   yellow_cards?: number;
   red_cards?: number;
+  time_played?: number;
 }
 
 export type MatchEventType =
@@ -68,6 +73,8 @@ export type MatchEventType =
   | 'opponent_shot'
   | 'opponent_shot_on_target';
 
+export type GoalType = 'offensive' | 'transition' | 'cpa' | 'superiority';
+
 export interface MatchEvent {
   id: string;
   match_id: string;
@@ -76,5 +83,6 @@ export interface MatchEvent {
   half: 1 | 2;
   player_id?: string | null;
   players_on_field?: string[];
+  goal_type?: GoalType | null;
   created_at?: string;
 }

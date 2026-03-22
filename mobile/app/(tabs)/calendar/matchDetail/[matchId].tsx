@@ -16,6 +16,7 @@ import {
   Pressable,
 } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
+import { useIsTablet } from '../../../../hooks/useIsTablet';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { getMatchById, updateMatch } from '../../../../lib/services/matches';
@@ -24,6 +25,22 @@ import { getMatchEventsAggregate, hasMatchEvents } from '../../../../lib/service
 import { useActiveTeam } from '../../../../contexts/ActiveTeamContext';
 import type { Match, MatchPlayer } from '../../../../types';
 import type { Player } from '../../../../types';
+import type { GoalsByTypeRecord } from '../../../../types';
+
+const GOAL_TYPE_KEYS = ['offensive', 'transition', 'cpa', 'superiority'] as const;
+const GOAL_TYPE_LABELS: Record<(typeof GOAL_TYPE_KEYS)[number], string> = {
+  offensive: 'Phase offensive',
+  transition: 'Transition',
+  cpa: 'CPA',
+  superiority: 'Supériorité',
+};
+
+const emptyGoalsByType = (): GoalsByTypeRecord => ({
+  offensive: 0,
+  transition: 0,
+  cpa: 0,
+  superiority: 0,
+});
 
 function parseMatchPlayers(m: Match): MatchPlayer[] {
   if (!m.players) return [];
@@ -41,6 +58,7 @@ const defaultPlayerStats = () => ({ goals: 0, yellow_cards: 0, red_cards: 0 });
 
 export default function MatchDetailScreen() {
   const { matchId } = useLocalSearchParams<{ matchId: string }>();
+  const isTablet = useIsTablet();
   const { activeTeamId, activeTeam, teams } = useActiveTeam();
   const [match, setMatch] = useState<Match | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -54,6 +72,8 @@ export default function MatchDetailScreen() {
   const [scoreOpponent, setScoreOpponent] = useState('');
   const [playerStats, setPlayerStats] = useState<Record<string, { goals: number; yellow_cards: number; red_cards: number }>>({});
   const [hasEvents, setHasEvents] = useState(false);
+  const [goalsByType, setGoalsByType] = useState<GoalsByTypeRecord>(emptyGoalsByType);
+  const [concededByType, setConcededByType] = useState<GoalsByTypeRecord>(emptyGoalsByType);
 
   const [clubPlayersWithTeams, setClubPlayersWithTeams] = useState<PlayerWithTeams[]>([]);
   const [inviteFilterTeamId, setInviteFilterTeamId] = useState<string>('all');
@@ -96,6 +116,18 @@ export default function MatchDetailScreen() {
         setPlayerStats(stats);
         setScoreTeam(String(m.score_team ?? 0));
         setScoreOpponent(String(m.score_opponent ?? 0));
+        setGoalsByType({
+          offensive: (m as any).goals_by_type?.offensive ?? 0,
+          transition: (m as any).goals_by_type?.transition ?? 0,
+          cpa: (m as any).goals_by_type?.cpa ?? 0,
+          superiority: (m as any).goals_by_type?.superiority ?? 0,
+        });
+        setConcededByType({
+          offensive: (m as any).conceded_by_type?.offensive ?? 0,
+          transition: (m as any).conceded_by_type?.transition ?? 0,
+          cpa: (m as any).conceded_by_type?.cpa ?? 0,
+          superiority: (m as any).conceded_by_type?.superiority ?? 0,
+        });
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');
@@ -177,6 +209,18 @@ export default function MatchDetailScreen() {
     setConvoqued((prev) => ({ ...prev, [playerId]: !prev[playerId] }));
   };
 
+  const setGoalTypeStat = (
+    which: 'scored' | 'conceded',
+    key: keyof GoalsByTypeRecord,
+    delta: number
+  ) => {
+    const setter = which === 'scored' ? setGoalsByType : setConcededByType;
+    setter((prev) => {
+      const v = Math.max(0, (prev[key] ?? 0) + delta);
+      return { ...prev, [key]: v };
+    });
+  };
+
   const setStat = (playerId: string, key: 'goals' | 'yellow_cards' | 'red_cards', delta: number) => {
     setPlayerStats((prev) => {
       const cur = prev[playerId] ?? { goals: 0, yellow_cards: 0, red_cards: 0 };
@@ -214,6 +258,8 @@ export default function MatchDetailScreen() {
         score_team: st,
         score_opponent: so,
         playerStats: stats,
+        goals_by_type: goalsByType,
+        conceded_by_type: concededByType,
       });
       setMatch(updated);
       setEditing(false);
@@ -223,7 +269,7 @@ export default function MatchDetailScreen() {
     } finally {
       setSaving(false);
     }
-  }, [matchId, convoqued, scoreTeam, scoreOpponent, playerStats, players, clubPlayersWithTeams]);
+  }, [matchId, convoqued, scoreTeam, scoreOpponent, playerStats, goalsByType, concededByType, players, clubPlayersWithTeams]);
 
   const sortedPlayersForMatch = useMemo(
     () =>
@@ -241,6 +287,16 @@ export default function MatchDetailScreen() {
         .filter((p) => convoqued[p.id])
         .sort((a, b) => (a.last_name || '').localeCompare(b.last_name || '', 'fr')),
     [players, convoqued]
+  );
+
+  const stepperStyles = useMemo(
+    () => ({
+      btn: [styles.stepperBtn, !isTablet && styles.stepperBtnPhone] as const,
+      text: [styles.stepperText, !isTablet && styles.stepperTextPhone] as const,
+      value: [styles.stepperValue, !isTablet && styles.stepperValuePhone] as const,
+      stepper: [styles.goalTypesStepper, !isTablet && styles.goalTypesStepperPhone] as const,
+    }),
+    [isTablet]
   );
 
   if (loading && !match) {
@@ -320,6 +376,41 @@ export default function MatchDetailScreen() {
               </TouchableOpacity>
             )}
 
+            <Text style={styles.sectionTitle}>Types de buts marqués et encaissés</Text>
+            <Text style={styles.sectionHint}>
+              Répartition des buts par type (Phase offensive, Transition, CPA, Supériorité)
+            </Text>
+            <View style={styles.goalTypesTable}>
+              <View style={styles.goalTypesHeader}>
+                <Text style={styles.goalTypesColType}>Type</Text>
+                <Text style={styles.goalTypesColLabel}>Marqués</Text>
+                <Text style={styles.goalTypesColLabel}>Encaissés</Text>
+              </View>
+              {GOAL_TYPE_KEYS.map((key) => (
+                <View key={key} style={styles.goalTypesRow}>
+                  <Text style={styles.goalTypesTypeLabel}>{GOAL_TYPE_LABELS[key]}</Text>
+                  <View style={stepperStyles.stepper}>
+                    <TouchableOpacity style={stepperStyles.btn} onPress={() => setGoalTypeStat('scored', key, -1)}>
+                      <Text style={stepperStyles.text}>−</Text>
+                    </TouchableOpacity>
+                    <Text style={stepperStyles.value}>{goalsByType[key] ?? 0}</Text>
+                    <TouchableOpacity style={stepperStyles.btn} onPress={() => setGoalTypeStat('scored', key, 1)}>
+                      <Text style={stepperStyles.text}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={stepperStyles.stepper}>
+                    <TouchableOpacity style={stepperStyles.btn} onPress={() => setGoalTypeStat('conceded', key, -1)}>
+                      <Text style={stepperStyles.text}>−</Text>
+                    </TouchableOpacity>
+                    <Text style={stepperStyles.value}>{concededByType[key] ?? 0}</Text>
+                    <TouchableOpacity style={stepperStyles.btn} onPress={() => setGoalTypeStat('conceded', key, 1)}>
+                      <Text style={stepperStyles.text}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </View>
+
             <Text style={styles.sectionTitle}>Joueurs convoqués et buts</Text>
             <Text style={styles.sectionHint}>
               Convoqué ou non, puis buts pour chaque convoqué. {totalGoals > scoreTeamNum ? '(Total buts > score)' : ''}
@@ -349,12 +440,12 @@ export default function MatchDetailScreen() {
                             <View style={styles.inlineStat}>
                               <Text style={styles.inlineLabel}>Buts</Text>
                               <View style={styles.stepperRow}>
-                                <TouchableOpacity style={styles.stepperBtn} onPress={() => setStat(p.id, 'goals', -1)}>
-                                  <Text style={styles.stepperText}>−</Text>
+                                <TouchableOpacity style={stepperStyles.btn} onPress={() => setStat(p.id, 'goals', -1)}>
+                                  <Text style={stepperStyles.text}>−</Text>
                                 </TouchableOpacity>
-                                <Text style={styles.stepperValue}>{s.goals}</Text>
-                                <TouchableOpacity style={styles.stepperBtn} onPress={() => setStat(p.id, 'goals', 1)}>
-                                  <Text style={styles.stepperText}>+</Text>
+                                <Text style={stepperStyles.value}>{s.goals}</Text>
+                                <TouchableOpacity style={stepperStyles.btn} onPress={() => setStat(p.id, 'goals', 1)}>
+                                  <Text style={stepperStyles.text}>+</Text>
                                 </TouchableOpacity>
                               </View>
                             </View>
@@ -395,36 +486,36 @@ export default function MatchDetailScreen() {
                         <View style={styles.inlineStat}>
                           <Text style={styles.inlineLabel}>Buts</Text>
                           <View style={styles.stepperRow}>
-                            <TouchableOpacity style={styles.stepperBtn} onPress={() => setStat(playerId, 'goals', -1)}>
-                              <Text style={styles.stepperText}>−</Text>
+                            <TouchableOpacity style={stepperStyles.btn} onPress={() => setStat(playerId, 'goals', -1)}>
+                              <Text style={stepperStyles.text}>−</Text>
                             </TouchableOpacity>
-                            <Text style={styles.stepperValue}>{s.goals}</Text>
-                            <TouchableOpacity style={styles.stepperBtn} onPress={() => setStat(playerId, 'goals', 1)}>
-                              <Text style={styles.stepperText}>+</Text>
+                            <Text style={stepperStyles.value}>{s.goals}</Text>
+                            <TouchableOpacity style={stepperStyles.btn} onPress={() => setStat(playerId, 'goals', 1)}>
+                              <Text style={stepperStyles.text}>+</Text>
                             </TouchableOpacity>
                           </View>
                         </View>
                         <View style={styles.inlineStat}>
                           <Text style={styles.inlineLabel}>Jaunes</Text>
                           <View style={styles.stepperRow}>
-                            <TouchableOpacity style={styles.stepperBtn} onPress={() => setStat(playerId, 'yellow_cards', -1)}>
-                              <Text style={styles.stepperText}>−</Text>
+                            <TouchableOpacity style={stepperStyles.btn} onPress={() => setStat(playerId, 'yellow_cards', -1)}>
+                              <Text style={stepperStyles.text}>−</Text>
                             </TouchableOpacity>
-                            <Text style={styles.stepperValue}>{s.yellow_cards}</Text>
-                            <TouchableOpacity style={styles.stepperBtn} onPress={() => setStat(playerId, 'yellow_cards', 1)}>
-                              <Text style={styles.stepperText}>+</Text>
+                            <Text style={stepperStyles.value}>{s.yellow_cards}</Text>
+                            <TouchableOpacity style={stepperStyles.btn} onPress={() => setStat(playerId, 'yellow_cards', 1)}>
+                              <Text style={stepperStyles.text}>+</Text>
                             </TouchableOpacity>
                           </View>
                         </View>
                         <View style={styles.inlineStat}>
                           <Text style={styles.inlineLabel}>Rouges</Text>
                           <View style={styles.stepperRow}>
-                            <TouchableOpacity style={styles.stepperBtn} onPress={() => setStat(playerId, 'red_cards', -1)}>
-                              <Text style={styles.stepperText}>−</Text>
+                            <TouchableOpacity style={stepperStyles.btn} onPress={() => setStat(playerId, 'red_cards', -1)}>
+                              <Text style={stepperStyles.text}>−</Text>
                             </TouchableOpacity>
-                            <Text style={styles.stepperValue}>{s.red_cards}</Text>
-                            <TouchableOpacity style={styles.stepperBtn} onPress={() => setStat(playerId, 'red_cards', 1)}>
-                              <Text style={styles.stepperText}>+</Text>
+                            <Text style={stepperStyles.value}>{s.red_cards}</Text>
+                            <TouchableOpacity style={stepperStyles.btn} onPress={() => setStat(playerId, 'red_cards', 1)}>
+                              <Text style={stepperStyles.text}>+</Text>
                             </TouchableOpacity>
                           </View>
                         </View>
@@ -452,6 +543,27 @@ export default function MatchDetailScreen() {
 
         {!editing && (
           <>
+            {(Object.values(goalsByType).some((v) => v > 0) || Object.values(concededByType).some((v) => v > 0)) && (
+              <View style={styles.goalTypesSummary}>
+                <Text style={styles.sectionTitle}>Types de buts</Text>
+                <View style={styles.goalTypesSummaryRow}>
+                  <Text style={styles.goalTypesSummaryLabel}>Marqués :</Text>
+                  <Text style={styles.goalTypesSummaryText}>
+                    {GOAL_TYPE_KEYS.filter((k) => (goalsByType[k] ?? 0) > 0)
+                      .map((k) => `${GOAL_TYPE_LABELS[k]} ${goalsByType[k]}`)
+                      .join(' · ') || '—'}
+                  </Text>
+                </View>
+                <View style={styles.goalTypesSummaryRow}>
+                  <Text style={styles.goalTypesSummaryLabel}>Encaissés :</Text>
+                  <Text style={styles.goalTypesSummaryText}>
+                    {GOAL_TYPE_KEYS.filter((k) => (concededByType[k] ?? 0) > 0)
+                      .map((k) => `${GOAL_TYPE_LABELS[k]} ${concededByType[k]}`)
+                      .join(' · ') || '—'}
+                  </Text>
+                </View>
+              </View>
+            )}
             <Text style={styles.sectionTitle}>Joueurs convoqués</Text>
             {convoquedPlayers.length === 0 && invitedPlayerIds.length === 0 ? (
               <Text style={styles.emptyText}>Aucun joueur convoqué</Text>
@@ -647,6 +759,47 @@ const styles = StyleSheet.create({
   fetchEventsText: { fontSize: 14, color: '#92400e', fontWeight: '500' },
   sectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 4, color: '#111' },
   sectionHint: { fontSize: 12, color: '#6b7280', marginBottom: 12 },
+  goalTypesTable: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 20,
+  },
+  goalTypesHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingBottom: 10,
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  goalTypesColType: { flex: 1.5, fontSize: 13, fontWeight: '600', color: '#6b7280' },
+  goalTypesColLabel: { flex: 1, fontSize: 12, fontWeight: '600', color: '#6b7280', textAlign: 'center' },
+  goalTypesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#f3f4f6',
+  },
+  goalTypesTypeLabel: { flex: 1.5, fontSize: 14, color: '#374151' },
+  goalTypesStepper: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  goalTypesStepperPhone: { gap: 4 },
+  goalTypesSummary: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  goalTypesSummaryRow: { flexDirection: 'row', marginBottom: 6 },
+  goalTypesSummaryLabel: { fontSize: 13, fontWeight: '600', color: '#6b7280', width: 90 },
+  goalTypesSummaryText: { flex: 1, fontSize: 13, color: '#374151' },
   emptyText: { fontSize: 14, color: '#6b7280', marginBottom: 16 },
   playerList: { marginBottom: 16 },
   playerRow: {
@@ -698,7 +851,7 @@ const styles = StyleSheet.create({
   statControls: { flexDirection: 'row', gap: 16 },
   statControl: { alignItems: 'center', minWidth: 64 },
   statLabel: { fontSize: 11, color: '#6b7280', marginBottom: 4 },
-  stepperRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  stepperRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   stepperBtn: {
     width: 32,
     height: 32,
@@ -707,8 +860,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  stepperBtnPhone: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+  },
   stepperText: { fontSize: 18, fontWeight: '600', color: '#374151' },
+  stepperTextPhone: { fontSize: 14 },
   stepperValue: { fontSize: 16, fontWeight: '700', color: '#111', minWidth: 24, textAlign: 'center' },
+  stepperValuePhone: { fontSize: 14, minWidth: 20 },
   footer: { marginTop: 24, gap: 12 },
   editBtn: {
     backgroundColor: '#dc2626',

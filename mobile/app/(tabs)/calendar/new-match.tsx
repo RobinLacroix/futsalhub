@@ -61,8 +61,8 @@ export default function NewMatchScreen() {
   const [location, setLocation] = useState<typeof LOCATION_OPTIONS[number]>('Domicile');
   const [competition, setCompetition] = useState<typeof COMPETITION_OPTIONS[number]>('Championnat');
   const [convoqued, setConvoqued] = useState<Record<string, boolean>>({});
-  const [scoreTeam, setScoreTeam] = useState('');
-  const [scoreOpponent, setScoreOpponent] = useState('');
+  const [scoreTeam, setScoreTeam] = useState('0');
+  const [scoreOpponent, setScoreOpponent] = useState('0');
 
   const [clubPlayersWithTeams, setClubPlayersWithTeams] = useState<PlayerWithTeams[]>([]);
   const [inviteFilterTeamId, setInviteFilterTeamId] = useState<string>('all');
