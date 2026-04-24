@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
 import { useUserClub } from '../../hooks/useUserClub';
-import { Plus, Edit, Trash2, Users, Trophy, Calendar, X } from 'lucide-react';
+import Link from 'next/link';
+import { Plus, Edit, Trash2, Users, Trophy, Calendar, X, Layers } from 'lucide-react';
 
 interface Team {
   id: string;
@@ -267,14 +268,23 @@ export default function TeamsPage() {
             </p>
           )}
         </div>
-        <button
-          type="button"
-          onClick={() => handleOpenModal()}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="h-5 w-5" />
-          Ajouter une équipe
-        </button>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/webapp/manager/season-planning"
+            className="flex items-center gap-2 px-4 py-2 border border-blue-600 text-blue-600 rounded-md hover:bg-blue-50 transition-colors text-sm font-medium"
+          >
+            <Layers className="h-4 w-4" />
+            Planification saison
+          </Link>
+          <button
+            type="button"
+            onClick={() => handleOpenModal()}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="h-5 w-5" />
+            Ajouter une équipe
+          </button>
+        </div>
       </div>
 
       {teams.length === 0 ? (
