@@ -12,6 +12,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useRouter } from 'expo-router';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 import {
   getUserClubId,
@@ -44,6 +45,7 @@ function memberLabel(m: ClubMemberWithUser): string {
 }
 
 export default function TeamsScreen() {
+  const router = useRouter();
   const { teams: activeTeamList, activeTeamId, setActiveTeamId, refetchTeams } = useActiveTeam();
   const [clubId, setClubId] = useState<string | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -247,10 +249,19 @@ export default function TeamsScreen() {
 
         <View style={styles.header}>
           <Text style={styles.title}>Équipes du club</Text>
-          <TouchableOpacity style={styles.addBtn} onPress={openCreate}>
-            <Ionicons name="add" size={22} color="#fff" />
-            <Text style={styles.addBtnText}>Ajouter</Text>
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              style={styles.planBtn}
+              onPress={() => router.push('/(tabs)/squad/season-planning' as any)}
+            >
+              <Ionicons name="layers-outline" size={16} color="#7c3aed" />
+              <Text style={styles.planBtnText}>Planif. saison</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.addBtn} onPress={openCreate}>
+              <Ionicons name="add" size={22} color="#fff" />
+              <Text style={styles.addBtnText}>Ajouter</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {teams.length === 0 ? (
@@ -442,6 +453,18 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   title: { fontSize: 20, fontWeight: '700', color: '#1e293b' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  planBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#7c3aed',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 8,
+  },
+  planBtnText: { color: '#7c3aed', fontWeight: '600', fontSize: 14 },
   addBtn: {
     flexDirection: 'row',
     alignItems: 'center',

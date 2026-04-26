@@ -466,69 +466,112 @@ export default function SeasonPlanningScreen() {
       <View style={styles.body}>
         {/* ── left panel: unassigned ── */}
         <View style={styles.leftPanel}>
+          {/* header */}
           <View style={styles.leftHeader}>
-            <Text style={styles.leftTitle}>
-              Non assignés{' '}
-              <Text style={styles.leftCount}>({filteredUnassigned.length}/{planning.unassigned.length})</Text>
-            </Text>
+            <View>
+              <Text style={styles.leftTitle}>Non assignés</Text>
+              <Text style={styles.leftCount}>
+                {filteredUnassigned.length}/{planning.unassigned.length} joueur{planning.unassigned.length !== 1 ? 's' : ''}
+              </Text>
+            </View>
             <TouchableOpacity onPress={() => setRecruitModal(true)} style={styles.recruitBtn}>
-              <Ionicons name="person-add-outline" size={15} color="#7c3aed" />
+              <Ionicons name="person-add-outline" size={16} color="#7c3aed" />
+              <Text style={styles.recruitBtnText}>Recrue</Text>
             </TouchableOpacity>
           </View>
 
           {/* search */}
           <View style={styles.searchRow}>
-            <Ionicons name="search-outline" size={14} color="#9ca3af" style={{ marginRight: 6 }} />
+            <Ionicons name="search-outline" size={15} color="#9ca3af" />
             <TextInput
               style={styles.searchInput}
-              placeholder="Rechercher…"
+              placeholder="Rechercher un joueur…"
               value={search}
               onChangeText={setSearch}
               placeholderTextColor="#9ca3af"
+              clearButtonMode="while-editing"
             />
           </View>
 
-          {/* position filter */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
-            {['', 'Gardien', 'Meneur', 'Ailier', 'Pivot'].map(pos => (
+          {/* position filter — grille 2×2 + bouton Tous */}
+          <View style={styles.filterSection}>
+            <Text style={styles.filterLabel}>Poste</Text>
+            <View style={styles.filterGrid}>
               <TouchableOpacity
-                key={pos}
-                onPress={() => setFilterPos(pos)}
-                style={[styles.filterChip, filterPos === pos && styles.filterChipActive]}
+                onPress={() => setFilterPos('')}
+                style={[styles.filterBtn, filterPos === '' && styles.filterBtnActive, { flex: 1 }]}
               >
-                <Text style={[styles.filterChipText, filterPos === pos && styles.filterChipTextActive]}>
-                  {pos || 'Tous'}
-                </Text>
+                <Text style={[styles.filterBtnText, filterPos === '' && styles.filterBtnTextActive]}>Tous</Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
+            </View>
+            <View style={styles.filterGrid}>
+              {[
+                { pos: 'Gardien', short: 'GK',  color: '#a16207', bg: '#fef9c3' },
+                { pos: 'Meneur',  short: 'MEN', color: '#1d4ed8', bg: '#dbeafe' },
+                { pos: 'Ailier',  short: 'AIL', color: '#15803d', bg: '#dcfce7' },
+                { pos: 'Pivot',   short: 'PIV', color: '#b91c1c', bg: '#fee2e2' },
+              ].map(({ pos, short, color, bg }) => (
+                <TouchableOpacity
+                  key={pos}
+                  onPress={() => setFilterPos(filterPos === pos ? '' : pos)}
+                  style={[
+                    styles.filterBtnPos,
+                    filterPos === pos
+                      ? { backgroundColor: bg, borderColor: color }
+                      : { backgroundColor: '#f8fafc', borderColor: '#e2e8f0' },
+                  ]}
+                >
+                  <Text style={[styles.filterBtnPosText, { color: filterPos === pos ? color : '#64748b' }]}>
+                    {short}
+                  </Text>
+                  <Text style={[styles.filterBtnPosLabel, { color: filterPos === pos ? color : '#94a3b8' }]}>
+                    {pos}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
 
           {/* pool */}
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 8, gap: 6 }}>
-            <TouchableOpacity
-              activeOpacity={selectedId ? 0.6 : 1}
-              onPress={() => selectedId && handleSlotPress({ type: 'unassigned' })}
-              style={[styles.poolDropArea, selectedId && styles.dropAreaActive]}
-            >
-              {filteredUnassigned.length === 0 ? (
-                <Text style={styles.dropHint}>{selectedId ? 'Déposer ici' : 'Aucun joueur'}</Text>
-              ) : (
-                filteredUnassigned.map(id => (
-                  <PlayerCard
-                    key={id}
-                    cardId={id}
-                    player={getPlayer(id)}
-                    recruit={getRecruit(id)}
-                    selected={selectedId === id}
-                    confirmed={(planning.confirmed ?? []).includes(id)}
-                    showConfirm={false}
-                    onPress={() => handleCardPress(id)}
-                    onLongPress={() => handleCardLongPress(id)}
-                  />
-                ))
-              )}
-            </TouchableOpacity>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.poolContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            {filteredUnassigned.length === 0 ? (
+              <View style={styles.poolEmpty}>
+                <Ionicons name="checkmark-circle-outline" size={28} color="#d1d5db" />
+                <Text style={styles.poolEmptyText}>
+                  {planning.unassigned.length === 0 ? 'Tous les joueurs sont placés !' : 'Aucun résultat'}
+                </Text>
+              </View>
+            ) : (
+              filteredUnassigned.map(id => (
+                <PlayerCard
+                  key={id}
+                  cardId={id}
+                  player={getPlayer(id)}
+                  recruit={getRecruit(id)}
+                  selected={selectedId === id}
+                  confirmed={(planning.confirmed ?? []).includes(id)}
+                  showConfirm={false}
+                  onPress={() => handleCardPress(id)}
+                  onLongPress={() => handleCardLongPress(id)}
+                />
+              ))
+            )}
           </ScrollView>
+
+          {/* "placer ici" quand un joueur est sélectionné */}
+          {selectedId && (
+            <TouchableOpacity
+              style={styles.placeUnassignedBtn}
+              onPress={() => handleSlotPress({ type: 'unassigned' })}
+            >
+              <Ionicons name="arrow-down-outline" size={15} color="#fff" />
+              <Text style={styles.placeUnassignedText}>Retirer dans le pool</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* ── right: board ── */}
@@ -780,19 +823,29 @@ const styles = StyleSheet.create({
   body:           { flex: 1, flexDirection: 'row' },
 
   // left panel
-  leftPanel:      { width: 220, backgroundColor: '#fff', borderRightWidth: 1, borderRightColor: '#e5e7eb', flexDirection: 'column' },
-  leftHeader:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  leftTitle:      { fontSize: 13, fontWeight: '700', color: '#374151' },
-  leftCount:      { fontSize: 11, fontWeight: '400', color: '#9ca3af' },
-  recruitBtn:     { padding: 4 },
-  searchRow:      { flexDirection: 'row', alignItems: 'center', margin: 8, paddingHorizontal: 8, backgroundColor: '#f9fafb', borderRadius: 8, borderWidth: 1, borderColor: '#e5e7eb' },
-  searchInput:    { flex: 1, height: 32, fontSize: 13, color: '#111' },
-  filterRow:      { paddingHorizontal: 8, paddingBottom: 6 },
-  filterChip:     { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: '#f3f4f6', marginRight: 6 },
-  filterChipActive: { backgroundColor: '#3b82f6' },
-  filterChipText: { fontSize: 11, color: '#6b7280' },
-  filterChipTextActive: { color: '#fff', fontWeight: '600' },
-  poolDropArea:   { minHeight: 60, borderRadius: 8, borderWidth: 2, borderStyle: 'dashed', borderColor: 'transparent', padding: 4, gap: 5 },
+  leftPanel:      { width: 250, backgroundColor: '#fff', borderRightWidth: 1, borderRightColor: '#e2e8f0', flexDirection: 'column' },
+  leftHeader:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingTop: 12, paddingBottom: 8 },
+  leftTitle:      { fontSize: 14, fontWeight: '700', color: '#1e293b' },
+  leftCount:      { fontSize: 11, color: '#94a3b8', marginTop: 1 },
+  recruitBtn:     { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, borderWidth: 1, borderColor: '#e9d5ff', backgroundColor: '#faf5ff' },
+  recruitBtnText: { fontSize: 12, fontWeight: '600', color: '#7c3aed' },
+  searchRow:      { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 10, marginBottom: 10, paddingHorizontal: 10, backgroundColor: '#f8fafc', borderRadius: 10, borderWidth: 1, borderColor: '#e2e8f0', height: 38 },
+  searchInput:    { flex: 1, fontSize: 13, color: '#0f172a' },
+  filterSection:  { paddingHorizontal: 10, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  filterLabel:    { fontSize: 10, fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
+  filterGrid:     { flexDirection: 'row', gap: 5, marginBottom: 5 },
+  filterBtn:      { paddingVertical: 5, borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#f8fafc', alignItems: 'center' },
+  filterBtnActive: { backgroundColor: '#eff6ff', borderColor: '#3b82f6' },
+  filterBtnText:  { fontSize: 12, color: '#64748b', fontWeight: '500' },
+  filterBtnTextActive: { color: '#3b82f6', fontWeight: '700' },
+  filterBtnPos:   { flex: 1, alignItems: 'center', paddingVertical: 6, borderRadius: 8, borderWidth: 1.5 },
+  filterBtnPosText: { fontSize: 11, fontWeight: '800' },
+  filterBtnPosLabel: { fontSize: 9, fontWeight: '500', marginTop: 1 },
+  poolContent:    { padding: 10, gap: 6 },
+  poolEmpty:      { alignItems: 'center', paddingVertical: 32, gap: 8 },
+  poolEmptyText:  { fontSize: 13, color: '#9ca3af', textAlign: 'center' },
+  placeUnassignedBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, margin: 8, paddingVertical: 10, backgroundColor: '#3b82f6', borderRadius: 10 },
+  placeUnassignedText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 
   // right board
   departBox:      { backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#fecaca', marginBottom: 4, overflow: 'hidden' },
