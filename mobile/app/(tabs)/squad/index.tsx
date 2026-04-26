@@ -107,6 +107,13 @@ export default function SquadScreen() {
         <View style={styles.tabletBar}>
           <Text style={styles.tabletBarTitle}>Équipe</Text>
           <TouchableOpacity
+            style={styles.tabletPlanBtn}
+            onPress={() => router.push('/(tabs)/squad/season-planning')}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.tabletPlanBtnText}>⊞ Planif. saison</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
             style={styles.tabletAddBtn}
             onPress={() => router.push('/(tabs)/squad/new-player')}
             activeOpacity={0.8}
@@ -220,6 +227,14 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(0,0,0,0.1)',
   },
   tabletBarTitle: { fontSize: 18, fontWeight: '600', color: '#fff' },
+  tabletPlanBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    marginRight: 8,
+  },
+  tabletPlanBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   tabletAddBtn: {
     width: 36,
     height: 36,

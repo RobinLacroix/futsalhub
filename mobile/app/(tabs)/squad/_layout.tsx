@@ -37,6 +37,7 @@ export default function SquadLayout() {
       />
       <Stack.Screen name="new-player" options={{ title: 'Nouveau joueur' }} />
       <Stack.Screen name="[playerId]" options={{ title: 'Joueur' }} />
+      <Stack.Screen name="season-planning" options={{ headerShown: false }} />
     </Stack>
   );
 }
