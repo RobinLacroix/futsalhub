@@ -1,5 +1,3 @@
-'use client';
-
 import { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
@@ -13,7 +11,7 @@ import {
   loadSeasonPlanning, saveSeasonPlanning, listSeasons,
   PlanningData, RecruitData, TeamPlanningState,
 } from '../../../lib/services/seasonPlanning';
-import type { Player, Team } from '../../../../types';
+import type { Player, Team } from '../../../types';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
