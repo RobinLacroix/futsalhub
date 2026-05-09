@@ -193,27 +193,39 @@ function Navbar() {
 }
 
 /* ─── Hero tactical mockup ────────────────────────────────────── */
+/*
+ * Terrain portrait (viewBox 200×140) = 20m width × 40m length rotated.
+ * Scale: sx = 184/20 = 9.2 px/m (horizontal), sy = 132/40 = 3.3 px/m (vertical).
+ * Field: x ∈ [8,192], y ∈ [4,136].
+ *
+ * Surface en D FIFA (portrait, buts haut/bas) :
+ *   Chaque D = quart-ellipse depuis poteau gauche + ligne à 6m + quart-ellipse depuis poteau droit
+ *   Poteaux haut : x=86 (8.5m×9.2) et x=114 (11.5m×9.2) à y=4
+ *   Rayon 6m → rx=6×3.3=20, ry=6×9.2=55 (ellipse aplatie car terrain non homothétique)
+ *   D haut  : M 31 4  A 55 20 0 0 0 86 24  L 114 24  A 55 20 0 0 0 169 4
+ *   D bas   : M 31 136 A 55 20 0 0 1 86 116 L 114 116 A 55 20 0 0 1 169 136
+ */
 function TacticalMockup() {
-  // 1-2-2 formation (GK + 2 déf + 2 mil/att) — notre équipe en bas
+  // 1-2-2 : GK + 2 déf + 2 mil — notre équipe en bas
+  // Coords calculées sur le terrain scalé (sy=3.3, sx=9.2, origin x=8 y=4)
   const players = [
-    { id: 1, cx: 100, cy: 122, label: 'GK', color: '#FFB020' },
-    { id: 2, cx: 62,  cy: 100, label: 'DF', color: '#60A5FA' },
-    { id: 3, cx: 138, cy: 100, label: 'DF', color: '#60A5FA' },
-    { id: 4, cx: 58,  cy: 80,  label: 'MF', color: '#34D399' },
-    { id: 5, cx: 142, cy: 80,  label: 'MF', color: '#34D399' },
+    { id: 1, cx: 100, cy: 129, label: 'GK', color: '#FFB020' },  // 10m, 38m
+    { id: 2, cx: 63,  cy: 110, label: 'DF', color: '#f9fafb' },  //  6m, 32m
+    { id: 3, cx: 137, cy: 110, label: 'DF', color: '#f9fafb' },  // 14m, 32m
+    { id: 4, cx: 54,  cy: 90,  label: 'MF', color: '#34D399' },  //  5m, 26m
+    { id: 5, cx: 146, cy: 90,  label: 'MF', color: '#34D399' },  // 15m, 26m
   ];
 
   // Adversaires 1-3-1 en haut
   const opponents = [
-    { id: 6, cx: 100, cy: 18,  label: 'GK', color: '#F87171' },
-    { id: 7, cx: 55,  cy: 38,  label: 'DF', color: '#F87171' },
-    { id: 8, cx: 100, cy: 42,  label: 'DF', color: '#F87171' },
-    { id: 9, cx: 145, cy: 38,  label: 'DF', color: '#F87171' },
-    { id: 10, cx: 100, cy: 56, label: 'AT', color: '#F87171' },
+    { id: 6,  cx: 100, cy: 11, label: 'GK' },  // 10m,  2m
+    { id: 7,  cx: 54,  cy: 30, label: 'DF' },  //  5m,  8m
+    { id: 8,  cx: 100, cy: 37, label: 'DF' },  // 10m, 10m
+    { id: 9,  cx: 146, cy: 30, label: 'DF' },  // 15m,  8m
+    { id: 10, cx: 100, cy: 57, label: 'AT' },  // 10m, 16m
   ];
 
-  const S = 'rgba(255,255,255,0.13)'; // stroke color for court lines
-  const SF = 'rgba(255,255,255,0.06)'; // faint fill
+  const W = 'rgba(255,255,255,0.6)'; // lignes terrain
 
   return (
     <motion.div
@@ -222,24 +234,15 @@ function TacticalMockup() {
       transition={{ duration: 0.9, delay: 0.4, ease: EASE_CUSTOM }}
       className="relative w-full max-w-[420px] mx-auto lg:mx-0"
     >
-      <div
-        className="absolute inset-0 rounded-2xl blur-3xl opacity-20"
-        style={{ backgroundColor: AMBER }}
-      />
+      <div className="absolute inset-0 rounded-2xl blur-3xl opacity-20"
+        style={{ backgroundColor: AMBER }} />
 
-      <div
-        className="relative rounded-2xl overflow-hidden"
-        style={{
-          backgroundColor: CARD_BG,
-          border: `1px solid ${CARD_BORDER}`,
-          backdropFilter: 'blur(24px)',
-        }}
+      <div className="relative rounded-2xl overflow-hidden"
+        style={{ backgroundColor: CARD_BG, border: `1px solid ${CARD_BORDER}`, backdropFilter: 'blur(24px)' }}
       >
-        {/* Card header */}
-        <div
-          className="flex items-center justify-between px-4 py-3 border-b"
-          style={{ borderColor: CARD_BORDER }}
-        >
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b"
+          style={{ borderColor: CARD_BORDER }}>
           <div className="flex items-center gap-2">
             <div className="flex gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-red-500/70" />
@@ -248,81 +251,82 @@ function TacticalMockup() {
             </div>
             <span className={`${inter.className} text-xs text-white/40`}>Schéma tactique · 1-2-2</span>
           </div>
-          <span
-            className={`${inter.className} text-xs px-2 py-0.5 rounded-md`}
-            style={{ backgroundColor: `${AMBER}20`, color: AMBER }}
-          >
-            Live
-          </span>
+          <span className={`${inter.className} text-xs px-2 py-0.5 rounded-md`}
+            style={{ backgroundColor: `${AMBER}20`, color: AMBER }}>Live</span>
         </div>
 
-        {/* ── Court SVG — terrain de futsal FIFA ── */}
+        {/* ── Terrain SVG ── */}
         <div className="px-4 pt-3 pb-2">
           <svg viewBox="0 0 200 140" className="w-full" style={{ height: 220 }}>
 
-            {/* Pelouse */}
-            <rect x="8" y="4" width="184" height="132" fill="rgba(34,197,94,0.09)" stroke="rgba(34,197,94,0.28)" strokeWidth="1.5" />
+            {/* Fond bleu authentique futsal */}
+            <rect x="8" y="4" width="184" height="132" fill="#14506a" />
+
+            {/* Bordure terrain */}
+            <rect x="8" y="4" width="184" height="132" fill="none" stroke={W} strokeWidth="1.5" />
 
             {/* Ligne médiane */}
-            <line x1="8" y1="70" x2="192" y2="70" stroke={S} strokeWidth="1" />
+            <line x1="8" y1="70" x2="192" y2="70" stroke={W} strokeWidth="1" />
 
-            {/* Cercle central */}
-            <circle cx="100" cy="70" r="18" fill="none" stroke={S} strokeWidth="1" />
-            <circle cx="100" cy="70" r="2" fill="rgba(255,255,255,0.22)" />
+            {/* Cercle central + point */}
+            <circle cx="100" cy="70" r="13" fill="none" stroke={W} strokeWidth="1" />
+            <circle cx="100" cy="70" r="1.8" fill={W} />
 
-            {/* Arcs de coin (quarts de cercle r=4) */}
-            <path d="M 8 14 A 10 10 0 0 1 18 4"  fill="none" stroke={S} strokeWidth="1" />
-            <path d="M 182 4 A 10 10 0 0 1 192 14" fill="none" stroke={S} strokeWidth="1" />
-            <path d="M 8 126 A 10 10 0 0 0 18 136"  fill="none" stroke={S} strokeWidth="1" />
-            <path d="M 182 136 A 10 10 0 0 0 192 126" fill="none" stroke={S} strokeWidth="1" />
+            {/* Arcs de coin (r≈10) */}
+            <path d="M 8 14 A 10 10 0 0 1 18 4"   fill="none" stroke={W} strokeWidth="1" />
+            <path d="M 182 4 A 10 10 0 0 1 192 14" fill="none" stroke={W} strokeWidth="1" />
+            <path d="M 8 126 A 10 10 0 0 0 18 136"   fill="none" stroke={W} strokeWidth="1" />
+            <path d="M 182 136 A 10 10 0 0 0 192 126" fill="none" stroke={W} strokeWidth="1" />
 
-            {/* ── Zone de but HAUT (9m×3m) ── */}
-            <rect x="59" y="4" width="82" height="10" fill={SF} stroke={S} strokeWidth="1" />
-            {/* But haut (3m) — légèrement à l'extérieur */}
-            <rect x="86" y="0" width="28" height="5" rx="1" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.35)" strokeWidth="1.2" />
+            {/* ── Surface en D HAUT (FIFA futsal) ──
+                Arc depuis (x=2.5m→31) jusqu'au poteau gauche (x=8.5m→86) à 6m de profondeur (y=24)
+                + ligne à 6m entre les deux poteaux
+                + arc symétrique du poteau droit (x=11.5m→114) vers (x=17.5m→169)  */}
+            <path d="M 31 4 A 55 20 0 0 0 86 24 L 114 24 A 55 20 0 0 0 169 4"
+              fill="none" stroke={W} strokeWidth="1" />
 
-            {/* ── Zone de but BAS (9m×3m) ── */}
-            <rect x="59" y="126" width="82" height="10" fill={SF} stroke={S} strokeWidth="1" />
+            {/* ── Surface en D BAS ── */}
+            <path d="M 31 136 A 55 20 0 0 1 86 116 L 114 116 A 55 20 0 0 1 169 136"
+              fill="none" stroke={W} strokeWidth="1" />
+
+            {/* But haut (3m, à l'extérieur de la ligne) */}
+            <rect x="86" y="0" width="28" height="5" rx="1"
+              fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.85)" strokeWidth="1.3" />
             {/* But bas */}
-            <rect x="86" y="135" width="28" height="5" rx="1" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.35)" strokeWidth="1.2" />
+            <rect x="86" y="135" width="28" height="5" rx="1"
+              fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.85)" strokeWidth="1.3" />
 
-            {/* Point de penalty haut (6m) */}
-            <circle cx="100" cy="24" r="1.5" fill="rgba(255,255,255,0.32)" />
-            {/* Point de penalty bas */}
-            <circle cx="100" cy="116" r="1.5" fill="rgba(255,255,255,0.32)" />
+            {/* 1er point de penalty haut (6m → y=24) et bas (y=116) */}
+            <circle cx="100" cy="24"  r="1.5" fill={W} />
+            <circle cx="100" cy="116" r="1.5" fill={W} />
+            {/* 2e point de penalty haut (10m → y=37) et bas (y=103) */}
+            <circle cx="100" cy="37"  r="1.5" fill="rgba(255,255,255,0.45)" />
+            <circle cx="100" cy="103" r="1.5" fill="rgba(255,255,255,0.45)" />
 
-            {/* 2e point de penalty haut (10m) */}
-            <circle cx="100" cy="37" r="1.5" fill="rgba(255,255,255,0.16)" />
-            {/* 2e point de penalty bas */}
-            <circle cx="100" cy="103" r="1.5" fill="rgba(255,255,255,0.16)" />
-
-            {/* ── Flèches de mouvement animées ── */}
-            {/* DF gauche monte en wing */}
-            <motion.path
-              d="M 62 100 Q 48 88 48 75"
+            {/* ── Flèches de mouvement ── */}
+            {/* MF gauche part en pénétration vers l'axe */}
+            <motion.path d="M 54 90 Q 70 78 90 70"
               fill="none" stroke={AMBER} strokeWidth="1.5"
               strokeDasharray="4 3" strokeLinecap="round"
               initial={{ pathLength: 0, opacity: 0 }}
-              animate={{ pathLength: 1, opacity: 0.75 }}
-              transition={{ duration: 1.1, delay: 1.2, ease: 'easeInOut' }}
+              animate={{ pathLength: 1, opacity: 0.8 }}
+              transition={{ duration: 1.0, delay: 1.2, ease: 'easeInOut' }}
             />
-            {/* DF droit monte en wing */}
-            <motion.path
-              d="M 138 100 Q 152 88 152 75"
+            {/* DF gauche monte couvrir l'espace de MF1 */}
+            <motion.path d="M 63 110 Q 58 100 54 90"
+              fill="none" stroke="#f9fafb" strokeWidth="1.5"
+              strokeDasharray="4 3" strokeLinecap="round"
+              initial={{ pathLength: 0, opacity: 0 }}
+              animate={{ pathLength: 1, opacity: 0.55 }}
+              transition={{ duration: 0.9, delay: 1.5, ease: 'easeInOut' }}
+            />
+            {/* MF droit pique vers le but */}
+            <motion.path d="M 146 90 Q 130 78 115 65"
               fill="none" stroke={AMBER} strokeWidth="1.5"
               strokeDasharray="4 3" strokeLinecap="round"
               initial={{ pathLength: 0, opacity: 0 }}
-              animate={{ pathLength: 1, opacity: 0.75 }}
-              transition={{ duration: 1.1, delay: 1.5, ease: 'easeInOut' }}
-            />
-            {/* MF gauche centre */}
-            <motion.path
-              d="M 58 80 Q 80 68 100 65"
-              fill="none" stroke="#60A5FA" strokeWidth="1.5"
-              strokeDasharray="4 3" strokeLinecap="round"
-              initial={{ pathLength: 0, opacity: 0 }}
-              animate={{ pathLength: 1, opacity: 0.6 }}
-              transition={{ duration: 0.9, delay: 1.8, ease: 'easeInOut' }}
+              animate={{ pathLength: 1, opacity: 0.8 }}
+              transition={{ duration: 1.0, delay: 1.7, ease: 'easeInOut' }}
             />
 
             {/* ── Nos joueurs ── */}
@@ -332,11 +336,10 @@ function TacticalMockup() {
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.4, delay: 0.55 + i * 0.1 }}
               >
-                <circle cx={p.cx} cy={p.cy} r="8"
-                  fill={`${p.color}22`} stroke={p.color} strokeWidth="1.8" />
-                <text x={p.cx} y={p.cy + 3.5}
-                  textAnchor="middle" fill={p.color}
-                  fontSize="5.5" fontFamily="monospace" fontWeight="700">
+                <circle cx={p.cx} cy={p.cy} r="8.5"
+                  fill={`${p.color}28`} stroke={p.color} strokeWidth="1.8" />
+                <text x={p.cx} y={p.cy + 3.5} textAnchor="middle"
+                  fill={p.color} fontSize="5.5" fontFamily="monospace" fontWeight="700">
                   {p.label}
                 </text>
               </motion.g>
@@ -349,12 +352,10 @@ function TacticalMockup() {
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.4, delay: 0.75 + i * 0.08 }}
               >
-                <circle cx={p.cx} cy={p.cy} r="7"
-                  fill="rgba(248,113,113,0.1)"
-                  stroke="rgba(248,113,113,0.5)" strokeWidth="1" />
-                <text x={p.cx} y={p.cy + 3.5}
-                  textAnchor="middle" fill="rgba(248,113,113,0.75)"
-                  fontSize="5" fontFamily="monospace">
+                <circle cx={p.cx} cy={p.cy} r="7.5"
+                  fill="rgba(220,38,38,0.18)" stroke="#dc2626" strokeWidth="1.5" />
+                <text x={p.cx} y={p.cy + 3.5} textAnchor="middle"
+                  fill="#fca5a5" fontSize="5" fontFamily="monospace" fontWeight="600">
                   {p.label}
                 </text>
               </motion.g>
@@ -362,23 +363,18 @@ function TacticalMockup() {
           </svg>
         </div>
 
-        {/* Card footer — chips de formation */}
-        <div
-          className="flex items-center justify-between px-4 py-3 border-t"
-          style={{ borderColor: CARD_BORDER }}
-        >
+        {/* Footer chips formation */}
+        <div className="flex items-center justify-between px-4 py-3 border-t"
+          style={{ borderColor: CARD_BORDER }}>
           <div className="flex gap-2">
             {['1-2-2', '1-3-1', '1-4-0'].map((f) => (
               <button key={f}
                 className={`${inter.className} text-xs px-2.5 py-1 rounded-md transition-all`}
-                style={
-                  f === '1-2-2'
-                    ? { backgroundColor: `${AMBER}25`, color: AMBER, border: `1px solid ${AMBER}40` }
-                    : { backgroundColor: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.38)', border: '1px solid rgba(255,255,255,0.08)' }
+                style={f === '1-2-2'
+                  ? { backgroundColor: `${AMBER}25`, color: AMBER, border: `1px solid ${AMBER}40` }
+                  : { backgroundColor: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.38)', border: '1px solid rgba(255,255,255,0.08)' }
                 }
-              >
-                {f}
-              </button>
+              >{f}</button>
             ))}
           </div>
           <span className={`${inter.className} text-xs text-white/30`}>5 joueurs</span>
@@ -391,11 +387,7 @@ function TacticalMockup() {
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.6, delay: 1.4 }}
         className="absolute -right-4 top-1/3 rounded-xl p-3 shadow-xl"
-        style={{
-          backgroundColor: 'rgba(14,14,16,0.9)',
-          border: `1px solid ${CARD_BORDER}`,
-          backdropFilter: 'blur(16px)',
-        }}
+        style={{ backgroundColor: 'rgba(14,14,16,0.92)', border: `1px solid ${CARD_BORDER}`, backdropFilter: 'blur(16px)' }}
       >
         <div className={`${inter.className} text-[10px] text-white/50 mb-1`}>Tirs cadrés</div>
         <div className="flex items-baseline gap-1">
