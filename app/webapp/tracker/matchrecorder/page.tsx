@@ -1921,7 +1921,7 @@ export default function MatchRecorderPage() {
                     }}
                     title={`${actionConfig.name} - ${event.player_name} (M${event.half}) ${event.match_time_seconds ? formatTime(event.match_time_seconds) : ''}`}
                   >
-                    <div className={`w-4 h-4 rounded-full ${actionConfig.color} ring-2 ring-white shadow-lg flex items-center justify-center transition-transform group-hover:scale-125`}>
+                    <div className={`w-4 h-4 rounded-full ${actionConfig.color} ring-1 ring-white/30 shadow-lg flex items-center justify-center transition-transform group-hover:scale-125 opacity-75 group-hover:opacity-100`}>
                       <IconComponent className="h-2.5 w-2.5 text-white" />
                     </div>
                     {/* Tooltip au survol */}
@@ -4217,7 +4217,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                         }}
                         title={`${actionConfig.name} - ${event.player_name} (M${event.half}) ${event.match_time_seconds ? formatTime(event.match_time_seconds) : ''}`}
                       >
-                        <div className={`w-4 h-4 rounded-full ${actionConfig.color} ring-2 ring-white shadow-lg flex items-center justify-center transition-transform group-hover:scale-125`}>
+                        <div className={`w-4 h-4 rounded-full ${actionConfig.color} ring-1 ring-white/30 shadow-lg flex items-center justify-center transition-transform group-hover:scale-125 opacity-75 group-hover:opacity-100`}>
                           <IconComponent className="h-2.5 w-2.5 text-white" />
                         </div>
                         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
