@@ -1,12 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { ActiveTeamProvider } from './contexts/ActiveTeamContext';
 import SimpleTeamSelector from './components/SimpleTeamSelector';
-import DebugTeamSelector from './components/DebugTeamSelector';
-import TeamChangeTester from './components/TeamChangeTester';
 import { usePlayerProfile } from './hooks/usePlayerProfile';
 import { useActiveTeam } from './hooks/useActiveTeam';
 import {
@@ -29,29 +27,64 @@ import {
   Menu
 } from 'lucide-react';
 
-// Composant Sidebar
+const AMBER = '#FFB020';
+
+function NavButton({
+  icon: Icon,
+  label,
+  href,
+  active,
+  expanded,
+  onClick,
+}: {
+  icon: React.ElementType;
+  label: string;
+  href?: string;
+  active?: boolean;
+  expanded: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={!expanded ? label : undefined}
+      className={`flex items-center w-full px-3 py-2.5 min-h-[44px] md:min-h-0 text-sm font-medium rounded-lg transition-all duration-150 ${
+        expanded ? 'justify-start text-left' : 'justify-center px-0'
+      } ${
+        active
+          ? 'text-[#FFB020]'
+          : 'text-white/55 hover:text-white/90 hover:bg-white/[0.06] active:bg-white/[0.09]'
+      }`}
+      style={active ? { backgroundColor: 'rgba(255,176,32,0.10)' } : undefined}
+    >
+      <Icon
+        className={`h-4.5 w-4.5 flex-shrink-0 ${expanded ? 'mr-3' : ''}`}
+        style={{ color: active ? AMBER : undefined }}
+      />
+      {expanded && <span style={{ fontFamily: 'var(--font-inter, Inter, sans-serif)', fontSize: '0.8125rem' }}>{label}</span>}
+    </button>
+  );
+}
+
 function Sidebar({
   isExpanded,
-  onToggle,
   isMobileOpen,
-  onMobileClose
+  onMobileClose,
 }: {
   isExpanded: boolean;
-  onToggle: () => void;
   isMobileOpen: boolean;
   onMobileClose: () => void;
 }) {
   const { player: playerProfile } = usePlayerProfile();
   const { teams } = useActiveTeam();
   const router = useRouter();
+  const pathname = usePathname();
 
   const isPlayerOnly = !!playerProfile && teams.length === 0;
+  const show = isExpanded || isMobileOpen;
 
-  const handleNavClick = (href: string) => {
-    onMobileClose();
-    router.push(href);
-  };
-
+  const handleNav = (href: string) => { onMobileClose(); router.push(href); };
   const handleLogout = async () => {
     onMobileClose();
     await supabase.auth.signOut();
@@ -59,99 +92,52 @@ function Sidebar({
   };
 
   const navigation = [
-    {
-      name: 'Accueil',
-      href: '/webapp',
-      icon: Home
-    },
-    ...(playerProfile
-      ? [{
-          name: 'Joueur',
-          items: [
-            { name: 'Calendrier / Présences', href: '/webapp/player/calendar', icon: Calendar },
-            { name: 'Ma fiche', href: '/webapp/player/profile', icon: UserCircle },
-            { name: 'Questionnaires', href: '/webapp/player/questionnaires', icon: MessageSquare }
-          ] as const
-        }]
-      : []
-    ),
-    ...(isPlayerOnly ? [] : [{
-      name: 'Manager',
+    { name: 'Accueil', href: '/webapp', icon: Home },
+    ...(playerProfile ? [{
+      name: 'Joueur',
       items: [
-        {
-          name: 'Calendrier / Résultats',
-          href: '/webapp/manager/calendar',
-          icon: Calendar
-        },
-        {
-          name: 'Effectif',
-          href: '/webapp/manager/squad',
-          icon: Users
-        },
-        {
-          name: 'Dashboard',
-          href: '/webapp/manager/dashboard',
-          icon: PieChart
-        },
-        {
-          name: 'Équipes',
-          href: '/webapp/manager/teams',
-          icon: Shield
-        }
-      ]
-    },
-    {
-      name: 'Tracker',
-      items: [
-        {
-          name: 'Dashboard',
-          href: '/webapp/tracker/dashboard',
-          icon: BarChart3
-        },
-        {
-          name: 'Enregistrer match',
-          href: '/webapp/tracker/matchrecorder',
-          icon: Video
-        }
-      ]
-    },
-    { name: 'Scout',
-      items: [
-        {
-          name: 'Annonce',
-          href: '/webapp/scout/opening',
-          icon: FileText
-        },
-        {
-          name: 'Recrutement',
-          href: '/webapp/scout/profiles',
-          icon: Search
-        }
-      ]
-    },
-    { name: 'Share',
-      items: [
-        {
-          name: 'Librairie',
-          href: '/webapp/library',
-          icon: FileText
-        },
-        {
-          name: 'Schémas tactiques',
-          href: '/webapp/library/schematics',
-          icon: Layout
-        },
-        {
-          name: 'Forum',
-          href: '/webapp/share/forum',
-          icon: MessageSquare
-        }
-      ]
-    }
-  ]),
-    { name: 'Paramètres', href: '/webapp/settings', icon: Settings },
-    { name: 'Se déconnecter', icon: LogOut, action: 'logout' as const }
+        { name: 'Calendrier / Présences', href: '/webapp/player/calendar', icon: Calendar },
+        { name: 'Ma fiche', href: '/webapp/player/profile', icon: UserCircle },
+        { name: 'Questionnaires', href: '/webapp/player/questionnaires', icon: MessageSquare },
+      ] as const,
+    }] : []),
+    ...(isPlayerOnly ? [] : [
+      {
+        name: 'Manager',
+        items: [
+          { name: 'Calendrier / Résultats', href: '/webapp/manager/calendar', icon: Calendar },
+          { name: 'Effectif', href: '/webapp/manager/squad', icon: Users },
+          { name: 'Dashboard', href: '/webapp/manager/dashboard', icon: PieChart },
+          { name: 'Équipes', href: '/webapp/manager/teams', icon: Shield },
+        ],
+      },
+      {
+        name: 'Tracker',
+        items: [
+          { name: 'Dashboard', href: '/webapp/tracker/dashboard', icon: BarChart3 },
+          { name: 'Enregistrer match', href: '/webapp/tracker/matchrecorder', icon: Video },
+        ],
+      },
+      {
+        name: 'Scout',
+        items: [
+          { name: 'Annonce', href: '/webapp/scout/opening', icon: FileText },
+          { name: 'Recrutement', href: '/webapp/scout/profiles', icon: Search },
+        ],
+      },
+      {
+        name: 'Share',
+        items: [
+          { name: 'Librairie', href: '/webapp/library', icon: FileText },
+          { name: 'Schémas tactiques', href: '/webapp/library/schematics', icon: Layout },
+          { name: 'Forum', href: '/webapp/share/forum', icon: MessageSquare },
+        ],
+      },
+    ]),
   ];
+
+  const sidebarBg = 'rgba(14,14,16,0.97)';
+  const borderColor = 'rgba(255,255,255,0.07)';
 
   return (
     <>
@@ -159,97 +145,104 @@ function Sidebar({
       <div
         aria-hidden
         onClick={onMobileClose}
-        className={`fixed inset-0 bg-black/50 z-40 transition-opacity md:hidden ${
+        className={`fixed inset-0 z-40 transition-opacity md:hidden ${
           isMobileOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
+        style={{ backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
       />
 
       <aside
-        className={`fixed left-0 bg-white border-r border-gray-200 flex flex-col z-40 overflow-hidden min-w-0
+        className={`fixed left-0 flex flex-col z-40 overflow-hidden min-w-0
           transition-[transform,width] duration-300 ease-out
           top-0 max-md:h-full
-          md:top-[calc(env(safe-area-inset-top,0px)+0.5rem)] md:h-[calc(100vh-calc(env(safe-area-inset-top,0px)+0.5rem))]
+          md:top-[calc(env(safe-area-inset-top,0px)+0.5rem)]
+          md:h-[calc(100vh-calc(env(safe-area-inset-top,0px)+0.5rem))]
           ${isExpanded ? 'w-64 md:!w-64' : 'w-16 md:!w-16'}
           ${isMobileOpen ? 'translate-x-0 max-md:w-64' : '-translate-x-full md:translate-x-0'}
         `}
+        style={{
+          backgroundColor: sidebarBg,
+          borderRight: `1px solid ${borderColor}`,
+          backdropFilter: 'blur(24px)',
+        }}
       >
-        {/* Sélecteur d'équipe */}
-        <div className="px-3 py-2 border-b border-gray-200 flex-shrink-0">
-          {isExpanded || isMobileOpen ? (
-            <SimpleTeamSelector />
+        {/* Logo / team selector */}
+        <div className="px-3 py-3 flex-shrink-0" style={{ borderBottom: `1px solid ${borderColor}` }}>
+          {show ? (
+            <div className="flex items-center gap-2 px-1">
+              <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0"
+                style={{ backgroundColor: AMBER }}>
+                <span style={{ fontSize: 10, fontWeight: 800, color: '#0E0E10', fontFamily: 'var(--font-syne)' }}>F</span>
+              </div>
+              <SimpleTeamSelector />
+            </div>
           ) : (
-            <div className="text-center">
-              <div className="text-blue-600 text-lg">🏆</div>
+            <div className="flex justify-center">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+                style={{ backgroundColor: AMBER }}>
+                <span style={{ fontSize: 12, fontWeight: 800, color: '#0E0E10', fontFamily: 'var(--font-syne)' }}>F</span>
+              </div>
             </div>
           )}
         </div>
 
-        <nav className="flex-1 py-4 overflow-y-auto overflow-x-hidden">
-          <div className="px-3 space-y-1 h-full">
+        {/* Navigation */}
+        <nav className="flex-1 py-3 overflow-y-auto overflow-x-hidden">
+          <div className={`space-y-0.5 ${show ? 'px-3' : 'px-2'}`}>
             {navigation.map((item) => (
               <div key={item.name}>
-                {'action' in item && item.action === 'logout' ? (
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className={`flex items-center w-full px-3 py-3 min-h-[44px] text-sm font-medium rounded-md text-gray-700 hover:bg-gray-50 active:bg-gray-100 md:py-2 md:min-h-0 ${
-                      isExpanded || isMobileOpen ? 'justify-start text-left' : 'justify-center px-0'
-                    }`}
-                  >
-                    <item.icon className={`h-5 w-5 flex-shrink-0 ${isExpanded || isMobileOpen ? 'mr-3' : ''}`} />
-                    {(isExpanded || isMobileOpen) && <span>{item.name}</span>}
-                  </button>
-                ) : item.href ? (
-                  <button
-                    type="button"
-                    onClick={() => handleNavClick(item.href!)}
-                    className={`flex items-center w-full px-3 py-3 min-h-[44px] text-sm font-medium rounded-md text-gray-700 hover:bg-gray-50 active:bg-gray-100 md:py-2 md:min-h-0 ${
-                      isExpanded || isMobileOpen ? 'justify-start text-left' : 'justify-center px-0'
-                    }`}
-                  >
-                    <item.icon className={`h-5 w-5 flex-shrink-0 ${isExpanded || isMobileOpen ? 'mr-3' : ''}`} />
-                    {(isExpanded || isMobileOpen) && <span>{item.name}</span>}
-                  </button>
-                ) : (
+                {'items' in item ? (
                   <>
-                    {(isExpanded || isMobileOpen) && (
-                      <div className="px-3 py-2 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                    {show && (
+                      <div className="px-3 pt-4 pb-1.5"
+                        style={{ fontFamily: 'var(--font-inter)', fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.08em', color: 'rgba(255,255,255,0.28)', textTransform: 'uppercase' }}>
                         {item.name}
                       </div>
                     )}
-                    {item.items?.map((subItem) => (
-                      <button
-                        key={subItem.name}
-                        type="button"
-                        onClick={() => handleNavClick(subItem.href)}
-                        className={`flex items-center w-full px-3 py-3 min-h-[44px] text-sm font-medium rounded-md text-gray-700 hover:bg-gray-50 active:bg-gray-100 md:py-2 md:min-h-0 ${
-                          isExpanded || isMobileOpen ? 'justify-start text-left' : 'justify-center px-0'
-                        }`}
-                      >
-                        <subItem.icon className={`h-5 w-5 flex-shrink-0 ${isExpanded || isMobileOpen ? 'mr-3' : ''}`} />
-                        {(isExpanded || isMobileOpen) && <span>{subItem.name}</span>}
-                      </button>
+                    {item.items.map((sub) => (
+                      <NavButton
+                        key={sub.name}
+                        icon={sub.icon}
+                        label={sub.name}
+                        href={sub.href}
+                        active={pathname === sub.href}
+                        expanded={show}
+                        onClick={() => handleNav(sub.href)}
+                      />
                     ))}
                   </>
+                ) : (
+                  <NavButton
+                    icon={item.icon}
+                    label={item.name}
+                    href={item.href}
+                    active={pathname === item.href}
+                    expanded={show}
+                    onClick={() => handleNav(item.href!)}
+                  />
                 )}
               </div>
             ))}
           </div>
         </nav>
+
+        {/* Bottom: settings + logout */}
+        <div className="pb-4 flex-shrink-0" style={{ borderTop: `1px solid ${borderColor}`, paddingTop: '0.75rem' }}>
+          <div className={show ? 'px-3' : 'px-2'}>
+            <NavButton icon={Settings} label="Paramètres" href="/webapp/settings"
+              active={pathname === '/webapp/settings'} expanded={show}
+              onClick={() => handleNav('/webapp/settings')} />
+            <NavButton icon={LogOut} label="Se déconnecter" expanded={show} onClick={handleLogout} />
+          </div>
+        </div>
       </aside>
     </>
   );
 }
 
-// Breakpoint desktop (aligné avec Tailwind md)
 const DESKTOP_BREAKPOINT = 768;
 
-// Layout principal
-export default function WebAppLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function WebAppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isDesktop, setIsDesktop] = useState(false);
@@ -265,30 +258,45 @@ export default function WebAppLayout({
 
   return (
     <ActiveTeamProvider>
-      <div className="min-h-screen bg-gray-50 min-h-[100dvh]">
+      <div className="min-h-screen min-h-[100dvh]" style={{ backgroundColor: '#0E0E10' }}>
         <Sidebar
           isExpanded={sidebarOpen}
-          onToggle={() => setSidebarOpen(!sidebarOpen)}
           isMobileOpen={mobileMenuOpen}
           onMobileClose={() => setMobileMenuOpen(false)}
         />
 
-        {/* Barre top : réserve l'espace pour la barre de statut (heure, wifi, etc.) sur iPad / desktop */}
+        {/* Desktop top bar (safe area spacer) */}
         <div
-          className="fixed top-0 left-0 right-0 z-30 bg-white/95 border-b border-gray-100 max-md:hidden"
-          style={{ minHeight: 'calc(env(safe-area-inset-top, 0px) + 0.5rem)' }}
+          className="fixed top-0 left-0 right-0 z-30 max-md:hidden"
+          style={{
+            minHeight: 'calc(env(safe-area-inset-top, 0px) + 0.5rem)',
+            backgroundColor: 'rgba(14,14,16,0.90)',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
+            backdropFilter: 'blur(16px)',
+          }}
         />
 
-        {/* Barre mobile : hamburger + espace */}
-        <header className="fixed top-0 left-0 right-0 h-14 min-h-[3.5rem] bg-white border-b border-gray-200 z-30 flex items-center px-4 md:hidden safe-area-inset-top">
+        {/* Mobile header */}
+        <header
+          className="fixed top-0 left-0 right-0 h-14 z-30 flex items-center px-4 md:hidden safe-area-inset-top"
+          style={{
+            backgroundColor: 'rgba(14,14,16,0.92)',
+            borderBottom: '1px solid rgba(255,255,255,0.07)',
+            backdropFilter: 'blur(16px)',
+          }}
+        >
           <button
             type="button"
             onClick={() => setMobileMenuOpen(true)}
-            className="flex items-center justify-center w-11 h-11 -ml-1 rounded-lg text-gray-600 hover:bg-gray-100 active:bg-gray-200 touch-manipulation"
+            className="flex items-center justify-center w-10 h-10 -ml-1 rounded-lg touch-manipulation"
+            style={{ color: 'rgba(255,255,255,0.6)' }}
             aria-label="Ouvrir le menu"
           >
-            <Menu className="h-6 w-6" />
+            <Menu className="h-5 w-5" />
           </button>
+          <span className="ml-3 text-sm font-semibold" style={{ color: '#FFB020', fontFamily: 'var(--font-syne)' }}>
+            FutsalHub
+          </span>
         </header>
 
         <main
@@ -298,22 +306,22 @@ export default function WebAppLayout({
             ...(isDesktop && { paddingTop: 'calc(env(safe-area-inset-top, 0px) + 0.5rem)' }),
           }}
         >
-          {/* Bouton réduire/agrandir la sidebar (desktop) : dans main pour être au-dessus de la sidebar (ordre DOM + z-index) */}
+          {/* Sidebar toggle (desktop) */}
           <button
             type="button"
             onClick={() => setSidebarOpen((v) => !v)}
             aria-label={sidebarOpen ? 'Réduire le menu' : 'Agrandir le menu'}
-            className="fixed z-[60] w-8 h-8 flex items-center justify-center rounded-full bg-white border border-gray-200 shadow-md hover:bg-gray-50 hover:shadow-lg transition-all duration-300 ease-out max-md:hidden"
+            className="fixed z-[60] w-7 h-7 flex items-center justify-center rounded-full max-md:hidden transition-all duration-300"
             style={{
-              left: sidebarOpen ? 'calc(16rem - 1rem)' : 'calc(4rem - 1rem)',
-              top: 'calc(env(safe-area-inset-top, 0px) + 0.5rem + 0.25rem)',
+              left: sidebarOpen ? 'calc(16rem - 0.875rem)' : 'calc(4rem - 0.875rem)',
+              top: 'calc(env(safe-area-inset-top, 0px) + 0.75rem)',
+              backgroundColor: '#1a1a1e',
+              border: '1px solid rgba(255,255,255,0.12)',
+              color: 'rgba(255,255,255,0.5)',
+              boxShadow: '0 2px 12px rgba(0,0,0,0.5)',
             }}
           >
-            {sidebarOpen ? (
-              <ChevronLeft className="h-4 w-4 text-gray-600" />
-            ) : (
-              <ChevronRight className="h-4 w-4 text-gray-600" />
-            )}
+            {sidebarOpen ? <ChevronLeft className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           </button>
 
           <div className="p-4 md:p-6 max-w-full overflow-x-hidden min-h-[calc(100dvh-3.5rem)] md:min-h-screen">
@@ -323,4 +331,4 @@ export default function WebAppLayout({
       </div>
     </ActiveTeamProvider>
   );
-} 
+}

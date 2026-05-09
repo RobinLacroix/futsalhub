@@ -1,20 +1,23 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0E0E10;
+  --foreground: #f9fafb;
+  --amber: #FFB020;
+  --card-bg: rgba(255, 255, 255, 0.04);
+  --card-border: rgba(255, 255, 255, 0.08);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-syne);
 }
 
 .dark {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  --background: #0E0E10;
+  --foreground: #f9fafb;
 }
 
 html {
@@ -23,20 +26,101 @@ html {
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: #0E0E10;
+  color: #f9fafb;
+  font-family: var(--font-inter, Inter, system-ui, sans-serif);
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
 }
 
-/* Egalise la hauteur des événements dans une case de react-big-calendar */
+/* ─── Global dark theme remaps ──────────────────────────────────
+   <html class="dark"> is set in layout.tsx, so these cascade
+   to every page without needing per-file edits.              */
+
+/* Backgrounds */
+.dark .bg-gray-50   { background-color: rgba(255,255,255,0.03) !important; }
+.dark .bg-gray-100  { background-color: rgba(255,255,255,0.06) !important; }
+.dark .bg-gray-200  { background-color: rgba(255,255,255,0.09) !important; }
+.dark .bg-white     { background-color: rgba(255,255,255,0.04) !important; }
+
+/* Borders */
+.dark .border-gray-100 { border-color: rgba(255,255,255,0.06) !important; }
+.dark .border-gray-200 { border-color: rgba(255,255,255,0.09) !important; }
+.dark .border-gray-300 { border-color: rgba(255,255,255,0.14) !important; }
+.dark .border-gray-400 { border-color: rgba(255,255,255,0.22) !important; }
+
+/* Text */
+.dark .text-gray-900 { color: #f9fafb !important; }
+.dark .text-gray-800 { color: rgba(255,255,255,0.88) !important; }
+.dark .text-gray-700 { color: rgba(255,255,255,0.72) !important; }
+.dark .text-gray-600 { color: rgba(255,255,255,0.52) !important; }
+.dark .text-gray-500 { color: rgba(255,255,255,0.38) !important; }
+.dark .text-gray-400 { color: rgba(255,255,255,0.28) !important; }
+
+/* Blue → Amber */
+.dark .text-blue-600,
+.dark .text-blue-500  { color: #FFB020 !important; }
+.dark .bg-blue-600    { background-color: #FFB020 !important; color: #0E0E10 !important; }
+.dark .hover\:bg-blue-700:hover { background-color: #e09800 !important; }
+.dark .bg-blue-50     { background-color: rgba(255,176,32,0.12) !important; }
+.dark .focus\:border-blue-500:focus { border-color: #FFB020 !important; }
+.dark .focus\:ring-blue-500:focus   { --tw-ring-color: rgba(255,176,32,0.4) !important; }
+.dark .border-blue-500 { border-color: #FFB020 !important; }
+
+/* Hover / active states */
+.dark .hover\:bg-gray-50:hover   { background-color: rgba(255,255,255,0.05) !important; }
+.dark .hover\:bg-gray-100:hover  { background-color: rgba(255,255,255,0.08) !important; }
+.dark .active\:bg-gray-100:active,
+.dark .active\:bg-gray-200:active { background-color: rgba(255,255,255,0.10) !important; }
+.dark .hover\:bg-gray-50:hover   { background-color: rgba(255,255,255,0.05) !important; }
+.dark .hover\:text-blue-500:hover,
+.dark .hover\:text-blue-600:hover { color: #FFB020 !important; }
+
+/* Shadows */
+.dark .shadow,
+.dark .shadow-sm  { box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important; }
+.dark .shadow-md  { box-shadow: 0 4px 16px rgba(0,0,0,0.45) !important; }
+.dark .shadow-xl  { box-shadow: 0 8px 32px rgba(0,0,0,0.55) !important; }
+
+/* Divide lines */
+.dark .divide-gray-200 > * + * { border-color: rgba(255,255,255,0.08) !important; }
+
+/* Red feedback → softer on dark */
+.dark .bg-red-50   { background-color: rgba(220,38,38,0.12) !important; }
+.dark .border-red-200 { border-color: rgba(220,38,38,0.3) !important; }
+.dark .text-red-600 { color: #f87171 !important; }
+.dark .text-red-800 { color: #fca5a5 !important; }
+.dark .bg-green-50  { background-color: rgba(52,211,153,0.10) !important; }
+.dark .text-green-800 { color: #6ee7b7 !important; }
+
+/* Spin/loader */
+.dark .border-b-2.border-blue-600 { border-color: #FFB020 !important; }
+
+/* ─── Inputs ────────────────────────────────────────────────── */
+input, textarea, select {
+  color: #f9fafb;
+  background-color: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.18);
+}
+input::placeholder, textarea::placeholder {
+  color: rgba(255,255,255,0.35);
+}
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: #FFB020;
+  background-color: rgba(255,255,255,0.08);
+}
+select option {
+  background-color: #1a1a1e;
+  color: #f9fafb;
+}
+
+/* ─── React Big Calendar overrides ─────────────────────────── */
 .rbc-day-slot .rbc-events-container {
   display: flex;
   flex-direction: column;
   height: 100%;
 }
-
 .rbc-day-slot .rbc-event {
   flex: 1 1 0;
   min-height: 0;
@@ -45,74 +129,50 @@ body {
   overflow: hidden;
 }
 
-/* Styles spécifiques pour iPad/tablette */
+/* ─── Drag & drop ───────────────────────────────────────────── */
 @media (pointer: coarse) {
-  /* Améliorer la zone de drag & drop sur écrans tactiles */
   [draggable="true"] {
     -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
     user-select: none;
     -webkit-touch-callout: none;
     -webkit-tap-highlight-color: transparent;
   }
-
-  /* Feedback visuel amélioré pour le drag & drop */
   [draggable="true"]:active {
     transform: scale(0.95);
     transition: transform 0.1s ease;
   }
-
-  /* Améliorer les boutons tactiles */
   button {
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
   }
-
-  /* Optimiser les interactions tactiles */
-  .touch-manipulation {
-    touch-action: manipulation;
-  }
+  .touch-manipulation { touch-action: manipulation; }
 }
 
-/* Styles pour le drag & drop */
 .dragging {
   opacity: 0.5;
   transform: scale(0.95);
   transition: all 0.2s ease;
 }
-
 .drag-over {
-  ring: 2px;
-  ring-color: #3b82f6;
   transform: scale(1.02);
   transition: all 0.2s ease;
 }
 
-/* Améliorer la visibilité des acronymes */
-.action-acronym {
-  font-weight: 700;
-  font-size: 0.75rem;
-  line-height: 1;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-}
-
-/* Contraste amélioré : champs de saisie et placeholder */
-input, textarea, select {
-  color: #111827; /* gray-900 - texte foncé sur fond clair */
-}
-input::placeholder, textarea::placeholder {
-  color: #4b5563; /* gray-600 - placeholder lisible sur blanc */
-}
-
-/* Safe area pour mobile (encoche, barre de gestes) */
+/* ─── Safe area ─────────────────────────────────────────────── */
 .safe-area-padding {
   padding-top: env(safe-area-inset-top);
   padding-right: env(safe-area-inset-right);
   padding-bottom: env(safe-area-inset-bottom);
   padding-left: env(safe-area-inset-left);
 }
-
 .safe-area-inset-top {
   padding-top: env(safe-area-inset-top, 0);
+}
+
+/* ─── Misc ──────────────────────────────────────────────────── */
+.action-acronym {
+  font-weight: 700;
+  font-size: 0.75rem;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
 }
