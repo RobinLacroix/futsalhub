@@ -194,32 +194,31 @@ function Navbar() {
 
 /* ─── Hero tactical mockup ────────────────────────────────────── */
 /*
- * Terrain portrait (viewBox 200×280) = 20m width × 40m length rotated.
- * Scale: sx = 184/20 = 9.2 px/m (horizontal), sy = 272/40 = 6.8 px/m (vertical).
- * Field: x ∈ [8,192], y ∈ [4,276].
+ * Terrain portrait (viewBox 200×280) = 20m width × 40m length.
+ * Scale: sx = sy = 6.8 px/m → ratio 2:1 exact.
+ * Field: x ∈ [32,168] (136px = 20m), y ∈ [4,276] (272px = 40m).
  *
- * Surface en D FIFA (portrait, buts haut/bas) :
- *   rx = 6×9.2 = 55, ry = 6×6.8 = 41
- *   D haut  : M 31 4  A 55 41 0 0 0 86 45  L 114 45  A 55 41 0 0 0 169 4
- *   D bas   : M 31 276 A 55 41 0 0 1 86 235 L 114 235 A 55 41 0 0 1 169 276
+ * Surface en D FIFA : rx = ry = 6×6.8 = 41 (arc-circle parfait)
+ *   D haut  : M 49 4  A 41 41 0 0 0 90 45  L 110 45  A 41 41 0 0 0 151 4
+ *   D bas   : M 49 276 A 41 41 0 0 1 90 235 L 110 235 A 41 41 0 0 1 151 276
  */
 function TacticalMockup() {
   // 1-2-2 : GK + 2 déf + 2 mil — notre équipe en bas
-  // Coords : x = 8 + m*9.2, y = 4 + m*6.8
+  // Coords : x = 32 + m*6.8, y = 4 + m*6.8
   const players = [
     { id: 1, cx: 100, cy: 262, label: 'GK', color: '#FFB020' },  // 10m, 38m
-    { id: 2, cx: 63,  cy: 222, label: 'DF', color: '#f9fafb' },  //  6m, 32m
-    { id: 3, cx: 137, cy: 222, label: 'DF', color: '#f9fafb' },  // 14m, 32m
-    { id: 4, cx: 54,  cy: 181, label: 'MF', color: '#34D399' },  //  5m, 26m
-    { id: 5, cx: 146, cy: 181, label: 'MF', color: '#34D399' },  // 15m, 26m
+    { id: 2, cx: 73,  cy: 222, label: 'DF', color: '#f9fafb' },  //  6m, 32m
+    { id: 3, cx: 127, cy: 222, label: 'DF', color: '#f9fafb' },  // 14m, 32m
+    { id: 4, cx: 66,  cy: 181, label: 'MF', color: '#34D399' },  //  5m, 26m
+    { id: 5, cx: 134, cy: 181, label: 'MF', color: '#34D399' },  // 15m, 26m
   ];
 
   // Adversaires 1-3-1 en haut
   const opponents = [
     { id: 6,  cx: 100, cy: 18,  label: 'GK' },  // 10m,  2m
-    { id: 7,  cx: 54,  cy: 58,  label: 'DF' },  //  5m,  8m
+    { id: 7,  cx: 66,  cy: 58,  label: 'DF' },  //  5m,  8m
     { id: 8,  cx: 100, cy: 72,  label: 'DF' },  // 10m, 10m
-    { id: 9,  cx: 146, cy: 58,  label: 'DF' },  // 15m,  8m
+    { id: 9,  cx: 134, cy: 58,  label: 'DF' },  // 15m,  8m
     { id: 10, cx: 100, cy: 113, label: 'AT' },  // 10m, 16m
   ];
 
@@ -258,37 +257,37 @@ function TacticalMockup() {
           <svg viewBox="0 0 200 280" className="w-full" preserveAspectRatio="none" style={{ height: 300 }}>
 
             {/* Fond bleu authentique futsal */}
-            <rect x="8" y="4" width="184" height="272" fill="#14506a" />
+            <rect x="32" y="4" width="136" height="272" fill="#14506a" />
 
             {/* Bordure terrain */}
-            <rect x="8" y="4" width="184" height="272" fill="none" stroke={W} strokeWidth="1.5" />
+            <rect x="32" y="4" width="136" height="272" fill="none" stroke={W} strokeWidth="1.5" />
 
             {/* Ligne médiane */}
-            <line x1="8" y1="140" x2="192" y2="140" stroke={W} strokeWidth="1" />
+            <line x1="32" y1="140" x2="168" y2="140" stroke={W} strokeWidth="1" />
 
             {/* Cercle central + point */}
             <circle cx="100" cy="140" r="20" fill="none" stroke={W} strokeWidth="1" />
             <circle cx="100" cy="140" r="1.8" fill={W} />
 
-            {/* Arcs de coin */}
-            <path d="M 8 14 A 10 10 0 0 1 18 4"    fill="none" stroke={W} strokeWidth="1" />
-            <path d="M 182 4 A 10 10 0 0 1 192 14"  fill="none" stroke={W} strokeWidth="1" />
-            <path d="M 8 266 A 10 10 0 0 0 18 276"  fill="none" stroke={W} strokeWidth="1" />
-            <path d="M 182 276 A 10 10 0 0 0 192 266" fill="none" stroke={W} strokeWidth="1" />
+            {/* Arcs de coin (r=7) */}
+            <path d="M 32 11 A 7 7 0 0 1 39 4"    fill="none" stroke={W} strokeWidth="1" />
+            <path d="M 161 4 A 7 7 0 0 1 168 11"  fill="none" stroke={W} strokeWidth="1" />
+            <path d="M 32 269 A 7 7 0 0 0 39 276"  fill="none" stroke={W} strokeWidth="1" />
+            <path d="M 161 276 A 7 7 0 0 0 168 269" fill="none" stroke={W} strokeWidth="1" />
 
-            {/* ── Surface en D HAUT (rx=55, ry=41 → 6m à l'échelle) ── */}
-            <path d="M 31 4 A 55 41 0 0 0 86 45 L 114 45 A 55 41 0 0 0 169 4"
+            {/* ── Surface en D HAUT (rx=ry=41, arc-circle parfait) ── */}
+            <path d="M 49 4 A 41 41 0 0 0 90 45 L 110 45 A 41 41 0 0 0 151 4"
               fill="none" stroke={W} strokeWidth="1" />
 
             {/* ── Surface en D BAS ── */}
-            <path d="M 31 276 A 55 41 0 0 1 86 235 L 114 235 A 55 41 0 0 1 169 276"
+            <path d="M 49 276 A 41 41 0 0 1 90 235 L 110 235 A 41 41 0 0 1 151 276"
               fill="none" stroke={W} strokeWidth="1" />
 
-            {/* But haut */}
-            <rect x="86" y="0" width="28" height="5" rx="1"
+            {/* But haut (3m centré sur 10m) */}
+            <rect x="90" y="0" width="20" height="5" rx="1"
               fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.85)" strokeWidth="1.3" />
             {/* But bas */}
-            <rect x="86" y="275" width="28" height="5" rx="1"
+            <rect x="90" y="275" width="20" height="5" rx="1"
               fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.85)" strokeWidth="1.3" />
 
             {/* 1er point de penalty haut (6m → y=45) et bas (y=235) */}
@@ -300,7 +299,7 @@ function TacticalMockup() {
 
             {/* ── Flèches de mouvement ── */}
             {/* MF gauche part en pénétration vers l'axe */}
-            <motion.path d="M 54 181 Q 70 160 90 140"
+            <motion.path d="M 66 181 Q 80 160 92 140"
               fill="none" stroke={AMBER} strokeWidth="1.5"
               strokeDasharray="4 3" strokeLinecap="round"
               initial={{ pathLength: 0, opacity: 0 }}
@@ -308,7 +307,7 @@ function TacticalMockup() {
               transition={{ duration: 1.0, delay: 1.2, ease: 'easeInOut' }}
             />
             {/* DF gauche monte couvrir l'espace de MF1 */}
-            <motion.path d="M 63 222 Q 58 202 54 181"
+            <motion.path d="M 73 222 Q 69 202 66 181"
               fill="none" stroke="#f9fafb" strokeWidth="1.5"
               strokeDasharray="4 3" strokeLinecap="round"
               initial={{ pathLength: 0, opacity: 0 }}
@@ -316,7 +315,7 @@ function TacticalMockup() {
               transition={{ duration: 0.9, delay: 1.5, ease: 'easeInOut' }}
             />
             {/* MF droit pique vers le but */}
-            <motion.path d="M 146 181 Q 130 160 115 143"
+            <motion.path d="M 134 181 Q 120 160 110 143"
               fill="none" stroke={AMBER} strokeWidth="1.5"
               strokeDasharray="4 3" strokeLinecap="round"
               initial={{ pathLength: 0, opacity: 0 }}
