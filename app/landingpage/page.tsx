@@ -230,7 +230,7 @@ function TacticalMockup() {
       initial={{ opacity: 0, y: 40, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.9, delay: 0.4, ease: EASE_CUSTOM }}
-      className="relative w-full max-w-[420px] mx-auto lg:mx-0"
+      className="relative w-full max-w-[360px] mx-auto lg:mx-0"
     >
       <div className="absolute inset-0 rounded-2xl blur-3xl opacity-20"
         style={{ backgroundColor: AMBER }} />
