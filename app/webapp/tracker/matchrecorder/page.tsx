@@ -1788,17 +1788,66 @@ export default function MatchRecorderPage() {
         {/* Terrain avec actions */}
         <div className="relative w-full max-w-2xl mx-auto scale-90 origin-center">
           <div
-            className="relative w-full"
+            className="relative w-full overflow-hidden"
             style={{
               aspectRatio: '432 / 262',
-              backgroundImage: `url('/futsal_pitch_hor.png')`,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-              backgroundRepeat: 'no-repeat',
               borderRadius: 12,
-              border: '1px solid rgba(209,213,219,1)',
+              border: '1px solid rgba(255,176,32,0.18)',
+              backgroundColor: '#050505',
+              boxShadow: '0 0 40px rgba(255,176,32,0.06)',
             }}
           >
+            {/* SVG terrain — fond noir, lignes amber */}
+            <svg viewBox="0 0 432 262" className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
+              {/* Fond noir du terrain */}
+              <rect x="16" y="12" width="400" height="238" fill="#080808" />
+              {/* Léger dégradé radial central */}
+              <defs>
+                <radialGradient id="pitchGlow" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%"   stopColor="#FFB020" stopOpacity="0.04" />
+                  <stop offset="100%" stopColor="#FFB020" stopOpacity="0" />
+                </radialGradient>
+              </defs>
+              <rect x="16" y="12" width="400" height="238" fill="url(#pitchGlow)" />
+
+              {/* Bordure terrain */}
+              <rect x="16" y="12" width="400" height="238" fill="none" stroke="#FFB020" strokeWidth="1.5" strokeOpacity="0.65" />
+
+              {/* Ligne médiane */}
+              <line x1="216" y1="12" x2="216" y2="250" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
+
+              {/* Cercle central + point */}
+              <ellipse cx="216" cy="131" rx="35" ry="35" fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
+              <circle cx="216" cy="131" r="2.5" fill="#FFB020" fillOpacity="0.65" />
+
+              {/* Arcs de coin (r≈10px) */}
+              <path d="M 16 22 A 10 10 0 0 1 26 12"   fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
+              <path d="M 406 12 A 10 10 0 0 1 416 22"  fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
+              <path d="M 16 240 A 10 10 0 0 0 26 250"  fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
+              <path d="M 406 250 A 10 10 0 0 0 416 240" fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
+
+              {/* Surface en D gauche — rx=60, ry=69 (6m à l'échelle sx=10, sy=11.5) */}
+              <path d="M 16 45 A 60 69 0 0 1 76 114 L 76 148 A 60 69 0 0 1 16 217"
+                fill="rgba(255,176,32,0.04)" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
+              {/* Surface en D droite */}
+              <path d="M 416 45 A 60 69 0 0 0 356 114 L 356 148 A 60 69 0 0 0 416 217"
+                fill="rgba(255,176,32,0.04)" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
+
+              {/* But gauche (3m) */}
+              <rect x="0" y="114" width="16" height="34" rx="1"
+                fill="rgba(255,176,32,0.08)" stroke="#FFB020" strokeWidth="1.4" strokeOpacity="0.85" />
+              {/* But droit */}
+              <rect x="416" y="114" width="16" height="34" rx="1"
+                fill="rgba(255,176,32,0.08)" stroke="#FFB020" strokeWidth="1.4" strokeOpacity="0.85" />
+
+              {/* 1er point de penalty gauche (6m) et droit */}
+              <circle cx="76"  cy="131" r="2.5" fill="#FFB020" fillOpacity="0.65" />
+              <circle cx="356" cy="131" r="2.5" fill="#FFB020" fillOpacity="0.65" />
+              {/* 2e point de penalty gauche (10m) et droit */}
+              <circle cx="116" cy="131" r="2" fill="#FFB020" fillOpacity="0.35" />
+              <circle cx="316" cy="131" r="2" fill="#FFB020" fillOpacity="0.35" />
+            </svg>
+
             {/* Afficher les actions filtrées */}
             {matchEvents
               .filter(event => {
@@ -4064,17 +4113,46 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
             {/* Terrain avec actions */}
             <div className="relative w-full max-w-2xl mx-auto scale-90 origin-center">
               <div
-                className="relative w-full"
+                className="relative w-full overflow-hidden"
                 style={{
                   aspectRatio: '432 / 262',
-                  backgroundImage: `url('/futsal_pitch_hor.png')`,
-                  backgroundSize: 'cover',
-                  backgroundPosition: 'center',
-                  backgroundRepeat: 'no-repeat',
                   borderRadius: 12,
-                  border: '1px solid rgba(209,213,219,1)',
+                  border: '1px solid rgba(255,176,32,0.18)',
+                  backgroundColor: '#050505',
+                  boxShadow: '0 0 40px rgba(255,176,32,0.06)',
                 }}
               >
+                {/* SVG terrain — fond noir, lignes amber */}
+                <svg viewBox="0 0 432 262" className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
+                  <rect x="16" y="12" width="400" height="238" fill="#080808" />
+                  <defs>
+                    <radialGradient id="pitchGlow2" cx="50%" cy="50%" r="50%">
+                      <stop offset="0%"   stopColor="#FFB020" stopOpacity="0.04" />
+                      <stop offset="100%" stopColor="#FFB020" stopOpacity="0" />
+                    </radialGradient>
+                  </defs>
+                  <rect x="16" y="12" width="400" height="238" fill="url(#pitchGlow2)" />
+                  <rect x="16" y="12" width="400" height="238" fill="none" stroke="#FFB020" strokeWidth="1.5" strokeOpacity="0.65" />
+                  <line x1="216" y1="12" x2="216" y2="250" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
+                  <ellipse cx="216" cy="131" rx="35" ry="35" fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
+                  <circle cx="216" cy="131" r="2.5" fill="#FFB020" fillOpacity="0.65" />
+                  <path d="M 16 22 A 10 10 0 0 1 26 12"    fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
+                  <path d="M 406 12 A 10 10 0 0 1 416 22"  fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
+                  <path d="M 16 240 A 10 10 0 0 0 26 250"  fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
+                  <path d="M 406 250 A 10 10 0 0 0 416 240" fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
+                  <path d="M 16 45 A 60 69 0 0 1 76 114 L 76 148 A 60 69 0 0 1 16 217"
+                    fill="rgba(255,176,32,0.04)" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
+                  <path d="M 416 45 A 60 69 0 0 0 356 114 L 356 148 A 60 69 0 0 0 416 217"
+                    fill="rgba(255,176,32,0.04)" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
+                  <rect x="0" y="114" width="16" height="34" rx="1"
+                    fill="rgba(255,176,32,0.08)" stroke="#FFB020" strokeWidth="1.4" strokeOpacity="0.85" />
+                  <rect x="416" y="114" width="16" height="34" rx="1"
+                    fill="rgba(255,176,32,0.08)" stroke="#FFB020" strokeWidth="1.4" strokeOpacity="0.85" />
+                  <circle cx="76"  cy="131" r="2.5" fill="#FFB020" fillOpacity="0.65" />
+                  <circle cx="356" cy="131" r="2.5" fill="#FFB020" fillOpacity="0.65" />
+                  <circle cx="116" cy="131" r="2" fill="#FFB020" fillOpacity="0.35" />
+                  <circle cx="316" cy="131" r="2" fill="#FFB020" fillOpacity="0.35" />
+                </svg>
                 {/* Afficher les actions filtrées */}
                 {matchEvents
                   .filter(event => {
