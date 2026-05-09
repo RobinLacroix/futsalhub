@@ -1,15 +1,5 @@
-'use client';
-import { useEffect } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { redirect } from 'next/navigation';
 
 export default function Home() {
-  useEffect(() => {
-    console.log('Supabase:', supabase);
-  }, []);
-
-  return (
-    <main>
-      <a href="/signup" className="text-2xl font-bold">Cliquez Ici!</a>
-    </main>
-  );
+  redirect('/landingpage');
 }
