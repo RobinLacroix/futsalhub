@@ -194,21 +194,26 @@ function Navbar() {
 
 /* ─── Hero tactical mockup ────────────────────────────────────── */
 function TacticalMockup() {
+  // 1-2-2 formation (GK + 2 déf + 2 mil/att) — notre équipe en bas
   const players = [
-    { id: 1, x: 50, y: 82, label: 'GK', color: '#FFB020' },
-    { id: 2, x: 22, y: 58, label: 'DF', color: '#60A5FA' },
-    { id: 3, x: 78, y: 58, label: 'DF', color: '#60A5FA' },
-    { id: 4, x: 30, y: 35, label: 'MF', color: '#34D399' },
-    { id: 5, x: 70, y: 35, label: 'MF', color: '#34D399' },
+    { id: 1, cx: 100, cy: 122, label: 'GK', color: '#FFB020' },
+    { id: 2, cx: 62,  cy: 100, label: 'DF', color: '#60A5FA' },
+    { id: 3, cx: 138, cy: 100, label: 'DF', color: '#60A5FA' },
+    { id: 4, cx: 58,  cy: 80,  label: 'MF', color: '#34D399' },
+    { id: 5, cx: 142, cy: 80,  label: 'MF', color: '#34D399' },
   ];
 
-  const opponentPlayers = [
-    { id: 6, x: 50, y: 18, label: 'GK', color: '#F87171' },
-    { id: 7, x: 25, y: 42, label: 'D', color: '#F87171' },
-    { id: 8, x: 75, y: 42, label: 'D', color: '#F87171' },
-    { id: 9, x: 40, y: 25, label: 'A', color: '#F87171' },
-    { id: 10, x: 60, y: 25, label: 'A', color: '#F87171' },
+  // Adversaires 1-3-1 en haut
+  const opponents = [
+    { id: 6, cx: 100, cy: 18,  label: 'GK', color: '#F87171' },
+    { id: 7, cx: 55,  cy: 38,  label: 'DF', color: '#F87171' },
+    { id: 8, cx: 100, cy: 42,  label: 'DF', color: '#F87171' },
+    { id: 9, cx: 145, cy: 38,  label: 'DF', color: '#F87171' },
+    { id: 10, cx: 100, cy: 56, label: 'AT', color: '#F87171' },
   ];
+
+  const S = 'rgba(255,255,255,0.13)'; // stroke color for court lines
+  const SF = 'rgba(255,255,255,0.06)'; // faint fill
 
   return (
     <motion.div
@@ -217,13 +222,11 @@ function TacticalMockup() {
       transition={{ duration: 0.9, delay: 0.4, ease: EASE_CUSTOM }}
       className="relative w-full max-w-[420px] mx-auto lg:mx-0"
     >
-      {/* Glow effect behind card */}
       <div
         className="absolute inset-0 rounded-2xl blur-3xl opacity-20"
         style={{ backgroundColor: AMBER }}
       />
 
-      {/* Card */}
       <div
         className="relative rounded-2xl overflow-hidden"
         style={{
@@ -243,128 +246,115 @@ function TacticalMockup() {
               <span className="w-2.5 h-2.5 rounded-full bg-yellow-400/70" />
               <span className="w-2.5 h-2.5 rounded-full bg-green-500/70" />
             </div>
-            <span className={`${inter.className} text-xs text-white/40`}>Schéma tactique · 4-1</span>
+            <span className={`${inter.className} text-xs text-white/40`}>Schéma tactique · 1-2-2</span>
           </div>
-          <div className="flex gap-2">
-            <span
-              className={`${inter.className} text-xs px-2 py-0.5 rounded-md`}
-              style={{ backgroundColor: `${AMBER}20`, color: AMBER }}
-            >
-              Live
-            </span>
-          </div>
+          <span
+            className={`${inter.className} text-xs px-2 py-0.5 rounded-md`}
+            style={{ backgroundColor: `${AMBER}20`, color: AMBER }}
+          >
+            Live
+          </span>
         </div>
 
-        {/* Court SVG */}
+        {/* ── Court SVG — terrain de futsal FIFA ── */}
         <div className="px-4 pt-3 pb-2">
           <svg viewBox="0 0 200 140" className="w-full" style={{ height: 220 }}>
-            {/* Court background */}
-            <rect x="4" y="4" width="192" height="132" rx="6" fill="rgba(34,197,94,0.08)" stroke="rgba(34,197,94,0.2)" strokeWidth="1.5" />
 
-            {/* Center line */}
-            <line x1="4" y1="70" x2="196" y2="70" stroke="rgba(255,255,255,0.1)" strokeWidth="1" />
+            {/* Pelouse */}
+            <rect x="8" y="4" width="184" height="132" fill="rgba(34,197,94,0.09)" stroke="rgba(34,197,94,0.28)" strokeWidth="1.5" />
 
-            {/* Center circle */}
-            <circle cx="100" cy="70" r="18" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="1" />
-            <circle cx="100" cy="70" r="2" fill="rgba(255,255,255,0.15)" />
+            {/* Ligne médiane */}
+            <line x1="8" y1="70" x2="192" y2="70" stroke={S} strokeWidth="1" />
 
-            {/* Goal areas */}
-            <rect x="4" y="50" width="28" height="40" rx="2" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="1" />
-            <rect x="168" y="50" width="28" height="40" rx="2" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="1" />
+            {/* Cercle central */}
+            <circle cx="100" cy="70" r="18" fill="none" stroke={S} strokeWidth="1" />
+            <circle cx="100" cy="70" r="2" fill="rgba(255,255,255,0.22)" />
 
-            {/* Penalty spots */}
-            <circle cx="36" cy="70" r="1.5" fill="rgba(255,255,255,0.2)" />
-            <circle cx="164" cy="70" r="1.5" fill="rgba(255,255,255,0.2)" />
+            {/* Arcs de coin (quarts de cercle r=4) */}
+            <path d="M 8 14 A 10 10 0 0 1 18 4"  fill="none" stroke={S} strokeWidth="1" />
+            <path d="M 182 4 A 10 10 0 0 1 192 14" fill="none" stroke={S} strokeWidth="1" />
+            <path d="M 8 126 A 10 10 0 0 0 18 136"  fill="none" stroke={S} strokeWidth="1" />
+            <path d="M 182 136 A 10 10 0 0 0 192 126" fill="none" stroke={S} strokeWidth="1" />
 
-            {/* Animated movement arrows */}
+            {/* ── Zone de but HAUT (9m×3m) ── */}
+            <rect x="59" y="4" width="82" height="10" fill={SF} stroke={S} strokeWidth="1" />
+            {/* But haut (3m) — légèrement à l'extérieur */}
+            <rect x="86" y="0" width="28" height="5" rx="1" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.35)" strokeWidth="1.2" />
+
+            {/* ── Zone de but BAS (9m×3m) ── */}
+            <rect x="59" y="126" width="82" height="10" fill={SF} stroke={S} strokeWidth="1" />
+            {/* But bas */}
+            <rect x="86" y="135" width="28" height="5" rx="1" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.35)" strokeWidth="1.2" />
+
+            {/* Point de penalty haut (6m) */}
+            <circle cx="100" cy="24" r="1.5" fill="rgba(255,255,255,0.32)" />
+            {/* Point de penalty bas */}
+            <circle cx="100" cy="116" r="1.5" fill="rgba(255,255,255,0.32)" />
+
+            {/* 2e point de penalty haut (10m) */}
+            <circle cx="100" cy="37" r="1.5" fill="rgba(255,255,255,0.16)" />
+            {/* 2e point de penalty bas */}
+            <circle cx="100" cy="103" r="1.5" fill="rgba(255,255,255,0.16)" />
+
+            {/* ── Flèches de mouvement animées ── */}
+            {/* DF gauche monte en wing */}
             <motion.path
-              d="M 44 116 Q 60 95 60 70"
-              fill="none"
-              stroke={AMBER}
-              strokeWidth="1.5"
-              strokeDasharray="4 3"
-              strokeLinecap="round"
+              d="M 62 100 Q 48 88 48 75"
+              fill="none" stroke={AMBER} strokeWidth="1.5"
+              strokeDasharray="4 3" strokeLinecap="round"
               initial={{ pathLength: 0, opacity: 0 }}
-              animate={{ pathLength: 1, opacity: 0.7 }}
-              transition={{ duration: 1.2, delay: 1.2, ease: 'easeInOut' }}
+              animate={{ pathLength: 1, opacity: 0.75 }}
+              transition={{ duration: 1.1, delay: 1.2, ease: 'easeInOut' }}
             />
+            {/* DF droit monte en wing */}
             <motion.path
-              d="M 156 116 Q 140 95 140 70"
-              fill="none"
-              stroke={AMBER}
-              strokeWidth="1.5"
-              strokeDasharray="4 3"
-              strokeLinecap="round"
+              d="M 138 100 Q 152 88 152 75"
+              fill="none" stroke={AMBER} strokeWidth="1.5"
+              strokeDasharray="4 3" strokeLinecap="round"
               initial={{ pathLength: 0, opacity: 0 }}
-              animate={{ pathLength: 1, opacity: 0.7 }}
-              transition={{ duration: 1.2, delay: 1.5, ease: 'easeInOut' }}
+              animate={{ pathLength: 1, opacity: 0.75 }}
+              transition={{ duration: 1.1, delay: 1.5, ease: 'easeInOut' }}
             />
+            {/* MF gauche centre */}
             <motion.path
-              d="M 60 70 Q 100 55 140 70"
-              fill="none"
-              stroke="#60A5FA"
-              strokeWidth="1.5"
-              strokeDasharray="4 3"
-              strokeLinecap="round"
+              d="M 58 80 Q 80 68 100 65"
+              fill="none" stroke="#60A5FA" strokeWidth="1.5"
+              strokeDasharray="4 3" strokeLinecap="round"
               initial={{ pathLength: 0, opacity: 0 }}
               animate={{ pathLength: 1, opacity: 0.6 }}
-              transition={{ duration: 1.0, delay: 1.8, ease: 'easeInOut' }}
+              transition={{ duration: 0.9, delay: 1.8, ease: 'easeInOut' }}
             />
 
-            {/* Our players */}
+            {/* ── Nos joueurs ── */}
             {players.map((p, i) => (
-              <motion.g
-                key={p.id}
+              <motion.g key={p.id}
                 initial={{ opacity: 0, scale: 0 }}
                 animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.4, delay: 0.6 + i * 0.1 }}
+                transition={{ duration: 0.4, delay: 0.55 + i * 0.1 }}
               >
-                <circle
-                  cx={p.x * 2}
-                  cy={p.y * 1.4}
-                  r="8"
-                  fill={`${p.color}20`}
-                  stroke={p.color}
-                  strokeWidth="1.5"
-                />
-                <text
-                  x={p.x * 2}
-                  y={p.y * 1.4 + 3.5}
-                  textAnchor="middle"
-                  fill={p.color}
-                  fontSize="5.5"
-                  fontFamily="monospace"
-                  fontWeight="700"
-                >
+                <circle cx={p.cx} cy={p.cy} r="8"
+                  fill={`${p.color}22`} stroke={p.color} strokeWidth="1.8" />
+                <text x={p.cx} y={p.cy + 3.5}
+                  textAnchor="middle" fill={p.color}
+                  fontSize="5.5" fontFamily="monospace" fontWeight="700">
                   {p.label}
                 </text>
               </motion.g>
             ))}
 
-            {/* Opponent players */}
-            {opponentPlayers.map((p, i) => (
-              <motion.g
-                key={p.id}
+            {/* ── Adversaires ── */}
+            {opponents.map((p, i) => (
+              <motion.g key={p.id}
                 initial={{ opacity: 0, scale: 0 }}
                 animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.4, delay: 0.8 + i * 0.08 }}
+                transition={{ duration: 0.4, delay: 0.75 + i * 0.08 }}
               >
-                <circle
-                  cx={p.x * 2}
-                  cy={p.y * 1.4}
-                  r="7"
+                <circle cx={p.cx} cy={p.cy} r="7"
                   fill="rgba(248,113,113,0.1)"
-                  stroke="rgba(248,113,113,0.5)"
-                  strokeWidth="1"
-                />
-                <text
-                  x={p.x * 2}
-                  y={p.y * 1.4 + 3.5}
-                  textAnchor="middle"
-                  fill="rgba(248,113,113,0.7)"
-                  fontSize="5"
-                  fontFamily="monospace"
-                >
+                  stroke="rgba(248,113,113,0.5)" strokeWidth="1" />
+                <text x={p.cx} y={p.cy + 3.5}
+                  textAnchor="middle" fill="rgba(248,113,113,0.75)"
+                  fontSize="5" fontFamily="monospace">
                   {p.label}
                 </text>
               </motion.g>
@@ -372,20 +362,19 @@ function TacticalMockup() {
           </svg>
         </div>
 
-        {/* Card footer — formation chips */}
+        {/* Card footer — chips de formation */}
         <div
           className="flex items-center justify-between px-4 py-3 border-t"
           style={{ borderColor: CARD_BORDER }}
         >
           <div className="flex gap-2">
-            {['2-2-1', '3-1-1', '4-0-1'].map((f) => (
-              <button
-                key={f}
+            {['1-2-2', '1-3-1', '1-4-0'].map((f) => (
+              <button key={f}
                 className={`${inter.className} text-xs px-2.5 py-1 rounded-md transition-all`}
                 style={
-                  f === '2-2-1'
+                  f === '1-2-2'
                     ? { backgroundColor: `${AMBER}25`, color: AMBER, border: `1px solid ${AMBER}40` }
-                    : { backgroundColor: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.4)', border: '1px solid rgba(255,255,255,0.08)' }
+                    : { backgroundColor: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.38)', border: '1px solid rgba(255,255,255,0.08)' }
                 }
               >
                 {f}
@@ -396,7 +385,7 @@ function TacticalMockup() {
         </div>
       </div>
 
-      {/* Floating stat badge */}
+      {/* Badge flottant — Tirs cadrés */}
       <motion.div
         initial={{ opacity: 0, x: 20 }}
         animate={{ opacity: 1, x: 0 }}
@@ -408,15 +397,15 @@ function TacticalMockup() {
           backdropFilter: 'blur(16px)',
         }}
       >
-        <div className={`${inter.className} text-xs text-white/50 mb-1`}>Possession</div>
-        <div className={`${syne.className} text-lg font-700`} style={{ color: AMBER }}>67%</div>
+        <div className={`${inter.className} text-[10px] text-white/50 mb-1`}>Tirs cadrés</div>
+        <div className="flex items-baseline gap-1">
+          <span className={`${syne.className} text-xl font-700`} style={{ color: AMBER }}>7</span>
+          <span className={`${inter.className} text-xs text-white/30`}>/ 12</span>
+        </div>
         <div className="flex gap-0.5 mt-1.5">
-          {Array.from({ length: 10 }).map((_, i) => (
-            <div
-              key={i}
-              className="w-1.5 h-1.5 rounded-full"
-              style={{ backgroundColor: i < 7 ? AMBER : 'rgba(255,255,255,0.15)' }}
-            />
+          {Array.from({ length: 12 }).map((_, i) => (
+            <div key={i} className="w-1.5 h-1.5 rounded-full"
+              style={{ backgroundColor: i < 7 ? AMBER : 'rgba(255,255,255,0.13)' }} />
           ))}
         </div>
       </motion.div>
