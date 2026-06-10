@@ -4,6 +4,7 @@ import { useRouter, useSegments } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useIsTablet, LAYOUT } from '../hooks/useIsTablet';
 import { useAppRole } from '../contexts/AppRoleContext';
+import { useNotifications } from '../contexts/NotificationContext';
 import { supabase } from '../lib/supabase';
 
 export type TabletSidebarProps = {
@@ -26,6 +27,7 @@ const NAV_ITEMS: NavItem[] = [
   { name: 'Dashboard', path: '/(tabs)/dashboard', icon: 'bar-chart-outline', iconFocused: 'bar-chart' },
   { name: 'Tracker', path: '/(tabs)/tracker', icon: 'stats-chart-outline', iconFocused: 'stats-chart' },
   { name: 'Analytics', path: '/(tabs)/analytics', icon: 'analytics-outline', iconFocused: 'analytics' },
+  { name: 'Partages', path: '/(tabs)/share', icon: 'share-social-outline', iconFocused: 'share-social' },
 ];
 
 function isActive(segments: string[], item: NavItem): boolean {
@@ -45,6 +47,7 @@ export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {
   const segments = useSegments();
   const isTablet = useIsTablet();
   const { isPlayer, setAppRole } = useAppRole();
+  const { counts, markRead } = useNotifications();
 
   if (!isTablet) return null;
 
@@ -74,22 +77,36 @@ export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {
       <View style={styles.nav}>
         {NAV_ITEMS.map((item) => {
           const active = isActive(segments as string[], item);
+          const badge = item.path === '/(tabs)/calendar' ? counts.absence_report
+                      : item.path === '/(tabs)/squad'    ? counts.feedback_comment
+                      : 0;
           return (
             <TouchableOpacity
               key={item.path}
+              onPress={() => {
+                if (item.path === '/(tabs)/calendar') void markRead(['absence_report']);
+                if (item.path === '/(tabs)/squad')    void markRead(['feedback_comment']);
+                router.push(item.path as any);
+              }}
               style={[
                 styles.navItem,
                 active && styles.navItemActive,
                 !isExpanded && styles.navItemCollapsed,
               ]}
-              onPress={() => router.push(item.path as any)}
               activeOpacity={0.7}
             >
-              <Ionicons
-                name={active ? item.iconFocused : item.icon}
-                size={24}
-                color={active ? '#1d4ed8' : '#64748b'}
-              />
+              <View style={{ position: 'relative' }}>
+                <Ionicons
+                  name={active ? item.iconFocused : item.icon}
+                  size={24}
+                  color={active ? '#1d4ed8' : '#64748b'}
+                />
+                {badge > 0 && (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{badge > 99 ? '99+' : badge}</Text>
+                  </View>
+                )}
+              </View>
               {isExpanded && (
                 <Text style={[styles.navLabel, active && styles.navLabelActive]}>{item.name}</Text>
               )}
@@ -231,5 +248,22 @@ const styles = StyleSheet.create({
   toggleBtn: {
     padding: 8,
     marginTop: 8,
+  },
+  badge: {
+    position: 'absolute',
+    top: -5,
+    right: -7,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#dc2626',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  badgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#fff',
   },
 });

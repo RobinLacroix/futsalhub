@@ -30,7 +30,8 @@ import {
   ChevronsUpDown,
   WifiOff,
   Wifi,
-  Database
+  Database,
+  FileText
 } from 'lucide-react';
 
 interface Player {
@@ -51,7 +52,7 @@ interface Player {
     goals: number;
     ballLoss: number;
     ballRecovery: number;
-    dribbleSuccess: number;
+    assists: number;
     oneOnOneDefLost: number;
     [key: string]: number;
   };
@@ -117,7 +118,7 @@ const ACTIONS = [
   { id: 'goals', name: 'But', acronym: 'B', icon: Goal, color: 'bg-blue-500' },
   { id: 'ballLoss', name: 'Perte de balle', acronym: 'PdB', icon: AlertTriangle, color: 'bg-red-500' },
   { id: 'ballRecovery', name: 'Récupération', acronym: 'R', icon: RefreshCw, color: 'bg-green-600' },
-  { id: 'dribbleSuccess', name: 'Dribble réussi', acronym: 'D', icon: ArrowRight, color: 'bg-purple-500' },
+  { id: 'assists', name: 'Passe décisive', acronym: 'Pdec', icon: ArrowRight, color: 'bg-purple-500' },
 ];
 
 const DEFAULT_SEQUENCE_TIME_LIMIT = 180;
@@ -320,7 +321,7 @@ export default function MatchRecorderPage() {
             return {
               id: player.id,
               name: `${player.first_name} ${player.last_name}`,
-              number: player.number || player.age || 0,
+              number: player.number || 0,
               position: player.position || 'Non défini',
               isStarter: false,
               isOnField: false,
@@ -333,7 +334,7 @@ export default function MatchRecorderPage() {
                 goals: 0,
                 ballLoss: 0,
                 ballRecovery: 0,
-                dribbleSuccess: 0,
+                assists: 0,
                 oneOnOneDefLost: 0,
               }
             };
@@ -623,9 +624,9 @@ export default function MatchRecorderPage() {
           aValue = a.stats.ballRecovery;
           bValue = b.stats.ballRecovery;
           break;
-        case 'dribbleSuccess':
-          aValue = a.stats.dribbleSuccess;
-          bValue = b.stats.dribbleSuccess;
+        case 'assists':
+          aValue = a.stats.assists;
+          bValue = b.stats.assists;
           break;
         case 'totalTime':
           aValue = a.totalTime || 0;
@@ -1032,7 +1033,7 @@ export default function MatchRecorderPage() {
                        statKey === 'shotsOnTarget' ? 'shot_on_target' :
                        statKey === 'shotsOffTarget' ? 'shot' :
                        statKey === 'ballRecovery' ? 'recovery' :
-                       statKey === 'dribbleSuccess' ? 'dribble' :
+                       statKey === 'assists' ? 'assist' :
                        statKey === 'ballLoss' ? 'ball_loss' : 'goal';
 
       // Log de débogage pour vérifier que players_on_field est correct
@@ -1094,7 +1095,7 @@ export default function MatchRecorderPage() {
                        statKey === 'shotsOnTarget' ? 'shot_on_target' :
                        statKey === 'shotsOffTarget' ? 'shot' :
                        statKey === 'ballRecovery' ? 'recovery' :
-                       statKey === 'dribbleSuccess' ? 'dribble' :
+                       statKey === 'assists' ? 'assist' :
                        statKey === 'ballLoss' ? 'ball_loss' : 'goal';
 
       const { error: deleteError } = await supabase.rpc('delete_last_event_by_type', {
@@ -1678,14 +1679,14 @@ export default function MatchRecorderPage() {
             </div>
           </div>
 
-          {/* Dribbles */}
+          {/* Passes décisives */}
           <div className="bg-purple-50 dark:bg-purple-900/40 border border-purple-200 dark:border-purple-600 rounded p-3 shadow-sm">
             <h3 className="text-sm font-semibold text-purple-900 dark:text-purple-100 mb-2 flex items-center gap-1">
               <ArrowRight className="h-4 w-4" />
-              Plus de dribbles réussis
+              Plus de passes décisives
             </h3>
             <div className="space-y-1">
-              {getTopPlayers('dribbleSuccess').map((player, index) => (
+              {getTopPlayers('assists').map((player, index) => (
                 <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-purple-100 dark:bg-purple-800/60 rounded border border-purple-200 dark:border-purple-700">
                   <div className="flex items-center gap-1">
                     <span className="text-xs font-medium text-purple-800 dark:text-purple-200">
@@ -1693,7 +1694,7 @@ export default function MatchRecorderPage() {
                     </span>
                   </div>
                   <span className="font-mono text-xs font-bold text-purple-950 dark:text-white">
-                    {player.stats.dribbleSuccess || 0}
+                    {player.stats.assists || 0}
                   </span>
                 </div>
               ))}
@@ -1744,7 +1745,7 @@ export default function MatchRecorderPage() {
               { value: 'shot', label: 'Tirs non cadrés' },
               { value: 'ball_loss', label: 'Pertes de balle' },
               { value: 'ball_recovery', label: 'Récupérations' },
-              { value: 'dribble_success', label: 'Dribbles réussis' },
+              { value: 'assist', label: 'Passes décisives' },
               { value: 'opponent_goal', label: 'Buts adverses' },
               { value: 'opponent_shot_on_target', label: 'Tirs cadrés adverses' },
               { value: 'opponent_shot', label: 'Tirs adverses' },
@@ -1863,7 +1864,7 @@ export default function MatchRecorderPage() {
                   'shot': 'shot',
                   'ball_loss': 'ball_loss',
                   'recovery': 'ball_recovery',
-                  'dribble': 'dribble_success',
+                  'assist': 'assist',
                   'opponent_goal': 'opponent_goal',
                   'opponent_shot_on_target': 'opponent_shot_on_target',
                   'opponent_shot': 'opponent_shot',
@@ -1881,7 +1882,7 @@ export default function MatchRecorderPage() {
                   'shot': 'shotsOffTarget',
                   'ball_loss': 'ballLoss',
                   'recovery': 'ballRecovery',
-                  'dribble': 'dribbleSuccess',
+                  'assist': 'assists',
                 };
                 const actionId = eventTypeToActionId[event.action_type] || event.action_type;
                 let actionConfig = ACTIONS.find(a => a.id === actionId);
@@ -1945,7 +1946,7 @@ export default function MatchRecorderPage() {
               'shotsOffTarget': ['shot'],
               'ballLoss': ['ball_loss'],
               'ballRecovery': ['recovery'],
-              'dribbleSuccess': ['dribble'],
+              'assists': ['assist'],
             };
             const eventTypes = actionIdToEventType[action.id] || [];
             const count = matchEvents.filter(e => eventTypes.includes(e.action_type)).length;
@@ -2306,7 +2307,7 @@ export default function MatchRecorderPage() {
           goals: 0,
           ballLoss: 0,
           ballRecovery: 0,
-          dribbleSuccess: 0,
+          assists: 0,
           oneOnOneDefLost: 0,
         }
       }));
@@ -2369,7 +2370,7 @@ export default function MatchRecorderPage() {
           goals: 0,
           ballLoss: 0,
           ballRecovery: 0,
-          dribbleSuccess: 0,
+          assists: 0,
           oneOnOneDefLost: 0,
         };
         
@@ -2407,7 +2408,7 @@ export default function MatchRecorderPage() {
           goals: 0,
           ballLoss: 0,
           ballRecovery: 0,
-          dribbleSuccess: 0,
+          assists: 0,
           oneOnOneDefLost: 0,
           yellowCards: 0,
           redCards: 0,
@@ -2430,7 +2431,7 @@ export default function MatchRecorderPage() {
               goals: 0,
               ballLoss: 0,
               ballRecovery: 0,
-              dribbleSuccess: 0,
+              assists: 0,
               oneOnOneDefLost: 0,
               yellowCards: 0,
               redCards: 0,
@@ -2458,8 +2459,8 @@ export default function MatchRecorderPage() {
             case 'recovery':
               playerStats.ballRecovery++;
               break;
-            case 'dribble':
-              playerStats.dribbleSuccess++;
+            case 'assist':
+              playerStats.assists++;
               break;
             case 'one_on_one_def_lost':
               playerStats.oneOnOneDefLost++;
@@ -2548,7 +2549,7 @@ export default function MatchRecorderPage() {
               goals: stats.goals,
               ballLoss: stats.ballLoss,
               ballRecovery: stats.ballRecovery,
-              dribbleSuccess: stats.dribbleSuccess,
+              assists: stats.assists,
               oneOnOneDefLost: stats.oneOnOneDefLost,
               plusMinus: stats.plusMinus || 0, // Ajouter le +/- calculé
             },
@@ -2639,7 +2640,7 @@ export default function MatchRecorderPage() {
             goals: 0,
             ballLoss: 0,
             ballRecovery: 0,
-            dribbleSuccess: 0,
+            assists: 0,
             oneOnOneDefLost: 0,
           }
         }));
@@ -3067,7 +3068,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
       'Buts',
       'Pertes de balle',
       'Récupérations',
-      'Dribbles réussis',
+      'Passes décisives',
       '1v1 déf perdu'
     ];
 
@@ -3088,7 +3089,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
       player.stats.goals || 0,
       player.stats.ballLoss || 0,
       player.stats.ballRecovery || 0,
-      player.stats.dribbleSuccess || 0,
+      player.stats.assists || 0,
       player.stats.oneOnOneDefLost || 0
     ]);
 
@@ -3269,7 +3270,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
   if (currentStep === 'match') {
     return (
       <div className="min-h-screen bg-gray-50 p-6">
-        <div className="max-w-7xl mx-auto">
+        <div className="w-full">
           {/* Header */}
           <div className="flex items-center justify-between mb-8">
             <h1 className="text-3xl font-bold text-gray-900">Choix du match</h1>
@@ -3759,7 +3760,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
   if (currentStep === 'summary') {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4">
-        <div className="max-w-7xl mx-auto">
+        <div className="w-full">
           {/* Header avec bouton retour */}
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 mb-6">
             <div className="flex items-center justify-between mb-4">
@@ -3915,11 +3916,11 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                     </th>
                     <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">
                       <button
-                        onClick={() => handleSort('dribbleSuccess')}
+                        onClick={() => handleSort('assists')}
                         className="flex items-center gap-1 hover:text-blue-600 transition-colors mx-auto"
                       >
-                        Dribbles
-                        {getSortIcon('dribbleSuccess')}
+                        Pdec
+                        {getSortIcon('assists')}
                       </button>
                     </th>
                     <th className="text-center p-2 font-semibold text-gray-900 dark:text-white text-sm">
@@ -4013,7 +4014,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                         </td>
                                                 <td className="text-center p-2">
                           <span className="inline-flex items-center justify-center w-6 h-6 bg-orange-500 text-white rounded-full font-bold text-xs">
-                            {player.stats.dribbleSuccess}
+                            {player.stats.assists}
                           </span>
                         </td>
                         <td className="text-center p-2">
@@ -4071,7 +4072,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                   { value: 'shot', label: 'Tirs non cadrés' },
                   { value: 'ball_loss', label: 'Pertes de balle' },
                   { value: 'ball_recovery', label: 'Récupérations' },
-                  { value: 'dribble_success', label: 'Dribbles réussis' },
+                  { value: 'assist', label: 'Passes décisives' },
                   { value: 'opponent_goal', label: 'Buts adverses' },
                   { value: 'opponent_shot_on_target', label: 'Tirs cadrés adverses' },
                   { value: 'opponent_shot', label: 'Tirs adverses' },
@@ -4165,7 +4166,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                       'shot': 'shot',
                       'ball_loss': 'ball_loss',
                       'recovery': 'ball_recovery',
-                      'dribble': 'dribble_success',
+                      'assist': 'assist',
                       'opponent_goal': 'opponent_goal',
                       'opponent_shot_on_target': 'opponent_shot_on_target',
                       'opponent_shot': 'opponent_shot',
@@ -4181,7 +4182,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                       'shot': 'shotsOffTarget',
                       'ball_loss': 'ballLoss',
                       'recovery': 'ballRecovery',
-                      'dribble': 'dribbleSuccess',
+                      'assist': 'assists',
                     };
                     const actionId = eventTypeToActionId[event.action_type] || event.action_type;
                     let actionConfig = ACTIONS.find(a => a.id === actionId);
@@ -4239,7 +4240,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                   'shotsOffTarget': ['shot'],
                   'ballLoss': ['ball_loss'],
                   'ballRecovery': ['recovery'],
-                  'dribbleSuccess': ['dribble'],
+                  'assists': ['assist'],
                 };
                 const eventTypes = actionIdToEventType[action.id] || [];
                 const count = matchEvents.filter(e => eventTypes.includes(e.action_type)).length;
@@ -4264,7 +4265,16 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
           </div>
 
           {/* Boutons d'action */}
-          <div className="flex justify-center gap-4 mt-4">
+          <div className="flex flex-wrap justify-center gap-4 mt-4">
+            {matchData.selectedMatch?.id && (
+              <button
+                onClick={() => window.open(`/webapp/tracker/match-report/${matchData.selectedMatch!.id}`, '_blank')}
+                className="flex items-center gap-2 px-6 py-3 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors font-semibold"
+              >
+                <FileText className="h-5 w-5" />
+                Rapport PDF
+              </button>
+            )}
             <button
               onClick={exportData}
               className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -4295,7 +4305,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
   // Étape 4: Enregistrement du match (Interface complète)
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4">
-      <div className="max-w-7xl mx-auto">
+      <div className="w-full">
         {/* Section de contrôle fixe en haut */}
         <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-xl shadow-xl p-3 mb-3 sticky top-0 z-50 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between mb-2">

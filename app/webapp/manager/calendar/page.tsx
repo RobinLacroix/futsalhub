@@ -14,6 +14,23 @@ import { format } from 'date-fns';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+
+// Envoi best-effort — ne bloque jamais en cas d'échec
+async function notifyPlayers(
+  playerIds: string[],
+  title: string,
+  body: string,
+  data?: Record<string, string>,
+) {
+  if (!playerIds.length) return;
+  try {
+    await supabase.functions.invoke('send-push-notification', {
+      body: { playerIds, title, body, data: data ?? {} },
+    });
+  } catch {
+    // silencieux
+  }
+}
 import { useActiveTeam } from '../../hooks/useActiveTeam';
 import { useUserClub } from '../../hooks/useUserClub';
 import { playersService } from '@/lib/services/playersService';
@@ -324,6 +341,7 @@ export default function CalendarPage() {
         const { data, error } = await supabase
           .from('training_procedures')
           .select('*')
+          .is('archived_at', null)
           .order('created_at', { ascending: false });
         
         if (error) throw error;
@@ -1332,6 +1350,19 @@ export default function CalendarPage() {
         console.log('Mise à jour des stats pour les joueurs:', cleanedPlayers);
         await updatePlayerStats(cleanedPlayers);
 
+        // Notifier les joueurs convoqués au match
+        const matchPlayerIds = cleanedPlayers.map((p) => p.id);
+        if (matchPlayerIds.length) {
+          const dateLabel = new Date(matchData.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+          const heureLabel = new Date(matchData.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+          notifyPlayers(
+            matchPlayerIds,
+            '⚽ Convocation match',
+            `${matchData.title} — ${dateLabel} à ${heureLabel}${matchData.location ? ` — ${matchData.location}` : ''}`,
+            { type: 'match' },
+          );
+        }
+
         handleCloseModal();
         fetchMatches();
         fetchPlayers();
@@ -1404,6 +1435,18 @@ export default function CalendarPage() {
 
         if (inserted?.id) {
           // Les questionnaires s'envoient en fin de séance via le bouton "Envoyer les questionnaires"
+        }
+
+        // Notifier les joueurs convoqués
+        if (convokedPlayerIds.length) {
+          const dateLabel = new Date(trainingData.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+          const heureLabel = new Date(trainingData.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+          notifyPlayers(
+            convokedPlayerIds,
+            '📋 Nouvelle convocation',
+            `Entraînement ${dateLabel} à ${heureLabel}${trainingData.location ? ` — ${trainingData.location}` : ''}`,
+            { type: 'training', id: inserted?.id ?? '' },
+          );
         }
 
         handleCloseTrainingModal();
@@ -1781,73 +1824,90 @@ export default function CalendarPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 px-4 py-6 sm:p-8">
+    <div className="space-y-4 w-full">
       {error && (
-        <div className="mb-4 p-4 bg-red-50 text-red-600 rounded-md flex items-center gap-2">
-          <AlertCircle className="h-5 w-5" />
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg text-sm"
+          style={{ backgroundColor: 'rgba(239,68,68,0.08)', color: '#DC2626', border: '1px solid rgba(239,68,68,0.2)' }}>
+          <AlertCircle className="h-4 w-4" />
           <span>{error}</span>
         </div>
       )}
 
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
-        <div className="space-y-2">
-          <h1 className="text-2xl font-bold text-gray-900">Calendrier</h1>
+      {/* ── Header banner ─────────────────────────────────────────────────── */}
+      <div className="rounded-xl p-5 flex flex-col sm:flex-row sm:items-center gap-4"
+        style={{ background: 'linear-gradient(135deg, #1e3a5f 0%, #2a4f7c 100%)', boxShadow: '0 4px 20px rgba(30,58,95,0.15)' }}>
+        <div className="flex-1">
+          <h1 style={{ fontSize: '1.25rem', fontWeight: 900, color: '#fff', lineHeight: 1.2 }}>Calendrier & Résultats</h1>
           {activeTeam && (
-            <p className="text-sm text-gray-600">
-              Équipe active : <strong>{activeTeam.name}</strong> ({activeTeam.category} - Niveau {activeTeam.level})
+            <p style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)', marginTop: 4 }}>
+              {activeTeam.name} · {activeTeam.category}
+              {activeTeam.level ? ` · Niveau ${activeTeam.level}` : ''}
             </p>
           )}
         </div>
-        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 w-full sm:w-auto">
+        <div className="flex flex-col sm:flex-row gap-2">
           <button
             onClick={handleOpenTrainingModal}
             disabled={!activeTeam}
-            className={`flex items-center justify-center gap-2 px-4 py-2 rounded-md transition-colors w-full sm:w-auto ${
-              activeTeam 
-                ? 'bg-green-600 text-white hover:bg-green-700' 
-                : 'bg-gray-400 text-gray-200 cursor-not-allowed'
-            }`}
+            className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition-opacity"
+            style={{ backgroundColor: '#16A34A', color: '#fff', border: 'none', cursor: activeTeam ? 'pointer' : 'not-allowed' }}
           >
-            <Dumbbell className="h-5 w-5" />
-            {activeTeam ? `Ajouter un entraînement à ${activeTeam.name}` : 'Sélectionnez une équipe'}
+            <Dumbbell className="h-4 w-4" />
+            Entraînement
           </button>
           <button
             onClick={handleOpenModal}
             disabled={!activeTeam}
-            className={`flex items-center justify-center gap-2 px-4 py-2 rounded-md transition-colors w-full sm:w-auto ${
-              activeTeam 
-                ? 'bg-blue-600 text-white hover:bg-blue-700' 
-                : 'bg-gray-400 text-gray-200 cursor-not-allowed'
-            }`}
+            className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition-opacity"
+            style={{ backgroundColor: '#D97706', color: '#fff', border: 'none', cursor: activeTeam ? 'pointer' : 'not-allowed' }}
           >
-            <Trophy className="h-5 w-5" />
-            {activeTeam ? `Ajouter un match à ${activeTeam.name}` : 'Sélectionnez une équipe'}
+            <Trophy className="h-4 w-4" />
+            Match
           </button>
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow p-4 sm:p-6 overflow-hidden">
-        <div className="w-full overflow-x-auto">
-          <div className="min-w-[600px] sm:min-w-0">
-            <DragAndDropCalendar
-              localizer={localizer}
-              events={events}
-              startAccessor={(event: object) => (event as RBCalendarEvent).start}
-              endAccessor={(event: object) => (event as RBCalendarEvent).end}
-              style={{ height: isMobile ? 520 : 600 }}
-              onSelectEvent={handleCalendarEventClick}
-              onEventDrop={moveEvent}
-              draggableAccessor={() => true}
-              onDoubleClickEvent={handleCalendarEventClick}
-              eventPropGetter={eventPropGetter}
-              components={{ event: CustomEvent }}
-              views={isMobile ? ['agenda', 'day', 'week', 'month'] : ['month', 'week', 'day']}
-              defaultView={isMobile ? 'agenda' : 'month'}
-              toolbar={true}
-              popup
-              date={currentDate}
-              onNavigate={setCurrentDate}
-            />
+      {/* ── Legend ────────────────────────────────────────────────────────── */}
+      <div className="flex gap-4 flex-wrap">
+        {[
+          { color: '#2563EB', label: 'Match' },
+          { color: '#16A34A', label: 'Entraînement' },
+          { color: '#DC2626', label: 'Défaite' },
+          { color: '#D97706', label: 'Nul' },
+        ].map(({ color, label }) => (
+          <div key={label} className="flex items-center gap-1.5">
+            <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: color }} />
+            <span style={{ fontSize: '0.75rem', color: '#697585', fontWeight: 500 }}>{label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Calendar ──────────────────────────────────────────────────────── */}
+      <div className="rounded-xl overflow-hidden"
+        style={{ backgroundColor: '#fff', border: '1px solid #DDE1EA', boxShadow: '0 1px 4px rgba(30,58,95,0.06)' }}>
+        <div className="p-4 sm:p-5 overflow-hidden">
+          <div className="w-full overflow-x-auto">
+            <div className="min-w-[600px] sm:min-w-0">
+              <DragAndDropCalendar
+                localizer={localizer}
+                events={events}
+                startAccessor={(event: object) => (event as RBCalendarEvent).start}
+                endAccessor={(event: object) => (event as RBCalendarEvent).end}
+                style={{ height: isMobile ? 520 : 620 }}
+                onSelectEvent={handleCalendarEventClick}
+                onEventDrop={moveEvent}
+                draggableAccessor={() => true}
+                onDoubleClickEvent={handleCalendarEventClick}
+                eventPropGetter={eventPropGetter}
+                components={{ event: CustomEvent }}
+                views={isMobile ? ['agenda', 'day', 'week', 'month'] : ['month', 'week', 'day']}
+                defaultView={isMobile ? 'agenda' : 'month'}
+                toolbar={true}
+                popup
+                date={currentDate}
+                onNavigate={setCurrentDate}
+              />
+            </div>
           </div>
         </div>
       </div>

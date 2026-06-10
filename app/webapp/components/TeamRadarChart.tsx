@@ -52,7 +52,7 @@ type TeamEventCounts = {
   shot: number
   recovery: number
   ball_loss: number
-  dribble: number
+  assist: number
   opponent_goal: number
   opponent_shot_on_target: number
   opponent_shot: number
@@ -64,7 +64,7 @@ const TEAM_EVENT_KEYS_ORDER: Array<keyof TeamEventCounts> = [
   'shot',
   'recovery',
   'ball_loss',
-  'dribble',
+  'assist',
   'opponent_goal',
   'opponent_shot_on_target',
   'opponent_shot',
@@ -76,7 +76,7 @@ const TEAM_LABELS: Record<keyof TeamEventCounts, string> = {
   shot: 'Total Tirs',  // ← Clarifier que c'est le total
   recovery: 'Récupérations',
   ball_loss: 'Pertes de balle',
-  dribble: 'Dribbles',
+  assist: 'Passes déc.',
   opponent_goal: 'Buts encaissés',
   opponent_shot_on_target: 'Tirs Cadrés Concédés',
   opponent_shot: 'Total Tirs Concédés',  // ← Clarifier que c'est le total
@@ -89,7 +89,7 @@ function createEmptyTeamCounts(): TeamEventCounts {
     shot: 0,
     recovery: 0,
     ball_loss: 0,
-    dribble: 0,
+    assist: 0,
     opponent_goal: 0,
     opponent_shot_on_target: 0,
     opponent_shot: 0,
@@ -217,8 +217,8 @@ export default function TeamRadarChart({ matchId, selectedMatchIds: initialSelec
         case 'ball_loss':
           stats[matchId].ball_loss += 1
           break
-        case 'dribble':
-          stats[matchId].dribble += 1
+        case 'assist':
+          stats[matchId].assist += 1
           break
         case 'opponent_goal':
           stats[matchId].opponent_goal += 1

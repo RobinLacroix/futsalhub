@@ -76,8 +76,20 @@ export default function CalendarLayout() {
           headerRight: () => <HeaderAddButton />,
         }}
       />
-      <Stack.Screen name="new" options={{ title: 'Nouvel entraînement' }} />
-      <Stack.Screen name="new-match" options={{ title: 'Nouveau match' }} />
+      <Stack.Screen
+        name="new"
+        options={{
+          title: 'Nouvel entraînement',
+          headerLeft: isTablet ? undefined : () => <PhoneNavMenu />,
+        }}
+      />
+      <Stack.Screen
+        name="new-match"
+        options={{
+          title: 'Nouveau match',
+          headerLeft: isTablet ? undefined : () => <PhoneNavMenu />,
+        }}
+      />
       <Stack.Screen name="training/[trainingId]" options={{ title: 'Entraînement' }} />
       <Stack.Screen name="training/edit/[trainingId]" options={{ title: "Modifier l'entraînement" }} />
       <Stack.Screen name="matchDetail/[matchId]" options={{ title: 'Match' }} />

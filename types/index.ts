@@ -39,7 +39,7 @@ export interface Player {
   id: string;
   first_name: string;
   last_name: string;
-  age: number;
+  birth_date?: string | null;
   position: string;
   strong_foot: string;
   status: string;
@@ -61,7 +61,7 @@ export interface Player {
 export interface PlayerFormData {
   first_name: string;
   last_name: string;
-  age: string;
+  birth_date: string;
   position: string;
   strong_foot: string;
   status: string;
@@ -77,7 +77,7 @@ export interface PlayerFormData {
 // - injured : blessé (ne peut pas participer)
 export type PlayerStatus = 'present' | 'late' | 'absent' | 'injured';
 
-export type PlayerEventType = 'interview' | 'injury' | 'suspension';
+export type PlayerEventType = 'interview' | 'injury' | 'suspension' | 'feedback';
 
 export interface PlayerEvent {
   id: string;
@@ -303,7 +303,7 @@ export interface MatchTrackerPlayer {
     goals: number;
     ballLoss: number;
     ballRecovery: number;
-    dribbleSuccess: number;
+    assists: number;
     oneOnOneDefLost: number;
     [key: string]: number;
   };
@@ -328,6 +328,30 @@ export interface MatchTrackerData {
     shotsOnTarget: number;
     shotsOffTarget: number;
   };
+}
+
+// ==================== CONTENU PARTAGÉ ====================
+export type SharedContentType = 'youtube' | 'link';
+
+export interface SharedContent {
+  id: string;
+  team_id: string;
+  title: string;
+  description?: string | null;
+  content_type: SharedContentType;
+  url: string;
+  folder_id?: string | null;
+  created_by?: string | null;
+  created_at: string;
+}
+
+export interface SharedFolder {
+  id: string;
+  team_id: string;
+  name: string;
+  parent_id: string | null;
+  created_by?: string | null;
+  created_at: string;
 }
 
 export interface LocalMatchEvent {

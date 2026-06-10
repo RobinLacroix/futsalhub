@@ -1,43 +1,85 @@
-import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { useAppRole } from '../../contexts/AppRoleContext';
-import { getPlayerStats } from '../../lib/services/players';
+import { useActiveTeam } from '../../contexts/ActiveTeamContext';
+import {
+  getPlayerStats,
+  getPlayerRadarStats,
+  type MatchTypeFilter,
+  type PlayerRadarResult,
+} from '../../lib/services/players';
+import { getTrainingsByTeam } from '../../lib/services/trainings';
+import { getMyOwnFeedbackHistory, type PlayerFeedbackRow } from '../../lib/services/feedback';
 import { getMyPlayerTeamIds } from '../../lib/services/playerConvocations';
+import { supabase } from '../../lib/supabase';
+import type { PlayerEvent } from '../../types';
+import { PlayerDetailView, type TrainingSession, type PlayerStats } from '../../components/PlayerDetailView';
 
 export default function PlayerProfileScreen() {
   const { player } = useAppRole();
-  const [stats, setStats] = useState<{
-    matches_played: number;
-    goals: number;
-    training_attendance: number;
-    attendance_percentage: number;
-    victories: number;
-    draws: number;
-    defeats: number;
-  } | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { teams: allTeams } = useActiveTeam();
+
+  const [teamId, setTeamId]               = useState<string | null>(null);
+  const [stats, setStats]                 = useState<PlayerStats | null>(null);
+  const [radarData, setRadarData]         = useState<PlayerRadarResult | null>(null);
+  const [radarLoading, setRadarLoading]   = useState(false);
+  const [feedbackRows, setFeedbackRows]   = useState<PlayerFeedbackRow[]>([]);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [allSessions, setAllSessions]     = useState<TrainingSession[]>([]);
+  const [initialEvents, setInitialEvents] = useState<PlayerEvent[]>([]);
+  const [matchFilter, setMatchFilter]     = useState<MatchTypeFilter>('all');
+  const [loading, setLoading]             = useState(true);
+
+  const loadBaseData = useCallback(async () => {
+    if (!player?.id) { setLoading(false); return; }
+    try {
+      const [teamIds, eventsRes] = await Promise.all([
+        getMyPlayerTeamIds(),
+        supabase.from('player_events').select('*').eq('player_id', player.id).order('event_date', { ascending: false }),
+      ]);
+      const tid = teamIds[0] ?? null;
+      setTeamId(tid);
+      setInitialEvents((eventsRes.data ?? []) as PlayerEvent[]);
+
+      if (tid) {
+        const trainings = await getTrainingsByTeam(tid);
+        const sorted = [...(trainings ?? [])].sort(
+          (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+        );
+        setAllSessions(
+          sorted.map(t => ({
+            date: t.date,
+            status: (t.attendance?.[player.id] ?? 'not_recorded') as TrainingSession['status'],
+          }))
+        );
+      }
+    } catch {
+      // silently degrade — stats still load below
+    } finally {
+      setLoading(false);
+    }
+  }, [player?.id]);
+
+  useEffect(() => { loadBaseData(); }, [loadBaseData]);
 
   useEffect(() => {
-    if (!player?.id) {
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const teamIds = await getMyPlayerTeamIds();
-        const tid = teamIds[0];
-        if (!cancelled && tid) {
-          const s = await getPlayerStats(player.id, tid);
-          if (!cancelled) setStats(s);
-        }
-      } catch {
-        // ignore
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
+    if (!player?.id || !teamId) return;
+    setStats(null);
+    getPlayerStats(player.id, teamId, matchFilter).then(setStats).catch(() => setStats(null));
+    setRadarLoading(true);
+    getPlayerRadarStats(player.id, teamId, matchFilter)
+      .then(setRadarData)
+      .catch(() => setRadarData(null))
+      .finally(() => setRadarLoading(false));
+  }, [player?.id, teamId, matchFilter]);
+
+  useEffect(() => {
+    if (!player?.id) return;
+    setFeedbackLoading(true);
+    getMyOwnFeedbackHistory()
+      .then(setFeedbackRows)
+      .catch(() => setFeedbackRows([]))
+      .finally(() => setFeedbackLoading(false));
   }, [player?.id]);
 
   if (!player) {
@@ -48,104 +90,38 @@ export default function PlayerProfileScreen() {
     );
   }
 
-  return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.card}>
-        <View style={styles.header}>
-          {player.number != null ? (
-            <View style={styles.numberBadge}>
-              <Text style={styles.numberText}>{player.number}</Text>
-            </View>
-          ) : null}
-          <View style={styles.nameBlock}>
-            <Text style={styles.name}>
-              {player.first_name} {player.last_name}
-            </Text>
-            <Text style={styles.meta}>
-              {player.position} · Pied {player.strong_foot}
-            </Text>
-            {player.age ? (
-              <Text style={styles.meta}>{player.age} ans</Text>
-            ) : null}
-          </View>
-        </View>
+  if (loading) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color="#16a34a" />
       </View>
+    );
+  }
 
-      {loading ? (
-        <ActivityIndicator size="small" color="#16a34a" style={styles.loader} />
-      ) : stats ? (
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Statistiques</Text>
-          <View style={styles.statsGrid}>
-            <View style={styles.stat}>
-              <Text style={styles.statValue}>{stats.matches_played}</Text>
-              <Text style={styles.statLabel}>Matchs</Text>
-            </View>
-            <View style={styles.stat}>
-              <Text style={styles.statValue}>{stats.goals}</Text>
-              <Text style={styles.statLabel}>Buts</Text>
-            </View>
-            <View style={styles.stat}>
-              <Text style={styles.statValue}>{stats.training_attendance}</Text>
-              <Text style={styles.statLabel}>Présences</Text>
-            </View>
-            <View style={styles.stat}>
-              <Text style={styles.statValue}>{stats.attendance_percentage} %</Text>
-              <Text style={styles.statLabel}>Assiduité</Text>
-            </View>
-            <View style={styles.stat}>
-              <Text style={[styles.statValue, styles.victory]}>{stats.victories}</Text>
-              <Text style={styles.statLabel}>Victoires</Text>
-            </View>
-            <View style={styles.stat}>
-              <Text style={[styles.statValue, styles.draw]}>{stats.draws}</Text>
-              <Text style={styles.statLabel}>Nuls</Text>
-            </View>
-            <View style={styles.stat}>
-              <Text style={[styles.statValue, styles.defeat]}>{stats.defeats}</Text>
-              <Text style={styles.statLabel}>Défaites</Text>
-            </View>
-          </View>
-        </View>
-      ) : null}
-    </ScrollView>
+  // Équipes auxquelles appartient le joueur (lecture seule)
+  const playerTeams = allTeams.filter(t => t.id === teamId);
+
+  return (
+    <PlayerDetailView
+      player={player}
+      playerTeams={playerTeams}
+      availableTeams={[]}
+      stats={stats}
+      radarData={radarData}
+      radarLoading={radarLoading}
+      feedbackRows={feedbackRows}
+      feedbackLoading={feedbackLoading}
+      allSessions={allSessions}
+      initialEvents={initialEvents}
+      matchFilter={matchFilter}
+      updatingTeamId={null}
+      isManager={false}
+      onMatchFilterChange={setMatchFilter}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f3f4f6' },
-  content: { padding: 16, paddingBottom: 32 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  centered:  { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   emptyText: { fontSize: 16, color: '#6b7280' },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#16a34a',
-  },
-  header: { flexDirection: 'row', alignItems: 'center' },
-  numberBadge: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#16a34a',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  numberText: { color: '#fff', fontWeight: '700', fontSize: 18 },
-  nameBlock: { flex: 1 },
-  name: { fontSize: 20, fontWeight: '700', color: '#111', marginBottom: 4 },
-  meta: { fontSize: 14, color: '#6b7280', marginBottom: 2 },
-  loader: { marginVertical: 24 },
-  sectionTitle: { fontSize: 18, fontWeight: '600', color: '#111', marginBottom: 16 },
-  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
-  stat: { minWidth: 80, alignItems: 'center' },
-  statValue: { fontSize: 24, fontWeight: '700', color: '#111' },
-  statLabel: { fontSize: 12, color: '#6b7280', marginTop: 4 },
-  victory: { color: '#16a34a' },
-  draw: { color: '#ca8a04' },
-  defeat: { color: '#dc2626' },
 });

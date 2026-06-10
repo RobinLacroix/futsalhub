@@ -76,7 +76,7 @@ interface PlayerStats {
   totalGoals: number;
   totalShots: number;
   totalShotsOnTarget: number;
-  totalDribbles: number;
+  totalAssists: number;
   totalBallLoss: number;
   totalRecoveries: number;
   totalYellowCards: number;
@@ -345,9 +345,9 @@ export default function TrackerDashboardPage() {
           aValue = a.totalShotsOnTarget;
           bValue = b.totalShotsOnTarget;
           break;
-        case 'totalDribbles':
-          aValue = a.totalDribbles;
-          bValue = b.totalDribbles;
+        case 'totalAssists':
+          aValue = a.totalAssists;
+          bValue = b.totalAssists;
           break;
         case 'totalBallLoss':
           aValue = a.totalBallLoss;
@@ -416,7 +416,7 @@ export default function TrackerDashboardPage() {
         const totalGoals = playerCreatedEvents.filter(event => event.event_type === 'goal').length;
         const totalShotsOnTarget = playerCreatedEvents.filter(event => event.event_type === 'shot_on_target').length;
         const totalShotsOffTarget = playerCreatedEvents.filter(event => event.event_type === 'shot').length;
-        const totalDribbles = playerCreatedEvents.filter(event => event.event_type === 'dribble').length;
+        const totalAssists = playerCreatedEvents.filter(event => event.event_type === 'assist').length;
         const totalBallLoss = playerCreatedEvents.filter(event => event.event_type === 'ball_loss').length;
         const totalRecoveries = playerCreatedEvents.filter(event => event.event_type === 'recovery').length;
         const totalYellowCards = playerCreatedEvents.filter(event => event.event_type === 'yellow_card').length;
@@ -521,7 +521,7 @@ export default function TrackerDashboardPage() {
           totalGoals: adjustedGoals,
           totalShots: adjustedShots,
           totalShotsOnTarget: adjustedShotsOnTarget,
-          totalDribbles,
+          totalAssists,
           totalBallLoss,
           totalRecoveries,
           totalYellowCards,
@@ -574,7 +574,7 @@ export default function TrackerDashboardPage() {
       recovery: '#8B5CF6',
       yellow_card: '#F59E0B',
       red_card: '#EF4444',
-      dribble: '#06B6D4',
+      assist: '#a855f7',
       ball_loss: '#6B7280',
       opponent_goal: '#EF4444',
       opponent_shot_on_target: '#F59E0B',
@@ -591,7 +591,7 @@ export default function TrackerDashboardPage() {
       recovery: 'Récupération',
       yellow_card: 'Carton jaune',
       red_card: 'Carton rouge',
-      dribble: 'Dribble',
+      assist: 'Passe déc.',
       ball_loss: 'Perte de balle',
       opponent_goal: 'But adverse',
       opponent_shot_on_target: 'Tir cadré adverse',
@@ -635,7 +635,7 @@ export default function TrackerDashboardPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-7xl mx-auto">
+      <div className="w-full">
         {/* Header */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
           <div className="flex items-center justify-between mb-4">
@@ -862,7 +862,7 @@ export default function TrackerDashboardPage() {
                   <div><span className="font-semibold">B</span> = Buts</div>
                   <div><span className="font-semibold">T</span> = Tirs totaux</div>
                   <div><span className="font-semibold">TC</span> = Tirs cadrés</div>
-                  <div><span className="font-semibold">D</span> = Dribbles</div>
+                  <div><span className="font-semibold">Pdec</span> = Passes décisives</div>
                   <div><span className="font-semibold">PB</span> = Pertes de balle</div>
                   <div><span className="font-semibold">R</span> = Récupérations</div>
                   <div><span className="font-semibold">+/-</span> = Différence buts</div>
@@ -920,11 +920,11 @@ export default function TrackerDashboardPage() {
                       </th>
                       <th className="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
                         <button
-                          onClick={() => handlePlayerStatsSort('totalDribbles')}
+                          onClick={() => handlePlayerStatsSort('totalAssists')}
                           className="flex items-center justify-center gap-1 hover:text-blue-600 transition-colors"
                         >
-                          D
-                          {getPlayerStatsSortIcon('totalDribbles')}
+                          Pdec
+                          {getPlayerStatsSortIcon('totalAssists')}
                         </button>
                       </th>
                       <th className="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
@@ -993,7 +993,7 @@ export default function TrackerDashboardPage() {
                           {player.totalShotsOnTarget}
                         </td>
                         <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
-                          {player.totalDribbles}
+                          {player.totalAssists}
                         </td>
                         <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
                           {player.totalBallLoss}

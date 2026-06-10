@@ -617,7 +617,6 @@ const styles = StyleSheet.create({
   themeChipText: { fontSize: 14, fontWeight: '500', color: '#374151' },
   themeChipTextActive: { color: '#fff' },
   sectionTitle: { fontSize: 18, fontWeight: '600', marginTop: 8, marginBottom: 12 },
-  themeHint: { fontSize: 12, color: '#6b7280', marginBottom: 8 },
   loader: { marginVertical: 16 },
   emptyText: { fontSize: 14, color: '#6b7280', marginBottom: 16 },
   playerRow: {

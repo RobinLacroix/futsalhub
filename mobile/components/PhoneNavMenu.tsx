@@ -12,6 +12,7 @@ import { useRouter, useSegments } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useIsTablet } from '../hooks/useIsTablet';
 import { useAppRole } from '../contexts/AppRoleContext';
+import { useNotifications } from '../contexts/NotificationContext';
 import { supabase } from '../lib/supabase';
 
 type NavItem = {
@@ -28,6 +29,7 @@ const NAV_ITEMS: NavItem[] = [
   { name: 'Dashboard', path: '/(tabs)/dashboard', icon: 'grid-outline' },
   { name: 'Tracker', path: '/(tabs)/tracker', icon: 'stats-chart-outline' },
   { name: 'Analytics', path: '/(tabs)/analytics', icon: 'pie-chart-outline' },
+  { name: 'Partages', path: '/(tabs)/share', icon: 'share-social-outline' },
 ];
 
 function isActive(segments: string[], item: NavItem): boolean {
@@ -38,6 +40,7 @@ function isActive(segments: string[], item: NavItem): boolean {
   if (item.path === '/(tabs)/dashboard') return first === 'dashboard';
   if (item.path === '/(tabs)/tracker') return first === 'tracker';
   if (item.path === '/(tabs)/analytics') return first === 'analytics';
+  if (item.path === '/(tabs)/share') return first === 'share';
   if (item.path === '/(tabs)/teams') return first === 'teams';
   return false;
 }
@@ -47,6 +50,7 @@ export function PhoneNavMenu() {
   const segments = useSegments();
   const isTablet = useIsTablet();
   const { isPlayer, setAppRole } = useAppRole();
+  const { counts, markRead } = useNotifications();
   const [visible, setVisible] = useState(false);
 
   if (isTablet) return null;
@@ -55,8 +59,13 @@ export function PhoneNavMenu() {
 
   const navigate = (path: string) => {
     close();
+    if (path === '/(tabs)/calendar') void markRead(['absence_report']);
+    if (path === '/(tabs)/squad')    void markRead(['feedback_comment']);
     router.push(path as any);
   };
+
+  const calendarBadge = counts.absence_report;
+  const squadBadge    = counts.feedback_comment;
 
   const handleSwitchToPlayer = async () => {
     close();
@@ -91,6 +100,9 @@ export function PhoneNavMenu() {
             <ScrollView style={styles.navList}>
               {NAV_ITEMS.map((item) => {
                 const active = isActive((segments ?? []) as string[], item);
+                const badge = item.path === '/(tabs)/calendar' ? calendarBadge
+                            : item.path === '/(tabs)/squad'    ? squadBadge
+                            : 0;
                 return (
                   <TouchableOpacity
                     key={item.path}
@@ -98,11 +110,18 @@ export function PhoneNavMenu() {
                     onPress={() => navigate(item.path)}
                     activeOpacity={0.7}
                   >
-                    <Ionicons
-                      name={item.icon}
-                      size={22}
-                      color={active ? '#3b82f6' : '#64748b'}
-                    />
+                    <View style={{ position: 'relative' }}>
+                      <Ionicons
+                        name={item.icon}
+                        size={22}
+                        color={active ? '#3b82f6' : '#64748b'}
+                      />
+                      {badge > 0 && (
+                        <View style={styles.badge}>
+                          <Text style={styles.badgeText}>{badge > 99 ? '99+' : badge}</Text>
+                        </View>
+                      )}
+                    </View>
                     <Text style={[styles.navLabel, active && styles.navLabelActive]}>{item.name}</Text>
                   </TouchableOpacity>
                 );
@@ -136,6 +155,23 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingRight: 12,
     paddingLeft: 4,
+  },
+  badge: {
+    position: 'absolute',
+    top: -5,
+    right: -7,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#dc2626',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  badgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#fff',
   },
   overlay: {
     flex: 1,

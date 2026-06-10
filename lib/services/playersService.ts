@@ -98,19 +98,22 @@ export const playersService = {
    */
   async createPlayer(playerData: PlayerFormData): Promise<Player> {
     // Créer le joueur
+    const primaryTeamId =
+      playerData.selectedTeams.length > 0 ? playerData.selectedTeams[0] : null;
     const { data: player, error: playerError } = await supabase
       .from('players')
       .insert({
         first_name: playerData.first_name,
         last_name: playerData.last_name,
-        age: parseInt(playerData.age),
+        birth_date: playerData.birth_date || null,
         position: playerData.position,
         strong_foot: playerData.strong_foot,
         status: playerData.status,
         number: playerData.number ? parseInt(playerData.number) : null,
-        sequence_time_limit: playerData.sequence_time_limit 
-          ? parseInt(playerData.sequence_time_limit) 
-          : 180
+        sequence_time_limit: playerData.sequence_time_limit
+          ? parseInt(playerData.sequence_time_limit)
+          : 180,
+        team_id: primaryTeamId,
       })
       .select()
       .single();
@@ -142,7 +145,7 @@ export const playersService = {
 
     if (playerData.first_name) updateData.first_name = playerData.first_name;
     if (playerData.last_name) updateData.last_name = playerData.last_name;
-    if (playerData.age) updateData.age = parseInt(playerData.age);
+    if (playerData.birth_date !== undefined) updateData.birth_date = playerData.birth_date || null;
     if (playerData.position) updateData.position = playerData.position;
     if (playerData.strong_foot) updateData.strong_foot = playerData.strong_foot;
     if (playerData.status) updateData.status = playerData.status;
@@ -247,6 +250,8 @@ export const playersService = {
   ): Promise<{
     matches_played: number;
     goals: number;
+    shots: number;
+    shot_efficiency: number | null;
     training_attendance: number;
     attendance_percentage: number;
     victories: number;
@@ -256,7 +261,7 @@ export const playersService = {
     // Récupérer les matchs de l'équipe
     const { data: matchesData, error: matchesError } = await supabase
       .from('matches')
-      .select('competition, players, score_team, score_opponent')
+      .select('id, competition, players, score_team, score_opponent')
       .eq('team_id', teamId);
 
     if (matchesError) throw matchesError;
@@ -351,17 +356,267 @@ export const playersService = {
       }
     });
 
+    // Récupérer les tirs du joueur depuis match_events (sur les matchs filtrés)
+    const filteredMatchIds = filteredMatches
+      .filter(m => {
+        if (!m.players) return false;
+        try {
+          const arr = Array.isArray(m.players) ? m.players : JSON.parse(m.players as string);
+          return arr.some((p: { id: string }) => p.id === playerId);
+        } catch { return false; }
+      })
+      .map(m => (m as any).id as string)
+      .filter(Boolean);
+
+    let shots = 0;
+    if (filteredMatchIds.length > 0) {
+      const { data: evData } = await supabase
+        .from('match_events')
+        .select('event_type')
+        .in('match_id', filteredMatchIds)
+        .eq('player_id', playerId)
+        .in('event_type', ['goal', 'shot_on_target', 'shot']);
+      shots = (evData ?? []).length;
+    }
+    const shot_efficiency = shots > 0 ? Math.round((goals / shots) * 100) : null;
+
     return {
       matches_played: matchesPlayed,
       goals,
+      shots,
+      shot_efficiency,
       training_attendance: trainingAttendance,
       attendance_percentage,
       victories,
       draws,
       defeats
     };
+  },
+
+  // ─── Radar de performance ───────────────────────────────────────────────────
+
+  /**
+   * Calcule les stats radar pour un joueur, en per-match (sauf +/- total saison).
+   * Normalise (0-100) selon le max de l'effectif.
+   * Retourne aussi les max et moyennes de l'effectif pour l'affichage du tooltip.
+   */
+  async getPlayerRadarStats(
+    playerId: string,
+    teamId: string,
+    filter: 'all' | 'Championnat' | 'Coupe' | 'Amical' = 'all'
+  ): Promise<PlayerRadarResult> {
+    // 1. Matchs de l'équipe
+    const { data: matchesData, error: matchesError } = await supabase
+      .from('matches')
+      .select('id, players, competition')
+      .eq('team_id', teamId);
+    if (matchesError) throw matchesError;
+
+    const allMatches = matchesData ?? [];
+    const matches =
+      filter === 'all'
+        ? allMatches
+        : allMatches.filter(
+            (m: { competition?: string | null }) =>
+              (m.competition ?? '').toString().trim().toLowerCase() === filter.toLowerCase()
+          );
+    const matchIds = matches.map((m: { id: string }) => m.id);
+
+    // 2. Événements de match
+    type EventRow = { player_id: string | null; event_type: string; players_on_field: string[] | null };
+    let events: EventRow[] = [];
+    if (matchIds.length > 0) {
+      const { data: eventsData, error: eventsError } = await supabase
+        .from('match_events')
+        .select('player_id, event_type, players_on_field')
+        .in('match_id', matchIds);
+      if (eventsError) throw eventsError;
+      events = (eventsData ?? []) as EventRow[];
+    }
+
+    // 3. Agrégation par joueur
+    type Acc = {
+      matchCount: number; matchesWithTime: number; totalTimeSec: number;
+      goals: number; shotsOnTarget: number; totalShots: number;
+      assists: number; recoveries: number; ballLoss: number; plusMinus: number;
+      saves: number; goalsConcededOnField: number;
+    };
+    const initAcc = (): Acc => ({
+      matchCount: 0, matchesWithTime: 0, totalTimeSec: 0,
+      goals: 0, shotsOnTarget: 0, totalShots: 0,
+      assists: 0, recoveries: 0, ballLoss: 0, plusMinus: 0,
+      saves: 0, goalsConcededOnField: 0,
+    });
+    const per = new Map<string, Acc>();
+    const ensure = (id: string) => { if (!per.has(id)) per.set(id, initAcc()); return per.get(id)!; };
+
+    // Depuis matches.players JSON → temps de jeu + nb matchs joués
+    for (const m of matches) {
+      if (!m.players) continue;
+      let arr: Array<{ id: string; time_played?: number }>;
+      try { arr = Array.isArray(m.players) ? m.players : JSON.parse(m.players as string); }
+      catch { continue; }
+      for (const p of arr) {
+        const acc = ensure(p.id);
+        acc.matchCount++;
+        const sec = Number(p.time_played) || 0;
+        if (sec > 0) { acc.totalTimeSec += sec; acc.matchesWithTime++; }
+      }
+    }
+
+    // Depuis match_events → stats individuelles
+    for (const ev of events) {
+      const pid = ev.player_id;
+      if (pid) {
+        const acc = ensure(pid);
+        switch (ev.event_type) {
+          case 'goal':           acc.goals++; acc.shotsOnTarget++; acc.totalShots++; break;
+          case 'shot_on_target': acc.shotsOnTarget++; acc.totalShots++; break;
+          case 'shot':           acc.totalShots++; break;
+          case 'assist':         acc.assists++; break;
+          case 'recovery':
+          case 'ball_recovery':  acc.recoveries++; break;
+          case 'ball_loss':      acc.ballLoss++; break;
+        }
+      }
+      // +/- et arrêts via players_on_field
+      if (ev.event_type === 'goal' || ev.event_type === 'opponent_goal' || ev.event_type === 'opponent_shot_on_target') {
+        const onField = (ev.players_on_field as string[]) ?? [];
+        for (const p2 of onField) {
+          if (ev.event_type === 'goal')                          ensure(p2).plusMinus++;
+          else if (ev.event_type === 'opponent_goal')          { ensure(p2).plusMinus--; ensure(p2).goalsConcededOnField++; }
+          else if (ev.event_type === 'opponent_shot_on_target')  ensure(p2).saves++;
+        }
+      }
+    }
+
+    // 4. Ratios par match
+    const toRatios = (acc: Acc): RadarPerMatchStats => {
+      const mc = acc.matchCount || 1;
+      return {
+        avgPlaytimeSec:           acc.matchesWithTime > 0 ? acc.totalTimeSec / acc.matchesWithTime : 0,
+        goalsPerMatch:            acc.goals / mc,
+        shotsOnTargetPerMatch:    acc.shotsOnTarget / mc,
+        totalShotsPerMatch:       acc.totalShots / mc,
+        assistsPerMatch:         acc.assists / mc,
+        recoveriesPerMatch:       acc.recoveries / mc,
+        ballLossPerMatch:         acc.ballLoss / mc,
+        plusMinus:                acc.plusMinus,
+        savesPerMatch:            acc.saves / mc,
+        goalsConcededPerMatch:    acc.goalsConcededOnField / mc,
+        savePercentage:           acc.saves + acc.goalsConcededOnField > 0
+                                    ? (acc.saves / (acc.saves + acc.goalsConcededOnField)) * 100
+                                    : 0,
+      };
+    };
+
+    // 5. Squad max & avg
+    const squadRatios = Array.from(per.values())
+      .filter(acc => acc.matchCount > 0)
+      .map(toRatios);
+
+    const squadMax: RadarPerMatchStats = {
+      avgPlaytimeSec:        Math.max(0, ...squadRatios.map(r => r.avgPlaytimeSec)),
+      goalsPerMatch:         Math.max(0, ...squadRatios.map(r => r.goalsPerMatch)),
+      shotsOnTargetPerMatch: Math.max(0, ...squadRatios.map(r => r.shotsOnTargetPerMatch)),
+      totalShotsPerMatch:    Math.max(0, ...squadRatios.map(r => r.totalShotsPerMatch)),
+      assistsPerMatch:      Math.max(0, ...squadRatios.map(r => r.assistsPerMatch)),
+      recoveriesPerMatch:    Math.max(0, ...squadRatios.map(r => r.recoveriesPerMatch)),
+      ballLossPerMatch:      Math.max(0, ...squadRatios.map(r => r.ballLossPerMatch)),
+      plusMinus:             Math.max(0, ...squadRatios.map(r => r.plusMinus)),
+      savesPerMatch:         Math.max(0, ...squadRatios.map(r => r.savesPerMatch)),
+      goalsConcededPerMatch: Math.max(0, ...squadRatios.map(r => r.goalsConcededPerMatch)),
+      savePercentage:        Math.max(0, ...squadRatios.map(r => r.savePercentage)),
+    };
+
+    const avg = (arr: number[]) => arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+    const squadAvg: RadarPerMatchStats = {
+      avgPlaytimeSec:        avg(squadRatios.map(r => r.avgPlaytimeSec)),
+      goalsPerMatch:         avg(squadRatios.map(r => r.goalsPerMatch)),
+      shotsOnTargetPerMatch: avg(squadRatios.map(r => r.shotsOnTargetPerMatch)),
+      totalShotsPerMatch:    avg(squadRatios.map(r => r.totalShotsPerMatch)),
+      assistsPerMatch:      avg(squadRatios.map(r => r.assistsPerMatch)),
+      recoveriesPerMatch:    avg(squadRatios.map(r => r.recoveriesPerMatch)),
+      ballLossPerMatch:      avg(squadRatios.map(r => r.ballLossPerMatch)),
+      plusMinus:             avg(squadRatios.map(r => r.plusMinus)),
+      savesPerMatch:         avg(squadRatios.map(r => r.savesPerMatch)),
+      goalsConcededPerMatch: avg(squadRatios.map(r => r.goalsConcededPerMatch)),
+      savePercentage:        avg(squadRatios.map(r => r.savePercentage)),
+    };
+
+    // 6. Stats du joueur cible
+    const playerAcc = per.get(playerId) ?? initAcc();
+    const playerRatios = toRatios(playerAcc);
+
+    const raw: PlayerRadarRaw = {
+      ...playerRatios,
+      matchCount:      playerAcc.matchCount,
+      matchesWithTime: playerAcc.matchesWithTime,
+    };
+
+    // 7. Normalise 0-100 selon le max de l'effectif
+    const norm = (val: number, max: number) => max > 0 ? Math.round(Math.max(0, val / max) * 100) : 0;
+
+    return {
+      raw,
+      normalized: {
+        avgPlaytime:           norm(playerRatios.avgPlaytimeSec,        squadMax.avgPlaytimeSec),
+        goalsPerMatch:         norm(playerRatios.goalsPerMatch,         squadMax.goalsPerMatch),
+        shotsOnTargetPerMatch: norm(playerRatios.shotsOnTargetPerMatch, squadMax.shotsOnTargetPerMatch),
+        totalShotsPerMatch:    norm(playerRatios.totalShotsPerMatch,    squadMax.totalShotsPerMatch),
+        assistsPerMatch:      norm(playerRatios.assistsPerMatch,      squadMax.assistsPerMatch),
+        recoveriesPerMatch:    norm(playerRatios.recoveriesPerMatch,    squadMax.recoveriesPerMatch),
+        ballLossPerMatch:      norm(playerRatios.ballLossPerMatch,      squadMax.ballLossPerMatch),
+        plusMinus:             norm(Math.max(0, playerRatios.plusMinus), squadMax.plusMinus),
+        savesPerMatch:         norm(playerRatios.savesPerMatch,         squadMax.savesPerMatch),
+        goalsConcededPerMatch: norm(playerRatios.goalsConcededPerMatch, squadMax.goalsConcededPerMatch),
+        savePercentage:        Math.round(Math.max(0, Math.min(100, playerRatios.savePercentage))),
+      },
+      squadMax,
+      squadAvg,
+    };
   }
 };
+
+// ─── Radar types (exported for use in UI) ──────────────────────────────────
+
+export interface RadarPerMatchStats {
+  avgPlaytimeSec: number;
+  goalsPerMatch: number;
+  shotsOnTargetPerMatch: number;
+  totalShotsPerMatch: number;
+  assistsPerMatch: number;
+  recoveriesPerMatch: number;
+  ballLossPerMatch: number;
+  plusMinus: number;
+  savesPerMatch: number;
+  savePercentage: number;
+  goalsConcededPerMatch: number;
+}
+
+export interface PlayerRadarRaw extends RadarPerMatchStats {
+  matchCount: number;
+  matchesWithTime: number;
+}
+
+export interface PlayerRadarResult {
+  raw: PlayerRadarRaw;
+  normalized: {
+    avgPlaytime: number;
+    goalsPerMatch: number;
+    shotsOnTargetPerMatch: number;
+    totalShotsPerMatch: number;
+    assistsPerMatch: number;
+    recoveriesPerMatch: number;
+    ballLossPerMatch: number;
+    plusMinus: number;
+    savesPerMatch: number;
+    goalsConcededPerMatch: number;
+    savePercentage: number;
+  };
+  squadMax: RadarPerMatchStats;
+  squadAvg: RadarPerMatchStats;
+}
 
 
 

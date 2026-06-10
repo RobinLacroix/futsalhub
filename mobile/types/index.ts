@@ -13,12 +13,27 @@ export interface Player {
   id: string;
   first_name: string;
   last_name: string;
-  age: number;
+  birth_date?: string | null;
   position: string;
   strong_foot: string;
   status: string;
   number?: number;
   team_id?: string;
+  sequence_time_limit?: number;
+}
+
+export type PlayerEventType = 'interview' | 'injury' | 'suspension' | 'feedback';
+
+export interface PlayerEvent {
+  id: string;
+  player_id: string;
+  event_type: PlayerEventType;
+  event_date: string;
+  report?: string | null;
+  injury_type?: string | null;
+  unavailability_days?: number | null;
+  matches_suspended?: number | null;
+  created_at?: string;
 }
 
 export type PlayerStatus = 'present' | 'late' | 'absent' | 'injured';
@@ -67,7 +82,7 @@ export type MatchEventType =
   | 'recovery'
   | 'yellow_card'
   | 'red_card'
-  | 'dribble'
+  | 'assist'
   | 'ball_loss'
   | 'opponent_goal'
   | 'opponent_shot'
@@ -85,4 +100,27 @@ export interface MatchEvent {
   players_on_field?: string[];
   goal_type?: GoalType | null;
   created_at?: string;
+}
+
+export type SharedContentType = 'youtube' | 'link';
+
+export interface SharedContent {
+  id: string;
+  team_id: string;
+  title: string;
+  description?: string | null;
+  content_type: SharedContentType;
+  url: string;
+  folder_id?: string | null;
+  created_by?: string | null;
+  created_at: string;
+}
+
+export interface SharedFolder {
+  id: string;
+  team_id: string;
+  name: string;
+  parent_id: string | null;
+  created_by?: string | null;
+  created_at: string;
 }

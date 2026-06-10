@@ -133,10 +133,10 @@ export default function TrackerPage() {
           setPlayers([]);
                 } else {
           // Transformer les données des joueurs
-          const transformedPlayers: Player[] = (playersData || []).map((player: { id: string; first_name: string; last_name: string; age: number; position: string; strong_foot: string; status: string }) => ({
+          const transformedPlayers: Player[] = (playersData || []).map((player: { id: string; first_name: string; last_name: string; number?: number; position: string; strong_foot: string; status: string }) => ({
             id: player.id,
             name: `${player.first_name} ${player.last_name}`,
-            number: player.age || 0, // Utiliser l'âge comme numéro temporaire
+            number: player.number || 0,
             position: player.position || 'Non défini',
             isStarter: false, // Sera défini lors de la sélection du match
             isOnField: false,
@@ -437,7 +437,7 @@ export default function TrackerPage() {
   if (showMatchSelector) {
     return (
       <div className="min-h-screen bg-gray-50 p-4">
-        <div className="max-w-4xl mx-auto">
+        <div className="w-full">
           <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
             <div className="flex items-center gap-3 mb-6">
               <Calendar className="h-8 w-8 text-blue-600" />

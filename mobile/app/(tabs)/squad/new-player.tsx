@@ -14,7 +14,7 @@ import { useRouter } from 'expo-router';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 import { createPlayer } from '../../../lib/services/players';
 
-const POSITION_OPTIONS = ['Gardien', 'Ailier', 'Pivot'] as const;
+const POSITION_OPTIONS = ['Gardien', 'Meneur', 'Ailier', 'Pivot'] as const;
 const STRONG_FOOT_OPTIONS = ['Droit', 'Gauche', 'Droit et gauche'] as const;
 
 export default function NewPlayerScreen() {
@@ -25,7 +25,7 @@ export default function NewPlayerScreen() {
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [ageStr, setAgeStr] = useState('');
+  const [birthDate, setBirthDate] = useState('');
   const [position, setPosition] = useState<typeof POSITION_OPTIONS[number]>('Ailier');
   const [strongFoot, setStrongFoot] = useState<typeof STRONG_FOOT_OPTIONS[number]>('Droit');
   const [numberStr, setNumberStr] = useState('');
@@ -41,9 +41,9 @@ export default function NewPlayerScreen() {
       Alert.alert('Champs requis', 'Prénom et nom sont obligatoires.');
       return;
     }
-    const age = parseInt(ageStr.trim(), 10);
-    if (Number.isNaN(age) || age < 1 || age > 99) {
-      Alert.alert('Âge invalide', 'Indiquez un âge entre 1 et 99.');
+    const birthDateTrimmed = birthDate.trim();
+    if (birthDateTrimmed && !/^\d{4}-\d{2}-\d{2}$/.test(birthDateTrimmed)) {
+      Alert.alert('Date invalide', 'Format attendu : AAAA-MM-JJ (ex: 2000-05-15)');
       return;
     }
     const num = numberStr.trim() ? parseInt(numberStr.trim(), 10) : undefined;
@@ -58,7 +58,7 @@ export default function NewPlayerScreen() {
       const player = await createPlayer(activeTeamId, {
         first_name: trimmedFirst,
         last_name: trimmedLast,
-        age,
+        birth_date: birthDateTrimmed || undefined,
         position,
         strong_foot: strongFoot,
         number: num,
@@ -119,14 +119,14 @@ export default function NewPlayerScreen() {
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Âge *</Text>
+          <Text style={styles.label}>Date de naissance (AAAA-MM-JJ)</Text>
           <TextInput
             style={styles.input}
-            value={ageStr}
-            onChangeText={setAgeStr}
-            placeholder="Âge"
+            value={birthDate}
+            onChangeText={setBirthDate}
+            placeholder="2000-05-15"
             placeholderTextColor="#9ca3af"
-            keyboardType="number-pad"
+            keyboardType="numbers-and-punctuation"
           />
         </View>
 

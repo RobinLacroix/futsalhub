@@ -17,8 +17,16 @@ import {
 } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useIsTablet } from '../../../../hooks/useIsTablet';
-import { format, parseISO } from 'date-fns';
+import { format, parse, parseISO, isValid } from 'date-fns';
 import { fr } from 'date-fns/locale';
+
+let DateTimePicker: import('react').ComponentType<any> | null = null;
+try {
+  DateTimePicker = require('@react-native-community/datetimepicker').default;
+} catch {
+  /* module optionnel */
+}
+const useNativePicker = DateTimePicker != null;
 import { getMatchById, updateMatch } from '../../../../lib/services/matches';
 import { getPlayersByTeam, getPlayersByClubWithTeams, type PlayerWithTeams } from '../../../../lib/services/players';
 import { getMatchEventsAggregate, hasMatchEvents } from '../../../../lib/services/matchEvents';
@@ -79,6 +87,26 @@ export default function MatchDetailScreen() {
   const [inviteFilterTeamId, setInviteFilterTeamId] = useState<string>('all');
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [inviteModalSelectedIds, setInviteModalSelectedIds] = useState<Record<string, boolean>>({});
+  const [editTitle, setEditTitle] = useState('');
+  const [matchEditDateTime, setMatchEditDateTime] = useState(() => new Date());
+  const [editDateStr, setEditDateStr] = useState('');
+  const [editTimeStr, setEditTimeStr] = useState('');
+  const [showMatchDatePicker, setShowMatchDatePicker] = useState(false);
+  const [showMatchTimePicker, setShowMatchTimePicker] = useState(false);
+
+  const beginEditing = useCallback(() => {
+    if (!match) return;
+    setEditTitle(match.title);
+    const ds = typeof match.date === 'string' ? match.date : (match.date as Date).toISOString?.() ?? '';
+    const d = ds ? parseISO(ds) : new Date();
+    const normalized = new Date(d.getTime());
+    setMatchEditDateTime(normalized);
+    setEditDateStr(format(normalized, 'dd/MM/yyyy', { locale: fr }));
+    setEditTimeStr(format(normalized, 'HH:mm'));
+    setShowMatchDatePicker(false);
+    setShowMatchTimePicker(false);
+    setEditing(true);
+  }, [match]);
 
   const load = useCallback(async () => {
     if (!matchId) {
@@ -232,6 +260,27 @@ export default function MatchDetailScreen() {
 
   const save = useCallback(async () => {
     if (!matchId) return;
+    if (!editTitle.trim()) {
+      Alert.alert('Champ requis', 'Veuillez renseigner le titre du match.');
+      return;
+    }
+    let submitDate: Date | null = null;
+    if (useNativePicker) {
+      submitDate = matchEditDateTime;
+    } else {
+      const dParsed = parse(editDateStr.trim(), 'dd/MM/yyyy', new Date(), { locale: fr });
+      if (!isValid(dParsed)) {
+        Alert.alert('Date ou heure invalide', 'Date : JJ/MM/AAAA. Heure : HH:MM (ex. 18:30).');
+        return;
+      }
+      const [h, m] = editTimeStr.trim().split(':').map(Number);
+      if (Number.isNaN(h) || Number.isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+        Alert.alert('Date ou heure invalide', 'Date : JJ/MM/AAAA. Heure : HH:MM (ex. 18:30).');
+        return;
+      }
+      submitDate = new Date(dParsed);
+      submitDate.setHours(h, m, 0, 0);
+    }
     const st = parseInt(scoreTeam.trim(), 10);
     const so = parseInt(scoreOpponent.trim(), 10);
     if (Number.isNaN(st) || Number.isNaN(so) || st < 0 || so < 0) {
@@ -251,9 +300,12 @@ export default function MatchDetailScreen() {
       Alert.alert('Incohérence', `Total des buteurs (${totalGoals}) ne peut pas dépasser le score de l'équipe (${st}).`);
       return;
     }
+    if (!submitDate) return;
     setSaving(true);
     try {
       const updated = await updateMatch(matchId, {
+        title: editTitle.trim(),
+        date: submitDate.toISOString(),
         convoquedPlayerIds: convoquedIds,
         score_team: st,
         score_opponent: so,
@@ -269,7 +321,22 @@ export default function MatchDetailScreen() {
     } finally {
       setSaving(false);
     }
-  }, [matchId, convoqued, scoreTeam, scoreOpponent, playerStats, goalsByType, concededByType, players, clubPlayersWithTeams]);
+  }, [
+    matchId,
+    editTitle,
+    useNativePicker,
+    matchEditDateTime,
+    editDateStr,
+    editTimeStr,
+    convoqued,
+    scoreTeam,
+    scoreOpponent,
+    playerStats,
+    goalsByType,
+    concededByType,
+    players,
+    clubPlayersWithTeams,
+  ]);
 
   const sortedPlayersForMatch = useMemo(
     () =>
@@ -332,8 +399,60 @@ export default function MatchDetailScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.card}>
-          <Text style={styles.title}>{match.title}</Text>
-          <Text style={styles.date}>{format(date, "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr })}</Text>
+          {editing ? (
+            <>
+              <Text style={styles.label}>Titre</Text>
+              <TextInput
+                style={styles.editInput}
+                value={editTitle}
+                onChangeText={setEditTitle}
+                placeholder="ex: Match 1 - Équipe adverse"
+                placeholderTextColor="#9ca3af"
+              />
+              <Text style={[styles.label, styles.labelSpaced]}>Date</Text>
+              {useNativePicker && DateTimePicker ? (
+                <TouchableOpacity style={styles.pickerTouch} onPress={() => setShowMatchDatePicker(true)}>
+                  <Text style={styles.pickerText}>{format(matchEditDateTime, 'EEEE d MMMM yyyy', { locale: fr })}</Text>
+                  <Text style={styles.pickerHint}>Appuyer pour ouvrir le sélecteur</Text>
+                </TouchableOpacity>
+              ) : (
+                <>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editDateStr}
+                    onChangeText={setEditDateStr}
+                    placeholder="JJ/MM/AAAA"
+                    placeholderTextColor="#9ca3af"
+                  />
+                  <Text style={styles.pickerHint}>Format : jour/mois/année</Text>
+                </>
+              )}
+              <Text style={[styles.label, styles.labelSpaced]}>Heure</Text>
+              {useNativePicker && DateTimePicker ? (
+                <TouchableOpacity style={styles.pickerTouch} onPress={() => setShowMatchTimePicker(true)}>
+                  <Text style={styles.pickerText}>{format(matchEditDateTime, 'HH:mm')}</Text>
+                  <Text style={styles.pickerHint}>Appuyer pour ouvrir le sélecteur</Text>
+                </TouchableOpacity>
+              ) : (
+                <>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editTimeStr}
+                    onChangeText={setEditTimeStr}
+                    placeholder="HH:MM"
+                    placeholderTextColor="#9ca3af"
+                    keyboardType="numbers-and-punctuation"
+                  />
+                  <Text style={styles.pickerHint}>Format : heures:minutes</Text>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <Text style={styles.title}>{match.title}</Text>
+              <Text style={styles.date}>{format(date, "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr })}</Text>
+            </>
+          )}
           <View style={styles.metaRow}>
             <Text style={styles.meta}>{match.location}</Text>
             <Text style={styles.metaDot}> · </Text>
@@ -621,17 +740,89 @@ export default function MatchDetailScreen() {
               >
                 <Text style={styles.saveBtnText}>{saving ? 'Enregistrement…' : 'Enregistrer'}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setEditing(false)} disabled={saving}>
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => {
+                  setShowMatchDatePicker(false);
+                  setShowMatchTimePicker(false);
+                  setEditing(false);
+                }}
+                disabled={saving}
+              >
                 <Text style={styles.cancelBtnText}>Annuler</Text>
               </TouchableOpacity>
             </>
           ) : (
-            <TouchableOpacity style={styles.editBtn} onPress={() => setEditing(true)}>
+            <TouchableOpacity style={styles.editBtn} onPress={beginEditing}>
               <Text style={styles.editBtnText}>Modifier le match</Text>
             </TouchableOpacity>
           )}
         </View>
       </ScrollView>
+
+      {useNativePicker && DateTimePicker && (
+        <>
+          <Modal visible={showMatchDatePicker} transparent animationType="slide">
+            <Pressable style={styles.sheetOverlay} onPress={() => setShowMatchDatePicker(false)}>
+              <View style={styles.sheetContent} onStartShouldSetResponder={() => true}>
+                <View style={styles.sheetHeader}>
+                  <Pressable onPress={() => setShowMatchDatePicker(false)}>
+                    <Text style={styles.modalDone}>OK</Text>
+                  </Pressable>
+                </View>
+                <View style={styles.sheetPickerWrap}>
+                  <DateTimePicker
+                    value={matchEditDateTime}
+                    mode="date"
+                    display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                    onChange={(_e: unknown, v?: Date) => {
+                      if (v) {
+                        const next = new Date(matchEditDateTime);
+                        next.setFullYear(v.getFullYear(), v.getMonth(), v.getDate());
+                        setMatchEditDateTime(next);
+                      }
+                      if (Platform.OS !== 'ios') setShowMatchDatePicker(false);
+                    }}
+                    locale="fr-FR"
+                    textColor="#111111"
+                    themeVariant="light"
+                  />
+                </View>
+              </View>
+            </Pressable>
+          </Modal>
+          <Modal visible={showMatchTimePicker} transparent animationType="slide">
+            <Pressable style={styles.sheetOverlay} onPress={() => setShowMatchTimePicker(false)}>
+              <View style={styles.sheetContent} onStartShouldSetResponder={() => true}>
+                <View style={styles.sheetHeader}>
+                  <Pressable onPress={() => setShowMatchTimePicker(false)}>
+                    <Text style={styles.modalDone}>OK</Text>
+                  </Pressable>
+                </View>
+                <View style={styles.sheetPickerWrap}>
+                  <DateTimePicker
+                    value={matchEditDateTime}
+                    mode="time"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={(_e: unknown, v?: Date) => {
+                      if (v) {
+                        const next = new Date(matchEditDateTime);
+                        next.setHours(v.getHours(), v.getMinutes(), 0, 0);
+                        setMatchEditDateTime(next);
+                      }
+                      if (Platform.OS !== 'ios') setShowMatchTimePicker(false);
+                    }}
+                    locale="fr-FR"
+                    is24Hour
+                    textColor="#111111"
+                    themeVariant="light"
+                  />
+                </View>
+              </View>
+            </Pressable>
+          </Modal>
+        </>
+      )}
 
       <Modal visible={inviteModalOpen} transparent animationType="slide">
         <Pressable style={styles.modalOverlay} onPress={() => setInviteModalOpen(false)}>
@@ -729,6 +920,39 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 20, fontWeight: '700', color: '#111', marginBottom: 8 },
   date: { fontSize: 16, color: '#374151', marginBottom: 4 },
+  labelSpaced: { marginTop: 14 },
+  editInput: {
+    backgroundColor: '#f9fafb',
+    borderRadius: 10,
+    padding: 12,
+    fontSize: 16,
+    color: '#111',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  pickerTouch: {
+    backgroundColor: '#f9fafb',
+    borderRadius: 10,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  pickerText: { fontSize: 16, color: '#111', fontWeight: '500' },
+  pickerHint: { fontSize: 12, color: '#9ca3af', marginTop: 4 },
+  sheetOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
+  sheetContent: {
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingBottom: 24,
+  },
+  sheetHeader: { flexDirection: 'row', justifyContent: 'flex-end', padding: 16 },
+  sheetPickerWrap: {
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    minHeight: 220,
+    width: '100%',
+  },
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 },
   meta: { fontSize: 14, color: '#6b7280' },
   metaDot: { fontSize: 14, color: '#9ca3af' },

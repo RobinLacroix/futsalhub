@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import {
   getMyCalendarEvents,
   getMyConvocationsStatus,
@@ -20,6 +21,32 @@ import {
   type MyConvolutionRow,
   type MyUpcomingMatchRow,
 } from '../../lib/services/playerConvocations';
+import { pushToMyCoaches } from '../../lib/services/notifications';
+
+// ─── Design tokens ─────────────────────────────────────────────────────────
+
+const C = {
+  bg:      '#edf0f5',
+  surface: '#ffffff',
+  surface2:'#f4f6fa',
+  border:  '#dde3ec',
+  navy:    '#1a2744',
+  amber:   '#d97706',
+  green:   '#059669',
+  greenLt: '#ecfdf5',
+  red:     '#dc2626',
+  redLt:   '#fef2f2',
+  blue:    '#1e40af',
+  blueLt:  '#eff6ff',
+  purple:  '#7c3aed',
+  purpleLt:'#f5f3ff',
+  text1:   '#0f172a',
+  text2:   '#475569',
+  text3:   '#94a3b8',
+  divider: '#e8edf4',
+} as const;
+
+// ─── Types ─────────────────────────────────────────────────────────────────
 
 type Status = 'present' | 'absent' | 'late' | 'injured';
 
@@ -35,21 +62,22 @@ function sortCalendarItems(items: CalendarItem[]): CalendarItem[] {
   });
 }
 
+// ─── Screen ────────────────────────────────────────────────────────────────
+
 export default function PlayerConvocationsScreen() {
   const [convocations, setConvocations] = useState<MyConvolutionRow[]>([]);
-  const [matches, setMatches] = useState<MyUpcomingMatchRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [emptyHint, setEmptyHint] = useState<'no_player' | 'no_team' | 'no_upcoming' | null>(null);
+  const [matches, setMatches]           = useState<MyUpcomingMatchRow[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [refreshing, setRefreshing]     = useState(false);
+  const [updatingId, setUpdatingId]     = useState<string | null>(null);
+  const [error, setError]               = useState<string | null>(null);
+  const [emptyHint, setEmptyHint]       = useState<'no_player' | 'no_team' | 'no_upcoming' | null>(null);
 
   const calendarItems = useMemo(
-    () =>
-      sortCalendarItems([
-        ...convocations.map((c) => ({ type: 'training' as const, data: c })),
-        ...matches.map((m) => ({ type: 'match' as const, data: m })),
-      ]),
+    () => sortCalendarItems([
+      ...convocations.map(c => ({ type: 'training' as const, data: c })),
+      ...matches.map(m => ({ type: 'match' as const, data: m })),
+    ]),
     [convocations, matches]
   );
 
@@ -57,37 +85,26 @@ export default function PlayerConvocationsScreen() {
     try {
       setError(null);
       setEmptyHint(null);
-      const { trainings: trainingsData, matches: matchesData } = await getMyCalendarEvents();
-      setConvocations(trainingsData);
+      const { trainings, matches: matchesData } = await getMyCalendarEvents();
+      setConvocations(trainings);
       setMatches(matchesData);
-      if (trainingsData.length === 0 && matchesData.length === 0) {
+      if (trainings.length === 0 && matchesData.length === 0) {
         try {
           const status = await getMyConvocationsStatus();
           if (status && status.hint !== 'ok') setEmptyHint(status.hint);
-        } catch {
-          // Ne pas afficher "Erreur au chargement" si seul le diagnostic échoue
-        }
+        } catch { /* diagnostic only */ }
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Erreur au chargement';
-      setError(msg);
-      setConvocations([]);
-      setMatches([]);
+      setError(e instanceof Error ? e.message : 'Erreur au chargement');
+      setConvocations([]); setMatches([]);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      setLoading(false); setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => {
-    setLoading(true);
-    load();
-  }, [load]);
+  useEffect(() => { setLoading(true); load(); }, [load]);
 
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    load();
-  }, [load]);
+  const onRefresh = useCallback(() => { setRefreshing(true); load(); }, [load]);
 
   const handleSetAttendance = useCallback(async (trainingId: string, status: Status) => {
     setUpdatingId(trainingId);
@@ -95,14 +112,15 @@ export default function PlayerConvocationsScreen() {
     const result = await setMyTrainingAttendance(trainingId, status);
     setUpdatingId(null);
     if (result.ok) {
-      setConvocations((prev) =>
-        prev.map((c) => (c.training_id === trainingId ? { ...c, my_status: status } : c))
-      );
+      setConvocations(prev => prev.map(c => c.training_id === trainingId ? { ...c, my_status: status } : c));
+      if (status === 'absent' || status === 'late' || status === 'injured') {
+        const label = status === 'absent' ? 'absent' : status === 'late' ? 'en retard' : 'blessé';
+        void pushToMyCoaches({ title: 'Réponse à une convocation', body: `Un joueur se déclare ${label}.`, data: { type: 'absence_report', training_id: trainingId } });
+      }
     } else {
-      const msg = result.error === 'too_late'
-        ? 'Il est trop tard pour répondre (délai : jusqu\'à 2 h avant la séance).'
-        : (result.error ?? 'Erreur');
-      setError(msg);
+      setError(result.error === 'too_late'
+        ? 'Il est trop tard pour répondre (jusqu\'à 2 h avant la séance).'
+        : (result.error ?? 'Erreur'));
     }
   }, []);
 
@@ -110,170 +128,83 @@ export default function PlayerConvocationsScreen() {
     const base = (process.env.EXPO_PUBLIC_SITE_URL ?? '').replace(/\/$/, '');
     const url = urlPathOrFull.startsWith('http')
       ? urlPathOrFull
-      : base
-        ? base + (urlPathOrFull.startsWith('/') ? urlPathOrFull : `/${urlPathOrFull}`)
-        : '';
+      : base ? base + (urlPathOrFull.startsWith('/') ? urlPathOrFull : `/${urlPathOrFull}`) : '';
     if (!url || !url.startsWith('http')) {
-      Alert.alert(
-        'Configuration',
-        'L’URL du site (EXPO_PUBLIC_SITE_URL) n’est pas définie. Ajoutez-la dans mobile/.env.'
-      );
+      Alert.alert('Configuration', "L'URL du site (EXPO_PUBLIC_SITE_URL) n'est pas définie.");
       return;
     }
-    try {
-      await Linking.openURL(url);
-    } catch {
-      Alert.alert('Erreur', 'Impossible d’ouvrir le lien.');
-    }
+    try { await Linking.openURL(url); }
+    catch { Alert.alert('Erreur', "Impossible d'ouvrir le lien."); }
   }, []);
 
   if (loading && calendarItems.length === 0) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#16a34a" />
+      <View style={s.centered}>
+        <ActivityIndicator size="large" color={C.navy} />
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      {error ? (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={() => { setLoading(true); load(); }}>
-            <Text style={styles.retryBtnText}>Réessayer</Text>
+    <View style={s.root}>
+      {error && (
+        <View style={s.errorBanner}>
+          <Ionicons name="alert-circle-outline" size={15} color={C.red} />
+          <Text style={s.errorText}>{error}</Text>
+          <TouchableOpacity onPress={() => { setLoading(true); load(); }}>
+            <Text style={s.retryText}>Réessayer</Text>
           </TouchableOpacity>
         </View>
-      ) : null}
+      )}
+
       <FlatList
         data={calendarItems}
-        keyExtractor={(item) =>
+        keyExtractor={item =>
           item.type === 'training' ? `t-${item.data.training_id}` : `m-${item.data.match_id}`
         }
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={s.list}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#16a34a']} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.navy} />
         }
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>
-              {emptyHint === 'no_player'
-                ? 'Compte non lié à une fiche joueur'
-                : emptyHint === 'no_team'
-                  ? 'Vous n’êtes dans aucune équipe'
-                  : 'Aucune convocation à venir'}
+          <View style={s.emptyWrap}>
+            <Ionicons name="calendar-outline" size={36} color={C.text3} style={{ marginBottom: 12 }} />
+            <Text style={s.emptyTitle}>
+              {emptyHint === 'no_player'   ? 'Compte non lié à une fiche joueur'
+               : emptyHint === 'no_team'   ? "Vous n'êtes dans aucune équipe"
+               : 'Aucune convocation à venir'}
             </Text>
-            <Text style={styles.emptyText}>
-              {emptyHint === 'no_player'
-                ? 'Demandez à votre coach de lier votre compte à votre fiche joueur (depuis l’app ou le site).'
-                : emptyHint === 'no_team'
-                  ? 'Demandez à votre coach de vous ajouter à une équipe.'
-                  : 'Vos séances et matchs apparaîtront ici (entraînements et matchs de vos équipes).'}
+            <Text style={s.emptyText}>
+              {emptyHint === 'no_player'   ? 'Demandez à votre coach de lier votre compte à votre fiche joueur.'
+               : emptyHint === 'no_team'   ? 'Demandez à votre coach de vous ajouter à une équipe.'
+               : 'Vos séances et matchs apparaîtront ici.'}
             </Text>
             <TouchableOpacity
-              style={styles.debugBtn}
+              style={s.debugBtn}
               onPress={async () => {
                 const d = await getMyConvocationsDebug();
-                if (!d) {
-                  Alert.alert('Diagnostic', 'Impossible de récupérer le diagnostic.');
-                  return;
-                }
+                if (!d) { Alert.alert('Diagnostic', 'Impossible de récupérer le diagnostic.'); return; }
                 const msg = (d.reason as string)
                   ? String(d.message || d.reason)
-                  : `Joueur: ${d.player_id ? 'oui' : 'non'}\nÉquipes: ${d.team_count ?? 0}\nSéances à venir: ${d.trainings_upcoming ?? 0}\nSéances total (équipes): ${d.trainings_total_for_teams ?? 0}`;
+                  : `Joueur: ${d.player_id ? 'oui' : 'non'}\nÉquipes: ${d.team_count ?? 0}\nSéances à venir: ${d.trainings_upcoming ?? 0}`;
                 Alert.alert('Diagnostic', msg);
               }}
             >
-              <Text style={styles.debugBtnText}>Voir le diagnostic</Text>
+              <Text style={s.debugBtnText}>Voir le diagnostic</Text>
             </TouchableOpacity>
           </View>
         }
         renderItem={({ item }) => {
           if (item.type === 'match') {
-            const m = item.data;
-            const matchDate = m.match_date ? parseISO(m.match_date) : new Date();
-            const otherTeam = !!m.is_other_team;
-            return (
-              <View style={[styles.card, styles.cardMatch, otherTeam && styles.cardOtherTeam]}>
-                <Text style={[styles.badge, styles.badgeMatch, otherTeam && styles.badgeOtherTeam]}>
-                  Match{otherTeam ? ' (autre équipe)' : ''}
-                </Text>
-                <Text style={styles.date}>{format(matchDate, 'EEEE d MMMM yyyy', { locale: fr })}</Text>
-                <Text style={styles.time}>{format(matchDate, 'HH:mm', { locale: fr })}</Text>
-                <Text style={styles.theme}>{m.title || 'Match'}</Text>
-                {m.opponent_team ? (
-                  <Text style={styles.meta}>vs {m.opponent_team}</Text>
-                ) : null}
-                {m.competition ? <Text style={styles.meta}>Compétition : {m.competition}</Text> : null}
-                {m.team_name ? <Text style={styles.meta}>Équipe : {m.team_name}</Text> : null}
-                {m.location ? <Text style={styles.meta}>Lieu : {m.location}</Text> : null}
-              </View>
-            );
+            return <MatchCard m={item.data} />;
           }
-          const c = item.data;
-          const date = c.training_date ? parseISO(c.training_date) : new Date();
-          const status = (c.my_status as Status) || null;
-          const isUpdating = updatingId === c.training_id;
-          const otherTeam = !!c.is_other_team;
           return (
-            <View style={[styles.card, otherTeam && styles.cardOtherTeamTraining]}>
-              <Text style={[styles.badge, otherTeam && styles.badgeOtherTeamTraining]}>
-                Entraînement{otherTeam ? ' (autre équipe)' : ''}
-              </Text>
-              <Text style={styles.date}>{format(date, 'EEEE d MMMM yyyy', { locale: fr })}</Text>
-              <Text style={styles.time}>{format(date, 'HH:mm', { locale: fr })}</Text>
-              {c.team_name ? <Text style={styles.meta}>Équipe : {c.team_name}</Text> : null}
-              {c.location ? <Text style={styles.meta}>Lieu : {c.location}</Text> : null}
-
-              <Text style={styles.label}>Je serai :</Text>
-              <View style={styles.buttons}>
-                <TouchableOpacity
-                  style={[styles.btn, status === 'present' && styles.btnPresent]}
-                  onPress={() => handleSetAttendance(c.training_id, 'present')}
-                  disabled={isUpdating}
-                >
-                  <Text style={[styles.btnText, status === 'present' && styles.btnTextActive]}>
-                    {isUpdating ? '…' : 'Présent'}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.btn, status === 'late' && styles.btnLate]}
-                  onPress={() => handleSetAttendance(c.training_id, 'late')}
-                  disabled={isUpdating}
-                >
-                  <Text style={[styles.btnText, status === 'late' && styles.btnTextActive]}>
-                    En retard
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.btn, status === 'absent' && styles.btnAbsent]}
-                  onPress={() => handleSetAttendance(c.training_id, 'absent')}
-                  disabled={isUpdating}
-                >
-                  <Text style={[styles.btnText, status === 'absent' && styles.btnTextActive]}>
-                    Absent
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.btn, status === 'injured' && styles.btnInjured]}
-                  onPress={() => handleSetAttendance(c.training_id, 'injured')}
-                  disabled={isUpdating}
-                >
-                  <Text style={[styles.btnText, status === 'injured' && styles.btnTextActive]}>
-                    Blessé
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {c.feedback_token && c.feedback_url && !otherTeam ? (
-                <TouchableOpacity
-                  style={styles.questionnaireLink}
-                  onPress={() => openQuestionnaire(c.feedback_url!)}
-                >
-                  <Text style={styles.questionnaireLinkText}>Remplir le questionnaire de la séance</Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
+            <TrainingCard
+              c={item.data}
+              isUpdating={updatingId === item.data.training_id}
+              onSetAttendance={handleSetAttendance}
+              onOpenQuestionnaire={openQuestionnaire}
+            />
           );
         }}
       />
@@ -281,77 +212,176 @@ export default function PlayerConvocationsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f3f4f6' },
-  listContent: { padding: 16, paddingBottom: 32 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  errorBox: { backgroundColor: '#fef2f2', padding: 12, margin: 16, borderRadius: 8 },
-  errorText: { color: '#dc2626', fontSize: 14 },
-  retryBtn: { marginTop: 8, paddingVertical: 8 },
-  retryBtnText: { color: '#dc2626', fontSize: 14, fontWeight: '600' },
-  empty: { padding: 32, alignItems: 'center' },
-  emptyTitle: { fontSize: 16, fontWeight: '600', color: '#374151', marginBottom: 8 },
-  emptyText: { fontSize: 14, color: '#6b7280', textAlign: 'center', marginBottom: 16 },
-  debugBtn: { paddingVertical: 8, paddingHorizontal: 16 },
-  debugBtnText: { fontSize: 13, color: '#6b7280', textDecorationLine: 'underline' },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: '#16a34a',
-  },
-  cardMatch: {
-    borderLeftColor: '#2563eb',
-  },
-  cardOtherTeam: {
-    backgroundColor: '#fffbeb',
-    borderLeftColor: '#d97706',
-  },
-  cardOtherTeamTraining: {
-    backgroundColor: '#f5f3ff',
-    borderLeftColor: '#7c3aed',
-  },
-  badgeOtherTeam: {
-    backgroundColor: '#d97706',
-  },
-  badgeOtherTeamTraining: {
-    backgroundColor: '#7c3aed',
-  },
-  badge: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#fff',
-    backgroundColor: '#16a34a',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    marginBottom: 8,
-    overflow: 'hidden',
-  },
-  badgeMatch: {
-    backgroundColor: '#2563eb',
-  },
-  date: { fontSize: 16, fontWeight: '600', color: '#111', marginBottom: 4 },
-  time: { fontSize: 14, color: '#6b7280', marginBottom: 8 },
-  theme: { fontSize: 14, color: '#374151', marginBottom: 4 },
-  meta: { fontSize: 12, color: '#6b7280', marginBottom: 2 },
-  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginTop: 12, marginBottom: 8 },
-  buttons: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  btn: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    backgroundColor: '#e5e7eb',
-  },
-  btnPresent: { backgroundColor: '#16a34a' },
-  btnLate: { backgroundColor: '#ea580c' },
-  btnAbsent: { backgroundColor: '#d97706' },
-  btnInjured: { backgroundColor: '#e11d48' },
-  btnText: { fontSize: 14, fontWeight: '600', color: '#374151' },
-  btnTextActive: { color: '#fff' },
-  questionnaireLink: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#e5e7eb' },
-  questionnaireLinkText: { fontSize: 14, color: '#2563eb', fontWeight: '500' },
+// ─── MatchCard ──────────────────────────────────────────────────────────────
+
+function MatchCard({ m }: { m: MyUpcomingMatchRow }) {
+  const matchDate = m.match_date ? parseISO(m.match_date) : new Date();
+  const other = !!m.is_other_team;
+  return (
+    <View style={[card.wrap, { borderLeftColor: other ? C.purple : C.blue }]}>
+      <View style={card.topRow}>
+        <View style={[card.badge, { backgroundColor: other ? C.purpleLt : C.blueLt, borderColor: other ? C.purple + '44' : C.blue + '33' }]}>
+          <Ionicons name="football-outline" size={11} color={other ? C.purple : C.blue} />
+          <Text style={[card.badgeText, { color: other ? C.purple : C.blue }]}>
+            Match{other ? ' · autre équipe' : ''}
+          </Text>
+        </View>
+        {m.competition ? (
+          <Text style={card.competition}>{m.competition}</Text>
+        ) : null}
+      </View>
+      <Text style={card.title}>{m.title || 'Match'}</Text>
+      {m.opponent_team ? <Text style={card.opponent}>vs <Text style={{ fontWeight: '700', color: C.text1 }}>{m.opponent_team}</Text></Text> : null}
+      <View style={card.metaRow}>
+        <View style={card.metaItem}>
+          <Ionicons name="calendar-outline" size={12} color={C.text3} />
+          <Text style={card.metaText}>{format(matchDate, 'EEEE d MMMM', { locale: fr })}</Text>
+        </View>
+        <View style={card.metaItem}>
+          <Ionicons name="time-outline" size={12} color={C.text3} />
+          <Text style={card.metaText}>{format(matchDate, 'HH:mm', { locale: fr })}</Text>
+        </View>
+        {m.team_name ? (
+          <View style={card.metaItem}>
+            <Ionicons name="people-outline" size={12} color={C.text3} />
+            <Text style={card.metaText}>{m.team_name}</Text>
+          </View>
+        ) : null}
+        {m.location ? (
+          <View style={card.metaItem}>
+            <Ionicons name="location-outline" size={12} color={C.text3} />
+            <Text style={card.metaText}>{m.location}</Text>
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+// ─── TrainingCard ───────────────────────────────────────────────────────────
+
+const ATTENDANCE_BTNS: { status: Status; label: string; color: string; bg: string; icon: 'checkmark-circle-outline' | 'time-outline' | 'close-circle-outline' | 'medkit-outline' }[] = [
+  { status: 'present', label: 'Présent',   color: C.green,  bg: '#ecfdf5', icon: 'checkmark-circle-outline' },
+  { status: 'late',    label: 'En retard', color: C.amber,  bg: '#fef3c7', icon: 'time-outline'             },
+  { status: 'absent',  label: 'Absent',    color: C.red,    bg: '#fef2f2', icon: 'close-circle-outline'     },
+  { status: 'injured', label: 'Blessé',    color: C.purple, bg: '#f5f3ff', icon: 'medkit-outline'           },
+];
+
+function TrainingCard({
+  c, isUpdating, onSetAttendance, onOpenQuestionnaire,
+}: {
+  c: MyConvolutionRow;
+  isUpdating: boolean;
+  onSetAttendance: (id: string, s: Status) => void;
+  onOpenQuestionnaire: (url: string) => void;
+}) {
+  const date   = c.training_date ? parseISO(c.training_date) : new Date();
+  const status = (c.my_status as Status) || null;
+  const other  = !!c.is_other_team;
+
+  return (
+    <View style={[card.wrap, { borderLeftColor: other ? C.purple : C.green }]}>
+      <View style={card.topRow}>
+        <View style={[card.badge, { backgroundColor: other ? C.purpleLt : C.greenLt, borderColor: other ? C.purple + '44' : C.green + '33' }]}>
+          <Ionicons name="fitness-outline" size={11} color={other ? C.purple : C.green} />
+          <Text style={[card.badgeText, { color: other ? C.purple : C.green }]}>
+            Entraînement{other ? ' · autre équipe' : ''}
+          </Text>
+        </View>
+      </View>
+
+      <View style={card.metaRow}>
+        <View style={card.metaItem}>
+          <Ionicons name="calendar-outline" size={12} color={C.text3} />
+          <Text style={card.metaText}>{format(date, 'EEEE d MMMM', { locale: fr })}</Text>
+        </View>
+        <View style={card.metaItem}>
+          <Ionicons name="time-outline" size={12} color={C.text3} />
+          <Text style={card.metaText}>{format(date, 'HH:mm', { locale: fr })}</Text>
+        </View>
+        {c.team_name ? (
+          <View style={card.metaItem}>
+            <Ionicons name="people-outline" size={12} color={C.text3} />
+            <Text style={card.metaText}>{c.team_name}</Text>
+          </View>
+        ) : null}
+        {c.location ? (
+          <View style={card.metaItem}>
+            <Ionicons name="location-outline" size={12} color={C.text3} />
+            <Text style={card.metaText}>{c.location}</Text>
+          </View>
+        ) : null}
+      </View>
+
+      <View style={card.divider} />
+
+      <Text style={card.attendLabel}>Ma présence</Text>
+      <View style={card.attendRow}>
+        {ATTENDANCE_BTNS.map(btn => {
+          const active = status === btn.status;
+          return (
+            <TouchableOpacity
+              key={btn.status}
+              style={[card.attendBtn, active && { backgroundColor: btn.bg, borderColor: btn.color }]}
+              onPress={() => onSetAttendance(c.training_id, btn.status)}
+              disabled={isUpdating}
+              activeOpacity={0.7}
+            >
+              {isUpdating && active
+                ? <ActivityIndicator size="small" color={btn.color} />
+                : <>
+                    <Ionicons name={btn.icon} size={14} color={active ? btn.color : C.text3} />
+                    <Text style={[card.attendBtnText, active && { color: btn.color, fontWeight: '700' }]}>{btn.label}</Text>
+                  </>
+              }
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {c.feedback_token && c.feedback_url && !other && (
+        <TouchableOpacity style={card.feedbackLink} onPress={() => onOpenQuestionnaire(c.feedback_url!)} activeOpacity={0.7}>
+          <Ionicons name="document-text-outline" size={14} color={C.navy} />
+          <Text style={card.feedbackLinkText}>Remplir le questionnaire</Text>
+          <Ionicons name="chevron-forward" size={13} color={C.navy} />
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+// ─── Styles ─────────────────────────────────────────────────────────────────
+
+const card = StyleSheet.create({
+  wrap:       { backgroundColor: C.surface, borderRadius: 12, borderLeftWidth: 4, borderWidth: 1, borderColor: C.border, marginBottom: 10, padding: 14, gap: 10 },
+  topRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  badge:      { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1 },
+  badgeText:  { fontSize: 11, fontWeight: '700', letterSpacing: 0.2 },
+  competition:{ fontSize: 11, color: C.text3, fontStyle: 'italic' },
+  title:      { fontSize: 16, fontWeight: '700', color: C.text1 },
+  opponent:   { fontSize: 13, color: C.text2 },
+  metaRow:    { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  metaItem:   { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  metaText:   { fontSize: 12, color: C.text2 },
+  divider:    { height: 1, backgroundColor: C.divider },
+  attendLabel:{ fontSize: 10, fontWeight: '700', color: C.text3, textTransform: 'uppercase', letterSpacing: 0.8 },
+  attendRow:  { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+  attendBtn:  { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.surface2 },
+  attendBtnText: { fontSize: 12, fontWeight: '600', color: C.text2 },
+  feedbackLink:  { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 10, borderTopWidth: 1, borderTopColor: C.divider },
+  feedbackLinkText: { flex: 1, fontSize: 13, fontWeight: '600', color: C.navy },
+});
+
+const s = StyleSheet.create({
+  root:      { flex: 1, backgroundColor: C.bg },
+  list:      { padding: 14, paddingBottom: 40 },
+  centered:  { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  errorBanner:  { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#fef2f2', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#fee2e2' },
+  errorText:    { flex: 1, fontSize: 13, color: C.red },
+  retryText:    { fontSize: 13, fontWeight: '700', color: C.red },
+  emptyWrap:    { padding: 40, alignItems: 'center' },
+  emptyTitle:   { fontSize: 15, fontWeight: '700', color: C.text1, marginBottom: 6, textAlign: 'center' },
+  emptyText:    { fontSize: 13, color: C.text2, textAlign: 'center', marginBottom: 16, lineHeight: 18 },
+  debugBtn:     { paddingVertical: 8, paddingHorizontal: 16 },
+  debugBtnText: { fontSize: 12, color: C.text3, textDecorationLine: 'underline' },
 });

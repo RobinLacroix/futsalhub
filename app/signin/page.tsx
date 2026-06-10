@@ -43,6 +43,7 @@ function InputField({
 function SignInForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
@@ -56,6 +57,12 @@ function SignInForm() {
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
+      if (!rememberMe) {
+        // Remove persisted session from localStorage so it won't restore after browser close
+        Object.keys(localStorage)
+          .filter(k => k.startsWith('sb-'))
+          .forEach(k => localStorage.removeItem(k));
+      }
       if (data.user) router.push(redirect.startsWith('/') ? redirect : `/${redirect}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur de connexion');
@@ -127,6 +134,32 @@ function SignInForm() {
                 onBlur={(e) => { e.currentTarget.style.borderColor = CARD_BORDER; e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.06)'; }}
               />
             </div>
+
+            {/* Rester connecté */}
+            <button
+              type="button"
+              onClick={() => setRememberMe(v => !v)}
+              className="flex items-center gap-2.5 mt-1 group w-fit"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+            >
+              <div
+                className="flex items-center justify-center rounded transition-all"
+                style={{
+                  width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                  border: `2px solid ${rememberMe ? AMBER : 'rgba(255,255,255,0.2)'}`,
+                  backgroundColor: rememberMe ? AMBER : 'transparent',
+                }}
+              >
+                {rememberMe && (
+                  <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                    <path d="M1 3.5L3.8 6.5L9 1" stroke="#0E0E10" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+              </div>
+              <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)', fontFamily: 'var(--font-inter)', userSelect: 'none' }}>
+                Rester connecté
+              </span>
+            </button>
 
             <button
               type="submit" disabled={loading}

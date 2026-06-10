@@ -27,6 +27,16 @@ export default function TrackerLayout() {
           headerBackTitle: 'Retour',
         }}
       />
+      <Stack.Screen
+        name="match-report/[matchId]"
+        options={{
+          title: 'Rapport de match',
+          headerShown: true,
+          headerStyle: { backgroundColor: '#0E0E10' },
+          headerTintColor: '#FFB020',
+          headerBackTitle: 'Retour',
+        }}
+      />
     </Stack>
   );
 }

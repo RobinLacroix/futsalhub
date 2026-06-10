@@ -25,7 +25,7 @@ type PlayerStatsFromEvents = {
   shot: number;
   ball_loss: number;
   recovery: number;
-  dribble: number;
+  assist: number;
   yellow_cards: number;
   red_cards: number;
   plusMinusGoals: number;
@@ -95,7 +95,7 @@ const STATS_COLUMNS: { key: string; label: string; flex: number }[] = [
   { key: 'plusMinusShots', label: '+/-T', flex: COL_FLEX_STAT },
   { key: 'recovery', label: 'R', flex: COL_FLEX_STAT },
   { key: 'ball_loss', label: 'PdB', flex: COL_FLEX_STAT },
-  { key: 'dribble', label: 'D', flex: COL_FLEX_STAT },
+  { key: 'assist', label: 'Pdec', flex: COL_FLEX_STAT },
 ];
 
 export type TrackerAnalyticsViewProps = {
@@ -202,7 +202,7 @@ export function TrackerAnalyticsView({ title, showRecordButton = true, showMatch
           shot: 0,
           ball_loss: 0,
           recovery: 0,
-          dribble: 0,
+          assist: 0,
           yellow_cards: 0,
           red_cards: 0,
           plusMinusGoals: 0,
@@ -236,8 +236,8 @@ export function TrackerAnalyticsView({ title, showRecordButton = true, showMatch
             case 'recovery':
               cur.recovery++;
               break;
-            case 'dribble':
-              cur.dribble++;
+            case 'assist':
+              cur.assist++;
               break;
             case 'yellow_card':
               cur.yellow_cards++;
@@ -515,7 +515,7 @@ export function TrackerAnalyticsView({ title, showRecordButton = true, showMatch
                 <Text style={[styles.statsCell, { flex: COL_FLEX_STAT }, s.plusMinusShots < 0 && styles.statsCellNeg, s.plusMinusShots > 0 && styles.statsCellPos]}>{s.plusMinusShots}</Text>
                 <Text style={[styles.statsCell, { flex: COL_FLEX_STAT }]}>{s.recovery}</Text>
                 <Text style={[styles.statsCell, { flex: COL_FLEX_STAT }]}>{s.ball_loss}</Text>
-                <Text style={[styles.statsCell, { flex: COL_FLEX_STAT }]}>{s.dribble}</Text>
+                <Text style={[styles.statsCell, { flex: COL_FLEX_STAT }]}>{s.assist}</Text>
               </View>
             ))}
             </View>
@@ -536,7 +536,7 @@ export function TrackerAnalyticsView({ title, showRecordButton = true, showMatch
             />
           )}
           {playerStatsList.length > 0 && (
-            <Text style={styles.legend}>B = Buts, +/-B = +/- buts, TC = Tirs cadrés, TT = Tirs totaux, +/-T = +/- tirs, R = Récupérations, PdB = Pertes de balle, D = Dribbles, Temps = temps de jeu cumulé</Text>
+            <Text style={styles.legend}>B = Buts, +/-B = +/- buts, TC = Tirs cadrés, TT = Tirs totaux, +/-T = +/- tirs, R = Récupérations, PdB = Pertes de balle, Pdec = Passes déc., Temps = temps de jeu cumulé</Text>
           )}
         </>
       )}

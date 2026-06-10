@@ -37,10 +37,12 @@ export function calculateAverageByField(
       groups[key].push(numVal);
     }
   });
-  return Object.entries(groups).map(([name, values]) => ({
-    name,
-    value: Number((values.reduce((a, b) => a + b, 0) / values.length).toFixed(1)),
-  }));
+  return Object.entries(groups).map(([name, values]) => {
+    const finite = values.filter((v) => typeof v === 'number' && Number.isFinite(v));
+    const avg =
+      finite.length > 0 ? finite.reduce((a, b) => a + b, 0) / finite.length : 0;
+    return { name, value: Number(avg.toFixed(1)) };
+  });
 }
 
 export const CHART_COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];

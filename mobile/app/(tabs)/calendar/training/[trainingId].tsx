@@ -10,7 +10,7 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useActiveTeam } from '../../../../contexts/ActiveTeamContext';
@@ -27,6 +27,7 @@ const STATUS_OPTIONS: { value: PlayerStatus; label: string }[] = [
 
 export default function TrainingDetailScreen() {
   const { trainingId } = useLocalSearchParams<{ trainingId: string }>();
+  const router = useRouter();
   const { activeTeamId, activeTeam, teams } = useActiveTeam();
   const [training, setTraining] = useState<Training | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -167,12 +168,19 @@ export default function TrainingDetailScreen() {
     }
   };
 
-  const presentOnlyCount = filteredPlayers.filter((p) => attendance[p.id] === 'present').length;
-  const lateCount = filteredPlayers.filter((p) => attendance[p.id] === 'late').length;
+  // Stats: équipe active (filteredPlayers) + joueurs d'autres équipes (dans attendance, hors effectif)
+  const squadPresentOnly = filteredPlayers.filter((p) => attendance[p.id] === 'present').length;
+  const squadLate = filteredPlayers.filter((p) => attendance[p.id] === 'late').length;
+  const invitedPresentOnly = invitedPlayerIds.filter((id) => attendance[id] === 'present').length;
+  const invitedLate = invitedPlayerIds.filter((id) => attendance[id] === 'late').length;
+  const presentOnlyCount = squadPresentOnly + invitedPresentOnly;
+  const lateCount = squadLate + invitedLate;
   const presentCount = presentOnlyCount + lateCount;
-  const absentCount = filteredPlayers.filter(
-    (p) => attendance[p.id] === 'absent' || attendance[p.id] === 'injured'
-  ).length;
+  const absentCount =
+    filteredPlayers.filter((p) => attendance[p.id] === 'absent' || attendance[p.id] === 'injured')
+      .length +
+    invitedPlayerIds.filter((id) => attendance[id] === 'absent' || attendance[id] === 'injured')
+      .length;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -181,6 +189,14 @@ export default function TrainingDetailScreen() {
         <Text style={styles.theme}>{training.theme}</Text>
         {training.location ? <Text style={styles.location}>{training.location}</Text> : null}
       </View>
+
+      <TouchableOpacity
+        style={styles.editTrainingBtn}
+        onPress={() => router.push(`/(tabs)/calendar/training/edit/${trainingId}`)}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.editTrainingBtnText}>Modifier la séance</Text>
+      </TouchableOpacity>
 
       <View style={styles.statsRow}>
         <View style={[styles.statBox, styles.statBoxPresent]}>
@@ -354,12 +370,12 @@ export default function TrainingDetailScreen() {
               </Pressable>
             </View>
             <Text style={styles.label}>Filtrer par équipe</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.inviteModalFilterRow}>
               <TouchableOpacity
                 style={[styles.filterChipInvite, inviteFilterTeamId === 'all' && styles.filterChipInviteActive]}
                 onPress={() => setInviteFilterTeamId('all')}
               >
-                <Text style={[styles.filterChipText, inviteFilterTeamId === 'all' && styles.filterChipTextActive]}>
+                <Text style={[styles.inviteModalFilterChipText, inviteFilterTeamId === 'all' && styles.inviteModalFilterChipTextActive]}>
                   Toutes
                 </Text>
               </TouchableOpacity>
@@ -369,7 +385,7 @@ export default function TrainingDetailScreen() {
                   style={[styles.filterChipInvite, inviteFilterTeamId === t.id && styles.filterChipInviteActive]}
                   onPress={() => setInviteFilterTeamId(t.id)}
                 >
-                  <Text style={[styles.filterChipText, inviteFilterTeamId === t.id && styles.filterChipTextActive]}>
+                  <Text style={[styles.inviteModalFilterChipText, inviteFilterTeamId === t.id && styles.inviteModalFilterChipTextActive]}>
                     {t.name}
                   </Text>
                 </TouchableOpacity>
@@ -434,13 +450,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
-    marginBottom: 20,
+    marginBottom: 12,
     borderLeftWidth: 4,
     borderLeftColor: '#3b82f6',
   },
   date: { fontSize: 16, fontWeight: '600', color: '#111', marginBottom: 4 },
   theme: { fontSize: 14, color: '#374151', marginBottom: 2 },
   location: { fontSize: 12, color: '#6b7280' },
+  editTrainingBtn: {
+    marginBottom: 20,
+    padding: 16,
+    backgroundColor: '#3b82f6',
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  editTrainingBtnText: { color: '#fff', fontWeight: '600', fontSize: 16 },
   statsRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
   statBox: {
     flex: 1,
@@ -555,7 +579,7 @@ const styles = StyleSheet.create({
   inviteModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   inviteModalTitle: { fontSize: 18, fontWeight: '700', color: '#111', flex: 1 },
   label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 6 },
-  filterRow: { marginBottom: 12, maxHeight: 44 },
+  inviteModalFilterRow: { marginBottom: 12, maxHeight: 44 },
   filterChipInvite: {
     paddingVertical: 10,
     paddingHorizontal: 14,
@@ -564,8 +588,8 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   filterChipInviteActive: { backgroundColor: '#16a34a' },
-  filterChipText: { fontSize: 14, fontWeight: '500', color: '#374151' },
-  filterChipTextActive: { color: '#fff' },
+  inviteModalFilterChipText: { fontSize: 14, fontWeight: '500', color: '#374151' },
+  inviteModalFilterChipTextActive: { color: '#fff' },
   inviteModalList: { maxHeight: 280, marginBottom: 16 },
   inviteModalPlayerRow: {
     flexDirection: 'row',

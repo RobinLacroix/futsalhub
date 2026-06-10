@@ -43,11 +43,10 @@ export function SchematicElements({
   const offsetX = (svgWidth - fieldLength) / 2;
   const offsetY = (svgHeight - fieldWidth) / 2;
   
-  // Facteur de réduction pour les traits en mode prévisualisation (proportionnel à l'échelle réduite)
-  // L'échelle normale est 10, l'échelle de prévisualisation est 8, donc facteur = 8/10 = 0.8
+  // Facteur de réduction pour les traits et polices : proportionnel à l'échelle réelle
+  // L'éditeur tourne à scale=10, donc scale/10 donne le bon ratio quelle que soit la taille de preview
   const strokeWidthScale = isPreview ? scale / 10 : 1;
-  // Facteur de réduction pour la taille de la police (15-20% de réduction, on utilise 18%)
-  const fontSizeScale = isPreview ? 0.82 : 1;
+  const fontSizeScale    = isPreview ? 0.82 : 1;
   const getStrokeDashArray = (style: string) => {
     switch (style) {
       case 'dashed':

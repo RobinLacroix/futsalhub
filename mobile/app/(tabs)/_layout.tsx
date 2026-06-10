@@ -7,11 +7,13 @@ import { useIsTablet, LAYOUT } from '../../hooks/useIsTablet';
 import { TabletSidebar } from '../../components/TabletSidebar';
 import { PhoneNavMenu } from '../../components/PhoneNavMenu';
 import { SwitchToPlayerButton, SignOutIconButton } from '../../components/SwitchSpaceButton';
+import { usePushNotifications } from '../../hooks/usePushNotifications';
 
 function TabsLayoutContent() {
   const isTablet = useIsTablet();
   const insets = useSafeAreaInsets();
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  usePushNotifications();
   const tabScreenOptions = {
     headerStyle: { backgroundColor: '#3b82f6' },
     headerTintColor: '#fff',
@@ -92,6 +94,16 @@ function TabsLayoutContent() {
           tabBarLabel: 'Analytics',
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? 'pie-chart' : 'pie-chart-outline'} size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="share"
+        options={{
+          title: 'Partages',
+          tabBarLabel: 'Partages',
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'share-social' : 'share-social-outline'} size={size} color={color} />
           ),
         }}
       />

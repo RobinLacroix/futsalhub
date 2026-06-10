@@ -9,7 +9,8 @@ import { Player, Team } from '@/types';
 import Link from 'next/link';
 import {
   Plus, X, Save, UserPlus, ChevronUp, ChevronDown,
-  LogOut, Search, RefreshCw, CheckCircle, Pencil, ExternalLink, RotateCcw
+  LogOut, Search, RefreshCw, CheckCircle, Pencil, ExternalLink, RotateCcw,
+  PlayCircle, Undo2, AlertTriangle, Users, ArrowRight,
 } from 'lucide-react';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -57,6 +58,7 @@ function removeCardFromAll(data: PlanningData, cardId: string): PlanningData {
   const next = deepClone(data);
   next.unassigned = next.unassigned.filter((id) => id !== cardId);
   next.departures = next.departures.filter((id) => id !== cardId);
+  next.confirmed = (next.confirmed ?? []).filter((id) => id !== cardId);
   for (const teamId of Object.keys(next.teams)) {
     const team = next.teams[teamId];
     for (const h of Object.keys(team.slots)) {
@@ -91,13 +93,19 @@ interface PlayerCardProps {
   player?: Player;
   recruit?: RecruitData;
   isDragging: boolean;
+  isConfirmed: boolean;
+  showConfirm: boolean;
   onDragStart: (e: React.DragEvent, cardId: string) => void;
   onContextMenu: (e: React.MouseEvent, cardId: string) => void;
+  onToggleConfirmed: (cardId: string) => void;
   onRemoveRecruit?: (recruitId: string) => void;
   compact?: boolean;
 }
 
-function PlayerCard({ cardId, player, recruit, isDragging, onDragStart, onContextMenu, onRemoveRecruit, compact }: PlayerCardProps) {
+function PlayerCard({
+  cardId, player, recruit, isDragging, isConfirmed, showConfirm,
+  onDragStart, onContextMenu, onToggleConfirmed, onRemoveRecruit, compact,
+}: PlayerCardProps) {
   const isRecruit = cardId.startsWith('recruit|');
   const name = player
     ? `${player.first_name} ${player.last_name}`
@@ -113,18 +121,32 @@ function PlayerCard({ cardId, player, recruit, isDragging, onDragStart, onContex
       className={`
         group relative select-none cursor-grab active:cursor-grabbing
         bg-white border rounded-lg shadow-sm
+        ${isConfirmed ? 'border-l-[3px] border-l-emerald-500' : ''}
         ${isDragging ? 'opacity-40 scale-95' : 'hover:shadow-md hover:-translate-y-0.5'}
         transition-all duration-150
         ${compact ? 'px-2 py-1.5' : 'px-3 py-2'}
       `}
     >
       <div className="flex items-center gap-2">
+        {showConfirm && (
+          <button
+            onClick={(e) => { e.stopPropagation(); e.preventDefault(); onToggleConfirmed(cardId); }}
+            onMouseDown={(e) => e.stopPropagation()}
+            className={`shrink-0 w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors
+              ${isConfirmed
+                ? 'bg-emerald-500 border-emerald-500 text-white'
+                : 'border-gray-300 hover:border-emerald-400'
+              }`}
+          >
+            {isConfirmed && <svg viewBox="0 0 10 8" className="w-2 h-2 fill-current"><path d="M1 4l3 3 5-6"/></svg>}
+          </button>
+        )}
         {number !== undefined && number !== null && (
           <span className="text-xs font-bold text-gray-400 w-5 text-right shrink-0">
             {number}
           </span>
         )}
-        <span className={`font-medium text-gray-800 truncate ${compact ? 'text-xs' : 'text-sm'}`}>
+        <span className={`font-medium truncate ${isConfirmed ? 'text-gray-900' : 'text-gray-600'} ${compact ? 'text-xs' : 'text-sm'}`}>
           {name}
         </span>
         {position && (
@@ -216,6 +238,12 @@ export default function SeasonPlanningPage() {
   const [filterPosition, setFilterPosition] = useState('');
   const [filterFoot, setFilterFoot] = useState('');
 
+  // Apply / revert modal
+  type ModalMode = 'apply' | 'revert' | null;
+  const [applyModal, setApplyModal] = useState<ModalMode>(null);
+  const [applying, setApplying] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
+
   // Editable hierarchy label: { teamId, h } | null
   const [editingLabel, setEditingLabel] = useState<{ teamId: string; h: number } | null>(null);
   const [editingLabelValue, setEditingLabelValue] = useState('');
@@ -235,6 +263,7 @@ export default function SeasonPlanningPage() {
       departures: [],
       unassigned: players.map((p) => p.id),
       recruits: {},
+      confirmed: [],
     };
   }, []);
 
@@ -310,6 +339,39 @@ export default function SeasonPlanningPage() {
       console.error('Season planning save error:', err);
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ── apply / revert ────────────────────────────────────────────────────────
+  const handleApply = async () => {
+    if (!club?.id || !planning) return;
+    setApplying(true);
+    setApplyError(null);
+    try {
+      const updated = await seasonPlanningService.applySeasonPlan(club.id, season, planning);
+      await seasonPlanningService.save(club.id, season, updated);
+      setPlanning(updated);
+      setApplyModal(null);
+    } catch (err) {
+      setApplyError(err instanceof Error ? err.message : 'Erreur lors de l\'application');
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const handleRevert = async () => {
+    if (!club?.id || !planning) return;
+    setApplying(true);
+    setApplyError(null);
+    try {
+      const updated = await seasonPlanningService.revertSeasonPlan(planning);
+      await seasonPlanningService.save(club.id, season, updated);
+      setPlanning(updated);
+      setApplyModal(null);
+    } catch (err) {
+      setApplyError(err instanceof Error ? err.message : 'Erreur lors de l\'annulation');
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -423,6 +485,18 @@ export default function SeasonPlanningPage() {
 
   const closeCtxMenu = () => setCtxMenu(null);
 
+  const toggleConfirmed = (cardId: string) => {
+    setPlanning((prev) => {
+      if (!prev) return prev;
+      const next = deepClone(prev);
+      const list = next.confirmed ?? [];
+      next.confirmed = list.includes(cardId)
+        ? list.filter((id) => id !== cardId)
+        : [...list, cardId];
+      return next;
+    });
+  };
+
   const ctxMoveToUnassigned = () => {
     if (!ctxMenu) return;
     setPlanning((prev) => {
@@ -450,16 +524,19 @@ export default function SeasonPlanningPage() {
     return { fieldPlayers, goalkeepers };
   };
 
-  const renderCard = (cardId: string, onRemoveRecruit?: (id: string) => void) => (
+  const renderCard = (cardId: string, opts?: { showConfirm?: boolean; onRemoveRecruit?: (id: string) => void }) => (
     <PlayerCard
       key={cardId}
       cardId={cardId}
       player={getPlayer(cardId)}
       recruit={getRecruit(cardId)}
       isDragging={draggingId === cardId}
+      isConfirmed={(planning?.confirmed ?? []).includes(cardId)}
+      showConfirm={opts?.showConfirm ?? false}
       onDragStart={handleDragStart}
       onContextMenu={handleContextMenu}
-      onRemoveRecruit={onRemoveRecruit}
+      onToggleConfirmed={toggleConfirmed}
+      onRemoveRecruit={opts?.onRemoveRecruit}
       compact
     />
   );
@@ -483,6 +560,16 @@ export default function SeasonPlanningPage() {
     }
     return true;
   });
+
+  // ── plan summary (for modal) ───────────────────────────────────────────────
+  const planSummary = planning ? (() => {
+    const departureCount = planning.departures.filter((id) => !id.startsWith('recruit|')).length;
+    const assignedCount = Object.values(planning.teams)
+      .flatMap((t) => Object.values(t.slots).flat())
+      .filter((id) => !id.startsWith('recruit|')).length;
+    const unassignedCount = planning.unassigned.filter((id) => !id.startsWith('recruit|')).length;
+    return { departureCount, assignedCount, unassignedCount };
+  })() : null;
 
   if (loading) {
     return (
@@ -527,6 +614,126 @@ export default function SeasonPlanningPage() {
           </button>
         </div>
       )}
+      {/* ── Apply / Revert modal ── */}
+      {applyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            {applyModal === 'apply' ? (
+              <>
+                <div className="px-6 pt-6 pb-4 border-b border-gray-100">
+                  <div className="flex items-center gap-3 mb-1">
+                    <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+                      <PlayCircle className="h-5 w-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-gray-900">Appliquer la saison {season}</h2>
+                      <p className="text-xs text-gray-500">Cette action modifie les données réelles des joueurs.</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="px-6 py-4 space-y-3">
+                  {planSummary && (
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+                        <p className="text-2xl font-black text-red-600">{planSummary.departureCount}</p>
+                        <p className="text-xs text-red-500 font-medium mt-0.5">Départ{planSummary.departureCount !== 1 ? 's' : ''}</p>
+                        <p className="text-[10px] text-red-400 mt-0.5">status → left</p>
+                      </div>
+                      <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+                        <p className="text-2xl font-black text-blue-600">{planSummary.assignedCount}</p>
+                        <p className="text-xs text-blue-500 font-medium mt-0.5">Réassignation{planSummary.assignedCount !== 1 ? 's' : ''}</p>
+                        <p className="text-[10px] text-blue-400 mt-0.5">teams mises à jour</p>
+                      </div>
+                      <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+                        <p className="text-2xl font-black text-gray-600">{planSummary.unassignedCount}</p>
+                        <p className="text-xs text-gray-500 font-medium mt-0.5">Dans le pool</p>
+                        <p className="text-[10px] text-gray-400 mt-0.5">non touchés</p>
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-700">
+                      Un snapshot de sécurité sera créé. Tu pourras annuler l&apos;application si nécessaire.
+                    </p>
+                  </div>
+                  {applyError && (
+                    <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{applyError}</p>
+                  )}
+                </div>
+                <div className="px-6 pb-6 flex gap-3">
+                  <button
+                    onClick={() => { setApplyModal(null); setApplyError(null); }}
+                    disabled={applying}
+                    className="flex-1 px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={handleApply}
+                    disabled={applying}
+                    className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+                  >
+                    {applying ? <RefreshCw className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
+                    {applying ? 'Application…' : 'Appliquer'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="px-6 pt-6 pb-4 border-b border-gray-100">
+                  <div className="flex items-center gap-3 mb-1">
+                    <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center shrink-0">
+                      <Undo2 className="h-5 w-5 text-orange-600" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-gray-900">Annuler l&apos;application</h2>
+                      <p className="text-xs text-gray-500">Remet les joueurs dans leur état d&apos;avant.</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="px-6 py-4 space-y-3">
+                  <p className="text-sm text-gray-700">
+                    Les statuts et appartenances d&apos;équipe de tous les joueurs concernés seront restaurés depuis le snapshot de sécurité.
+                  </p>
+                  <div className="flex items-start gap-2 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
+                    <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0 mt-0.5" />
+                    <p className="text-xs text-orange-700">
+                      Le plan de planification sera conservé — seules les données réelles sont restaurées.
+                    </p>
+                  </div>
+                  {planning?.appliedAt && (
+                    <p className="text-xs text-gray-400 text-center">
+                      Appliqué le {new Date(planning.appliedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  )}
+                  {applyError && (
+                    <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{applyError}</p>
+                  )}
+                </div>
+                <div className="px-6 pb-6 flex gap-3">
+                  <button
+                    onClick={() => { setApplyModal(null); setApplyError(null); }}
+                    disabled={applying}
+                    className="flex-1 px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    Garder tel quel
+                  </button>
+                  <button
+                    onClick={handleRevert}
+                    disabled={applying}
+                    className="flex-1 px-4 py-2 rounded-lg bg-orange-500 text-white text-sm font-bold hover:bg-orange-600 transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+                  >
+                    {applying ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
+                    {applying ? 'Restauration…' : 'Restaurer'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── Header ── */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white shrink-0">
         <div>
@@ -561,24 +768,52 @@ export default function SeasonPlanningPage() {
             </button>
           </div>
 
-          <div className="flex flex-col items-end gap-1">
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className={`
-                flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
-                ${saved
-                  ? 'bg-green-100 text-green-700 border border-green-300'
-                  : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm'
-                }
-              `}
-            >
-              {saved ? (
-                <><CheckCircle className="h-4 w-4" /> Sauvegardé</>
-              ) : (
-                <><Save className="h-4 w-4" /> {saving ? 'Sauvegarde…' : 'Sauvegarder'}</>
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex items-center gap-2">
+              {/* Revert button — only visible when plan has been applied */}
+              {planning?.appliedAt && (
+                <button
+                  onClick={() => { setApplyError(null); setApplyModal('revert'); }}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-orange-300 text-orange-600 bg-orange-50 hover:bg-orange-100 transition-colors"
+                  title="Annuler l'application de la saison"
+                >
+                  <Undo2 className="h-4 w-4" />
+                  Annuler l&apos;application
+                </button>
               )}
-            </button>
+              {/* Apply button — disabled if already applied */}
+              {!planning?.appliedAt ? (
+                <button
+                  onClick={() => { setApplyError(null); setApplyModal('apply'); }}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm transition-colors"
+                >
+                  <PlayCircle className="h-4 w-4" />
+                  Appliquer la saison
+                </button>
+              ) : (
+                <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-50 border border-emerald-300 text-emerald-700">
+                  <CheckCircle className="h-4 w-4" />
+                  Saison appliquée
+                </div>
+              )}
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className={`
+                  flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
+                  ${saved
+                    ? 'bg-green-100 text-green-700 border border-green-300'
+                    : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm'
+                  }
+                `}
+              >
+                {saved ? (
+                  <><CheckCircle className="h-4 w-4" /> Sauvegardé</>
+                ) : (
+                  <><Save className="h-4 w-4" /> {saving ? 'Sauvegarde…' : 'Sauvegarder'}</>
+                )}
+              </button>
+            </div>
             {lastSavedAt && (
               <span className="text-[10px] text-gray-400">
                 Dernière sauvegarde : {lastSavedAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
@@ -710,7 +945,7 @@ export default function SeasonPlanningPage() {
               emptyLabel="Tous assignés !"
             >
               {filteredUnassigned.map((id) =>
-                renderCard(id, id.startsWith('recruit|') ? handleRemoveRecruit : undefined)
+                renderCard(id, { onRemoveRecruit: id.startsWith('recruit|') ? handleRemoveRecruit : undefined })
               )}
             </DropZone>
           </div>
@@ -725,6 +960,11 @@ export default function SeasonPlanningPage() {
               <LogOut className="h-4 w-4 text-red-500" />
               <span className="font-semibold text-red-700 text-sm">Départs du club</span>
               <span className="text-xs text-red-400">({planning.departures.length})</span>
+              {planning.appliedAt && planning.departures.length > 0 && (
+                <span className="ml-auto text-[10px] font-semibold bg-red-100 text-red-600 px-2 py-0.5 rounded-full">
+                  status: left ✓
+                </span>
+              )}
             </div>
             <div className="p-2">
               <DropZone
@@ -735,7 +975,7 @@ export default function SeasonPlanningPage() {
                 onDrop={handleDrop}
                 emptyLabel="Déposer les joueurs qui quittent le club"
               >
-                {planning.departures.map((id) => renderCard(id))}
+                {planning.departures.map((id) => renderCard(id, { showConfirm: true }))}
               </DropZone>
             </div>
           </div>
@@ -843,7 +1083,10 @@ export default function SeasonPlanningPage() {
                               className={`border-2 ${style.border} rounded-lg`}
                               emptyLabel="Déposer un joueur"
                             >
-                              {cards.map((id) => renderCard(id, id.startsWith('recruit|') ? handleRemoveRecruit : undefined))}
+                              {cards.map((id) => renderCard(id, {
+                                showConfirm: true,
+                                onRemoveRecruit: id.startsWith('recruit|') ? handleRemoveRecruit : undefined,
+                              }))}
                             </DropZone>
                           </div>
                         </div>

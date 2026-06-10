@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { playersService } from '@/lib/services/playersService';
@@ -11,15 +10,209 @@ import {
   Trash2,
   AlertCircle,
   Check,
-  Pencil
+  Pencil,
+  Search,
+  ChevronUp,
+  ChevronDown,
+  ChevronsUpDown,
+  LayoutGrid,
+  List,
 } from 'lucide-react';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
 
+// ─── Design tokens ────────────────────────────────────────────────────────────
+const T = {
+  pageBg:      '#EEF0F5',
+  cardBg:      '#FFFFFF',
+  border:      '#DDE1EA',
+  text:        '#1A2332',
+  textMuted:   '#697585',
+  accent:      '#3B82F6',
+  accentAmber: '#FFB020',
+  rowOdd:      '#F9FAFB',
+};
+
+// ─── Player Card component ────────────────────────────────────────────────────
+function PlayerCard({
+  player, pos, st, attPct, onOpen, onEdit, onDelete,
+}: {
+  player: any;
+  pos: { abbr: string; color: string; bg: string };
+  st: { label: string; color: string; bg: string };
+  attPct: number;
+  onOpen: () => void;
+  onEdit: (e: React.MouseEvent) => void;
+  onDelete: (e: React.MouseEvent) => void;
+}) {
+  const [hov, setHov] = useState(false);
+  const goals = player.goals ?? 0;
+  const matches = player.matches_played ?? 0;
+  const trainings = player.training_attendance ?? 0;
+  return (
+    <div
+      onClick={onOpen}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        backgroundColor: '#FFFFFF',
+        border: `1.5px solid ${hov ? pos.color + '60' : '#DDE1EA'}`,
+        borderRadius: 10,
+        cursor: 'pointer',
+        transition: 'all 150ms ease',
+        transform: hov ? 'translateY(-2px)' : 'none',
+        boxShadow: hov ? `0 6px 20px ${pos.color}18` : '0 1px 4px rgba(30,58,95,0.05)',
+        overflow: 'hidden',
+        position: 'relative',
+      }}
+    >
+      {/* Top color stripe */}
+      <div style={{ height: 4, backgroundColor: pos.color, width: '100%' }} />
+
+      <div style={{ padding: '12px 14px 14px' }}>
+        {/* Header row: number + position + status */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+          <span style={{
+            fontSize: 11, fontWeight: 900, color: pos.color,
+            width: 28, height: 28, borderRadius: 6,
+            backgroundColor: pos.bg,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            {player.number != null ? player.number : '#'}
+          </span>
+          <span style={{
+            fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 3,
+            backgroundColor: pos.bg, color: pos.color, letterSpacing: '0.3px',
+          }}>
+            {pos.abbr}
+          </span>
+          <div style={{ flex: 1 }} />
+          <span style={{
+            fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 3,
+            backgroundColor: st.bg, color: st.color,
+          }}>
+            {st.label}
+          </span>
+        </div>
+
+        {/* Name */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: '#1A2332', letterSpacing: '0.3px', lineHeight: 1.2 }}>
+            {player.last_name.toUpperCase()}
+          </div>
+          <div style={{ fontSize: 11, color: '#697585', marginTop: 2 }}>
+            {player.first_name}{player.birth_date ? ` · ${calcAge(player.birth_date)} ans` : ''}
+          </div>
+        </div>
+
+        {/* Stats row */}
+        <div style={{ display: 'flex', gap: 0, borderTop: '1px solid #F1F5F9', paddingTop: 10 }}>
+          {[
+            { val: matches,  label: 'Matchs',   color: '#2563EB' },
+            { val: goals,    label: 'Buts',      color: goals > 0 ? '#D97706' : '#94A3B8' },
+            { val: `${attPct}%`, label: 'Présence',
+              color: attPct >= 80 ? '#16A34A' : attPct >= 60 ? '#D97706' : attPct > 0 ? '#DC2626' : '#94A3B8' },
+          ].map((s, i) => (
+            <div key={i} style={{ flex: 1, textAlign: 'center', borderLeft: i > 0 ? '1px solid #F1F5F9' : 'none' }}>
+              <div style={{ fontSize: 14, fontWeight: 900, color: s.color, lineHeight: 1 }}>{s.val}</div>
+              <div style={{ fontSize: 9, color: '#94A3B8', marginTop: 2, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Attendance bar */}
+        {attPct > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ height: 3, borderRadius: 2, backgroundColor: '#F1F5F9', overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', borderRadius: 2,
+                width: `${Math.min(attPct, 100)}%`,
+                backgroundColor: attPct >= 80 ? '#16A34A' : attPct >= 60 ? '#D97706' : '#DC2626',
+                transition: 'width 600ms ease',
+              }} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Hover actions */}
+      {hov && (
+        <div
+          style={{
+            position: 'absolute', top: 10, right: 10,
+            display: 'flex', gap: 4,
+          }}
+          onClick={e => e.stopPropagation()}
+        >
+          <button
+            onClick={onEdit}
+            style={{ padding: 5, borderRadius: 6, border: '1px solid #E2E8F0', backgroundColor: '#FFF', cursor: 'pointer', color: '#3B82F6' }}
+            title="Modifier"
+          >
+            <Pencil size={12} />
+          </button>
+          <button
+            onClick={onDelete}
+            style={{ padding: 5, borderRadius: 6, border: '1px solid #E2E8F0', backgroundColor: '#FFF', cursor: 'pointer', color: '#EF4444' }}
+            title="Supprimer"
+          >
+            <Trash2 size={12} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Position config ──────────────────────────────────────────────────────────
+const POSITION_MAP: Record<string, { abbr: string; color: string; bg: string }> = {
+  Gardien:   { abbr: 'GB',  color: '#EF4444', bg: 'rgba(239,68,68,0.10)'   },
+  Ailier:    { abbr: 'AIL', color: '#3B82F6', bg: 'rgba(59,130,246,0.10)'  },
+  Meneur:    { abbr: 'MEN', color: '#22C55E', bg: 'rgba(34,197,94,0.10)'   },
+  Pivot:     { abbr: 'PIV', color: '#8B5CF6', bg: 'rgba(139,92,246,0.10)'  },
+};
+
+function getPosition(position?: string) {
+  if (!position) return { abbr: '—', color: T.textMuted, bg: '#F1F5F9' };
+  const key = Object.keys(POSITION_MAP).find(k =>
+    position.toLowerCase().startsWith(k.toLowerCase())
+  );
+  return key ? POSITION_MAP[key] : { abbr: position.slice(0, 3).toUpperCase(), color: T.textMuted, bg: '#F1F5F9' };
+}
+
+// ─── Status badge config ──────────────────────────────────────────────────────
+const STATUS_MAP: Record<string, { label: string; color: string; bg: string }> = {
+  'Non-muté': { label: 'Actif',     color: '#16A34A', bg: 'rgba(22,163,74,0.10)'    },
+  'Muté':     { label: 'Muté',      color: '#3B82F6', bg: 'rgba(59,130,246,0.10)'   },
+  'Muté HP':  { label: 'Muté HP',   color: '#F97316', bg: 'rgba(249,115,22,0.10)'   },
+  'Blessé':   { label: 'Blessé',    color: '#EF4444', bg: 'rgba(239,68,68,0.10)'    },
+  'Suspendu': { label: 'Suspendu',  color: '#FFB020', bg: 'rgba(255,176,32,0.10)'   },
+};
+
+function getStatus(status?: string) {
+  if (!status) return { label: status || '—', color: T.textMuted, bg: '#F1F5F9' };
+  return STATUS_MAP[status] ?? { label: status, color: T.textMuted, bg: '#F1F5F9' };
+}
+
+// ─── Match type filter ────────────────────────────────────────────────────────
+type MatchTypeFilter = 'all' | 'Championnat' | 'Coupe' | 'Amical';
+const MATCH_FILTERS: { label: string; value: MatchTypeFilter }[] = [
+  { label: 'Tous',         value: 'all' },
+  { label: 'Championnat', value: 'Championnat' },
+  { label: 'Coupe',       value: 'Coupe' },
+  { label: 'Amical',      value: 'Amical' },
+];
+
+// ─── Sort ─────────────────────────────────────────────────────────────────────
+type SortKey = 'name' | 'seances' | 'matches' | 'goals';
+type SortDir = 'asc' | 'desc';
+
+// ─── Interfaces ───────────────────────────────────────────────────────────────
 interface Player {
   id: string;
   first_name: string;
   last_name: string;
-  age: number;
+  birth_date?: string | null;
   position: string;
   strong_foot: string;
   status: string;
@@ -34,233 +227,172 @@ interface Player {
 interface PlayerFormData {
   first_name: string;
   last_name: string;
-  age: string;
+  birth_date: string;
   position: string;
   strong_foot: string;
   status: string;
   number: string;
   sequence_time_limit: string;
-  selectedTeams: string[]; // Tableau d'IDs d'équipes
-}
-
-interface FilterState {
-  name: string;
-  age: string;
-  position: string;
-  strongFoot: string;
-  status: string;
+  selectedTeams: string[];
 }
 
 const initialFormData: PlayerFormData = {
   first_name: '',
   last_name: '',
-  age: '',
+  birth_date: '',
   position: '',
   strong_foot: '',
   status: '',
   number: '',
   sequence_time_limit: '180',
-  selectedTeams: []
+  selectedTeams: [],
 };
 
-const initialFilters: FilterState = {
-  name: '',
-  age: '',
-  position: '',
-  strongFoot: '',
-  status: ''
-};
+function calcAge(birthDate: string): number {
+  const today = new Date();
+  const birth = new Date(birthDate);
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+  return age;
+}
 
+// ─── Sort icon helper ─────────────────────────────────────────────────────────
+function SortIcon({ col, sortKey, sortDir }: { col: SortKey; sortKey: SortKey; sortDir: SortDir }) {
+  if (sortKey !== col) return <ChevronsUpDown size={13} style={{ color: T.textMuted, marginLeft: 3 }} />;
+  return sortDir === 'asc'
+    ? <ChevronUp size={13} style={{ color: T.accent, marginLeft: 3 }} />
+    : <ChevronDown size={13} style={{ color: T.accent, marginLeft: 3 }} />;
+}
+
+// ─── Page component ───────────────────────────────────────────────────────────
 export default function SquadPage() {
   const router = useRouter();
   const { activeTeam, teams } = useActiveTeam();
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [totalTrainings, setTotalTrainings] = useState<number>(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
-  const [formData, setFormData] = useState<PlayerFormData>(initialFormData);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [filters, setFilters] = useState<FilterState>(initialFilters);
 
-  // Recharger les données quand l'équipe active change OU au chargement initial
+  // Data state
+  const [players, setPlayers]           = useState<Player[]>([]);
+  const [totalTrainings, setTotalTrainings] = useState<number>(0);
+  const [loading, setLoading]           = useState(true);
+  const [error, setError]               = useState<string | null>(null);
+  const [success, setSuccess]           = useState<string | null>(null);
+
+  // Modal state
+  const [isModalOpen, setIsModalOpen]   = useState(false);
+  const [isEditing, setIsEditing]       = useState(false);
+  const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
+  const [formData, setFormData]         = useState<PlayerFormData>(initialFormData);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // UI state
+  const [searchName, setSearchName]     = useState('');
+  const [matchFilter, setMatchFilter]   = useState<MatchTypeFilter>('all');
+  const [sortKey, setSortKey]           = useState<SortKey>('name');
+  const [sortDir, setSortDir]           = useState<SortDir>('asc');
+  const [viewMode, setViewMode]         = useState<'cards' | 'table'>('cards');
+
+  // ── Data loading ────────────────────────────────────────────────────────────
+
   useEffect(() => {
     if (activeTeam) {
-      console.log('🏆 Équipe active détectée, chargement des données pour:', activeTeam.name);
-      console.log('🏆 ID de l\'équipe:', activeTeam.id);
-      
-      // Vider d'abord les données existantes
       setPlayers([]);
       setTotalTrainings(0);
       setLoading(true);
-      
-      // Puis recharger les nouvelles données
       const loadData = async () => {
         try {
-          console.log('🏆 Début du chargement des données...');
           await fetchTotalTrainings();
           await fetchPlayers();
-          console.log('🏆 Chargement des données terminé');
         } catch (err) {
-          console.error('🏆 Erreur lors du chargement des données:', err);
+          console.error('Erreur lors du chargement des données:', err);
         } finally {
           setLoading(false);
         }
       };
-      
       loadData();
     } else {
-      console.log('🏆 Aucune équipe active, attente...');
       setPlayers([]);
       setTotalTrainings(0);
       setLoading(false);
     }
   }, [activeTeam]);
 
-  // Recalculer les stats quand totalTrainings ou players changent
   useEffect(() => {
     if (totalTrainings > 0 && players.length > 0 && activeTeam) {
-      console.log('🏆 Recalcul des stats pour l\'équipe:', activeTeam.name);
       recalculatePlayerStats();
     }
-  }, [totalTrainings, players, activeTeam]);
-
-  const handleFilterChange = (field: keyof FilterState, value: string) => {
-    setFilters(prev => ({ ...prev, [field]: value }));
-  };
-
-  const resetFilters = () => {
-    setFilters(initialFilters);
-  };
+  }, [totalTrainings, players.length, activeTeam]);
 
   const fetchTotalTrainings = async () => {
     try {
-      // Vérifier qu'une équipe est sélectionnée
-      if (!activeTeam) {
-        console.log('🏆 Aucune équipe active, chargement des entraînements impossible');
-        setTotalTrainings(0);
-        return;
-      }
-      
-      console.log('🏆 Chargement des entraînements pour l\'équipe:', activeTeam.name);
-      console.log('🏆 Requête Supabase avec team_id:', activeTeam.id);
-      
+      if (!activeTeam) { setTotalTrainings(0); return; }
       const { count, error } = await supabase
         .from('trainings')
         .select('*', { count: 'exact', head: true })
         .eq('team_id', activeTeam.id);
-
-      if (error) {
-        console.error('🏆 Erreur Supabase:', error);
-        throw error;
-      }
-      
-      console.log('🏆 Nombre d\'entraînements trouvés:', count);
+      if (error) throw error;
       setTotalTrainings(count || 0);
     } catch (err) {
-      console.error('🏆 Erreur lors de la récupération du nombre total d\'entraînements:', err);
+      console.error('Erreur trainings:', err);
       setTotalTrainings(0);
     }
   };
 
   const recalculatePlayerStats = async () => {
     try {
-      // Vérifier qu'une équipe est sélectionnée
-      if (!activeTeam) {
-        console.log('Aucune équipe active, recalcul des stats impossible');
-        return;
-      }
-      
-      console.log('Recalcul des stats pour l\'équipe:', activeTeam.name);
-      
-      // Récupération des matchs filtrés par équipe
+      if (!activeTeam) return;
       const { data: matchesData, error: matchesError } = await supabase
         .from('matches')
         .select('players')
         .eq('team_id', activeTeam.id);
       if (matchesError) throw matchesError;
 
-      // Récupération des entraînements filtrés par équipe avec le nouveau champ attendance
       const { data: trainingsData, error: trainingsError } = await supabase
         .from('trainings')
         .select('attendance')
         .eq('team_id', activeTeam.id);
       if (trainingsError) throw trainingsError;
-      
-      console.log('Trainings data récupérée:', trainingsData);
 
-      // Recalcul des stats pour chaque joueur
-      const playersWithUpdatedStats = players.map(player => {
+      setPlayers(prev => prev.map(player => {
         try {
-          // Nombre de matchs joués
           const matchesPlayed = (matchesData || []).filter(match => {
             if (!match.players) return false;
             try {
               const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
               return arr.some((p: { id: string }) => p.id === player.id);
-            } catch {
-              return false;
-            }
+            } catch { return false; }
           }).length;
 
-          // Nombre de buts marqués
           const goals = (matchesData || []).reduce((sum, match) => {
             if (!match.players) return sum;
             try {
               const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
-              const playerMatch = arr.find((p: { id: string; goals?: number; yellow_cards?: number; red_cards?: number }) => p.id === player.id);
-              return sum + (playerMatch && typeof playerMatch.goals === 'number' ? playerMatch.goals : 0);
-            } catch {
-              return sum;
-            }
+              const pm = arr.find((p: { id: string; goals?: number }) => p.id === player.id);
+              return sum + (pm && typeof pm.goals === 'number' ? pm.goals : 0);
+            } catch { return sum; }
           }, 0);
 
-          // Nombre de présences à l'entraînement (nouveau système avec attendance JSONB)
           const trainingAttendance = (trainingsData || []).filter(training => {
-            try {
-              // Debug: vérifier la structure de chaque training
-              if (!training.attendance || typeof training.attendance !== 'object') {
-                console.log('Training sans attendance valide:', training);
-                return false;
-              }
-              
-              // Vérifier si le joueur est présent dans ce training
-              const isPresent = training.attendance[player.id] === 'present';
-              console.log('Vérification présence:', { 
-                playerId: player.id, 
-                attendance: training.attendance[player.id],
-                isPresent 
-              });
-              return isPresent;
-            } catch (error) {
-              console.error('Erreur lors de la vérification de présence:', error, training);
-              return false;
-            }
+            if (!training.attendance || typeof training.attendance !== 'object') return false;
+            const s = training.attendance[player.id];
+            return s === 'present' || s === 'late';
           }).length;
-
-          const attendance_percentage = totalTrainings > 0 ? Math.round((trainingAttendance / totalTrainings) * 100) : 0;
+          const trainingConvoked = (trainingsData || []).filter(training => {
+            if (!training.attendance || typeof training.attendance !== 'object') return false;
+            const s = training.attendance[player.id];
+            return s === 'present' || s === 'late' || s === 'absent' || s === 'injured';
+          }).length;
 
           return {
             ...player,
             matches_played: matchesPlayed,
             goals,
             training_attendance: trainingAttendance,
-          attendance_percentage,
-          sequence_time_limit: player.sequence_time_limit ?? 180
+            attendance_percentage: trainingConvoked > 0 ? Math.round((trainingAttendance / trainingConvoked) * 100) : 0,
           };
-        } catch (playerError) {
-          console.error('Erreur lors du traitement du joueur:', player.id, playerError);
-          return player; // Retourner le joueur sans modification en cas d'erreur
-        }
-      });
-
-      console.log('Stats recalculées avec succès');
-      setPlayers(playersWithUpdatedStats);
+        } catch { return player; }
+      }));
     } catch (err) {
-      console.error('Erreur lors du recalcul des stats:', err);
+      console.error('Erreur recalcul stats:', err);
     }
   };
 
@@ -268,89 +400,60 @@ export default function SquadPage() {
     try {
       setLoading(true);
       setError(null);
-      
-      // Vérifier qu'une équipe est sélectionnée
-      if (!activeTeam) {
-        console.log('❌ Aucune équipe active, chargement des joueurs impossible');
-        setPlayers([]);
-        return;
-      }
-      
-      console.log('🏆 Chargement des joueurs pour l\'équipe:', activeTeam.name, 'ID:', activeTeam.id);
-      
-      // Récupération des joueurs filtrés par équipe via la table de liaison
+      if (!activeTeam) { setPlayers([]); return; }
+
       const { data, error } = await supabase
         .from('player_teams')
-        .select(`
-          player_id,
-          players (*)
-        `)
+        .select(`player_id, players (*)`)
         .eq('team_id', activeTeam.id)
         .order('players(last_name)');
-      
-      // Transformer les données pour extraire les joueurs
-      const playersData = data?.map((item: any) => item.players).filter(Boolean) || [];
 
+      const playersData = (data?.map((item: any) => item.players).filter(Boolean) || []) as any[];
       if (error) throw error;
 
-      console.log('📊 Joueurs récupérés de Supabase:', playersData?.length || 0);
-      if (playersData && playersData.length > 0) {
-        console.log('📋 Premier joueur (exemple):', playersData[0]);
-      } else {
-        console.log('⚠️ Aucun joueur trouvé pour l\'équipe:', activeTeam.name);
-        console.log('⚠️ Vérifiez que l\'équipe a des joueurs dans la base de données');
-      }
-
-      // Récupération des matchs
       const { data: matchesData, error: matchesError } = await supabase
         .from('matches')
         .select('players');
       if (matchesError) throw matchesError;
 
-      // Récupération des entraînements avec le nouveau champ attendance
       const { data: trainingsData, error: trainingsError } = await supabase
         .from('trainings')
         .select('attendance');
       if (trainingsError) throw trainingsError;
 
-      // Calcul dynamique des stats pour chaque joueur
-      const playersWithStats = (playersData || []).map(player => {
-        const sequenceTimeLimit =
-          typeof (player as any).sequence_time_limit === 'number'
-            ? (player as any).sequence_time_limit
-            : 180;
-        // Nombre de matchs joués
+      const playersWithStats = playersData.map(player => {
+        const sequenceTimeLimit = typeof player.sequence_time_limit === 'number' ? player.sequence_time_limit : 180;
+
         const matchesPlayed = (matchesData || []).filter(match => {
           if (!match.players) return false;
           try {
             const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
             return arr.some((p: { id: string }) => p.id === player.id);
-          } catch {
-            return false;
-          }
+          } catch { return false; }
         }).length;
 
-        // Nombre de buts marqués
-        const goals = (matchesData || []).reduce((sum, match) => {
+        const goals = (matchesData || []).reduce((sum: number, match) => {
           if (!match.players) return sum;
           try {
             const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
-            const playerMatch = arr.find((p: { id: string; goals?: number; yellow_cards?: number; red_cards?: number }) => p.id === player.id);
-            return sum + (playerMatch && typeof playerMatch.goals === 'number' ? playerMatch.goals : 0);
-          } catch {
-            return sum;
-          }
+            const pm = arr.find((p: { id: string; goals?: number }) => p.id === player.id);
+            return sum + (pm && typeof pm.goals === 'number' ? pm.goals : 0);
+          } catch { return sum; }
         }, 0);
 
-        // Nombre de présences à l'entraînement (nouveau système avec attendance JSONB)
         const trainingAttendance = (trainingsData || []).filter(training => {
           if (!training.attendance) return false;
           try {
-            // Vérifier si le joueur est présent dans ce training
-            return training.attendance[player.id] === 'present';
-          } catch {
-            return false;
-          }
+            const s = training.attendance[player.id];
+            return s === 'present' || s === 'late';
+          } catch { return false; }
+        }).length;
+        const trainingConvoked = (trainingsData || []).filter(training => {
+          if (!training.attendance) return false;
+          try {
+            const s = training.attendance[player.id];
+            return s === 'present' || s === 'late' || s === 'absent' || s === 'injured';
+          } catch { return false; }
         }).length;
 
         return {
@@ -358,100 +461,91 @@ export default function SquadPage() {
           matches_played: matchesPlayed,
           goals,
           training_attendance: trainingAttendance,
-          attendance_percentage: totalTrainings > 0 ? Math.round((trainingAttendance / totalTrainings) * 100) : 0,
-          sequence_time_limit: sequenceTimeLimit
+          attendance_percentage: trainingConvoked > 0 ? Math.round((trainingAttendance / trainingConvoked) * 100) : 0,
+          sequence_time_limit: sequenceTimeLimit,
         };
       });
 
       setPlayers(playersWithStats);
-
     } catch (err) {
-      console.error('Erreur lors du chargement des joueurs:', err);
+      console.error('Erreur chargement joueurs:', err);
       setError(err instanceof Error ? err.message : 'Une erreur est survenue');
     } finally {
       setLoading(false);
     }
   };
 
-  // Filtrage des joueurs
-  const filteredPlayers = useMemo(() => {
-    return players.filter(player => {
-      const fullName = `${player.first_name} ${player.last_name}`.toLowerCase();
-      const searchName = filters.name.toLowerCase();
-      
-      if (filters.name && !fullName.includes(searchName)) return false;
-      if (filters.age && player.age.toString() !== filters.age) return false;
-      if (filters.position && player.position !== filters.position) return false;
-      if (filters.strongFoot && player.strong_foot !== filters.strongFoot) return false;
-      if (filters.status && player.status !== filters.status) return false;
-      return true;
-    });
-  }, [players, filters]);
+  // ── Sorting ─────────────────────────────────────────────────────────────────
 
-  const handleOpenModal = async (player?: Player) => {
-    // Vérifier qu'une équipe est active
-    if (!activeTeam) {
-      setError('Aucune équipe active sélectionnée. Veuillez sélectionner une équipe dans la sidebar.');
-      return;
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir(key === 'name' ? 'asc' : 'desc'); }
+  };
+
+  // ── Filtering + sorting pipeline ────────────────────────────────────────────
+
+  const displayedPlayers = useMemo(() => {
+    let list = [...players];
+
+    // Name search
+    if (searchName.trim()) {
+      const q = searchName.toLowerCase();
+      list = list.filter(p => `${p.first_name} ${p.last_name}`.toLowerCase().includes(q));
     }
 
-    console.log('🏆 Ouverture du modal pour l\'équipe:', activeTeam.name);
+    // Sort
+    list.sort((a, b) => {
+      let va: number | string, vb: number | string;
+      switch (sortKey) {
+        case 'seances': va = a.training_attendance ?? 0; vb = b.training_attendance ?? 0; break;
+        case 'matches': va = a.matches_played ?? 0;      vb = b.matches_played ?? 0;      break;
+        case 'goals':   va = a.goals ?? 0;               vb = b.goals ?? 0;               break;
+        default:
+          va = `${a.last_name} ${a.first_name}`;
+          vb = `${b.last_name} ${b.first_name}`;
+      }
+      if (typeof va === 'string')
+        return sortDir === 'asc' ? va.localeCompare(vb as string, 'fr') : (vb as string).localeCompare(va, 'fr');
+      return sortDir === 'asc' ? (va as number) - (vb as number) : (vb as number) - (va as number);
+    });
 
+    return list;
+  }, [players, searchName, sortKey, sortDir]);
+
+  // ── Modal handlers ──────────────────────────────────────────────────────────
+
+  const handleOpenModal = async (player?: Player) => {
+    if (!activeTeam) {
+      setError('Aucune équipe active sélectionnée.');
+      return;
+    }
     if (player) {
       setIsEditing(true);
       setCurrentPlayer(player);
-      
-      // Récupérer les équipes du joueur
       let playerTeamIds: string[] = [];
-      
       try {
-        const { data: playerTeamsData, error: playerTeamsError } = await supabase
+        const { data: ptData } = await supabase
           .from('player_teams')
           .select('team_id')
           .eq('player_id', player.id);
-        
-        if (playerTeamsError) {
-          console.warn('Erreur lors de la récupération des équipes du joueur:', playerTeamsError);
-        } else {
-          playerTeamIds = playerTeamsData?.map(pt => pt.team_id) || [];
-        }
-      } catch (err) {
-        console.warn('Erreur lors de la récupération des équipes du joueur:', err);
-      }
-      
-      // Si le joueur n'a pas d'équipes dans player_teams, utiliser team_id ou l'équipe active
-      if (playerTeamIds.length === 0) {
-        const fallbackTeamId = (player as any).team_id || activeTeam?.id;
-        if (fallbackTeamId) {
-          playerTeamIds = [fallbackTeamId];
-        } else if (activeTeam) {
-          playerTeamIds = [activeTeam.id];
-        }
-      }
-      
-      // S'assurer qu'au moins une équipe est sélectionnée
-      if (playerTeamIds.length === 0 && activeTeam) {
-        playerTeamIds = [activeTeam.id];
-      }
-      
+        playerTeamIds = ptData?.map((pt: { team_id: string }) => pt.team_id) || [];
+      } catch { /* ignore */ }
+      if (playerTeamIds.length === 0) playerTeamIds = [activeTeam.id];
       setFormData({
         first_name: player.first_name,
         last_name: player.last_name,
-        age: player.age.toString(),
+        birth_date: player.birth_date || '',
         position: player.position,
         strong_foot: player.strong_foot,
         status: player.status,
         number: player.number?.toString() || '',
         sequence_time_limit: (player.sequence_time_limit ?? 180).toString(),
-        selectedTeams: playerTeamIds
+        selectedTeams: playerTeamIds,
       });
     } else {
       setIsEditing(false);
       setCurrentPlayer(null);
-      setFormData({
-        ...initialFormData,
-        selectedTeams: [activeTeam.id] // Pré-sélectionner l'équipe active par défaut
-      });
+      setFormData({ ...initialFormData, selectedTeams: [activeTeam.id] });
     }
     setIsModalOpen(true);
   };
@@ -467,99 +561,54 @@ export default function SquadPage() {
     setIsSubmitting(true);
     setError(null);
     setSuccess(null);
-
     try {
-      // Vérifier qu'au moins une équipe est sélectionnée
       if (!formData.selectedTeams || formData.selectedTeams.length === 0) {
-        setError('Veuillez sélectionner au moins une équipe pour ce joueur.');
-        setIsSubmitting(false);
+        setError('Veuillez sélectionner au moins une équipe.');
         return;
       }
-
-      console.log('🏆 Ajout/modification de joueur pour les équipes:', formData.selectedTeams);
-
       const playerData = {
         first_name: formData.first_name,
         last_name: formData.last_name,
-        age: parseInt(formData.age),
+        birth_date: formData.birth_date || null,
         position: formData.position,
         strong_foot: formData.strong_foot,
         status: formData.status,
         number: formData.number ? parseInt(formData.number) : null,
         sequence_time_limit: formData.sequence_time_limit ? parseInt(formData.sequence_time_limit) : 180,
-        team_id: formData.selectedTeams[0] // Garder la première équipe comme équipe principale (rétrocompatibilité)
+        team_id: formData.selectedTeams[0],
       };
-
-      console.log('🏆 Données du joueur à enregistrer:', playerData);
 
       let playerId: string;
 
       if (isEditing && currentPlayer) {
-        // Mise à jour du joueur
-        const { error: updateError } = await supabase
-          .from('players')
-          .update(playerData)
-          .eq('id', currentPlayer.id);
-
+        const { error: updateError } = await supabase.from('players').update(playerData).eq('id', currentPlayer.id);
         if (updateError) throw updateError;
         playerId = currentPlayer.id;
-
-        // Mettre à jour les relations avec les équipes
-        // Supprimer toutes les relations existantes
-        const { error: deleteError } = await supabase
-          .from('player_teams')
-          .delete()
-          .eq('player_id', playerId);
-
+        const { error: deleteError } = await supabase.from('player_teams').delete().eq('player_id', playerId);
         if (deleteError) throw deleteError;
-
-        // Ajouter les nouvelles relations
-        const teamRelations = formData.selectedTeams.map(teamId => ({
-          player_id: playerId,
-          team_id: teamId
-        }));
-
-        const { error: insertError } = await supabase
-          .from('player_teams')
-          .insert(teamRelations);
-
+        const { error: insertError } = await supabase.from('player_teams').insert(
+          formData.selectedTeams.map(teamId => ({ player_id: playerId, team_id: teamId }))
+        );
         if (insertError) throw insertError;
-
         const teamNames = teams.filter(t => formData.selectedTeams.includes(t.id)).map(t => t.name).join(', ');
-        setSuccess(`Joueur modifié avec succès dans ${teamNames}`);
+        setSuccess(`Joueur modifié dans ${teamNames}`);
       } else {
-        // Création du joueur
         const { data: newPlayer, error: insertError } = await supabase
-          .from('players')
-          .insert([playerData])
-          .select()
-          .single();
-
+          .from('players').insert([playerData]).select().single();
         if (insertError) throw insertError;
         if (!newPlayer) throw new Error('Erreur lors de la création du joueur');
-
         playerId = newPlayer.id;
-
-        // Ajouter les relations avec les équipes
-        const teamRelations = formData.selectedTeams.map(teamId => ({
-          player_id: playerId,
-          team_id: teamId
-        }));
-
-        const { error: relationError } = await supabase
-          .from('player_teams')
-          .insert(teamRelations);
-
+        const { error: relationError } = await supabase.from('player_teams').insert(
+          formData.selectedTeams.map(teamId => ({ player_id: playerId, team_id: teamId }))
+        );
         if (relationError) throw relationError;
-
         const teamNames = teams.filter(t => formData.selectedTeams.includes(t.id)).map(t => t.name).join(', ');
-        setSuccess(`Joueur ajouté avec succès dans ${teamNames}`);
+        setSuccess(`Joueur ajouté dans ${teamNames}`);
       }
 
       handleCloseModal();
       fetchPlayers();
     } catch (err) {
-      console.error('🏆 Erreur lors de l\'ajout/modification du joueur:', err);
       setError(err instanceof Error ? err.message : 'Une erreur est survenue');
     } finally {
       setIsSubmitting(false);
@@ -568,508 +617,474 @@ export default function SquadPage() {
 
   const handleDelete = async (playerId: string) => {
     if (!confirm('Êtes-vous sûr de vouloir supprimer ce joueur ?')) return;
-
     try {
       setError(null);
       await playersService.deletePlayer(playerId);
-
       setSuccess('Joueur supprimé avec succès');
-      setPlayers(players.filter(player => player.id !== playerId));
+      setPlayers(players.filter(p => p.id !== playerId));
     } catch (err: any) {
-      console.error('Erreur lors de la suppression du joueur:', err);
-      const errorMessage = err?.message || err?.error?.message || 'Erreur lors de la suppression';
-      setError(errorMessage);
+      setError(err?.message || 'Erreur lors de la suppression');
     }
   };
 
+  // ── Loading state ───────────────────────────────────────────────────────────
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      <div style={{ backgroundColor: T.pageBg, minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: T.accent }} />
       </div>
     );
   }
 
+  // ── Render ──────────────────────────────────────────────────────────────────
+
   return (
-    <div className="p-8">
-      {/* Indicateur d'équipe active */}
-      <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-        <div className="flex items-center gap-3">
-          <div className="text-lg">🏆</div>
-          <div>
-            <div className="font-semibold text-blue-800">
-              Équipe active : {activeTeam ? activeTeam.name : 'Aucune équipe sélectionnée'}
-            </div>
-            <div className="text-sm text-blue-600">
-              {activeTeam ? `${activeTeam.category} - Niveau ${activeTeam.level}` : 'Sélectionnez une équipe dans la sidebar'}
-            </div>
+    <div className="space-y-4 w-full">
+
+      {/* ── Toasts ─────────────────────────────────────────────────────────── */}
+      {error && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg text-sm"
+          style={{ backgroundColor: 'rgba(239,68,68,0.08)', color: '#DC2626', border: '1px solid rgba(239,68,68,0.2)' }}>
+          <AlertCircle size={16} /><span>{error}</span>
+        </div>
+      )}
+      {success && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg text-sm"
+          style={{ backgroundColor: 'rgba(34,197,94,0.08)', color: '#16A34A', border: '1px solid rgba(34,197,94,0.2)' }}>
+          <Check size={16} /><span>{success}</span>
+        </div>
+      )}
+
+      {/* ── Header banner ──────────────────────────────────────────────────── */}
+      <div className="rounded-xl p-5 flex items-center gap-4"
+        style={{ background: 'linear-gradient(135deg, #1e3a5f 0%, #2a4f7c 100%)', boxShadow: '0 4px 20px rgba(30,58,95,0.15)' }}>
+        <div className="w-12 h-12 rounded-xl flex items-center justify-center"
+          style={{ backgroundColor: activeTeam?.color || T.accent, flexShrink: 0 }}>
+          <span style={{ fontSize: 20, fontWeight: 900, color: '#fff' }}>
+            {activeTeam?.name?.[0]?.toUpperCase() ?? '?'}
+          </span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#fff' }}>
+            Effectif {activeTeam ? `— ${activeTeam.name}` : ''}
           </div>
+          <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)', marginTop: 3 }}>
+            {displayedPlayers.length} joueur{displayedPlayers.length !== 1 ? 's' : ''}
+            {players.length !== displayedPlayers.length && ` (${players.length} au total)`}
+          </div>
+        </div>
+        {/* Position legend */}
+        <div className="hidden md:flex gap-3">
+          {Object.entries(POSITION_MAP).filter(([,v]) => ['GB','DEF','PIV','MEN','AIL'].includes(v.abbr)).map(([key, val]) => (
+            <div key={key} className="flex items-center gap-1.5">
+              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: val.color }} />
+              <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.65)', fontWeight: 600 }}>{key}</span>
+            </div>
+          ))}
         </div>
       </div>
 
-      {error && (
-        <div className="mb-4 p-4 bg-red-50 text-red-600 rounded-md flex items-center gap-2">
-          <AlertCircle className="h-5 w-5" />
-          <span>{error}</span>
-        </div>
-      )}
+      {/* ── Toolbar ────────────────────────────────────────────────────────── */}
+      <div className="rounded-xl flex items-center gap-3 p-3 flex-wrap"
+        style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}`, boxShadow: '0 1px 4px rgba(30,58,95,0.05)' }}>
 
-      {success && (
-        <div className="mb-4 p-4 bg-green-50 text-green-600 rounded-md flex items-center gap-2">
-          <Check className="h-5 w-5" />
-          <span>{success}</span>
+        {/* Search */}
+        <div style={{ position: 'relative', flex: 1, minWidth: 160 }}>
+          <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: T.textMuted, pointerEvents: 'none' }} />
+          <input
+            type="text"
+            placeholder="Rechercher un joueur..."
+            value={searchName}
+            onChange={e => setSearchName(e.target.value)}
+            style={{
+              paddingLeft: 32, paddingRight: 12, paddingTop: 8, paddingBottom: 8,
+              border: `1px solid ${T.border}`,
+              borderRadius: 8,
+              fontSize: 13,
+              color: T.text,
+              backgroundColor: '#F9FAFB',
+              outline: 'none',
+              width: '100%',
+            }}
+          />
         </div>
-      )}
 
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Effectif</h1>
-          {activeTeam && (
-            <p className="text-sm text-gray-600 mt-2">
-              Équipe active : <strong>{activeTeam.name}</strong> ({activeTeam.category} - Niveau {activeTeam.level})
-            </p>
-          )}
+        {/* Match type filter pills */}
+        <div style={{ display: 'flex', gap: 4 }}>
+          {MATCH_FILTERS.map(f => (
+            <button
+              key={f.value}
+              onClick={() => setMatchFilter(f.value)}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 6,
+                fontSize: 12,
+                fontWeight: 600,
+                border: `1px solid ${matchFilter === f.value ? T.accent : T.border}`,
+                backgroundColor: matchFilter === f.value ? T.accent : 'transparent',
+                color: matchFilter === f.value ? '#fff' : T.textMuted,
+                cursor: 'pointer',
+                transition: 'all .15s',
+              }}
+            >
+              {f.label}
+            </button>
+          ))}
         </div>
+
+        {/* Sort by (for card view) */}
+        {viewMode === 'cards' && (
+          <div style={{ display: 'flex', gap: 4 }}>
+            {([['name', 'Nom'], ['goals', 'Buts'], ['matches', 'Matchs'], ['seances', 'Séances']] as [SortKey, string][]).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => handleSort(key)}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: `1px solid ${sortKey === key ? '#1e3a5f' : T.border}`,
+                  backgroundColor: sortKey === key ? '#EFF6FF' : 'transparent',
+                  color: sortKey === key ? '#1e3a5f' : T.textMuted,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                {label}
+                {sortKey === key && (sortDir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />)}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* View toggle */}
+        <div className="flex rounded-lg overflow-hidden" style={{ border: `1px solid ${T.border}` }}>
+          <button
+            onClick={() => setViewMode('cards')}
+            title="Vue cartes"
+            style={{
+              padding: '7px 10px', border: 'none',
+              backgroundColor: viewMode === 'cards' ? '#1e3a5f' : T.cardBg,
+              color: viewMode === 'cards' ? '#fff' : T.textMuted,
+              cursor: 'pointer',
+            }}
+          >
+            <LayoutGrid size={15} />
+          </button>
+          <button
+            onClick={() => setViewMode('table')}
+            title="Vue tableau"
+            style={{
+              padding: '7px 10px', border: 'none',
+              borderLeft: `1px solid ${T.border}`,
+              backgroundColor: viewMode === 'table' ? '#1e3a5f' : T.cardBg,
+              color: viewMode === 'table' ? '#fff' : T.textMuted,
+              cursor: 'pointer',
+            }}
+          >
+            <List size={15} />
+          </button>
+        </div>
+
+        {/* New player */}
         <button
           onClick={() => handleOpenModal()}
           disabled={!activeTeam}
-          className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors ${
-            activeTeam 
-              ? 'bg-blue-600 text-white hover:bg-blue-700' 
-              : 'bg-gray-400 text-gray-200 cursor-not-allowed'
-          }`}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50"
+          style={{
+            backgroundColor: activeTeam ? T.accentAmber : '#CBD5E1',
+            color: activeTeam ? '#1A0A00' : '#94A3B8',
+            border: 'none',
+            cursor: activeTeam ? 'pointer' : 'not-allowed',
+          }}
         >
-          <Plus className="h-5 w-5" />
-          {activeTeam ? `Ajouter un joueur à ${activeTeam.name}` : 'Sélectionnez une équipe'}
+          <Plus size={15} /> Nouveau joueur
         </button>
       </div>
 
-      {/* Filtres */}
-      <div className="mb-6 bg-white rounded-lg shadow p-4">
-        <div className="flex items-center gap-4 mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">Filtres</h3>
-          <button
-            onClick={resetFilters}
-            className="text-sm text-gray-600 hover:text-gray-800"
-          >
-            Réinitialiser
-          </button>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-800 mb-1">Nom</label>
-            <input
-              type="text"
-              value={filters.name}
-              onChange={(e) => handleFilterChange('name', e.target.value)}
-              placeholder="Rechercher par nom..."
-              className="w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-800 mb-1">Âge</label>
-            <select
-              value={filters.age}
-              onChange={(e) => handleFilterChange('age', e.target.value)}
-              className="w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900"
-            >
-              <option value="">Tous les âges</option>
-              {Array.from(new Set(players.map(p => p.age))).sort().map(age => (
-                <option key={age} value={age.toString()}>{age} ans</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-800 mb-1">Poste</label>
-            <select
-              value={filters.position}
-              onChange={(e) => handleFilterChange('position', e.target.value)}
-              className="w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900"
-            >
-              <option value="">Tous les postes</option>
-              <option value="Meneur">Meneur</option>
-              <option value="Ailier">Ailier</option>
-              <option value="Pivot">Pivot</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-800 mb-1">Pied fort</label>
-            <select
-              value={filters.strongFoot}
-              onChange={(e) => handleFilterChange('strongFoot', e.target.value)}
-              className="w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900"
-            >
-              <option value="">Tous les pieds</option>
-              <option value="Droit">Droit</option>
-              <option value="Gauche">Gauche</option>
-              <option value="Ambidextre">Ambidextre</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-800 mb-1">Statut</label>
-            <select
-              value={filters.status}
-              onChange={(e) => handleFilterChange('status', e.target.value)}
-              className="w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900"
-            >
-              <option value="">Tous les statuts</option>
-              <option value="Non-muté">Non-muté</option>
-              <option value="Muté">Muté</option>
-              <option value="Muté HP">Muté HP</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                  #
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                  Nom
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                  Âge
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                  Poste
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                  Pied fort
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                  Statut
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                  Limite séquence (s)
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                  Matchs
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                  Buts
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                  Présences
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                  % Présence
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-600 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredPlayers.length === 0 ? (
-                <tr>
-                  <td colSpan={12} className="px-6 py-8 text-center text-gray-600">
-                    {players.length === 0 ? (
-                      <div>
-                        <p className="text-lg font-medium mb-2">Aucun joueur trouvé</p>
-                        <p className="text-sm">Vérifiez la connexion à la base de données et les permissions.</p>
-                        <p className="text-sm mt-1">Players count: {players.length}</p>
-                        <p className="text-sm">Error: {error || 'none'}</p>
-                      </div>
-                    ) : (
-                      <div>
-                        <p className="text-lg font-medium mb-2">Aucun joueur ne correspond aux filtres</p>
-                        <p className="text-sm">Essayez de modifier vos critères de recherche.</p>
-                        <p className="text-sm mt-1">Total players: {players.length}</p>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ) : (
-                filteredPlayers.map((player) => (
-                  <tr
+      {/* ── Card grid view ──────────────────────────────────────────────────── */}
+      {viewMode === 'cards' && (
+        <div>
+          {displayedPlayers.length === 0 ? (
+            <div className="rounded-xl p-12 text-center" style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}` }}>
+              <p style={{ color: T.textMuted, fontSize: 14 }}>
+                {players.length === 0 ? 'Aucun joueur dans cette équipe' : 'Aucun joueur ne correspond à la recherche'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
+              {displayedPlayers.map(player => {
+                const pos = getPosition(player.position);
+                const st  = getStatus(player.status);
+                const attPct = player.attendance_percentage ?? 0;
+                return (
+                  <PlayerCard
                     key={player.id}
-                    className="hover:bg-gray-50 cursor-pointer group"
-                    onClick={() => router.push(`/webapp/manager/squad/${player.id}`)}
-                  >
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {player.number || '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      <Link
-                        href={`/webapp/manager/squad/${player.id}`}
-                        className="text-blue-600 hover:text-blue-800 group-hover:underline"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {player.first_name} {player.last_name}
-                      </Link>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {player.age}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {player.position}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {player.strong_foot}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {player.status}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {player.sequence_time_limit ?? 180}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {player.matches_played || 0}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {player.goals || 0}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {player.training_attendance || 0}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {player.attendance_percentage}%
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={() => handleOpenModal(player)}
-                          className="text-blue-600 hover:text-blue-900"
-                        >
-                          <Pencil className="h-5 w-5" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(player.id)}
-                          className="text-red-600 hover:text-red-900"
-                        >
-                          <Trash2 className="h-5 w-5" />
-                        </button>
-                      </div>
+                    player={player}
+                    pos={pos}
+                    st={st}
+                    attPct={attPct}
+                    onOpen={() => router.push(`/webapp/manager/squad/${player.id}`)}
+                    onEdit={e => { e.stopPropagation(); handleOpenModal(player); }}
+                    onDelete={e => { e.stopPropagation(); handleDelete(player.id); }}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Table view ─────────────────────────────────────────────────────── */}
+      {viewMode === 'table' && (
+        <div className="rounded-xl overflow-hidden" style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}`, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ backgroundColor: '#F8FAFC', borderBottom: `1px solid ${T.border}` }}>
+                  <th style={{ padding: '10px 12px 10px 20px', textAlign: 'center', width: 44, fontSize: 11, fontWeight: 700, color: T.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>N°</th>
+                  <th style={{ padding: '10px 8px', width: 64, fontSize: 11, fontWeight: 700, color: T.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>POS</th>
+                  <th style={{ padding: '10px 8px', textAlign: 'left', cursor: 'pointer', userSelect: 'none' }} onClick={() => handleSort('name')}>
+                    <div style={{ display: 'flex', alignItems: 'center', fontSize: 11, fontWeight: 700, color: sortKey === 'name' ? T.accent : T.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                      NOM <SortIcon col="name" sortKey={sortKey} sortDir={sortDir} />
+                    </div>
+                  </th>
+                  <th style={{ padding: '10px 8px', width: 100, fontSize: 11, fontWeight: 700, color: T.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>STATUT</th>
+                  <th style={{ padding: '10px 8px', width: 70, cursor: 'pointer', userSelect: 'none', textAlign: 'center' }} onClick={() => handleSort('seances')}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: sortKey === 'seances' ? T.accent : T.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                      SÉA <SortIcon col="seances" sortKey={sortKey} sortDir={sortDir} />
+                    </div>
+                  </th>
+                  <th style={{ padding: '10px 8px', width: 70, cursor: 'pointer', userSelect: 'none', textAlign: 'center' }} onClick={() => handleSort('matches')}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: sortKey === 'matches' ? T.accent : T.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                      MAT <SortIcon col="matches" sortKey={sortKey} sortDir={sortDir} />
+                    </div>
+                  </th>
+                  <th style={{ padding: '10px 8px', width: 70, cursor: 'pointer', userSelect: 'none', textAlign: 'center' }} onClick={() => handleSort('goals')}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: sortKey === 'goals' ? T.accent : T.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                      BUT <SortIcon col="goals" sortKey={sortKey} sortDir={sortDir} />
+                    </div>
+                  </th>
+                  <th style={{ padding: '10px 20px 10px 8px', width: 72, fontSize: 11, fontWeight: 700, color: T.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: 'right' }}>ACTIONS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayedPlayers.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} style={{ padding: '48px 20px', textAlign: 'center', color: T.textMuted, fontSize: 14 }}>
+                      {players.length === 0 ? 'Aucun joueur dans cette équipe' : 'Aucun joueur ne correspond à la recherche'}
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-            <tfoot className="bg-gray-100 font-semibold">
-              <tr>
-                <td className="px-6 py-2"></td>
-                <td className="px-6 py-2">{filteredPlayers.length} joueur{filteredPlayers.length > 1 ? 's' : ''}</td>
-                <td className="px-6 py-2">
-                  {filteredPlayers.length > 0
-                    ? (filteredPlayers.reduce((sum, p) => sum + (p.age || 0), 0) / filteredPlayers.length).toFixed(1)
-                    : '-'}
-                </td>
-                <td></td>
-                <td></td>
-                <td></td>
-                <td className="px-6 py-2">-</td>
-                <td className="px-6 py-2">
-                  {filteredPlayers.length > 0
-                    ? (filteredPlayers.reduce((sum, p) => sum + (p.matches_played || 0), 0) / filteredPlayers.length).toFixed(1)
-                    : '-'}
-                </td>
-                <td className="px-6 py-2">
-                  {filteredPlayers.reduce((sum, p) => sum + (p.goals || 0), 0)}
-                </td>
-                <td className="px-6 py-2">
-                  {filteredPlayers.length > 0
-                    ? (filteredPlayers.reduce((sum, p) => sum + (p.training_attendance || 0), 0) / filteredPlayers.length).toFixed(1)
-                    : '-'}
-                </td>
-                <td></td>
-                <td></td>
-              </tr>
-            </tfoot>
-          </table>
+                ) : displayedPlayers.map((player, index) => {
+                  const pos = getPosition(player.position);
+                  const st  = getStatus(player.status);
+                  const isEven = index % 2 === 0;
+                  return (
+                    <tr key={player.id} onClick={() => router.push(`/webapp/manager/squad/${player.id}`)}
+                      style={{ backgroundColor: isEven ? T.cardBg : T.rowOdd, borderBottom: `1px solid ${T.border}`, cursor: 'pointer', transition: 'background-color .1s' }}
+                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#EFF6FF')}
+                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = isEven ? T.cardBg : T.rowOdd)}
+                    >
+                      <td style={{ padding: 0, width: 0, position: 'relative' }}>
+                        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, backgroundColor: pos.color }} />
+                        <span style={{ display: 'block', paddingLeft: 23, paddingRight: 8, textAlign: 'center', fontSize: 13, fontWeight: 600, color: T.textMuted }}>
+                          {player.number != null ? player.number : '—'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 8px', textAlign: 'center' }}>
+                        <span style={{ display: 'inline-block', padding: '2px 7px', borderRadius: 3, fontSize: 10, fontWeight: 800, letterSpacing: '0.3px', backgroundColor: pos.bg, color: pos.color }}>
+                          {pos.abbr}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 8px' }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{player.last_name.toUpperCase()}</div>
+                        <div style={{ fontSize: 11, color: T.textMuted, marginTop: 1 }}>{player.first_name}</div>
+                      </td>
+                      <td style={{ padding: '10px 8px' }}>
+                        <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, backgroundColor: st.bg, color: st.color }}>
+                          {st.label}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 8px', textAlign: 'center', fontSize: 14, fontWeight: 700, color: sortKey === 'seances' ? T.accent : T.textMuted }}>
+                        {player.training_attendance ?? 0}
+                      </td>
+                      <td style={{ padding: '10px 8px', textAlign: 'center', fontSize: 14, fontWeight: 700, color: sortKey === 'matches' ? T.accent : T.textMuted }}>
+                        {player.matches_played ?? 0}
+                      </td>
+                      <td style={{ padding: '10px 8px', textAlign: 'center', fontSize: 14, fontWeight: 700, color: sortKey === 'goals' ? T.accent : (player.goals ?? 0) > 0 ? '#F59E0B' : T.textMuted }}>
+                        {player.goals ?? 0}
+                      </td>
+                      <td style={{ padding: '10px 20px 10px 8px', textAlign: 'right' }}>
+                        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }} onClick={e => e.stopPropagation()}>
+                          <button onClick={() => handleOpenModal(player)} style={{ padding: 4, border: 'none', background: 'none', cursor: 'pointer', color: T.accent, borderRadius: 4 }} title="Modifier">
+                            <Pencil size={15} />
+                          </button>
+                          <button onClick={() => handleDelete(player.id)} style={{ padding: 4, border: 'none', background: 'none', cursor: 'pointer', color: '#EF4444', borderRadius: 4 }} title="Supprimer">
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Modal */}
+      {/* ── Modal ────────────────────────────────────────────────────────────── */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-md max-h-[90vh] flex flex-col">
-            <div className="flex justify-between items-center p-6 pb-4 border-b">
-              <h2 className="text-xl font-semibold">
-                {isEditing ? 'Modifier le joueur' : 'Ajouter un joueur'}
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 50,
+          backgroundColor: 'rgba(0,0,0,0.45)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 16,
+        }}>
+          <div style={{
+            backgroundColor: T.cardBg,
+            borderRadius: 10,
+            width: '100%',
+            maxWidth: 460,
+            maxHeight: '92vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+          }}>
+            {/* Modal header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 22px 14px', borderBottom: `1px solid ${T.border}` }}>
+              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: T.text }}>
+                {isEditing ? 'Modifier le joueur' : 'Nouveau joueur'}
               </h2>
-              <button
-                onClick={handleCloseModal}
-                className="text-gray-600 hover:text-gray-800"
-              >
-                <X className="h-5 w-5" />
+              <button onClick={handleCloseModal} style={{ border: 'none', background: 'none', cursor: 'pointer', color: T.textMuted }}>
+                <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
-              <div className="flex-1 overflow-y-auto p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-800">Numéro</label>
-                <input
-                  type="number"
-                  value={formData.number}
-                  onChange={(e) => setFormData({ ...formData, number: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  min="1"
-                  max="99"
-                  placeholder="Numéro de maillot"
-                />
-              </div>
+            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+              <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-800">Prénom</label>
-                <input
-                  type="text"
-                  value={formData.first_name}
-                  onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-800">Nom</label>
-                <input
-                  type="text"
-                  value={formData.last_name}
-                  onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-800">Âge</label>
-                <input
-                  type="number"
-                  value={formData.age}
-                  onChange={(e) => setFormData({ ...formData, age: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  required
-                  min="15"
-                  max="50"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-800">Poste</label>
-                <select
-                  value={formData.position}
-                  onChange={(e) => setFormData({ ...formData, position: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  required
-                >
-                  <option value="">Sélectionner un poste</option>
-                  <option value="Gardien">Gardien</option>
-                  <option value="Meneur">Meneur</option>
-                  <option value="Ailier">Ailier</option>
-                  <option value="Pivot">Pivot</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-800">Pied fort</label>
-                <select
-                  value={formData.strong_foot}
-                  onChange={(e) => setFormData({ ...formData, strong_foot: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  required
-                >
-                  <option value="">Sélectionner un pied</option>
-                  <option value="Droit">Droit</option>
-                  <option value="Gauche">Gauche</option>
-                  <option value="Ambidextre">Ambidextre</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-800">Statut</label>
-                <select
-                  value={formData.status}
-                  onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  required
-                >
-                  <option value="">Sélectionner un statut</option>
-                  <option value="Non-muté">Non-Muté</option>
-                  <option value="Muté">Muté</option>
-                  <option value="Muté HP">Muté HP</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-800">Limite de temps par séquence (secondes)</label>
-                <input
-                  type="number"
-                  min="30"
-                  step="10"
-                  value={formData.sequence_time_limit}
-                  onChange={(e) => setFormData({ ...formData, sequence_time_limit: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  required
-                />
-                <p className="mt-1 text-xs text-gray-600">Durée maximale avant alerte dans le match recorder (défaut 180 secondes).</p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-800 mb-2">
-                  Équipes <span className="text-gray-600 text-xs">(sélection multiple possible)</span>
+                {/* Numéro */}
+                <label style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
+                  Numéro de maillot
+                  <input
+                    type="number" min="1" max="99"
+                    value={formData.number}
+                    onChange={e => setFormData({ ...formData, number: e.target.value })}
+                    placeholder="Ex: 10"
+                    style={inputStyle}
+                  />
                 </label>
-                <div className="mt-2 space-y-2 max-h-48 overflow-y-auto border border-gray-400 rounded-md p-3">
-                  {teams.map((team) => (
-                    <label key={team.id} className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
-                      <input
-                        type="checkbox"
-                        checked={formData.selectedTeams.includes(team.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setFormData({
-                              ...formData,
-                              selectedTeams: [...formData.selectedTeams, team.id]
-                            });
-                          } else {
-                            setFormData({
-                              ...formData,
-                              selectedTeams: formData.selectedTeams.filter(id => id !== team.id)
-                            });
-                          }
-                        }}
-                        className="rounded border-gray-400 text-blue-600 focus:ring-blue-500"
-                      />
-                      <div className="flex items-center gap-2 flex-1">
-                        <div
-                          className="w-4 h-4 rounded-full"
-                          style={{ backgroundColor: team.color }}
-                        ></div>
-                        <span className="text-sm text-gray-800">
+
+                {/* Prénom + Nom */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
+                    Prénom *
+                    <input type="text" required value={formData.first_name} onChange={e => setFormData({ ...formData, first_name: e.target.value })} style={inputStyle} />
+                  </label>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
+                    Nom *
+                    <input type="text" required value={formData.last_name} onChange={e => setFormData({ ...formData, last_name: e.target.value })} style={inputStyle} />
+                  </label>
+                </div>
+
+                {/* Date de naissance */}
+                <label style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
+                  Date de naissance
+                  <input type="date" value={formData.birth_date} onChange={e => setFormData({ ...formData, birth_date: e.target.value })} style={inputStyle} />
+                </label>
+
+                {/* Poste */}
+                <label style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
+                  Poste *
+                  <select required value={formData.position} onChange={e => setFormData({ ...formData, position: e.target.value })} style={inputStyle}>
+                    <option value="">Sélectionner</option>
+                    <option value="Gardien">Gardien</option>
+                    <option value="Meneur">Meneur</option>
+                    <option value="Ailier">Ailier</option>
+                    <option value="Pivot">Pivot</option>
+                  </select>
+                </label>
+
+                {/* Pied fort */}
+                <label style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
+                  Pied fort *
+                  <select required value={formData.strong_foot} onChange={e => setFormData({ ...formData, strong_foot: e.target.value })} style={inputStyle}>
+                    <option value="">Sélectionner</option>
+                    <option value="Droit">Droit</option>
+                    <option value="Gauche">Gauche</option>
+                    <option value="Ambidextre">Ambidextre</option>
+                  </select>
+                </label>
+
+                {/* Statut */}
+                <label style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
+                  Statut *
+                  <select required value={formData.status} onChange={e => setFormData({ ...formData, status: e.target.value })} style={inputStyle}>
+                    <option value="">Sélectionner</option>
+                    <option value="Non-muté">Non-Muté</option>
+                    <option value="Muté">Muté</option>
+                    <option value="Muté HP">Muté HP</option>
+                    <option value="Blessé">Blessé</option>
+                    <option value="Suspendu">Suspendu</option>
+                  </select>
+                </label>
+
+                {/* Limite séquence */}
+                <label style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
+                  Limite par séquence (secondes) *
+                  <input type="number" required min="30" step="10" value={formData.sequence_time_limit} onChange={e => setFormData({ ...formData, sequence_time_limit: e.target.value })} style={inputStyle} />
+                  <span style={{ fontSize: 11, color: T.textMuted, marginTop: 4, display: 'block' }}>Durée max avant alerte dans le match recorder (défaut 180 s)</span>
+                </label>
+
+                {/* Équipes */}
+                <div>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: T.text, margin: '0 0 8px' }}>
+                    Équipes <span style={{ fontSize: 11, fontWeight: 400, color: T.textMuted }}>(sélection multiple)</span>
+                  </p>
+                  <div style={{ border: `1px solid ${T.border}`, borderRadius: 6, maxHeight: 160, overflowY: 'auto', padding: '4px 0' }}>
+                    {teams.map(team => (
+                      <label key={team.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={formData.selectedTeams.includes(team.id)}
+                          onChange={e => setFormData({
+                            ...formData,
+                            selectedTeams: e.target.checked
+                              ? [...formData.selectedTeams, team.id]
+                              : formData.selectedTeams.filter(id => id !== team.id),
+                          })}
+                        />
+                        <div style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: team.color, flexShrink: 0 }} />
+                        <span style={{ fontSize: 13, color: T.text }}>
                           {team.name} {team.category && `(${team.category}${team.level ? ` - ${team.level}` : ''})`}
                         </span>
-                      </div>
-                    </label>
-                  ))}
+                      </label>
+                    ))}
+                  </div>
+                  {formData.selectedTeams.length === 0 && (
+                    <p style={{ fontSize: 11, color: '#EF4444', margin: '4px 0 0' }}>Veuillez sélectionner au moins une équipe</p>
+                  )}
                 </div>
-                {formData.selectedTeams.length === 0 && (
-                  <p className="mt-1 text-xs text-red-500">Veuillez sélectionner au moins une équipe</p>
-                )}
-                {formData.selectedTeams.length > 0 && (
-                  <p className="mt-1 text-xs text-gray-600">
-                    {formData.selectedTeams.length} équipe{formData.selectedTeams.length > 1 ? 's' : ''} sélectionnée{formData.selectedTeams.length > 1 ? 's' : ''}
-                  </p>
-                )}
-              </div>
               </div>
 
-              <div className="flex justify-end gap-2 p-6 pt-4 border-t bg-gray-50">
+              {/* Modal footer */}
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', padding: '14px 22px', borderTop: `1px solid ${T.border}`, backgroundColor: '#F8FAFC' }}>
                 <button
                   type="button"
                   onClick={handleCloseModal}
-                  className="px-4 py-2 text-sm font-medium text-gray-800 bg-white border border-gray-400 rounded-md hover:bg-gray-50"
+                  style={{ padding: '8px 16px', borderRadius: 6, fontSize: 13, fontWeight: 600, border: `1px solid ${T.border}`, backgroundColor: T.cardBg, color: T.text, cursor: 'pointer' }}
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ padding: '8px 18px', borderRadius: 6, fontSize: 13, fontWeight: 700, border: 'none', backgroundColor: T.accent, color: '#fff', cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}
                 >
                   {isSubmitting ? 'Enregistrement...' : isEditing ? 'Modifier' : 'Ajouter'}
                 </button>
@@ -1080,4 +1095,19 @@ export default function SquadPage() {
       )}
     </div>
   );
-} 
+}
+
+// ─── Shared input style ───────────────────────────────────────────────────────
+const inputStyle: React.CSSProperties = {
+  display: 'block',
+  width: '100%',
+  marginTop: 5,
+  padding: '8px 11px',
+  border: '1px solid #DDE1EA',
+  borderRadius: 6,
+  fontSize: 13,
+  color: '#1A2332',
+  backgroundColor: '#F9FAFB',
+  outline: 'none',
+  boxSizing: 'border-box',
+};

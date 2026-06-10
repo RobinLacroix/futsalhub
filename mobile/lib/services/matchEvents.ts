@@ -1,17 +1,73 @@
 import { supabase } from '../supabase';
-import type { MatchEvent, MatchEventType } from '../../types';
+import type { MatchEvent, MatchEventType, GoalType } from '../../types';
+import { isDeviceOffline, shouldTreatAsOfflineError } from '../offline/networkReachability';
+import { rememberMatchEventsFromServer, getCachedMatchEvents } from '../offline/matchEventsCache';
+import { getPendingInsertEventsForMatch } from '../offline/matchRecorderOutbox';
+import {
+  enqueueMatchEventInsert,
+  enqueuePendingDelete,
+  tryStripOnePendingInsert,
+} from '../offline/matchRecorderOutbox';
 
-export async function getEventsByMatchId(matchId: string): Promise<MatchEvent[]> {
-  const { data, error } = await supabase
-    .from('match_events')
-    .select('*')
-    .eq('match_id', matchId)
-    .order('match_time_seconds', { ascending: true });
-  if (error) throw error;
-  return (data ?? []) as MatchEvent[];
+export type { GoalType };
+
+/** Doit rester aligné sur la contrainte CHECK de `match_events.event_type` (Supabase). */
+const MATCH_EVENT_TYPES_ALLOWED = new Set<MatchEventType>([
+  'goal',
+  'shot',
+  'shot_on_target',
+  'recovery',
+  'yellow_card',
+  'red_card',
+  'assist',
+  'ball_loss',
+  'opponent_goal',
+  'opponent_shot',
+  'opponent_shot_on_target',
+]);
+
+function sanitizePlayersOnField(ids: string[]): string[] {
+  return [...new Set(ids.filter((id) => typeof id === 'string' && id.trim().length > 0).map((id) => id.trim()))];
 }
 
-export type GoalType = 'offensive' | 'transition' | 'cpa' | 'superiority';
+function mergeEventsWithPending(base: MatchEvent[], pending: MatchEvent[]): MatchEvent[] {
+  if (pending.length === 0) return base;
+  const byId = new Map(base.map((ev) => [ev.id, ev]));
+  for (const p of pending) {
+    if (!byId.has(p.id)) byId.set(p.id, p);
+  }
+  return Array.from(byId.values()).sort((a, b) => {
+    if (a.half !== b.half) return a.half - b.half;
+    if (a.match_time_seconds !== b.match_time_seconds) return a.match_time_seconds - b.match_time_seconds;
+    return String(a.id).localeCompare(String(b.id));
+  });
+}
+
+export async function getEventsByMatchId(matchId: string): Promise<MatchEvent[]> {
+  let list: MatchEvent[] = [];
+  try {
+    if (await isDeviceOffline()) {
+      list = await getCachedMatchEvents(matchId);
+    } else {
+      const { data, error } = await supabase
+        .from('match_events')
+        .select('*')
+        .eq('match_id', matchId)
+        .order('match_time_seconds', { ascending: true });
+      if (error) throw error;
+      list = (data ?? []) as MatchEvent[];
+      await rememberMatchEventsFromServer(matchId, list);
+    }
+  } catch (e) {
+    if (shouldTreatAsOfflineError(e)) {
+      list = await getCachedMatchEvents(matchId);
+    } else {
+      throw e;
+    }
+  }
+  const pending = await getPendingInsertEventsForMatch(matchId);
+  return mergeEventsWithPending(list, pending);
+}
 
 export interface CreateMatchEventInput {
   match_id: string;
@@ -23,18 +79,56 @@ export interface CreateMatchEventInput {
   goal_type?: GoalType | null;
 }
 
-export async function createMatchEvent(input: CreateMatchEventInput): Promise<MatchEvent> {
-  const playersOnField = input.players_on_field ?? [];
+/** Supprime le dernier événement du type donné (même joueur si `playerId` défini). */
+export async function deleteLastMatchEventByType(
+  matchId: string,
+  eventType: MatchEventType,
+  playerId: string | null
+): Promise<{ ok: boolean; error?: string }> {
+  if (await tryStripOnePendingInsert(matchId, eventType, playerId)) {
+    return { ok: true };
+  }
+  if (await isDeviceOffline()) {
+    await enqueuePendingDelete(matchId, eventType, playerId);
+    return { ok: true };
+  }
+  try {
+    const { error } = await supabase.rpc('delete_last_event_by_type', {
+      p_match_id: matchId,
+      p_event_type: eventType,
+      p_player_id: playerId,
+    });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  } catch (e) {
+    if (shouldTreatAsOfflineError(e)) {
+      await enqueuePendingDelete(matchId, eventType, playerId);
+      return { ok: true };
+    }
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg };
+  }
+}
+
+async function insertMatchEventRemote(input: CreateMatchEventInput): Promise<MatchEvent> {
+  const playersOnField = sanitizePlayersOnField(input.players_on_field ?? []);
+  const matchTimeSeconds = Math.max(0, Math.floor(Number(input.match_time_seconds)));
+  const half: 1 | 2 = input.half === 2 ? 2 : 1;
+  const goalType =
+    input.event_type === 'goal' || input.event_type === 'opponent_goal'
+      ? input.goal_type ?? null
+      : null;
+
   const { data, error } = await supabase.rpc('insert_match_event', {
     p_match_id: input.match_id,
     p_event_type: input.event_type,
-    p_match_time_seconds: input.match_time_seconds,
-    p_half: input.half,
+    p_match_time_seconds: matchTimeSeconds,
+    p_half: half,
     p_player_id: input.player_id ?? null,
     p_players_on_field: playersOnField,
     p_location_x: null,
     p_location_y: null,
-    p_goal_type: input.goal_type ?? null,
+    p_goal_type: goalType,
   });
   if (error) {
     const errMsg = typeof error === 'object' && error !== null && 'message' in error
@@ -45,8 +139,35 @@ export async function createMatchEvent(input: CreateMatchEventInput): Promise<Ma
       : '';
     throw new Error(errDetails ? `${errMsg} (${errDetails})` : errMsg);
   }
+  if (data == null) {
+    throw new Error("insert_match_event n'a retourné aucune ligne (vérifiez la RPC Supabase).");
+  }
   return data as MatchEvent;
 }
+
+export async function createMatchEvent(input: CreateMatchEventInput): Promise<MatchEvent> {
+  if (!MATCH_EVENT_TYPES_ALLOWED.has(input.event_type)) {
+    throw new Error(`Type d'événement non reconnu par Supabase: ${input.event_type}`);
+  }
+
+  const payload: CreateMatchEventInput = {
+    ...input,
+    players_on_field: sanitizePlayersOnField(input.players_on_field ?? []),
+  };
+
+  if (await isDeviceOffline()) {
+    return enqueueMatchEventInsert(payload);
+  }
+  try {
+    return await insertMatchEventRemote(input);
+  } catch (e) {
+    if (shouldTreatAsOfflineError(e)) {
+      return enqueueMatchEventInsert(payload);
+    }
+    throw e;
+  }
+}
+
 
 /** Agrège goals_by_type et conceded_by_type à partir des événements. */
 export async function getGoalsByTypeForMatches(
@@ -80,12 +201,8 @@ export async function getGoalsByTypeForMatches(
 }
 
 export async function hasMatchEvents(matchId: string): Promise<boolean> {
-  const { count, error } = await supabase
-    .from('match_events')
-    .select('*', { count: 'exact', head: true })
-    .eq('match_id', matchId);
-  if (error) throw error;
-  return (count ?? 0) > 0;
+  const ev = await getEventsByMatchId(matchId);
+  return ev.length > 0;
 }
 
 export interface MatchEventsAggregateRow {

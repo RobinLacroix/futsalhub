@@ -6,13 +6,16 @@ import { playersService } from '@/lib/services';
 import { aggregateByField, calculateAverageByField } from '@/lib/utils/chartUtils';
 import type { Player, PlayerFilterState, PerformanceFilterState, ChartData } from '@/types';
 
+type CompetitionFilter = 'all' | 'Championnat' | 'Coupe' | 'Amical';
+
 interface UseDashboardDataOptions {
   teamId?: string;
   filters: PlayerFilterState;
   performanceFilters: PerformanceFilterState;
+  playerCompetitionFilter?: CompetitionFilter;
 }
 
-export function useDashboardData({ teamId, filters, performanceFilters }: UseDashboardDataOptions) {
+export function useDashboardData({ teamId, filters, performanceFilters, playerCompetitionFilter = 'all' }: UseDashboardDataOptions) {
   const { players: allPlayers, loading: playersLoading } = usePlayers({ teamId, autoFetch: !!teamId });
   const { matchStats, loading: matchesLoading } = useMatches({ teamId, autoFetch: !!teamId });
   const { 
@@ -36,11 +39,8 @@ export function useDashboardData({ teamId, filters, performanceFilters }: UseDas
       const playersWithCalculatedStats = await Promise.all(
         allPlayers.map(async (player) => {
           try {
-            const stats = await playersService.getPlayerStats(player.id, teamId);
-            return {
-              ...player,
-              ...stats
-            };
+            const stats = await playersService.getPlayerStats(player.id, teamId, playerCompetitionFilter);
+            return { ...player, ...stats };
           } catch (error) {
             console.error(`Erreur lors du calcul des stats pour le joueur ${player.id}:`, error);
             return player;
@@ -51,7 +51,7 @@ export function useDashboardData({ teamId, filters, performanceFilters }: UseDas
     };
 
     calculateStats();
-  }, [allPlayers, teamId, totalTrainings]);
+  }, [allPlayers, teamId, totalTrainings, playerCompetitionFilter]);
 
   // Filtrer les joueurs
   const filteredPlayers = useMemo(() => {

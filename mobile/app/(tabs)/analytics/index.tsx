@@ -1,11 +1,5 @@
-import { TrackerAnalyticsView } from '../../../components/TrackerAnalyticsView';
+import { AnalyticsView } from '../../../components/AnalyticsView';
 
 export default function AnalyticsScreen() {
-  return (
-    <TrackerAnalyticsView
-      title="Analytics"
-      showRecordButton={false}
-      showMatchList={false}
-    />
-  );
+  return <AnalyticsView />;
 }

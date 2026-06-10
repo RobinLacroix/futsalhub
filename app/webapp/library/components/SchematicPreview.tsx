@@ -11,9 +11,15 @@ import { Play, Pause, ChevronLeft, ChevronRight } from 'lucide-react';
 interface SchematicPreviewProps {
   data: SchematicData;
   fieldType?: FieldType;
+  /** Override the pixel-per-meter scale (default: 8) */
+  scale?: number;
+  /** Override SVG width in px (default: 400) */
+  svgWidth?: number;
+  /** Override SVG height in px (default: 300) */
+  svgHeight?: number;
 }
 
-export function SchematicPreview({ data, fieldType = 'futsal' }: SchematicPreviewProps) {
+export function SchematicPreview({ data, fieldType = 'futsal', scale: scaleProp, svgWidth: svgWidthProp, svgHeight: svgHeightProp }: SchematicPreviewProps) {
   const [currentCircuitIndex, setCurrentCircuitIndex] = useState(data.currentCircuitIndex || 0);
   const [currentSequenceIndex, setCurrentSequenceIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -30,9 +36,9 @@ export function SchematicPreview({ data, fieldType = 'futsal' }: SchematicPrevie
   }, [data.currentCircuitIndex]);
   
   // Échelle pour la prévisualisation (plus petite que l'éditeur)
-  const scale = 8; // 8 pixels par mètre
-  const svgWidth = 400;
-  const svgHeight = 300;
+  const scale = scaleProp ?? 8;
+  const svgWidth = svgWidthProp ?? 400;
+  const svgHeight = svgHeightProp ?? 300;
 
   // Récupérer le circuit et les séquences actuels (mémorisés pour éviter les re-renders)
   const currentCircuit = useMemo(() => {
@@ -300,7 +306,7 @@ export function SchematicPreview({ data, fieldType = 'futsal' }: SchematicPrevie
       )}
 
       {/* Schéma SVG */}
-      <div className="w-full bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">
+      <div className="w-full bg-gray-50 rounded-lg border border-gray-200 overflow-hidden" style={{ height: svgHeight }}>
         <svg
           width={svgWidth}
           height={svgHeight}

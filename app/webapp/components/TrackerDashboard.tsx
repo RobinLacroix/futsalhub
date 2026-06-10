@@ -43,7 +43,7 @@ const EVENT_KEYS_ORDER: Array<keyof EventCounts> = [
   'shot',
   'recovery',
   'ball_loss',
-  'dribble',
+  'assist',
 ]
 
 type EventCounts = {
@@ -52,7 +52,7 @@ type EventCounts = {
   shot: number
   recovery: number
   ball_loss: number
-  dribble: number
+  assist: number
 }
 
 function createEmptyCounts(): EventCounts {
@@ -62,7 +62,7 @@ function createEmptyCounts(): EventCounts {
     shot: 0,
     recovery: 0,
     ball_loss: 0,
-    dribble: 0,
+    assist: 0,
   }
 }
 
@@ -222,8 +222,8 @@ export default function TrackerDashboard({ matchId }: Props) {
           case 'ball_loss':
             acc[pid].ball_loss += 1
             break
-          case 'dribble':
-            acc[pid].dribble += 1
+          case 'assist':
+            acc[pid].assist += 1
             break
           default:
             break
@@ -281,8 +281,8 @@ export default function TrackerDashboard({ matchId }: Props) {
           case 'ball_loss':
             globalCountsByPlayer[pid].ball_loss += 1
             break
-          case 'dribble':
-            globalCountsByPlayer[pid].dribble += 1
+          case 'assist':
+            globalCountsByPlayer[pid].assist += 1
             break
           default:
             break
@@ -337,7 +337,7 @@ export default function TrackerDashboard({ matchId }: Props) {
       shot: 'nb Tirs',
       recovery: 'nb récupération',
       ball_loss: 'nb perte de balle',
-      dribble: 'nb de dribble',
+      assist: 'nb de passes déc.',
     }
 
     return EVENT_KEYS_ORDER.map((key) => {
@@ -363,7 +363,7 @@ export default function TrackerDashboard({ matchId }: Props) {
     shot: number
     recovery: number
     ball_loss: number
-    dribble: number
+    assist: number
     opponent_goal: number
     opponent_shot_on_target: number
     opponent_shot: number
@@ -375,7 +375,7 @@ export default function TrackerDashboard({ matchId }: Props) {
     'shot',
     'recovery',
     'ball_loss',
-    'dribble',
+    'assist',
     'opponent_goal',
     'opponent_shot_on_target',
     'opponent_shot',
@@ -388,7 +388,7 @@ export default function TrackerDashboard({ matchId }: Props) {
       shot: 0,
       recovery: 0,
       ball_loss: 0,
-      dribble: 0,
+      assist: 0,
       opponent_goal: 0,
       opponent_shot_on_target: 0,
       opponent_shot: 0,
@@ -419,8 +419,8 @@ export default function TrackerDashboard({ matchId }: Props) {
         case 'ball_loss':
           byMatch[mid].ball_loss += 1
           break
-        case 'dribble':
-          byMatch[mid].dribble += 1
+        case 'assist':
+          byMatch[mid].assist += 1
           break
         case 'opponent_goal':
           byMatch[mid].opponent_goal += 1
@@ -474,7 +474,7 @@ export default function TrackerDashboard({ matchId }: Props) {
     shot: 'nb Tirs',
     recovery: 'nb récupération',
     ball_loss: 'nb perte de balle',
-    dribble: 'nb de dribble',
+    assist: 'nb de passes déc.',
     opponent_goal: 'nb buts encaissés',
     opponent_shot_on_target: 'nb tirs cadrés concédés',
     opponent_shot: 'nb tirs concédés',

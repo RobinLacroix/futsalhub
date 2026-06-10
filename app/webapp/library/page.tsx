@@ -1,15 +1,62 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import Image from 'next/image';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Filter, X, Loader2, Plus, Layout, ExternalLink, Edit, Trash2 } from 'lucide-react';
+import {
+  ArrowLeft,
+  Check,
+  ChevronRight,
+  Clock,
+  Copy,
+  Edit,
+  ExternalLink,
+  Layout,
+  Link2,
+  Link2Off,
+  Loader2,
+  Plus,
+  Search,
+  Trash2,
+  Users,
+  X,
+} from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { useActiveTeam } from '../hooks/useActiveTeam';
 import { schematicsService, type SchematicRecord, type SchematicData } from '@/lib/services/schematicsService';
 import { trainingsService } from '@/lib/services/trainingsService';
 import { SchematicPreview } from './components/SchematicPreview';
 
+// ─── Theme FM light ───────────────────────────────────────────────────────────
+const T = {
+  pageBg: '#EEF0F5',
+  cardBg: '#FFFFFF',
+  border: '#DDE1EA',
+  text: '#1A2332',
+  textMuted: '#697585',
+  accent: '#3B82F6',
+  accentAmber: '#FFB020',
+};
+
+// ─── Taxonomie pédagogique ────────────────────────────────────────────────────
+const BLOCS = [
+  { value: 'Échauffement',      color: '#ea580c', bg: '#FFF7ED', label: 'Éch.'  },
+  { value: 'Problématisation',  color: '#2563eb', bg: '#EFF6FF', label: 'Prob.' },
+  { value: 'Situation isolée',  color: '#16a34a', bg: '#F0FDF4', label: 'Sit.'  },
+  { value: 'Analytique',        color: '#6b7280', bg: '#F9FAFB', label: 'Anal.' },
+  { value: 'Jeu orienté',       color: '#7c3aed', bg: '#F5F3FF', label: 'Jeu'   },
+  { value: 'Match libre',       color: '#d97706', bg: '#FFFBEB', label: 'Match' },
+] as const;
+
+type BlocValue = (typeof BLOCS)[number]['value'];
+
+interface BlocStyle { value: string; color: string; bg: string; label: string }
+function getBlocStyle(bloc?: string | null): BlocStyle {
+  const found = BLOCS.find((b) => b.value === bloc);
+  if (!found) return { value: bloc || '—', color: T.textMuted, bg: '#F1F2F5', label: bloc || '—' };
+  return { ...found };
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 type TrainingTheme = 'Offensif' | 'Defensif' | 'Transition' | 'CPA';
 type TrainingType = 'Echauffement' | 'Exercice' | 'Situation' | 'Jeu';
 
@@ -20,8 +67,16 @@ interface TrainingProcedure {
   instructions: string;
   variants?: string | null;
   corrections?: string | null;
-  theme: TrainingTheme;
-  type: TrainingType;
+  // Legacy (kept for compat, not displayed)
+  theme?: TrainingTheme;
+  type?: TrainingType;
+  // New fields
+  bloc?: string | null;
+  principe?: string | null;
+  phase?: string | null;
+  rapport_numerique?: string | null;
+  share_code?: string | null;
+  // Misc
   min_players?: number | null;
   field_dimensions?: string | null;
   duration_minutes?: number | null;
@@ -30,14 +85,16 @@ interface TrainingProcedure {
   created_at?: string;
 }
 
-interface NewProcedureForm {
+interface ProcedureForm {
   title: string;
   objectives: string;
   instructions: string;
   variants: string;
   corrections: string;
-  theme: TrainingTheme;
-  type: TrainingType;
+  bloc: string;
+  principe: string;
+  phase: string;
+  rapport_numerique: string;
   min_players: string;
   field_dimensions: string;
   duration_minutes: string;
@@ -45,1060 +102,1286 @@ interface NewProcedureForm {
   schematic_id: string;
 }
 
-const THEMES: TrainingTheme[] = ['Offensif', 'Defensif', 'Transition', 'CPA'];
-const TYPES: TrainingType[] = ['Echauffement', 'Exercice', 'Situation', 'Jeu'];
+const DEFAULT_FORM: ProcedureForm = {
+  title: '',
+  objectives: '',
+  instructions: '',
+  variants: '',
+  corrections: '',
+  bloc: '',
+  principe: '',
+  phase: '',
+  rapport_numerique: '',
+  min_players: '',
+  field_dimensions: '',
+  duration_minutes: '',
+  image_url: '',
+  schematic_id: '',
+};
 
-export default function LibraryPage() {
-  const router = useRouter();
-  const { activeTeam } = useActiveTeam();
-  const [procedures, setProcedures] = useState<TrainingProcedure[]>([]);
-  const [loading, setLoading] = useState(true);
+// ─── BlocBadge ────────────────────────────────────────────────────────────────
+function BlocBadge({ bloc, short = false }: { bloc?: string | null; short?: boolean }) {
+  if (!bloc) return null;
+  const style = getBlocStyle(bloc);
+  return (
+    <span
+      style={{ backgroundColor: style.bg, color: style.color, border: `1px solid ${style.color}22` }}
+      className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap"
+    >
+      {short ? style.label : style.value}
+    </span>
+  );
+}
+
+// ─── SharePopover ─────────────────────────────────────────────────────────────
+function SharePopover({
+  procedure,
+  onUpdate,
+  onClose,
+}: {
+  procedure: TrainingProcedure;
+  onUpdate: (updated: TrainingProcedure) => void;
+  onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
 
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedThemes, setSelectedThemes] = useState<TrainingTheme[]>([]);
-  const [selectedTypes, setSelectedTypes] = useState<TrainingType[]>([]);
-  const [selectedProcedure, setSelectedProcedure] = useState<TrainingProcedure | null>(null);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [availableSchematics, setAvailableSchematics] = useState<SchematicRecord[]>([]);
-  const [isSchematicModalOpen, setIsSchematicModalOpen] = useState(false);
-  const [selectedSchematic, setSelectedSchematic] = useState<SchematicRecord | null>(null);
-  const [editingProcedure, setEditingProcedure] = useState<TrainingProcedure | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [previewSchematicData, setPreviewSchematicData] = useState<SchematicData | null>(null);
-  const [procedureUsageCount, setProcedureUsageCount] = useState<number | null>(null);
+  const shareUrl = procedure.share_code
+    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/p/${procedure.share_code}`
+    : null;
 
-  const [formData, setFormData] = useState<NewProcedureForm>({
-    title: '',
-    objectives: '',
-    instructions: '',
-    variants: '',
-    corrections: '',
-    theme: 'Offensif',
-    type: 'Exercice',
-    min_players: '',
-    field_dimensions: '',
-    duration_minutes: '',
-    image_url: '',
-    schematic_id: '',
-  });
-
-  useEffect(() => {
-    const fetchProcedures = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const { data, error: fetchError } = await supabase
-          .from('training_procedures')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (fetchError) {
-          throw fetchError;
-        }
-
-        setProcedures((data || []) as TrainingProcedure[]);
-      } catch (err) {
-        console.error('Erreur lors du chargement des procédés:', err);
-        setError('Impossible de charger la bibliothèque pour le moment.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchProcedures();
-  }, []);
-
-  // Charger les schémas disponibles quand le modal s'ouvre
-  useEffect(() => {
-    const loadSchematics = async () => {
-      if (isCreateModalOpen || isSchematicModalOpen) {
-        try {
-          console.log('Chargement de tous les schémas disponibles');
-          // Récupérer tous les schémas (accessibles à toutes les équipes)
-          const schematics = await schematicsService.getSchematicsByTeam();
-          console.log('Schémas chargés:', schematics);
-          setAvailableSchematics(schematics);
-        } catch (err) {
-          console.error('Erreur lors du chargement des schémas:', err);
-        }
-      } else if (!isCreateModalOpen && !isSchematicModalOpen) {
-        // Réinitialiser la liste si les modals sont fermés
-        setAvailableSchematics([]);
-      }
-    };
-    loadSchematics();
-  }, [isCreateModalOpen, isSchematicModalOpen]);
-
-  // Charger le schéma pour la prévisualisation quand un procédé est sélectionné
-  useEffect(() => {
-    if (selectedProcedure?.schematic_id && activeTeam?.id) {
-      schematicsService.getSchematicById(selectedProcedure.schematic_id)
-        .then((schematic) => {
-          if (schematic) {
-            setPreviewSchematicData(schematic.data);
-          } else {
-            setPreviewSchematicData(null);
-          }
-        })
-        .catch((err) => {
-          console.error('Erreur lors du chargement du schéma pour la prévisualisation:', err);
-          setPreviewSchematicData(null);
-        });
-    } else {
-      setPreviewSchematicData(null);
+  const handleGenerate = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const code = Math.random().toString(36).substring(2, 10);
+      const { error: err } = await supabase
+        .from('training_procedures')
+        .update({ share_code: code } as any)
+        .eq('id', procedure.id);
+      if (err) throw err;
+      onUpdate({ ...procedure, share_code: code });
+    } catch (e: any) {
+      setError(e?.message || 'Erreur lors de la génération du lien.');
+    } finally {
+      setLoading(false);
     }
-  }, [selectedProcedure?.schematic_id, activeTeam?.id]);
+  };
 
-  // Charger le nombre d'utilisations du procédé quand il est sélectionné
-  useEffect(() => {
-    if (selectedProcedure?.id) {
-      trainingsService.getProcedureUsageCount(selectedProcedure.id)
-        .then((count) => {
-          setProcedureUsageCount(count);
-        })
-        .catch((err) => {
-          console.error('Erreur lors du chargement du nombre d\'utilisations:', err);
-          setProcedureUsageCount(0);
-        });
-    } else {
-      setProcedureUsageCount(null);
+  const handleRevoke = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { error: err } = await supabase
+        .from('training_procedures')
+        .update({ share_code: null } as any)
+        .eq('id', procedure.id);
+      if (err) throw err;
+      onUpdate({ ...procedure, share_code: null });
+    } catch (e: any) {
+      setError(e?.message || 'Erreur lors de la révocation.');
+    } finally {
+      setLoading(false);
     }
-  }, [selectedProcedure?.id]);
+  };
 
-  const filteredProcedures = useMemo(() => {
-    return procedures.filter((procedure) => {
-      const matchesSearch =
-        procedure.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        procedure.objectives.toLowerCase().includes(searchTerm.toLowerCase());
-
-      const matchesTheme =
-        selectedThemes.length === 0 || selectedThemes.includes(procedure.theme);
-
-      const matchesType =
-        selectedTypes.length === 0 || selectedTypes.includes(procedure.type);
-
-      return matchesSearch && matchesTheme && matchesType;
+  const handleCopy = () => {
+    if (!shareUrl) return;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     });
-  }, [procedures, searchTerm, selectedThemes, selectedTypes]);
-
-  const toggleTheme = (theme: TrainingTheme) => {
-    setSelectedThemes((prev) =>
-      prev.includes(theme) ? prev.filter((item) => item !== theme) : [...prev, theme]
-    );
   };
 
-  const toggleType = (type: TrainingType) => {
-    setSelectedTypes((prev) =>
-      prev.includes(type) ? prev.filter((item) => item !== type) : [...prev, type]
-    );
-  };
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [onClose]);
 
   return (
-    <div className="min-h-screen bg-gray-50 px-4 py-6 sm:px-6 lg:px-8">
-      <header className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Bibliothèque de procédés d&apos;entraînement</h1>
-        <p className="mt-2 text-gray-600 max-w-3xl">
-          Explorez et filtrez les procédés enregistrés. Accédez rapidement aux informations essentielles
-          et ouvrez chaque fiche pour consulter les consignes, variantes et points clés.
-        </p>
-      </header>
+    <div
+      ref={popoverRef}
+      style={{
+        backgroundColor: T.cardBg,
+        border: `1px solid ${T.border}`,
+        boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+      }}
+      className="absolute right-0 top-10 z-50 w-80 rounded-xl p-4 space-y-3"
+    >
+      <div className="flex items-center justify-between">
+        <span style={{ color: T.text }} className="text-sm font-semibold">
+          Partager le procédé
+        </span>
+        <button onClick={onClose} style={{ color: T.textMuted }} className="hover:opacity-70">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
 
-      <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 mb-8">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div className="relative flex-1 max-w-xl">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-600" />
-            <input
-              type="search"
-              placeholder="Rechercher par titre ou objectifs..."
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-              className="w-full pl-10 pr-4 py-2 border-2 border-gray-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
-            />
-          </div>
+      {error && (
+        <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1">{error}</p>
+      )}
 
-          <div className="flex flex-col sm:flex-row sm:items-center sm:gap-4 gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <Filter className="h-4 w-4 text-gray-600" />
-              <span className="text-sm font-medium text-gray-800">Filtres</span>
-            </div>
+      {shareUrl ? (
+        <>
+          <div
+            style={{ backgroundColor: T.pageBg, border: `1px solid ${T.border}` }}
+            className="rounded-lg px-3 py-2 flex items-center gap-2"
+          >
+            <span style={{ color: T.text }} className="text-xs flex-1 truncate font-mono">
+              {shareUrl}
+            </span>
             <button
-              onClick={() => {
-                setCreateError(null);
-                setEditingProcedure(null);
-                setFormData({
-                  title: '',
-                  objectives: '',
-                  instructions: '',
-                  variants: '',
-                  corrections: '',
-                  theme: 'Offensif',
-                  type: 'Exercice',
-                  min_players: '',
-                  field_dimensions: '',
-                  duration_minutes: '',
-                  image_url: '',
-                  schematic_id: '',
-                });
-                setSelectedSchematic(null);
-                setIsCreateModalOpen(true);
-              }}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium shadow-sm hover:bg-blue-700 transition-colors"
+              onClick={handleCopy}
+              style={{ color: T.accent }}
+              className="shrink-0 hover:opacity-70 transition-opacity"
             >
-              <Plus className="h-4 w-4" />
-              Ajouter un procédé
+              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
             </button>
           </div>
-        </div>
-
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <h3 className="text-sm font-semibold text-gray-800 mb-3 uppercase tracking-wide">
-              Thèmes
-            </h3>
-            <div className="flex flex-wrap gap-2">
-              {THEMES.map((theme) => {
-                const isActive = selectedThemes.includes(theme);
-                return (
-                  <button
-                    key={theme}
-                    onClick={() => toggleTheme(theme)}
-                    className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
-                      isActive
-                        ? 'bg-blue-600 text-white shadow-sm'
-                        : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
-                    }`}
-                  >
-                    {theme}
-                  </button>
-                );
-              })}
-              {selectedThemes.length > 0 && (
-                <button
-                  onClick={() => setSelectedThemes([])}
-                  className="px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 flex items-center gap-1"
-                >
-                  <X className="h-3 w-3" />
-                  Réinitialiser
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <h3 className="text-sm font-semibold text-gray-800 mb-3 uppercase tracking-wide">
-              Types
-            </h3>
-            <div className="flex flex-wrap gap-2">
-              {TYPES.map((type) => {
-                const isActive = selectedTypes.includes(type);
-                return (
-                  <button
-                    key={type}
-                    onClick={() => toggleType(type)}
-                    className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
-                      isActive
-                        ? 'bg-purple-600 text-white shadow-sm'
-                        : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
-                    }`}
-                  >
-                    {type}
-                  </button>
-                );
-              })}
-              {selectedTypes.length > 0 && (
-                <button
-                  onClick={() => setSelectedTypes([])}
-                  className="px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 flex items-center gap-1"
-                >
-                  <X className="h-3 w-3" />
-                  Réinitialiser
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {loading ? (
-        <div className="flex justify-center items-center py-20">
-          <Loader2 className="h-8 w-8 text-blue-600 animate-spin" />
-        </div>
-      ) : error ? (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-5 rounded-lg">
-          {error}
-        </div>
-      ) : filteredProcedures.length === 0 ? (
-        <div className="bg-white border border-dashed border-gray-400 rounded-xl p-10 text-center text-gray-600">
-          Aucun procédé ne correspond à votre recherche. Essayez d&apos;ajuster les filtres ou d&apos;ajouter un nouveau contenu.
-        </div>
+          <p style={{ color: T.textMuted }} className="text-xs">
+            Ce lien est public — tout le monde peut consulter cette fiche sans se connecter.
+          </p>
+          <button
+            onClick={handleRevoke}
+            disabled={loading}
+            style={{ color: '#dc2626', borderColor: '#fca5a5' }}
+            className="w-full flex items-center justify-center gap-1.5 text-xs font-medium border rounded-lg px-3 py-2 hover:bg-red-50 transition-colors disabled:opacity-50"
+          >
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2Off className="h-3.5 w-3.5" />}
+            Révoquer le lien
+          </button>
+        </>
       ) : (
-        <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-          {filteredProcedures.map((procedure) => (
-            <article
-              key={procedure.id}
-              onClick={() => setSelectedProcedure(procedure)}
-              className="bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-shadow cursor-pointer p-5 flex flex-col gap-4"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900 line-clamp-2">{procedure.title}</h2>
-                  <p className="mt-1 text-sm text-gray-600 line-clamp-3">{procedure.objectives}</p>
-                </div>
-                <div className="flex flex-col gap-2 items-end shrink-0">
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
-                    {procedure.theme}
-                  </span>
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
-                    {procedure.type}
-                  </span>
-                </div>
-              </div>
-
-              <dl className="grid grid-cols-2 gap-4 text-sm text-gray-600">
-                <div>
-                  <dt className="font-medium text-gray-600">Nb joueurs min.</dt>
-                  <dd className="mt-1 text-gray-900">
-                    {procedure.min_players ? `${procedure.min_players}` : '—'}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="font-medium text-gray-600">Durée (min)</dt>
-                  <dd className="mt-1 text-gray-900">
-                    {procedure.duration_minutes ? `${procedure.duration_minutes}` : '—'}
-                  </dd>
-                </div>
-                <div className="col-span-2">
-                  <dt className="font-medium text-gray-600">Dimension terrain</dt>
-                  <dd className="mt-1 text-gray-900">
-                    {procedure.field_dimensions || '—'}
-                  </dd>
-                </div>
-              </dl>
-
-              <div className="text-xs text-gray-600">
-                Cliquer pour voir les consignes, variantes et correctifs
-              </div>
-            </article>
-          ))}
-        </section>
-      )}
-
-      {selectedProcedure && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="flex justify-between items-start gap-4 border-b px-6 py-4">
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900">{selectedProcedure.title}</h2>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
-                    {selectedProcedure.theme}
-                  </span>
-                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
-                    {selectedProcedure.type}
-                  </span>
-                  {selectedProcedure.duration_minutes && (
-                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                      {selectedProcedure.duration_minutes} min
-                    </span>
-                  )}
-                  {selectedProcedure.min_players && (
-                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                      {selectedProcedure.min_players} joueurs minimum
-                    </span>
-                  )}
-                  {procedureUsageCount !== null && (
-                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                      Utilisé {procedureUsageCount} {procedureUsageCount === 1 ? 'fois' : 'fois'}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedProcedure(null)}
-                className="text-gray-600 hover:text-gray-600 transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Colonne gauche : Texte */}
-                <div className="space-y-4">
-                  {selectedProcedure.image_url && (
-                    <div className="relative w-full h-40 rounded-xl overflow-hidden border border-gray-200">
-                      <Image
-                        src={selectedProcedure.image_url}
-                        alt={`Illustration pour ${selectedProcedure.title}`}
-                        fill
-                        className="object-cover"
-                      />
-                    </div>
-                  )}
-
-                  <section>
-                    <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wide">
-                      Objectifs
-                    </h3>
-                    <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">{selectedProcedure.objectives}</p>
-                  </section>
-
-                  <section>
-                    <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wide">
-                      Consignes / Règles
-                    </h3>
-                    <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">{selectedProcedure.instructions}</p>
-                  </section>
-
-                  {selectedProcedure.variants && (
-                    <section>
-                      <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wide">
-                        Variantes
-                      </h3>
-                      <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">{selectedProcedure.variants}</p>
-                    </section>
-                  )}
-
-                  {selectedProcedure.corrections && (
-                    <section>
-                      <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wide">
-                        Correctifs / Comportements attendus
-                      </h3>
-                      <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">{selectedProcedure.corrections}</p>
-                    </section>
-                  )}
-
-                  {(selectedProcedure.field_dimensions || selectedProcedure.duration_minutes || selectedProcedure.min_players) && (
-                    <section className="grid gap-3 sm:grid-cols-3">
-                      {selectedProcedure.field_dimensions && (
-                        <div className="bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
-                          <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                            Dimension du terrain
-                          </div>
-                          <div className="mt-1 text-sm text-gray-800">{selectedProcedure.field_dimensions}</div>
-                        </div>
-                      )}
-                      {selectedProcedure.duration_minutes && (
-                        <div className="bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
-                          <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                            Durée indicative
-                          </div>
-                          <div className="mt-1 text-sm text-gray-800">{selectedProcedure.duration_minutes} minutes</div>
-                        </div>
-                      )}
-                      {selectedProcedure.min_players && (
-                        <div className="bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
-                          <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                            Nombre de joueurs minimum
-                          </div>
-                          <div className="mt-1 text-sm text-gray-800">{selectedProcedure.min_players}</div>
-                        </div>
-                      )}
-                    </section>
-                  )}
-                </div>
-
-                {/* Colonne droite : Schéma */}
-                <div className="space-y-4">
-                  {selectedProcedure.schematic_id && previewSchematicData && (
-                    <section>
-                      <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wide mb-2">
-                        Schéma tactique
-                      </h3>
-                      <SchematicPreview data={previewSchematicData} />
-                      <button
-                        onClick={() => router.push(`/webapp/library/schematics?schematic=${selectedProcedure.schematic_id}`)}
-                        className="mt-2 w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-                      >
-                        <Layout className="h-3 w-3" />
-                        Ouvrir dans l'éditeur
-                        <ExternalLink className="h-3 w-3" />
-                      </button>
-                    </section>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="border-t px-6 py-4 bg-gray-50 flex justify-between items-center">
-              <button
-                onClick={async () => {
-                  if (!confirm('Êtes-vous sûr de vouloir supprimer ce procédé ? Cette action est irréversible.')) {
-                    return;
-                  }
-                  setIsDeleting(true);
-                  try {
-                    const { error: deleteError } = await supabase
-                      .from('training_procedures')
-                      .delete()
-                      .eq('id', selectedProcedure.id);
-
-                    if (deleteError) {
-                      throw deleteError;
-                    }
-
-                    setProcedures((prev) => prev.filter((p) => p.id !== selectedProcedure.id));
-                    setSelectedProcedure(null);
-                  } catch (err) {
-                    console.error('Erreur lors de la suppression:', err);
-                    alert('Impossible de supprimer le procédé. Réessayez plus tard.');
-                  } finally {
-                    setIsDeleting(false);
-                  }
-                }}
-                disabled={isDeleting}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                <Trash2 className="h-4 w-4" />
-                {isDeleting ? 'Suppression...' : 'Supprimer'}
-              </button>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    // Charger les données du procédé dans le formulaire
-                    setFormData({
-                      title: selectedProcedure.title,
-                      objectives: selectedProcedure.objectives,
-                      instructions: selectedProcedure.instructions,
-                      variants: selectedProcedure.variants || '',
-                      corrections: selectedProcedure.corrections || '',
-                      theme: selectedProcedure.theme,
-                      type: selectedProcedure.type,
-                      min_players: selectedProcedure.min_players?.toString() || '',
-                      field_dimensions: selectedProcedure.field_dimensions || '',
-                      duration_minutes: selectedProcedure.duration_minutes?.toString() || '',
-                      image_url: selectedProcedure.image_url || '',
-                      schematic_id: selectedProcedure.schematic_id || '',
-                    });
-                    // Charger le schéma associé si présent
-                    if (selectedProcedure.schematic_id && activeTeam?.id) {
-                      schematicsService.getSchematicById(selectedProcedure.schematic_id)
-                        .then((schematic) => {
-                          if (schematic) {
-                            setSelectedSchematic(schematic);
-                          }
-                        })
-                        .catch(console.error);
-                    }
-                    setEditingProcedure(selectedProcedure);
-                    setSelectedProcedure(null);
-                    setIsCreateModalOpen(true);
-                  }}
-                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-800 bg-white border-2 border-gray-400 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <Edit className="h-4 w-4" />
-                  Modifier
-                </button>
-                <button
-                  onClick={() => setSelectedProcedure(null)}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  Fermer
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isCreateModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="flex justify-between items-start gap-4 border-b px-6 py-4">
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900">
-                  {editingProcedure ? 'Modifier le procédé' : 'Ajouter un procédé'}
-                </h2>
-                <p className="mt-1 text-sm text-gray-600">
-                  {editingProcedure
-                    ? 'Modifiez les informations puis validez pour enregistrer les changements.'
-                    : 'Renseignez les informations principales puis validez pour l\'enregistrer dans la bibliothèque.'}
-                </p>
-              </div>
-              <button
-                onClick={() => {
-                  setIsCreateModalOpen(false);
-                  setEditingProcedure(null);
-                  setFormData({
-                    title: '',
-                    objectives: '',
-                    instructions: '',
-                    variants: '',
-                    corrections: '',
-                    theme: 'Offensif',
-                    type: 'Exercice',
-                    min_players: '',
-                    field_dimensions: '',
-                    duration_minutes: '',
-                    image_url: '',
-                    schematic_id: '',
-                  });
-                  setSelectedSchematic(null);
-                }}
-                className="text-gray-600 hover:text-gray-600 transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
-              {createError && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-md text-sm">
-                  {createError}
-                </div>
-              )}
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="sm:col-span-2">
-                  <label className="block text-sm font-medium text-gray-800 mb-1">Titre *</label>
-                  <input
-                    type="text"
-                    value={formData.title}
-                    onChange={(event) => setFormData((prev) => ({ ...prev, title: event.target.value }))}
-                    className="w-full rounded-lg border-2 border-gray-400 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
-                    placeholder="Nom du procédé"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block text-sm font-medium text-gray-800 mb-1">Objectifs *</label>
-                  <textarea
-                    value={formData.objectives}
-                    onChange={(event) => setFormData((prev) => ({ ...prev, objectives: event.target.value }))}
-                    rows={3}
-                    className="w-full rounded-lg border-2 border-gray-400 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
-                    placeholder="Décrire les objectifs principaux"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block text-sm font-medium text-gray-800 mb-1">Consignes / Règles *</label>
-                  <textarea
-                    value={formData.instructions}
-                    onChange={(event) => setFormData((prev) => ({ ...prev, instructions: event.target.value }))}
-                    rows={4}
-                    className="w-full rounded-lg border-2 border-gray-400 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
-                    placeholder="Décrire précisément le déroulement et les règles"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-800 mb-1">Thème *</label>
-                  <select
-                    value={formData.theme}
-                    onChange={(event) =>
-                      setFormData((prev) => ({ ...prev, theme: event.target.value as TrainingTheme }))
-                    }
-                    className="w-full rounded-lg border-2 border-gray-400 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
-                  >
-                    {THEMES.map((theme) => (
-                      <option key={theme} value={theme}>
-                        {theme}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-800 mb-1">Type *</label>
-                  <select
-                    value={formData.type}
-                    onChange={(event) =>
-                      setFormData((prev) => ({ ...prev, type: event.target.value as TrainingType }))
-                    }
-                    className="w-full rounded-lg border-2 border-gray-400 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
-                  >
-                    {TYPES.map((type) => (
-                      <option key={type} value={type}>
-                        {type}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-800 mb-1">Nb joueurs minimum</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={formData.min_players}
-                    onChange={(event) => setFormData((prev) => ({ ...prev, min_players: event.target.value }))}
-                    className="w-full rounded-lg border-2 border-gray-400 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
-                    placeholder="Ex: 8"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-800 mb-1">Durée (min)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={formData.duration_minutes}
-                    onChange={(event) =>
-                      setFormData((prev) => ({ ...prev, duration_minutes: event.target.value }))
-                    }
-                    className="w-full rounded-lg border-2 border-gray-400 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
-                    placeholder="Ex: 15"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block text-sm font-medium text-gray-800 mb-1">Dimension du terrain</label>
-                  <input
-                    type="text"
-                    value={formData.field_dimensions}
-                    onChange={(event) =>
-                      setFormData((prev) => ({ ...prev, field_dimensions: event.target.value }))
-                    }
-                    className="w-full rounded-lg border-2 border-gray-400 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
-                    placeholder="Ex: 20m x 15m"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block text-sm font-medium text-gray-800 mb-1">Variantes</label>
-                  <textarea
-                    value={formData.variants}
-                    onChange={(event) => setFormData((prev) => ({ ...prev, variants: event.target.value }))}
-                    rows={3}
-                    className="w-full rounded-lg border-2 border-gray-400 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
-                    placeholder="Variantes possibles du procédé"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block text-sm font-medium text-gray-800 mb-1">
-                    Correctifs / Comportements attendus
-                  </label>
-                  <textarea
-                    value={formData.corrections}
-                    onChange={(event) => setFormData((prev) => ({ ...prev, corrections: event.target.value }))}
-                    rows={3}
-                    className="w-full rounded-lg border-2 border-gray-400 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
-                    placeholder="Points de coaching importants"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block text-sm font-medium text-gray-800 mb-1">URL image</label>
-                  <input
-                    type="text"
-                    value={formData.image_url}
-                    onChange={(event) => setFormData((prev) => ({ ...prev, image_url: event.target.value }))}
-                    className="w-full rounded-lg border-2 border-gray-400 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
-                    placeholder="https://..."
-                  />
-                </div>
-
-                <div className="sm:col-span-2 border-t pt-4">
-                  <label className="block text-sm font-medium text-gray-800 mb-2">Schéma tactique</label>
-                  <div className="flex flex-col gap-3">
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          // Ouvrir l'éditeur de schémas dans un nouvel onglet
-                          const newWindow = window.open('/webapp/library/schematics', '_blank');
-                          if (newWindow) {
-                            // Attendre que l'utilisateur crée/sauvegarde un schéma
-                            // On pourrait utiliser un message postMessage pour communiquer
-                          }
-                        }}
-                        className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-                      >
-                        <Layout className="h-4 w-4" />
-                        Créer un nouveau schéma
-                      </button>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          if (activeTeam?.id) {
-                            try {
-                              // Recharger les schémas avant d'ouvrir le modal
-                              // Récupérer tous les schémas (accessibles à toutes les équipes)
-                              const schematics = await schematicsService.getSchematicsByTeam();
-                              setAvailableSchematics(schematics);
-                              setIsSchematicModalOpen(true);
-                            } catch (err) {
-                              console.error('Erreur lors du chargement des schémas:', err);
-                              setIsSchematicModalOpen(true); // Ouvrir quand même le modal
-                            }
-                          } else {
-                            setIsSchematicModalOpen(true);
-                          }
-                        }}
-                        className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-800 bg-white border-2 border-gray-400 rounded-lg hover:bg-gray-50 transition-colors"
-                      >
-                        Charger un schéma existant
-                      </button>
-                    </div>
-                    {selectedSchematic && (
-                      <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
-                        <div className="flex items-center gap-2">
-                          <Layout className="h-4 w-4 text-gray-600" />
-                          <span className="text-sm text-gray-800">{selectedSchematic.name}</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedSchematic(null);
-                            setFormData((prev) => ({ ...prev, schematic_id: '' }));
-                          }}
-                          className="text-gray-600 hover:text-gray-600"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="border-t px-6 py-4 bg-gray-50 flex justify-end gap-3">
-              <button
-                onClick={() => {
-                  setIsCreateModalOpen(false);
-                  setEditingProcedure(null);
-                  setFormData({
-                    title: '',
-                    objectives: '',
-                    instructions: '',
-                    variants: '',
-                    corrections: '',
-                    theme: 'Offensif',
-                    type: 'Exercice',
-                    min_players: '',
-                    field_dimensions: '',
-                    duration_minutes: '',
-                    image_url: '',
-                    schematic_id: '',
-                  });
-                  setSelectedSchematic(null);
-                }}
-                className="px-4 py-2 text-sm font-medium text-gray-800 bg-white border-2 border-gray-400 rounded-lg hover:bg-gray-100 transition-colors"
-                disabled={isCreating}
-              >
-                Annuler
-              </button>
-              <button
-                onClick={async () => {
-                  if (!formData.title.trim() || !formData.objectives.trim() || !formData.instructions.trim()) {
-                    setCreateError('Veuillez renseigner les champs obligatoires (titre, objectifs, consignes).');
-                    return;
-                  }
-
-                  setIsCreating(true);
-                  setCreateError(null);
-                  try {
-                    // Préparer les données à insérer
-                    const insertData: any = {
-                      title: formData.title.trim(),
-                      objectives: formData.objectives.trim(),
-                      instructions: formData.instructions.trim(),
-                      variants: formData.variants.trim() || null,
-                      corrections: formData.corrections.trim() || null,
-                      theme: formData.theme,
-                      type: formData.type,
-                      min_players: formData.min_players ? Number(formData.min_players) : null,
-                      field_dimensions: formData.field_dimensions.trim() || null,
-                      duration_minutes: formData.duration_minutes ? Number(formData.duration_minutes) : null,
-                      image_url: formData.image_url.trim() || null,
-                    };
-
-                    // Ajouter schematic_id seulement s'il n'est pas vide
-                    if (formData.schematic_id && formData.schematic_id.trim()) {
-                      insertData.schematic_id = formData.schematic_id.trim();
-                    }
-
-                    console.log('Données à insérer/modifier:', insertData);
-
-                    let data: TrainingProcedure | null = null;
-                    let error: any = null;
-
-                    if (editingProcedure) {
-                      // Mise à jour
-                      const { data: updateData, error: updateError } = await supabase
-                        .from('training_procedures')
-                        .update(insertData)
-                        .eq('id', editingProcedure.id)
-                        .select()
-                        .single();
-
-                      data = updateData as TrainingProcedure | null;
-                      error = updateError;
-                    } else {
-                      // Création
-                      const { data: insertDataResult, error: insertError } = await supabase
-                        .from('training_procedures')
-                        .insert([insertData])
-                        .select()
-                        .single();
-
-                      data = insertDataResult as TrainingProcedure | null;
-                      error = insertError;
-                    }
-
-                    if (error) {
-                      console.error('Erreur Supabase complète:', JSON.stringify(error, null, 2));
-                      console.error('Code:', error.code);
-                      console.error('Message:', error.message);
-                      console.error('Details:', error.details);
-                      console.error('Hint:', error.hint);
-                      throw error;
-                    }
-
-                    if (data) {
-                      if (editingProcedure) {
-                        // Mise à jour de la liste
-                        setProcedures((prev) =>
-                          prev.map((p) => (p.id === editingProcedure.id ? data! : p))
-                        );
-                      } else {
-                        // Ajout à la liste
-                        setProcedures((prev) => [data, ...prev]);
-                      }
-                      setIsCreateModalOpen(false);
-                      setEditingProcedure(null);
-                      // Réinitialiser le formulaire
-                      setFormData({
-                        title: '',
-                        objectives: '',
-                        instructions: '',
-                        variants: '',
-                        corrections: '',
-                        theme: 'Offensif',
-                        type: 'Exercice',
-                        min_players: '',
-                        field_dimensions: '',
-                        duration_minutes: '',
-                        image_url: '',
-                        schematic_id: '',
-                      });
-                      setSelectedSchematic(null);
-                    }
-                  } catch (err: any) {
-                    console.error('Erreur lors de la création du procédé:', err);
-                    console.error('Type d\'erreur:', typeof err);
-                    console.error('Erreur stringifiée:', JSON.stringify(err, null, 2));
-                    
-                    let errorMessage = 'Erreur inconnue';
-                    if (err?.message) {
-                      errorMessage = err.message;
-                    } else if (err?.details) {
-                      errorMessage = err.details;
-                    } else if (err?.code) {
-                      errorMessage = `Code d'erreur: ${err.code}`;
-                    } else if (typeof err === 'string') {
-                      errorMessage = err;
-                    } else {
-                      errorMessage = JSON.stringify(err);
-                    }
-                    
-                    setCreateError(`Impossible d'enregistrer le procédé: ${errorMessage}`);
-                  } finally {
-                    setIsCreating(false);
-                  }
-                }}
-                disabled={isCreating}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {isCreating && <Loader2 className="h-4 w-4 animate-spin" />}
-                {isCreating
-                  ? editingProcedure
-                    ? 'Modification...'
-                    : 'Enregistrement...'
-                  : editingProcedure
-                  ? 'Enregistrer les modifications'
-                  : 'Enregistrer'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de sélection de schéma */}
-      {isSchematicModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
-            <div className="flex justify-between items-start gap-4 border-b px-6 py-4">
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900">Sélectionner un schéma</h2>
-                <p className="mt-1 text-sm text-gray-600">
-                  Choisissez un schéma tactique existant à associer à cette procédure.
-                </p>
-              </div>
-              <button
-                onClick={() => setIsSchematicModalOpen(false)}
-                className="text-gray-600 hover:text-gray-600 transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-6 py-5">
-              {!activeTeam?.id ? (
-                <div className="text-center py-10 text-gray-600">
-                  <p>Veuillez sélectionner une équipe pour charger les schémas.</p>
-                </div>
-              ) : availableSchematics.length === 0 ? (
-                <div className="text-center py-10 text-gray-600">
-                  <Layout className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                  <p>Aucun schéma disponible.</p>
-                  <p className="text-sm mt-2">Créez d'abord un schéma dans l'éditeur de schémas tactiques.</p>
-                  <p className="text-xs mt-2 text-gray-600">Équipe: {activeTeam.name}</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {availableSchematics.map((schematic) => (
-                    <button
-                      key={schematic.id}
-                      onClick={() => {
-                        setSelectedSchematic(schematic);
-                        setFormData((prev) => ({ ...prev, schematic_id: schematic.id }));
-                        setIsSchematicModalOpen(false);
-                      }}
-                      className={`w-full text-left p-4 rounded-lg border transition-colors ${
-                        selectedSchematic?.id === schematic.id
-                          ? 'border-blue-500 bg-blue-50'
-                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <Layout className="h-5 w-5 text-gray-600" />
-                          <div>
-                            <div className="font-medium text-gray-900">{schematic.name}</div>
-                            <div className="text-sm text-gray-600">
-                              {schematic.data.circuits.length} circuit{schematic.data.circuits.length > 1 ? 's' : ''}
-                            </div>
-                          </div>
-                        </div>
-                        {selectedSchematic?.id === schematic.id && (
-                          <div className="text-blue-600 font-medium">Sélectionné</div>
-                        )}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="border-t px-6 py-4 bg-gray-50 flex justify-end">
-              <button
-                onClick={() => setIsSchematicModalOpen(false)}
-                className="px-4 py-2 text-sm font-medium text-gray-800 bg-white border-2 border-gray-400 rounded-lg hover:bg-gray-100 transition-colors"
-              >
-                Fermer
-              </button>
-            </div>
-          </div>
-        </div>
+        <>
+          <p style={{ color: T.textMuted }} className="text-xs">
+            Générez un lien public pour partager cette fiche sans compte.
+          </p>
+          <button
+            onClick={handleGenerate}
+            disabled={loading}
+            style={{ backgroundColor: T.accent, color: '#fff' }}
+            className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold rounded-lg px-3 py-2 hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}
+            Générer un lien de partage
+          </button>
+        </>
       )}
     </div>
   );
 }
 
+// ─── ProcedureDrawer (create/edit slide-over) ─────────────────────────────────
+function ProcedureDrawer({
+  editing,
+  onClose,
+  onSaved,
+  activeTeamId,
+}: {
+  editing: TrainingProcedure | null;
+  onClose: () => void;
+  onSaved: (p: TrainingProcedure) => void;
+  activeTeamId?: string;
+}) {
+  const [form, setForm] = useState<ProcedureForm>(
+    editing
+      ? {
+          title: editing.title,
+          objectives: editing.objectives,
+          instructions: editing.instructions,
+          variants: editing.variants || '',
+          corrections: editing.corrections || '',
+          bloc: editing.bloc || '',
+          principe: editing.principe || '',
+          phase: editing.phase || '',
+          rapport_numerique: editing.rapport_numerique || '',
+          min_players: editing.min_players?.toString() || '',
+          field_dimensions: editing.field_dimensions || '',
+          duration_minutes: editing.duration_minutes?.toString() || '',
+          image_url: editing.image_url || '',
+          schematic_id: editing.schematic_id || '',
+        }
+      : DEFAULT_FORM
+  );
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [availableSchematics, setAvailableSchematics] = useState<SchematicRecord[]>([]);
+  const [selectedSchematic, setSelectedSchematic] = useState<SchematicRecord | null>(null);
+  const [showSchematicPicker, setShowSchematicPicker] = useState(false);
+
+  const set = <K extends keyof ProcedureForm>(k: K, v: ProcedureForm[K]) =>
+    setForm((prev) => ({ ...prev, [k]: v }));
+
+  useEffect(() => {
+    schematicsService.getSchematicsByTeam().then(setAvailableSchematics).catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    if (editing?.schematic_id) {
+      schematicsService
+        .getSchematicById(editing.schematic_id)
+        .then((s) => s && setSelectedSchematic(s))
+        .catch(console.error);
+    }
+  }, [editing?.schematic_id]);
+
+  const handleSave = async () => {
+    if (!form.title.trim() || !form.objectives.trim() || !form.instructions.trim()) {
+      setSaveError('Renseignez le titre, les objectifs et les consignes.');
+      return;
+    }
+    setSaving(true);
+    setSaveError(null);
+
+    const base: any = {
+      title: form.title.trim(),
+      objectives: form.objectives.trim(),
+      instructions: form.instructions.trim(),
+      variants: form.variants.trim() || null,
+      corrections: form.corrections.trim() || null,
+      min_players: form.min_players ? Number(form.min_players) : null,
+      field_dimensions: form.field_dimensions.trim() || null,
+      duration_minutes: form.duration_minutes ? Number(form.duration_minutes) : null,
+      image_url: form.image_url.trim() || null,
+      schematic_id: form.schematic_id.trim() || null,
+    };
+
+    // New pedagogic fields — graceful fallback
+    const extra: any = {
+      bloc: form.bloc || null,
+      principe: form.principe.trim() || null,
+      phase: form.phase || null,
+      rapport_numerique: form.rapport_numerique.trim() || null,
+    };
+
+    const tryWithExtra = async () => {
+      if (editing) {
+        return supabase
+          .from('training_procedures')
+          .update({ ...base, ...extra })
+          .eq('id', editing.id)
+          .select()
+          .single();
+      } else {
+        return supabase
+          .from('training_procedures')
+          .insert([{ ...base, ...extra }])
+          .select()
+          .single();
+      }
+    };
+
+    const tryWithoutExtra = async () => {
+      if (editing) {
+        return supabase
+          .from('training_procedures')
+          .update(base)
+          .eq('id', editing.id)
+          .select()
+          .single();
+      } else {
+        return supabase
+          .from('training_procedures')
+          .insert([base])
+          .select()
+          .single();
+      }
+    };
+
+    try {
+      let result = await tryWithExtra();
+      if (result.error && (result.error.message?.includes('column') || result.error.code === '42703')) {
+        console.warn('[Library] Migration DB requise — colonnes pédagogiques manquantes. Sauvegarde sans ces champs.');
+        result = await tryWithoutExtra();
+      }
+      if (result.error) throw result.error;
+      onSaved(result.data as TrainingProcedure);
+    } catch (e: any) {
+      setSaveError(e?.message || 'Erreur lors de la sauvegarde.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const inputCls =
+    'w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500';
+  const inputStyle = {
+    backgroundColor: T.cardBg,
+    border: `1.5px solid ${T.border}`,
+    color: T.text,
+  };
+
+  return (
+    <>
+      {/* Overlay */}
+      <div
+        className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      {/* Drawer */}
+      <div
+        style={{ backgroundColor: T.pageBg, borderLeft: `1px solid ${T.border}` }}
+        className="fixed inset-y-0 right-0 z-50 w-full max-w-xl flex flex-col shadow-2xl"
+      >
+        {/* Header */}
+        <div
+          style={{ backgroundColor: T.cardBg, borderBottom: `1px solid ${T.border}` }}
+          className="flex items-center justify-between px-5 py-4 shrink-0"
+        >
+          <h2 style={{ color: T.text }} className="text-base font-semibold">
+            {editing ? 'Modifier le procédé' : 'Nouveau procédé'}
+          </h2>
+          <button onClick={onClose} style={{ color: T.textMuted }} className="hover:opacity-70">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
+          {saveError && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {saveError}
+            </p>
+          )}
+
+          {/* Titre */}
+          <div>
+            <label style={{ color: T.text }} className="block text-sm font-medium mb-1">
+              Titre *
+            </label>
+            <input
+              type="text"
+              value={form.title}
+              onChange={(e) => set('title', e.target.value)}
+              className={inputCls}
+              style={inputStyle}
+              placeholder="Nom du procédé"
+            />
+          </div>
+
+          {/* Bloc */}
+          <div>
+            <label style={{ color: T.text }} className="block text-sm font-medium mb-2">
+              Bloc
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {BLOCS.map((b) => {
+                const active = form.bloc === b.value;
+                return (
+                  <button
+                    key={b.value}
+                    type="button"
+                    onClick={() => set('bloc', active ? '' : b.value)}
+                    style={{
+                      backgroundColor: active ? b.bg : T.cardBg,
+                      color: active ? b.color : T.textMuted,
+                      border: `1.5px solid ${active ? b.color : T.border}`,
+                      fontWeight: active ? 600 : 400,
+                    }}
+                    className="px-3 py-1 rounded-full text-xs transition-all hover:opacity-80"
+                  >
+                    {b.value}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Principe + Phase + Rapport */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label style={{ color: T.text }} className="block text-sm font-medium mb-1">
+                Principe servi
+              </label>
+              <input
+                type="text"
+                value={form.principe}
+                onChange={(e) => set('principe', e.target.value)}
+                className={inputCls}
+                style={inputStyle}
+                placeholder="Déséquilibre, Pressing…"
+                list="principes-list"
+              />
+              <datalist id="principes-list">
+                {['Déséquilibre collectif', 'Conservation', 'Transition', 'Pressing', 'CPA', 'Supériorité'].map(
+                  (p) => <option key={p} value={p} />
+                )}
+              </datalist>
+            </div>
+            <div>
+              <label style={{ color: T.text }} className="block text-sm font-medium mb-1">
+                Rapport numérique
+              </label>
+              <input
+                type="text"
+                value={form.rapport_numerique}
+                onChange={(e) => set('rapport_numerique', e.target.value)}
+                className={inputCls}
+                style={inputStyle}
+                placeholder="3v2, 4v3+GK…"
+              />
+            </div>
+          </div>
+
+          {/* Phase */}
+          <div>
+            <label style={{ color: T.text }} className="block text-sm font-medium mb-2">
+              Phase
+            </label>
+            <div className="flex gap-2">
+              {['1', '2', 'Mix'].map((p) => {
+                const active = form.phase === p;
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => set('phase', active ? '' : p)}
+                    style={{
+                      backgroundColor: active ? '#EFF6FF' : T.cardBg,
+                      color: active ? T.accent : T.textMuted,
+                      border: `1.5px solid ${active ? T.accent : T.border}`,
+                      fontWeight: active ? 600 : 400,
+                    }}
+                    className="px-4 py-1.5 rounded-lg text-sm transition-all hover:opacity-80"
+                  >
+                    Phase {p}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Objectifs */}
+          <div>
+            <label style={{ color: T.text }} className="block text-sm font-medium mb-1">
+              Objectifs *
+            </label>
+            <textarea
+              value={form.objectives}
+              onChange={(e) => set('objectives', e.target.value)}
+              rows={3}
+              className={inputCls}
+              style={inputStyle}
+              placeholder="Décrire les objectifs principaux"
+            />
+          </div>
+
+          {/* Consignes */}
+          <div>
+            <label style={{ color: T.text }} className="block text-sm font-medium mb-1">
+              Consignes / Règles *
+            </label>
+            <textarea
+              value={form.instructions}
+              onChange={(e) => set('instructions', e.target.value)}
+              rows={4}
+              className={inputCls}
+              style={inputStyle}
+              placeholder="Décrire précisément le déroulement et les règles"
+            />
+          </div>
+
+          {/* Durée + Joueurs */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label style={{ color: T.text }} className="block text-sm font-medium mb-1">
+                Durée (min)
+              </label>
+              <input
+                type="number"
+                min={0}
+                value={form.duration_minutes}
+                onChange={(e) => set('duration_minutes', e.target.value)}
+                className={inputCls}
+                style={inputStyle}
+                placeholder="15"
+              />
+            </div>
+            <div>
+              <label style={{ color: T.text }} className="block text-sm font-medium mb-1">
+                Nb joueurs min.
+              </label>
+              <input
+                type="number"
+                min={0}
+                value={form.min_players}
+                onChange={(e) => set('min_players', e.target.value)}
+                className={inputCls}
+                style={inputStyle}
+                placeholder="8"
+              />
+            </div>
+          </div>
+
+          {/* Terrain */}
+          <div>
+            <label style={{ color: T.text }} className="block text-sm font-medium mb-1">
+              Dimension du terrain
+            </label>
+            <input
+              type="text"
+              value={form.field_dimensions}
+              onChange={(e) => set('field_dimensions', e.target.value)}
+              className={inputCls}
+              style={inputStyle}
+              placeholder="20m x 15m"
+            />
+          </div>
+
+          {/* Variantes */}
+          <div>
+            <label style={{ color: T.text }} className="block text-sm font-medium mb-1">
+              Variantes
+            </label>
+            <textarea
+              value={form.variants}
+              onChange={(e) => set('variants', e.target.value)}
+              rows={3}
+              className={inputCls}
+              style={inputStyle}
+              placeholder="Variantes possibles du procédé"
+            />
+          </div>
+
+          {/* Correctifs */}
+          <div>
+            <label style={{ color: T.text }} className="block text-sm font-medium mb-1">
+              Correctifs / Comportements attendus
+            </label>
+            <textarea
+              value={form.corrections}
+              onChange={(e) => set('corrections', e.target.value)}
+              rows={3}
+              className={inputCls}
+              style={inputStyle}
+              placeholder="Points de coaching importants"
+            />
+          </div>
+
+          {/* Schéma tactique */}
+          <div style={{ borderTop: `1px solid ${T.border}` }} className="pt-4">
+            <label style={{ color: T.text }} className="block text-sm font-medium mb-2">
+              Schéma tactique
+            </label>
+            <div className="flex gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => window.open('/webapp/library/schematics', '_blank')}
+                style={{ color: T.accent, borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' }}
+                className="inline-flex items-center gap-1.5 text-xs font-medium border rounded-lg px-3 py-2 hover:opacity-80 transition-opacity"
+              >
+                <Layout className="h-3.5 w-3.5" />
+                Créer un schéma
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSchematicPicker(true)}
+                style={{ color: T.text, borderColor: T.border, backgroundColor: T.cardBg }}
+                className="inline-flex items-center gap-1.5 text-xs font-medium border rounded-lg px-3 py-2 hover:opacity-80 transition-opacity"
+              >
+                Charger un schéma existant
+              </button>
+            </div>
+            {selectedSchematic && (
+              <div
+                style={{ backgroundColor: T.pageBg, border: `1px solid ${T.border}` }}
+                className="mt-2 flex items-center justify-between px-3 py-2 rounded-lg"
+              >
+                <span style={{ color: T.text }} className="text-sm flex items-center gap-2">
+                  <Layout className="h-3.5 w-3.5 shrink-0" />
+                  {selectedSchematic.name}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedSchematic(null);
+                    set('schematic_id', '');
+                  }}
+                  style={{ color: T.textMuted }}
+                  className="hover:opacity-70"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div
+          style={{ backgroundColor: T.cardBg, borderTop: `1px solid ${T.border}` }}
+          className="flex justify-end gap-3 px-5 py-4 shrink-0"
+        >
+          <button
+            onClick={onClose}
+            disabled={saving}
+            style={{ color: T.text, border: `1.5px solid ${T.border}`, backgroundColor: T.cardBg }}
+            className="px-4 py-2 text-sm font-medium rounded-lg hover:opacity-80 transition-opacity disabled:opacity-50"
+          >
+            Annuler
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{ backgroundColor: T.accent, color: '#fff' }}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            {saving ? (editing ? 'Modification…' : 'Enregistrement…') : editing ? 'Enregistrer' : 'Créer'}
+          </button>
+        </div>
+      </div>
+
+      {/* Schematic picker sub-drawer */}
+      {showSchematicPicker && (
+        <div
+          style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}` }}
+          className="fixed inset-y-0 right-[min(100vw,28rem)] z-50 w-80 flex flex-col shadow-2xl"
+        >
+          <div
+            style={{ borderBottom: `1px solid ${T.border}` }}
+            className="flex items-center justify-between px-4 py-3 shrink-0"
+          >
+            <span style={{ color: T.text }} className="text-sm font-semibold">
+              Sélectionner un schéma
+            </span>
+            <button
+              onClick={() => setShowSchematicPicker(false)}
+              style={{ color: T.textMuted }}
+              className="hover:opacity-70"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {availableSchematics.length === 0 ? (
+              <p style={{ color: T.textMuted }} className="text-xs text-center py-8">
+                Aucun schéma disponible.
+              </p>
+            ) : (
+              availableSchematics.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => {
+                    setSelectedSchematic(s);
+                    set('schematic_id', s.id);
+                    setShowSchematicPicker(false);
+                  }}
+                  style={{
+                    backgroundColor: selectedSchematic?.id === s.id ? '#EFF6FF' : T.pageBg,
+                    border: `1px solid ${selectedSchematic?.id === s.id ? T.accent : T.border}`,
+                    color: T.text,
+                  }}
+                  className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:opacity-80 transition-opacity"
+                >
+                  <Layout className="h-4 w-4 shrink-0 text-gray-400" />
+                  <span className="flex-1 truncate">{s.name}</span>
+                  {selectedSchematic?.id === s.id && (
+                    <Check className="h-4 w-4 shrink-0" style={{ color: T.accent }} />
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+export default function LibraryPage() {
+  const router = useRouter();
+  const { activeTeam } = useActiveTeam();
+
+  const [procedures, setProcedures] = useState<TrainingProcedure[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedBlocs, setSelectedBlocs] = useState<string[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const [previewSchematicData, setPreviewSchematicData] = useState<SchematicData | null>(null);
+  const [procedureUsageCount, setProcedureUsageCount] = useState<number | null>(null);
+
+  const [showDrawer, setShowDrawer] = useState(false);
+  const [editingProcedure, setEditingProcedure] = useState<TrainingProcedure | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showSharePopover, setShowSharePopover] = useState(false);
+
+  // Mobile: show list or detail
+  const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
+
+  // Load procedures
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const { data, error: err } = await supabase
+          .from('training_procedures')
+          .select('*')
+          .is('archived_at', null)
+          .order('created_at', { ascending: false });
+        if (err) { setError('Impossible de charger la bibliothèque.'); }
+        else { setProcedures((data || []) as TrainingProcedure[]); }
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  const selectedProcedure = useMemo(
+    () => procedures.find((p) => p.id === selectedId) ?? null,
+    [procedures, selectedId]
+  );
+
+  // Load schematic for selected procedure
+  useEffect(() => {
+    if (!selectedProcedure?.schematic_id) { setPreviewSchematicData(null); return; }
+    schematicsService
+      .getSchematicById(selectedProcedure.schematic_id)
+      .then((s) => setPreviewSchematicData(s?.data ?? null))
+      .catch(() => setPreviewSchematicData(null));
+  }, [selectedProcedure?.schematic_id]);
+
+  // Load usage count
+  useEffect(() => {
+    if (!selectedProcedure?.id) { setProcedureUsageCount(null); return; }
+    trainingsService
+      .getProcedureUsageCount(selectedProcedure.id)
+      .then(setProcedureUsageCount)
+      .catch(() => setProcedureUsageCount(0));
+  }, [selectedProcedure?.id]);
+
+  const filteredProcedures = useMemo(() => {
+    const q = searchTerm.toLowerCase();
+    return procedures.filter((p) => {
+      const matchSearch =
+        p.title.toLowerCase().includes(q) ||
+        p.objectives.toLowerCase().includes(q) ||
+        (p.principe?.toLowerCase().includes(q) ?? false);
+      const matchBloc = selectedBlocs.length === 0 || selectedBlocs.includes(p.bloc ?? '');
+      return matchSearch && matchBloc;
+    });
+  }, [procedures, searchTerm, selectedBlocs]);
+
+  const toggleBloc = (v: string) =>
+    setSelectedBlocs((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]));
+
+  const selectProcedure = (id: string) => {
+    setSelectedId(id);
+    setShowSharePopover(false);
+    setMobileView('detail');
+  };
+
+  const handleDelete = async () => {
+    if (!selectedProcedure) return;
+    if (!confirm('Archiver ce procédé ? Il disparaîtra de la bibliothèque.')) return;
+    setIsDeleting(true);
+    try {
+      const { error: err } = await supabase
+        .from('training_procedures')
+        .update({ archived_at: new Date().toISOString() } as any)
+        .eq('id', selectedProcedure.id);
+      if (err) throw err;
+      setProcedures((prev) => prev.filter((p) => p.id !== selectedProcedure.id));
+      setSelectedId(null);
+      setMobileView('list');
+    } catch (e) {
+      alert('Impossible de supprimer ce procédé.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleSaved = (saved: TrainingProcedure) => {
+    setProcedures((prev) => {
+      const exists = prev.find((p) => p.id === saved.id);
+      return exists ? prev.map((p) => (p.id === saved.id ? saved : p)) : [saved, ...prev];
+    });
+    setSelectedId(saved.id);
+    setShowDrawer(false);
+    setEditingProcedure(null);
+  };
+
+  const handleShareUpdate = (updated: TrainingProcedure) => {
+    setProcedures((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  return (
+    <div
+      style={{ backgroundColor: T.pageBg, color: T.text, height: 'calc(100dvh - 2.75rem)' }}
+      className="flex flex-col overflow-hidden -mx-4 md:-mx-5 -mt-4 md:-mt-5"
+    >
+      {/* Top bar */}
+      <div
+        style={{ backgroundColor: T.cardBg, borderBottom: `1px solid ${T.border}` }}
+        className="flex items-center justify-between px-4 py-3 shrink-0"
+      >
+        <h1 style={{ color: T.text }} className="text-base font-semibold">
+          Bibliothèque de procédés
+        </h1>
+        <button
+          onClick={() => { setEditingProcedure(null); setShowDrawer(true); }}
+          style={{ backgroundColor: T.accent, color: '#fff' }}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg hover:opacity-90 transition-opacity"
+        >
+          <Plus className="h-4 w-4" />
+          <span className="hidden sm:inline">Nouveau procédé</span>
+        </button>
+      </div>
+
+      {/* Split pane */}
+      <div className="flex flex-1 min-h-0">
+        {/* ── LEFT PANEL ── */}
+        <div
+          style={{
+            width: 320,
+            minWidth: 320,
+            backgroundColor: T.cardBg,
+            borderRight: `1px solid ${T.border}`,
+          }}
+          className={`flex flex-col ${mobileView === 'detail' ? 'hidden md:flex' : 'flex'} md:flex`}
+        >
+          {/* Search */}
+          <div style={{ borderBottom: `1px solid ${T.border}` }} className="px-3 py-3 shrink-0">
+            <div className="relative">
+              <Search
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5"
+                style={{ color: T.textMuted }}
+              />
+              <input
+                type="search"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Rechercher…"
+                style={{
+                  backgroundColor: T.pageBg,
+                  border: `1px solid ${T.border}`,
+                  color: T.text,
+                }}
+                className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            </div>
+          </div>
+
+          {/* Bloc filters */}
+          <div style={{ borderBottom: `1px solid ${T.border}` }} className="px-3 py-2 shrink-0 flex flex-wrap gap-1.5">
+            {BLOCS.map((b) => {
+              const active = selectedBlocs.includes(b.value);
+              return (
+                <button
+                  key={b.value}
+                  onClick={() => toggleBloc(b.value)}
+                  style={{
+                    backgroundColor: active ? b.bg : 'transparent',
+                    color: active ? b.color : T.textMuted,
+                    border: `1px solid ${active ? b.color : T.border}`,
+                    fontWeight: active ? 600 : 400,
+                  }}
+                  className="px-2 py-0.5 rounded-full text-xs transition-all hover:opacity-80"
+                >
+                  {b.label}
+                </button>
+              );
+            })}
+            {selectedBlocs.length > 0 && (
+              <button
+                onClick={() => setSelectedBlocs([])}
+                style={{ color: T.textMuted }}
+                className="px-2 py-0.5 rounded-full text-xs flex items-center gap-0.5 hover:opacity-70"
+              >
+                <X className="h-3 w-3" /> Tout
+              </button>
+            )}
+          </div>
+
+          {/* List */}
+          <div className="flex-1 overflow-y-auto">
+            {loading ? (
+              <div className="flex justify-center items-center py-16">
+                <Loader2 className="h-6 w-6 animate-spin" style={{ color: T.accent }} />
+              </div>
+            ) : error ? (
+              <p className="text-xs text-red-600 px-4 py-6 text-center">{error}</p>
+            ) : filteredProcedures.length === 0 ? (
+              <p style={{ color: T.textMuted }} className="text-xs px-4 py-6 text-center">
+                Aucun procédé ne correspond.
+              </p>
+            ) : (
+              filteredProcedures.map((p) => {
+                const isActive = p.id === selectedId;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => selectProcedure(p.id)}
+                    style={{
+                      backgroundColor: isActive ? '#EFF6FF' : 'transparent',
+                      borderLeft: isActive ? `3px solid ${T.accent}` : '3px solid transparent',
+                      borderBottom: `1px solid ${T.border}`,
+                      color: T.text,
+                    }}
+                    className="w-full text-left px-3 py-3 flex flex-col gap-1 transition-colors hover:bg-blue-50/40"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-semibold truncate">{p.title}</span>
+                      <BlocBadge bloc={p.bloc} short />
+                    </div>
+                    {p.principe && (
+                      <span style={{ color: T.textMuted }} className="text-xs truncate">
+                        {p.principe}
+                      </span>
+                    )}
+                    <div className="flex items-center gap-3 mt-0.5">
+                      {p.rapport_numerique && (
+                        <span
+                          style={{ color: T.textMuted, fontSize: 11 }}
+                          className="flex items-center gap-1"
+                        >
+                          <Users className="h-3 w-3" />
+                          {p.rapport_numerique}
+                        </span>
+                      )}
+                      {p.duration_minutes && (
+                        <span
+                          style={{ color: T.textMuted, fontSize: 11 }}
+                          className="flex items-center gap-1"
+                        >
+                          <Clock className="h-3 w-3" />
+                          {p.duration_minutes} min
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* ── RIGHT PANEL ── */}
+        <div
+          style={{ backgroundColor: T.pageBg }}
+          className={`flex-1 min-w-0 flex flex-col ${mobileView === 'list' ? 'hidden md:flex' : 'flex'} md:flex`}
+        >
+          {selectedProcedure ? (
+            <div className="flex-1 overflow-y-auto">
+              {/* Mobile back button */}
+              <div className="md:hidden px-4 pt-4">
+                <button
+                  onClick={() => { setMobileView('list'); setSelectedId(null); }}
+                  style={{ color: T.accent }}
+                  className="flex items-center gap-1 text-sm font-medium hover:opacity-70"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Retour
+                </button>
+              </div>
+
+              {/* Detail header */}
+              <div
+                style={{ backgroundColor: T.cardBg, borderBottom: `1px solid ${T.border}` }}
+                className="px-6 py-5"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <h2 style={{ color: T.text }} className="text-xl font-bold leading-tight">
+                      {selectedProcedure.title}
+                    </h2>
+                    <div className="mt-2 flex flex-wrap gap-2 items-center">
+                      <BlocBadge bloc={selectedProcedure.bloc} />
+                      {selectedProcedure.principe && (
+                        <span
+                          style={{
+                            backgroundColor: '#F1F5F9',
+                            color: T.textMuted,
+                            border: `1px solid ${T.border}`,
+                          }}
+                          className="inline-flex items-center px-2 py-0.5 rounded-full text-xs"
+                        >
+                          {selectedProcedure.principe}
+                        </span>
+                      )}
+                      {selectedProcedure.phase && (
+                        <span
+                          style={{
+                            backgroundColor: '#EFF6FF',
+                            color: T.accent,
+                            border: `1px solid #BFDBFE`,
+                          }}
+                          className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                        >
+                          Phase {selectedProcedure.phase}
+                        </span>
+                      )}
+                      {selectedProcedure.rapport_numerique && (
+                        <span
+                          style={{
+                            backgroundColor: '#F9FAFB',
+                            color: T.textMuted,
+                            border: `1px solid ${T.border}`,
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs"
+                        >
+                          <Users className="h-3 w-3" />
+                          {selectedProcedure.rapport_numerique}
+                        </span>
+                      )}
+                      {selectedProcedure.duration_minutes && (
+                        <span
+                          style={{
+                            backgroundColor: '#F9FAFB',
+                            color: T.textMuted,
+                            border: `1px solid ${T.border}`,
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs"
+                        >
+                          <Clock className="h-3 w-3" />
+                          {selectedProcedure.duration_minutes} min
+                        </span>
+                      )}
+                      {procedureUsageCount !== null && (
+                        <span
+                          style={{
+                            backgroundColor: '#F0FDF4',
+                            color: '#16a34a',
+                            border: '1px solid #bbf7d0',
+                          }}
+                          className="inline-flex items-center px-2 py-0.5 rounded-full text-xs"
+                        >
+                          Utilisé {procedureUsageCount} fois en séance
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Action buttons */}
+                  <div className="flex items-center gap-2 shrink-0 relative">
+                    <button
+                      onClick={() => { setEditingProcedure(selectedProcedure); setShowDrawer(true); }}
+                      style={{ color: T.text, border: `1.5px solid ${T.border}`, backgroundColor: T.cardBg }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg hover:opacity-80 transition-opacity"
+                    >
+                      <Edit className="h-3.5 w-3.5" />
+                      Modifier
+                    </button>
+                    <button
+                      onClick={() => setShowSharePopover((v) => !v)}
+                      style={{
+                        color: selectedProcedure.share_code ? T.accent : T.text,
+                        border: `1.5px solid ${selectedProcedure.share_code ? T.accent : T.border}`,
+                        backgroundColor: selectedProcedure.share_code ? '#EFF6FF' : T.cardBg,
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg hover:opacity-80 transition-opacity"
+                    >
+                      <Link2 className="h-3.5 w-3.5" />
+                      Partager
+                    </button>
+                    <button
+                      onClick={handleDelete}
+                      disabled={isDeleting}
+                      style={{ color: '#dc2626', border: '1.5px solid #fca5a5', backgroundColor: '#FFF5F5' }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg hover:opacity-80 transition-opacity disabled:opacity-50"
+                    >
+                      {isDeleting ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                      <span className="hidden sm:inline">Supprimer</span>
+                    </button>
+
+                    {showSharePopover && selectedProcedure && (
+                      <SharePopover
+                        procedure={selectedProcedure}
+                        onUpdate={handleShareUpdate}
+                        onClose={() => setShowSharePopover(false)}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Detail body */}
+              <div className="px-6 py-5 space-y-6">
+                {/* Schéma */}
+                {selectedProcedure.schematic_id && previewSchematicData && (
+                  <section>
+                    <h3
+                      style={{ color: T.textMuted }}
+                      className="text-xs font-semibold uppercase tracking-wider mb-3"
+                    >
+                      Schéma tactique
+                    </h3>
+                    <div style={{ pointerEvents: 'none' }}>
+                      <SchematicPreview
+                        data={previewSchematicData}
+                        scale={8}
+                        svgWidth={800}
+                        svgHeight={370}
+                      />
+                    </div>
+                    <button
+                      onClick={() =>
+                        router.push(
+                          `/webapp/library/schematics?schematic=${selectedProcedure.schematic_id}`
+                        )
+                      }
+                      style={{ color: T.accent, borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' }}
+                      className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium border rounded-lg px-3 py-1.5 hover:opacity-80 transition-opacity"
+                    >
+                      <Layout className="h-3.5 w-3.5" />
+                      Ouvrir dans l'éditeur
+                      <ExternalLink className="h-3 w-3" />
+                    </button>
+                  </section>
+                )}
+
+                {/* Objectifs */}
+                <section>
+                  <h3
+                    style={{ color: T.textMuted }}
+                    className="text-xs font-semibold uppercase tracking-wider mb-2"
+                  >
+                    Objectifs
+                  </h3>
+                  <p style={{ color: T.text }} className="text-sm whitespace-pre-line leading-relaxed">
+                    {selectedProcedure.objectives}
+                  </p>
+                </section>
+
+                {/* Consignes */}
+                <section>
+                  <h3
+                    style={{ color: T.textMuted }}
+                    className="text-xs font-semibold uppercase tracking-wider mb-2"
+                  >
+                    Consignes &amp; Règles
+                  </h3>
+                  <p style={{ color: T.text }} className="text-sm whitespace-pre-line leading-relaxed">
+                    {selectedProcedure.instructions}
+                  </p>
+                </section>
+
+                {/* Variantes */}
+                {selectedProcedure.variants && (
+                  <section>
+                    <h3
+                      style={{ color: T.textMuted }}
+                      className="text-xs font-semibold uppercase tracking-wider mb-2"
+                    >
+                      Variantes
+                    </h3>
+                    <p style={{ color: T.text }} className="text-sm whitespace-pre-line leading-relaxed">
+                      {selectedProcedure.variants}
+                    </p>
+                  </section>
+                )}
+
+                {/* Correctifs */}
+                {selectedProcedure.corrections && (
+                  <section>
+                    <h3
+                      style={{ color: T.textMuted }}
+                      className="text-xs font-semibold uppercase tracking-wider mb-2"
+                    >
+                      Correctifs / Comportements attendus
+                    </h3>
+                    <p style={{ color: T.text }} className="text-sm whitespace-pre-line leading-relaxed">
+                      {selectedProcedure.corrections}
+                    </p>
+                  </section>
+                )}
+
+                {/* Méta-infos */}
+                {(selectedProcedure.field_dimensions ||
+                  selectedProcedure.duration_minutes ||
+                  selectedProcedure.min_players) && (
+                  <section>
+                    <h3
+                      style={{ color: T.textMuted }}
+                      className="text-xs font-semibold uppercase tracking-wider mb-2"
+                    >
+                      Informations pratiques
+                    </h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {selectedProcedure.field_dimensions && (
+                        <div
+                          style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}` }}
+                          className="rounded-lg px-3 py-2"
+                        >
+                          <div style={{ color: T.textMuted }} className="text-xs font-semibold uppercase tracking-wide">
+                            Terrain
+                          </div>
+                          <div style={{ color: T.text }} className="text-sm mt-1">
+                            {selectedProcedure.field_dimensions}
+                          </div>
+                        </div>
+                      )}
+                      {selectedProcedure.duration_minutes && (
+                        <div
+                          style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}` }}
+                          className="rounded-lg px-3 py-2"
+                        >
+                          <div style={{ color: T.textMuted }} className="text-xs font-semibold uppercase tracking-wide">
+                            Durée
+                          </div>
+                          <div style={{ color: T.text }} className="text-sm mt-1">
+                            {selectedProcedure.duration_minutes} min
+                          </div>
+                        </div>
+                      )}
+                      {selectedProcedure.min_players && (
+                        <div
+                          style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}` }}
+                          className="rounded-lg px-3 py-2"
+                        >
+                          <div style={{ color: T.textMuted }} className="text-xs font-semibold uppercase tracking-wide">
+                            Joueurs min.
+                          </div>
+                          <div style={{ color: T.text }} className="text-sm mt-1">
+                            {selectedProcedure.min_players}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center space-y-2">
+                <ChevronRight className="h-8 w-8 mx-auto" style={{ color: T.border }} />
+                <p style={{ color: T.textMuted }} className="text-sm">
+                  Sélectionnez un procédé pour consulter sa fiche
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Create/Edit Drawer */}
+      {showDrawer && (
+        <ProcedureDrawer
+          editing={editingProcedure}
+          onClose={() => { setShowDrawer(false); setEditingProcedure(null); }}
+          onSaved={handleSaved}
+          activeTeamId={activeTeam?.id}
+        />
+      )}
+    </div>
+  );
+}

@@ -16,10 +16,11 @@ import {
   Pressable,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useActiveTeam } from '../contexts/ActiveTeamContext';
 import { getMatchesByTeam, getMatchById, updateMatch } from '../lib/services/matches';
-import { getEventsByMatchId, createMatchEvent, type GoalType } from '../lib/services/matchEvents';
+import { getEventsByMatchId, createMatchEvent, deleteLastMatchEventByType, type GoalType } from '../lib/services/matchEvents';
 import { getPlayersByTeam } from '../lib/services/players';
 import type { Match, MatchPlayer } from '../types';
 import type { Player } from '../types';
@@ -41,7 +42,7 @@ const ACTIONS: { id: string; eventType: MatchEventType; label: string; acronym: 
   { id: 'goals', eventType: 'goal', label: 'But', acronym: 'B', color: '#3b82f6' },
   { id: 'ballLoss', eventType: 'ball_loss', label: 'Perte de balle', acronym: 'PdB', color: '#ef4444' },
   { id: 'ballRecovery', eventType: 'recovery', label: 'Récupération', acronym: 'R', color: '#16a34a' },
-  { id: 'dribbleSuccess', eventType: 'dribble', label: 'Dribble', acronym: 'D', color: '#a855f7' },
+  { id: 'assists', eventType: 'assist', label: 'Passe déc.', acronym: 'Pdec', color: '#a855f7' },
 ];
 
 const STATS_TABLE_COLUMNS: { key: string; label: string; type: 'player' | 'circle' | 'time' | 'plusminus' | 'card'; color?: string; flex: number }[] = [
@@ -51,7 +52,7 @@ const STATS_TABLE_COLUMNS: { key: string; label: string; type: 'player' | 'circl
   { key: 'totalShots', label: 'Tirs totaux', type: 'circle', color: '#1e293b', flex: 1 },
   { key: 'ballLoss', label: 'Pertes de balle', type: 'circle', color: '#ef4444', flex: 1 },
   { key: 'recovery', label: 'Récupérations', type: 'circle', color: '#a855f7', flex: 1 },
-  { key: 'dribble', label: 'Dribbles', type: 'circle', color: '#f97316', flex: 1 },
+  { key: 'assist', label: 'Passes déc.', type: 'circle', color: '#a855f7', flex: 1 },
   { key: 'totalTime', label: 'Temps', type: 'time', flex: 1 },
   { key: 'plusMinus', label: '+/-', type: 'plusminus', flex: 1 },
   { key: 'yellowCards', label: 'Cartons J', type: 'card', flex: 1 },
@@ -88,6 +89,7 @@ interface TabletMatchRecorderProps {
 
 export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, onBack }: TabletMatchRecorderProps) {
   const { activeTeamId } = useActiveTeam();
+  const router = useRouter();
   const [step, setStep] = useState<'select' | 'record'>(initialMatchId ? 'record' : 'select');
   const [matchId, setMatchId] = useState<string | null>(initialMatchId ?? null);
   const [matches, setMatches] = useState<Match[]>([]);
@@ -106,6 +108,7 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
     playerId?: string | null;
     statKey?: string;
   } | null>(null);
+  const modalOpenedAtRef = useRef<number>(0);
   const cardRefsRef = useRef<Record<string, View | null>>({});
   const cardLayoutsRef = useRef<Record<string, { x: number; y: number; w: number; h: number }>>({});
   const dropTargetRef = useRef<string | null>(null);
@@ -121,7 +124,16 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
   const [foulsOpponent, setFoulsOpponent] = useState(0);
   const [playersOnField, setPlayersOnField] = useState<string[]>([]);
   const [playerStates, setPlayerStates] = useState<Record<string, PlayerState>>({});
+  const [plusMinusByPlayer, setPlusMinusByPlayer] = useState<Record<string, number>>({});
+  const [goalsByType,    setGoalsByType]    = useState<Record<string, number>>({ offensive: 0, transition: 0, cpa: 0, superiority: 0 });
+  const [concededByType, setConcededByType] = useState<Record<string, number>>({ offensive: 0, transition: 0, cpa: 0, superiority: 0 });
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Enregistre le timestamp à chaque ouverture du modal pour éviter le "ghost tap"
+  // (l'événement "doigt levé" du bouton d'ouverture qui traverse vers l'overlay et ferme immédiatement)
+  useEffect(() => {
+    if (goalTypeModal) modalOpenedAtRef.current = Date.now();
+  }, [goalTypeModal]);
 
   const convoquedIds = useMemo(() => {
     if (!match) return [];
@@ -211,7 +223,7 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
                 sequenceTimeLimit: limit,
                 yellowCards: 0,
                 redCards: 0,
-                stats: { shotsOnTarget: 0, shotsOffTarget: 0, goals: 0, ballLoss: 0, ballRecovery: 0, dribbleSuccess: 0 },
+                stats: { shotsOnTarget: 0, shotsOffTarget: 0, goals: 0, ballLoss: 0, ballRecovery: 0, assists: 0 },
               };
             }
           });
@@ -233,7 +245,7 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
               shot: 'shotsOffTarget',
               ball_loss: 'ballLoss',
               recovery: 'ballRecovery',
-              dribble: 'dribbleSuccess',
+              assist: 'assists',
             };
             setPlayerStates((prev) => {
               const next = { ...prev };
@@ -255,6 +267,35 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
               });
               return next;
             });
+
+            // Calcul +/- depuis les événements existants
+            const pmMap: Record<string, number> = {};
+            events.forEach((ev) => {
+              if (
+                (ev.event_type === 'goal' || ev.event_type === 'opponent_goal') &&
+                Array.isArray(ev.players_on_field)
+              ) {
+                const delta = ev.event_type === 'goal' ? 1 : -1;
+                ev.players_on_field.forEach((pid) => {
+                  pmMap[pid] = (pmMap[pid] ?? 0) + delta;
+                });
+              }
+            });
+            setPlusMinusByPlayer(pmMap);
+
+            // Calcul types de buts/encaissés depuis les événements existants
+            const gbtMap: Record<string, number> = { offensive: 0, transition: 0, cpa: 0, superiority: 0 };
+            const cbtMap: Record<string, number> = { offensive: 0, transition: 0, cpa: 0, superiority: 0 };
+            events.forEach((ev) => {
+              if (ev.event_type === 'goal' && ev.goal_type) {
+                gbtMap[ev.goal_type] = (gbtMap[ev.goal_type] ?? 0) + 1;
+              }
+              if (ev.event_type === 'opponent_goal' && ev.goal_type) {
+                cbtMap[ev.goal_type] = (cbtMap[ev.goal_type] ?? 0) + 1;
+              }
+            });
+            setGoalsByType(gbtMap);
+            setConcededByType(cbtMap);
           }
         }
       } catch {
@@ -269,14 +310,7 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
   useEffect(() => {
     if (!isRunning) return;
     intervalRef.current = setInterval(() => {
-      setSeconds((s) => {
-        if (s >= HALF_DURATION_SEC - 1) {
-          setIsRunning(false);
-          if (intervalRef.current) clearInterval(intervalRef.current);
-          return HALF_DURATION_SEC;
-        }
-        return s + 1;
-      });
+      setSeconds((s) => s + 1);
       setPlayerStates((prev) => {
         const next = { ...prev };
         playersOnField.forEach((id) => {
@@ -323,18 +357,36 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
 
         if (eventType === 'goal') {
           setScoreUs((n) => n + 1);
+          if (goalType) {
+            setGoalsByType((prev) => ({ ...prev, [goalType]: (prev[goalType] ?? 0) + 1 }));
+          }
           await createMatchEvent({
             ...basePayload,
             event_type: 'shot_on_target',
             player_id: playerIdVal,
           });
+          // +1 pour chaque joueur sur le terrain
+          setPlusMinusByPlayer((prev) => {
+            const next = { ...prev };
+            playersOnField.forEach((pid) => { next[pid] = (next[pid] ?? 0) + 1; });
+            return next;
+          });
         }
         if (eventType === 'opponent_goal') {
           setScoreOpponent((n) => n + 1);
+          if (goalType) {
+            setConcededByType((prev) => ({ ...prev, [goalType]: (prev[goalType] ?? 0) + 1 }));
+          }
           await createMatchEvent({
             ...basePayload,
             event_type: 'opponent_shot_on_target',
             player_id: null,
+          });
+          // -1 pour chaque joueur sur le terrain
+          setPlusMinusByPlayer((prev) => {
+            const next = { ...prev };
+            playersOnField.forEach((pid) => { next[pid] = (next[pid] ?? 0) - 1; });
+            return next;
           });
         }
         if (eventType === 'opponent_shot') setOpponentShotsTotal((n) => n + 1);
@@ -402,6 +454,49 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
       recordEvent(card === 'yellow' ? 'yellow_card' : 'red_card', playerId);
     },
     [recordEvent]
+  );
+
+  const handleUndoPlayerAction = useCallback(
+    (playerId: string, actionId: string) => {
+      const action = ACTIONS.find((a) => a.id === actionId);
+      if (!action || !matchId) return;
+      setPlayerStates((prev) => {
+        const st = prev[playerId];
+        if (!st) return prev;
+        const current = st.stats[actionId] ?? 0;
+        if (current <= 0) return prev;
+        return {
+          ...prev,
+          [playerId]: { ...st, stats: { ...st.stats, [actionId]: current - 1 } },
+        };
+      });
+      if (action.eventType === 'goal') setScoreUs((n) => Math.max(0, n - 1));
+      deleteLastMatchEventByType(matchId, action.eventType, playerId);
+    },
+    [matchId]
+  );
+
+  const handleUndoPlayerCard = useCallback(
+    (playerId: string, card: 'yellow' | 'red') => {
+      if (!matchId) return;
+      const eventType = card === 'yellow' ? 'yellow_card' : 'red_card';
+      setPlayerStates((prev) => {
+        const st = prev[playerId];
+        if (!st) return prev;
+        const current = card === 'yellow' ? st.yellowCards : st.redCards;
+        if (current <= 0) return prev;
+        return {
+          ...prev,
+          [playerId]: {
+            ...st,
+            yellowCards: card === 'yellow' ? st.yellowCards - 1 : st.yellowCards,
+            redCards: card === 'red' ? st.redCards - 1 : st.redCards,
+          },
+        };
+      });
+      deleteLastMatchEventByType(matchId, eventType, playerId);
+    },
+    [matchId]
   );
 
   const handleGoalTypeSelect = useCallback(
@@ -507,6 +602,8 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
     if (half === 1) {
       setHalf(2);
       setSeconds(0);
+      setFoulsUs(0);
+      setFoulsOpponent(0);
       setPlayerStates((prev) => {
         const next = { ...prev };
         Object.keys(next).forEach((id) => {
@@ -535,16 +632,35 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
         score_opponent: scoreOpponent,
         convoquedPlayerIds: convoquedIds,
         playerStats: statsMap,
+        goals_by_type: {
+          offensive:   goalsByType.offensive   ?? 0,
+          transition:  goalsByType.transition  ?? 0,
+          cpa:         goalsByType.cpa         ?? 0,
+          superiority: goalsByType.superiority ?? 0,
+        },
+        conceded_by_type: {
+          offensive:   concededByType.offensive   ?? 0,
+          transition:  concededByType.transition  ?? 0,
+          cpa:         concededByType.cpa         ?? 0,
+          superiority: concededByType.superiority ?? 0,
+        },
       });
       Alert.alert('Match enregistré', 'Score et événements enregistrés.', [
-        { text: 'OK', onPress: () => onMatchFinished?.() },
+        {
+          text: 'Voir le rapport',
+          onPress: () => {
+            onMatchFinished?.();
+            router.push(`/(tabs)/tracker/match-report/${matchId}`);
+          },
+        },
+        { text: 'Terminer', onPress: () => onMatchFinished?.() },
       ]);
     } catch (e) {
       Alert.alert('Erreur', e instanceof Error ? e.message : "Impossible d'enregistrer le match");
     } finally {
       setSaving(false);
     }
-  }, [matchId, scoreUs, scoreOpponent, playerStates, convoquedIds]);
+  }, [matchId, scoreUs, scoreOpponent, playerStates, convoquedIds, goalsByType, concededByType]);
 
   const opponentActions = [
     { type: 'opponent_goal' as const, label: 'But adverse', color: '#ef4444' },
@@ -576,7 +692,7 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
       const totalShots = shotsOnTarget + shotsOffTarget;
       const ballLoss = st?.stats.ballLoss ?? 0;
       const recovery = st?.stats.ballRecovery ?? 0;
-      const dribble = st?.stats.dribbleSuccess ?? 0;
+      const assist = st?.stats.assists ?? 0;
       const totalTime = st?.totalTime ?? 0;
       const yellowCards = st?.yellowCards ?? 0;
       const redCards = st?.redCards ?? 0;
@@ -591,9 +707,9 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
         totalShots,
         ballLoss,
         recovery,
-        dribble,
+        assist,
         totalTime,
-        plusMinus: 0,
+        plusMinus: plusMinusByPlayer[p.id] ?? 0,
         yellowCards,
         redCards,
       };
@@ -610,7 +726,7 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
       const nb = typeof vb === 'number' ? vb : 0;
       return dir * (na - nb);
     });
-  }, [convoquedPlayers, playerStates, statsSortBy, statsSortDir]);
+  }, [convoquedPlayers, playerStates, plusMinusByPlayer, statsSortBy, statsSortDir]);
 
   const handleStatsSort = useCallback((col: string) => {
     setStatsSortBy((prevCol) => {
@@ -787,6 +903,22 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
                         ? setGoalTypeModal({ eventType: 'opponent_goal' })
                         : recordEvent(a.type)
                     }
+                    onLongPress={() => {
+                      if (!matchId) return;
+                      if (a.type === 'opponent_goal' && scoreOpponent > 0) {
+                        setScoreOpponent((n) => Math.max(0, n - 1));
+                        setOpponentShotsOnTarget((n) => Math.max(0, n - 1));
+                        setOpponentShotsTotal((n) => Math.max(0, n - 1));
+                        deleteLastMatchEventByType(matchId, 'opponent_goal', null);
+                      } else if (a.type === 'opponent_shot_on_target' && opponentShotsOnTarget > 0) {
+                        setOpponentShotsOnTarget((n) => Math.max(0, n - 1));
+                        setOpponentShotsTotal((n) => Math.max(0, n - 1));
+                        deleteLastMatchEventByType(matchId, 'opponent_shot_on_target', null);
+                      } else if (a.type === 'opponent_shot' && opponentShotsTotal > opponentShotsOnTarget) {
+                        setOpponentShotsTotal((n) => Math.max(0, n - 1));
+                        deleteLastMatchEventByType(matchId, 'opponent_shot', null);
+                      }
+                    }}
                   >
                     <Text style={styles.opponentBtnText}>{a.label}</Text>
                   </TouchableOpacity>
@@ -821,7 +953,7 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
                   ? convoquedPlayers.find((p) => p.id === draggingPlayerId)
                   : null;
                 const panGesture = Gesture.Pan()
-                  .activateAfterLongPress(400)
+                  .activateAfterLongPress(700)
                   .runOnJS(true)
                   .onStart(() => {
                     setDraggingPlayerId(player.id);
@@ -902,6 +1034,8 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
                                   key={act.id}
                                   style={[styles.actionMiniBtn, { backgroundColor: act.color }]}
                                   onPress={() => handlePlayerAction(player.id, act.id)}
+                                  onLongPress={() => handleUndoPlayerAction(player.id, act.id)}
+                                  delayLongPress={300}
                                 >
                                   <Text style={styles.actionMiniText}>{act.acronym}</Text>
                                   <Text style={styles.actionMiniCount}>{st.stats[act.id] ?? 0}</Text>
@@ -914,6 +1048,8 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
                                   key={act.id}
                                   style={[styles.actionMiniBtn, { backgroundColor: act.color }]}
                                   onPress={() => handlePlayerAction(player.id, act.id)}
+                                  onLongPress={() => handleUndoPlayerAction(player.id, act.id)}
+                                  delayLongPress={300}
                                 >
                                   <Text style={styles.actionMiniText}>{act.acronym}</Text>
                                   <Text style={styles.actionMiniCount}>{st.stats[act.id] ?? 0}</Text>
@@ -926,12 +1062,16 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
                           <TouchableOpacity
                             style={styles.cardYellow}
                             onPress={() => handlePlayerCard(player.id, 'yellow')}
+                            onLongPress={() => handleUndoPlayerCard(player.id, 'yellow')}
+                            delayLongPress={300}
                           >
                             <Text style={styles.cardText}>{st.yellowCards}</Text>
                           </TouchableOpacity>
                           <TouchableOpacity
                             style={styles.cardRed}
                             onPress={() => handlePlayerCard(player.id, 'red')}
+                            onLongPress={() => handleUndoPlayerCard(player.id, 'red')}
+                            delayLongPress={300}
                           >
                             <Text style={styles.cardText}>{st.redCards}</Text>
                           </TouchableOpacity>
@@ -1191,7 +1331,13 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
       </ScrollView>
 
       <Modal visible={!!goalTypeModal} transparent animationType="fade">
-        <Pressable style={styles.goalTypeOverlay} onPress={() => setGoalTypeModal(null)}>
+        <Pressable
+          style={styles.goalTypeOverlay}
+          onPress={() => {
+            // Ignorer les taps dans les 300 ms suivant l'ouverture (ghost-tap passthrough)
+            if (Date.now() - modalOpenedAtRef.current > 300) setGoalTypeModal(null);
+          }}
+        >
           <Pressable style={styles.goalTypeBox} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.goalTypeTitle}>
               {goalTypeModal?.eventType === 'goal' ? 'Type de but marqué' : 'Type de but encaissé'}
