@@ -589,7 +589,6 @@ export default function WebApp() {
           <ActionTile icon={BarChart3} label="Dashboard"         sublabel="Bilan de saison"          href="/webapp/manager/dashboard"     color={C.purple} />
           <ActionTile icon={Activity}  label="Analytics"         sublabel="Statistiques avancées"    href="/webapp/manager/analytics"     color="#0891b2" />
           <ActionTile icon={Video}     label="Enregistrer"       sublabel="Live match tracker"       href="/webapp/tracker/matchrecorder" color={C.red} />
-          <ActionTile icon={BarChart3} label="Tracker"           sublabel="Rapports de matchs"       href="/webapp/tracker/dashboard"     color={C.amber} />
           <ActionTile icon={FileText}  label="Librairie"         sublabel="Exercices & ressources"   href="/webapp/library"               color={C.green} />
           <ActionTile icon={Layout}    label="Schémas tactiques" sublabel="Créer & partager"         href="/webapp/library/schematics"    color="#6366f1" />
         </div>

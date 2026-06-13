@@ -1359,7 +1359,7 @@ export default function CalendarPage() {
             matchPlayerIds,
             '⚽ Convocation match',
             `${matchData.title} — ${dateLabel} à ${heureLabel}${matchData.location ? ` — ${matchData.location}` : ''}`,
-            { type: 'match' },
+            { type: 'convocation' },
           );
         }
 
@@ -1435,18 +1435,6 @@ export default function CalendarPage() {
 
         if (inserted?.id) {
           // Les questionnaires s'envoient en fin de séance via le bouton "Envoyer les questionnaires"
-        }
-
-        // Notifier les joueurs convoqués
-        if (convokedPlayerIds.length) {
-          const dateLabel = new Date(trainingData.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-          const heureLabel = new Date(trainingData.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-          notifyPlayers(
-            convokedPlayerIds,
-            '📋 Nouvelle convocation',
-            `Entraînement ${dateLabel} à ${heureLabel}${trainingData.location ? ` — ${trainingData.location}` : ''}`,
-            { type: 'training', id: inserted?.id ?? '' },
-          );
         }
 
         handleCloseTrainingModal();
@@ -1914,24 +1902,22 @@ export default function CalendarPage() {
 
       {/* Modal d'ajout de match */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-[600px] max-h-[90vh] flex flex-col">
-            {/* Header fixe */}
-            <div className="flex justify-between items-center p-6 border-b">
-              <h2 className="text-xl text-gray-800 font-semibold">Ajouter un match</h2>
-              <button
-                onClick={handleCloseModal}
-                className="text-gray-600 hover:text-gray-800"
-              >
-                <X className="h-5 w-5" />
+        <div className="fm-overlay">
+          <div className="fm-modal" style={{ maxWidth: 620 }}>
+            <div className="fm-modal-header">
+              <div className="fm-modal-title">
+                <div className="fm-modal-title-bar" />
+                {isEditing ? 'Modifier le match' : 'Ajouter un match'}
+              </div>
+              <button className="fm-modal-close" onClick={handleCloseModal}>
+                <X size={16} />
               </button>
             </div>
 
-            {/* Contenu scrollable */}
-            <div className="flex-1 overflow-y-auto p-6">
+            <div className="fm-modal-body">
               <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-800">Titre</label>
+                  <label className="fm-label">Titre</label>
                   <Controller
                     name="title"
                     control={control}
@@ -1939,7 +1925,7 @@ export default function CalendarPage() {
                       <input
                         {...field}
                         type="text"
-                        className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="fm-input"
                       />
                     )}
                   />
@@ -1949,7 +1935,7 @@ export default function CalendarPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-800">Date</label>
+                  <label className="fm-label">Date</label>
                   <Controller
                     name="date"
                     control={control}
@@ -1963,7 +1949,7 @@ export default function CalendarPage() {
                             onChange(date);
                           }
                         }}
-                        className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="fm-input"
                       />
                     )}
                   />
@@ -1973,7 +1959,7 @@ export default function CalendarPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-800">Lieu</label>
+                  <label className="fm-label">Lieu</label>
                   <Controller
                     name="location"
                     control={control}
@@ -1981,7 +1967,7 @@ export default function CalendarPage() {
                       <div className="mt-1">
                         <select
                           {...field}
-                          className="block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900"
+                          className="fm-input"
                         >
                           <option value="Domicile">Domicile</option>
                           <option value="Exterieur">Exterieur</option>
@@ -1995,7 +1981,7 @@ export default function CalendarPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-800">Type de compétition</label>
+                  <label className="fm-label">Type de compétition</label>
                   <Controller
                     name="competition"
                     control={control}
@@ -2003,7 +1989,7 @@ export default function CalendarPage() {
                       <div className="mt-1">
                         <select
                           {...field}
-                          className="block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900"
+                          className="fm-input"
                         >
                           <option value="Championnat">Championnat</option>
                           <option value="Coupe">Coupe</option>
@@ -2018,7 +2004,7 @@ export default function CalendarPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-800">Nom de l'adversaire</label>
+                  <label className="fm-label">Nom de l'adversaire</label>
                   <Controller
                     name="opponent_team"
                     control={control}
@@ -2027,7 +2013,7 @@ export default function CalendarPage() {
                         {...field}
                         type="text"
                         placeholder="Ex: Team X (optionnel)"
-                        className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="fm-input"
                       />
                     )}
                   />
@@ -2035,7 +2021,7 @@ export default function CalendarPage() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-800">Score équipe</label>
+                    <label className="fm-label">Score équipe</label>
                     <Controller
                       name="score_team"
                       control={control}
@@ -2043,14 +2029,14 @@ export default function CalendarPage() {
                         <input
                           type="number"
                           min="0"
-                          className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                          className="fm-input"
                           {...field}
                         />
                       )}
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-800">Score adversaire</label>
+                    <label className="fm-label">Score adversaire</label>
                     <Controller
                       name="score_opponent"
                       control={control}
@@ -2058,7 +2044,7 @@ export default function CalendarPage() {
                         <input
                           type="number"
                           min="0"
-                          className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                          className="fm-input"
                           {...field}
                         />
                       )}
@@ -2071,7 +2057,7 @@ export default function CalendarPage() {
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Répartition des buts marqués</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-800">Phase Offensive</label>
+                      <label className="fm-label">Phase Offensive</label>
                       <Controller
                         name="goals_by_type.offensive"
                         control={control}
@@ -2079,14 +2065,14 @@ export default function CalendarPage() {
                           <input
                             type="number"
                             min="0"
-                            className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            className="fm-input"
                             {...field}
                           />
                         )}
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-800">Transition</label>
+                      <label className="fm-label">Transition</label>
                       <Controller
                         name="goals_by_type.transition"
                         control={control}
@@ -2094,14 +2080,14 @@ export default function CalendarPage() {
                           <input
                             type="number"
                             min="0"
-                            className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            className="fm-input"
                             {...field}
                           />
                         )}
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-800">CPA</label>
+                      <label className="fm-label">CPA</label>
                       <Controller
                         name="goals_by_type.cpa"
                         control={control}
@@ -2109,14 +2095,14 @@ export default function CalendarPage() {
                           <input
                             type="number"
                             min="0"
-                            className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            className="fm-input"
                             {...field}
                           />
                         )}
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-800">Supériorité</label>
+                      <label className="fm-label">Supériorité</label>
                       <Controller
                         name="goals_by_type.superiority"
                         control={control}
@@ -2124,7 +2110,7 @@ export default function CalendarPage() {
                           <input
                             type="number"
                             min="0"
-                            className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            className="fm-input"
                             {...field}
                           />
                         )}
@@ -2138,7 +2124,7 @@ export default function CalendarPage() {
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Répartition des buts encaissés</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-800">Phase Offensive</label>
+                      <label className="fm-label">Phase Offensive</label>
                       <Controller
                         name="conceded_by_type.offensive"
                         control={control}
@@ -2146,14 +2132,14 @@ export default function CalendarPage() {
                           <input
                             type="number"
                             min="0"
-                            className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            className="fm-input"
                             {...field}
                           />
                         )}
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-800">Transition</label>
+                      <label className="fm-label">Transition</label>
                       <Controller
                         name="conceded_by_type.transition"
                         control={control}
@@ -2161,14 +2147,14 @@ export default function CalendarPage() {
                           <input
                             type="number"
                             min="0"
-                            className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            className="fm-input"
                             {...field}
                           />
                         )}
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-800">CPA</label>
+                      <label className="fm-label">CPA</label>
                       <Controller
                         name="conceded_by_type.cpa"
                         control={control}
@@ -2176,14 +2162,14 @@ export default function CalendarPage() {
                           <input
                             type="number"
                             min="0"
-                            className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            className="fm-input"
                             {...field}
                           />
                         )}
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-800">Supériorité</label>
+                      <label className="fm-label">Supériorité</label>
                       <Controller
                         name="conceded_by_type.superiority"
                         control={control}
@@ -2191,7 +2177,7 @@ export default function CalendarPage() {
                           <input
                             type="number"
                             min="0"
-                            className="mt-1 block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            className="fm-input"
                             {...field}
                           />
                         )}
@@ -2201,7 +2187,7 @@ export default function CalendarPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-800 mb-2">Joueurs participants</label>
+                  <label className="fm-label">Joueurs participants</label>
                   <div className="border rounded-md overflow-hidden">
                     {/* Header de la table */}
                     <div className="hidden sm:grid grid-cols-12 gap-4 bg-gray-50 p-3 border-b">
@@ -2240,7 +2226,7 @@ export default function CalendarPage() {
                                     type="checkbox"
                                     checked={value ?? false}
                                     onChange={(e) => onChange(e.target.checked)}
-                                    className="rounded border-gray-400 text-blue-600 focus:ring-blue-500"
+                                    style={{ accentColor: '#2563EB', width: 15, height: 15 }}
                                   />
                                 )}
                               />
@@ -2263,9 +2249,7 @@ export default function CalendarPage() {
                                     value={value || 0}
                                     onChange={(e) => onChange(parseInt(e.target.value) || 0)}
                                     disabled={!isPlayerPresent}
-                                    className={`w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900 ${
-                                      !isPlayerPresent ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
-                                    }`}
+                                    className={`fm-input${!isPlayerPresent ? ' fm-input-disabled' : ''}`}
                                   />
                                 )}
                               />
@@ -2285,9 +2269,7 @@ export default function CalendarPage() {
                                     value={value || 0}
                                     onChange={(e) => onChange(parseInt(e.target.value) || 0)}
                                     disabled={!isPlayerPresent}
-                                    className={`w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900 ${
-                                      !isPlayerPresent ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
-                                    }`}
+                                    className={`fm-input${!isPlayerPresent ? ' fm-input-disabled' : ''}`}
                                   />
                                 )}
                               />
@@ -2307,9 +2289,7 @@ export default function CalendarPage() {
                                     value={value || 0}
                                     onChange={(e) => onChange(parseInt(e.target.value) || 0)}
                                     disabled={!isPlayerPresent}
-                                    className={`w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900 ${
-                                      !isPlayerPresent ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
-                                    }`}
+                                    className={`fm-input${!isPlayerPresent ? ' fm-input-disabled' : ''}`}
                                   />
                                 )}
                               />
@@ -2326,7 +2306,7 @@ export default function CalendarPage() {
                     <button
                       type="button"
                       onClick={() => setInviteMatchModalOpen(true)}
-                      className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700"
+                      className="fm-btn fm-btn-blue" style={{ background: '#059669', borderColor: '#059669' }}
                     >
                       <Plus className="h-4 w-4" />
                       Ajouter joueurs autres équipes
@@ -2336,7 +2316,7 @@ export default function CalendarPage() {
 
                 {invitedPlayerIdsInForm.length > 0 && (
                   <div className="mt-4">
-                    <label className="block text-sm font-medium text-gray-800 mb-2">Joueurs d&apos;autres équipes convoqués</label>
+                    <label className="fm-label">Joueurs d&apos;autres équipes convoqués</label>
                     <div className="border rounded-md overflow-hidden">
                       <div className="hidden sm:grid grid-cols-12 gap-4 bg-gray-50 p-3 border-b">
                         <div className="col-span-4">
@@ -2371,7 +2351,7 @@ export default function CalendarPage() {
                                       type="checkbox"
                                       checked={value ?? true}
                                       onChange={(e) => onChange(e.target.checked)}
-                                      className="rounded border-gray-400 text-blue-600 focus:ring-blue-500"
+                                      style={{ accentColor: '#2563EB', width: 15, height: 15 }}
                                     />
                                   )}
                                 />
@@ -2389,7 +2369,7 @@ export default function CalendarPage() {
                                       value={value ?? 0}
                                       onChange={(e) => onChange(parseInt(e.target.value) || 0)}
                                       disabled={!isPlayerPresent}
-                                      className="w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900 bg-white py-1.5"
+                                      className="fm-input"
                                     />
                                   )}
                                 />
@@ -2406,7 +2386,7 @@ export default function CalendarPage() {
                                       value={value ?? 0}
                                       onChange={(e) => onChange(parseInt(e.target.value) || 0)}
                                       disabled={!isPlayerPresent}
-                                      className="w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900 bg-white py-1.5"
+                                      className="fm-input"
                                     />
                                   )}
                                 />
@@ -2423,7 +2403,7 @@ export default function CalendarPage() {
                                       value={value ?? 0}
                                       onChange={(e) => onChange(parseInt(e.target.value) || 0)}
                                       disabled={!isPlayerPresent}
-                                      className="w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900 bg-white py-1.5"
+                                      className="fm-input"
                                     />
                                   )}
                                 />
@@ -2453,21 +2433,12 @@ export default function CalendarPage() {
               </form>
             </div>
 
-            {/* Footer fixe */}
-            <div className="flex justify-end gap-2 p-6 border-t bg-gray-50">
-              <button
-                type="button"
-                onClick={handleCloseModal}
-                className="px-4 py-2 text-sm font-medium text-gray-800 bg-white border border-gray-400 rounded-md hover:bg-gray-50"
-              >
+            <div className="fm-modal-footer">
+              <button type="button" className="fm-btn fm-btn-secondary" onClick={handleCloseModal}>
                 Annuler
               </button>
-              <button
-                type="submit"
-                onClick={handleSubmit(onSubmit)}
-                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
-              >
-                Ajouter
+              <button type="submit" className="fm-btn fm-btn-primary" onClick={handleSubmit(onSubmit)}>
+                {isEditing ? 'Enregistrer' : 'Ajouter le match'}
               </button>
             </div>
           </div>
@@ -2476,24 +2447,23 @@ export default function CalendarPage() {
 
       {/* Modal "page" pour ajouter des joueurs d'autres équipes */}
       {inviteMatchModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-lg w-full max-w-lg max-h-[85vh] flex flex-col shadow-xl">
-            <div className="flex justify-between items-center p-4 border-b">
-              <h2 className="text-lg font-semibold text-gray-900">Ajouter des joueurs d&apos;autres équipes</h2>
-              <button
-                type="button"
-                onClick={() => { setInviteMatchModalOpen(false); setInviteModalSelectedIds({}); }}
-                className="text-gray-600 hover:text-gray-800 p-1"
-              >
-                <X className="h-5 w-5" />
+        <div className="fm-overlay fm-overlay-top">
+          <div className="fm-modal" style={{ maxWidth: 520 }}>
+            <div className="fm-modal-header">
+              <div className="fm-modal-title">
+                <div className="fm-modal-title-bar" />
+                Ajouter des joueurs d&apos;autres équipes
+              </div>
+              <button type="button" className="fm-modal-close" onClick={() => { setInviteMatchModalOpen(false); setInviteModalSelectedIds({}); }}>
+                <X size={16} />
               </button>
             </div>
-            <div className="p-4 border-b bg-gray-50">
-              <label className="block text-sm font-medium text-gray-800 mb-1.5">Filtrer par équipe</label>
+            <div style={{ padding: '14px 20px', borderBottom: '1.5px solid #E8EDF4', background: '#F8FAFC' }}>
+              <label className="fm-label">Filtrer par équipe</label>
               <select
                 value={inviteFilterTeamId}
                 onChange={(e) => setInviteFilterTeamId(e.target.value)}
-                className="block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900 text-sm py-2"
+                className="fm-select"
               >
                 <option value="all">Toutes les équipes</option>
                 {teams.filter((t) => t.id !== activeTeam?.id).map((t) => (
@@ -2520,22 +2490,19 @@ export default function CalendarPage() {
                       onChange={(e) => {
                         setInviteModalSelectedIds((prev) => ({ ...prev, [player.id]: e.target.checked }));
                       }}
-                      className="rounded border-gray-400 text-green-600 focus:ring-green-500"
+                      style={{ accentColor: '#059669', width: 15, height: 15 }}
                     />
                   </label>
                 ))}
               </div>
             </div>
-            <div className="flex justify-end gap-2 p-4 border-t bg-gray-50">
-              <button
-                type="button"
-                onClick={() => { setInviteMatchModalOpen(false); setInviteModalSelectedIds({}); }}
-                className="px-4 py-2 text-sm font-medium text-gray-800 bg-white border border-gray-400 rounded-md hover:bg-gray-50"
-              >
+            <div className="fm-modal-footer">
+              <button type="button" className="fm-btn fm-btn-secondary" onClick={() => { setInviteMatchModalOpen(false); setInviteModalSelectedIds({}); }}>
                 Annuler
               </button>
               <button
                 type="button"
+                className="fm-btn fm-btn-blue"
                 onClick={() => {
                   const current = getValues('players') || {};
                   const toAdd = Object.entries(inviteModalSelectedIds)
@@ -2550,7 +2517,6 @@ export default function CalendarPage() {
                   setInviteMatchModalOpen(false);
                   setInviteModalSelectedIds({});
                 }}
-                className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700"
               >
                 Ajouter la sélection
               </button>
@@ -2561,24 +2527,23 @@ export default function CalendarPage() {
 
       {/* Modal "page" pour ajouter des joueurs d'autres équipes (entraînement) */}
       {inviteTrainingModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-lg w-full max-w-lg max-h-[85vh] flex flex-col shadow-xl">
-            <div className="flex justify-between items-center p-4 border-b">
-              <h2 className="text-lg font-semibold text-gray-900">Ajouter des joueurs d&apos;autres équipes</h2>
-              <button
-                type="button"
-                onClick={() => { setInviteTrainingModalOpen(false); setInviteTrainingModalSelectedIds({}); }}
-                className="text-gray-600 hover:text-gray-800 p-1"
-              >
-                <X className="h-5 w-5" />
+        <div className="fm-overlay fm-overlay-top">
+          <div className="fm-modal" style={{ maxWidth: 520 }}>
+            <div className="fm-modal-header">
+              <div className="fm-modal-title">
+                <div className="fm-modal-title-bar" />
+                Ajouter des joueurs d&apos;autres équipes
+              </div>
+              <button type="button" className="fm-modal-close" onClick={() => { setInviteTrainingModalOpen(false); setInviteTrainingModalSelectedIds({}); }}>
+                <X size={16} />
               </button>
             </div>
-            <div className="p-4 border-b bg-gray-50">
-              <label className="block text-sm font-medium text-gray-800 mb-1.5">Filtrer par équipe</label>
+            <div style={{ padding: '14px 20px', borderBottom: '1.5px solid #E8EDF4', background: '#F8FAFC' }}>
+              <label className="fm-label">Filtrer par équipe</label>
               <select
                 value={inviteFilterTeamId}
                 onChange={(e) => setInviteFilterTeamId(e.target.value)}
-                className="block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900 text-sm py-2"
+                className="fm-select"
               >
                 <option value="all">Toutes les équipes</option>
                 {teams.filter((t) => t.id !== activeTeam?.id).map((t) => (
@@ -2605,22 +2570,19 @@ export default function CalendarPage() {
                       onChange={(e) => {
                         setInviteTrainingModalSelectedIds((prev) => ({ ...prev, [player.id]: e.target.checked }));
                       }}
-                      className="rounded border-gray-400 text-green-600 focus:ring-green-500"
+                      style={{ accentColor: '#059669', width: 15, height: 15 }}
                     />
                   </label>
                 ))}
               </div>
             </div>
-            <div className="flex justify-end gap-2 p-4 border-t bg-gray-50">
-              <button
-                type="button"
-                onClick={() => { setInviteTrainingModalOpen(false); setInviteTrainingModalSelectedIds({}); }}
-                className="px-4 py-2 text-sm font-medium text-gray-800 bg-white border border-gray-400 rounded-md hover:bg-gray-50"
-              >
+            <div className="fm-modal-footer">
+              <button type="button" className="fm-btn fm-btn-secondary" onClick={() => { setInviteTrainingModalOpen(false); setInviteTrainingModalSelectedIds({}); }}>
                 Annuler
               </button>
               <button
                 type="button"
+                className="fm-btn fm-btn-blue"
                 onClick={() => {
                   const current = getTrainingValues('players') || {};
                   const toAdd = Object.entries(inviteTrainingModalSelectedIds)
@@ -2635,7 +2597,6 @@ export default function CalendarPage() {
                   setInviteTrainingModalOpen(false);
                   setInviteTrainingModalSelectedIds({});
                 }}
-                className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700"
               >
                 Ajouter la sélection
               </button>
@@ -2646,27 +2607,25 @@ export default function CalendarPage() {
 
       {/* Modal d'ajout d'entraînement */}
       {isTrainingModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-[800px] max-h-[90vh] flex flex-col">
-            {/* Header fixe */}
-            <div className="flex justify-between items-center p-4 border-b">
-              <h2 className="text-lg font-semibold text-gray-900">Ajouter un entraînement</h2>
-              <button
-                onClick={handleCloseTrainingModal}
-                className="text-gray-600 hover:text-gray-800"
-              >
-                <X className="h-5 w-5" />
-              </button>
+        <div className="fm-overlay">
+          <div className="fm-modal" style={{ maxWidth: 820 }}>
+            <div className="fm-modal-header">
+              <div className="fm-modal-title">
+                <div className="fm-modal-title-bar" style={{ background: '#059669' }} />
+                {isEditing ? 'Modifier l\'entraînement' : 'Ajouter un entraînement'}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: trainingFormPage === 1 ? '#059669' : '#DDE1EA' }} />
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: trainingFormPage === 2 ? '#059669' : '#DDE1EA' }} />
+                </div>
+                <button className="fm-modal-close" onClick={handleCloseTrainingModal}>
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
-            {/* Indicateur de page */}
-            <div className="flex items-center justify-center gap-2 p-2 border-b bg-gray-50">
-              <div className={`w-2 h-2 rounded-full ${trainingFormPage === 1 ? 'bg-green-600' : 'bg-gray-300'}`} />
-              <div className={`w-2 h-2 rounded-full ${trainingFormPage === 2 ? 'bg-green-600' : 'bg-gray-300'}`} />
-            </div>
-
-            {/* Contenu scrollable */}
-            <div className="flex-1 overflow-y-auto p-4">
+            <div className="fm-modal-body">
               <form onSubmit={handleTrainingSubmit(onSubmitTraining)} className="space-y-3">
                 {trainingFormPage === 1 ? (
                   <>
@@ -2685,7 +2644,7 @@ export default function CalendarPage() {
                             onChange(date);
                           }
                         }}
-                        className="block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm py-1.5"
+                        className="fm-input"
                       />
                     )}
                   />
@@ -2703,7 +2662,7 @@ export default function CalendarPage() {
                       <input
                         {...field}
                         type="text"
-                        className="block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm py-1.5"
+                        className="fm-input"
                       />
                     )}
                   />
@@ -2721,7 +2680,7 @@ export default function CalendarPage() {
                       <div>
                         <select
                           {...field}
-                          className="block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900 text-sm py-1.5"
+                          className="fm-input"
                         >
                           <option value="Offensif">Offensif</option>
                           <option value="Défensif">Défensif</option>
@@ -2745,7 +2704,7 @@ export default function CalendarPage() {
                       <textarea
                         {...field}
                         rows={2}
-                        className="block w-full rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm py-1.5"
+                        className="fm-input"
                       />
                     )}
                   />
@@ -2876,7 +2835,7 @@ export default function CalendarPage() {
                     <button
                       type="button"
                       onClick={() => setInviteTrainingModalOpen(true)}
-                      className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700"
+                      className="fm-btn fm-btn-blue" style={{ background: '#059669', borderColor: '#059669' }}
                     >
                       <Plus className="h-4 w-4" />
                       Ajouter joueurs autres équipes
@@ -3213,7 +3172,7 @@ export default function CalendarPage() {
                                       );
                                       setTrainingValue('sessionParts', updated);
                                     }}
-                                    className="w-14 px-1.5 py-0.5 text-xs rounded border border-gray-400 focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900"
+                                    className="fm-input" style={{ width: 56, padding: '3px 6px', fontSize: '0.75rem' }}
                                   />
                                 </div>
                               </div>
@@ -3272,7 +3231,7 @@ export default function CalendarPage() {
                       <div className="flex gap-2 mb-2">
                         <select
                           id="newPartType"
-                          className="flex-1 rounded-md border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm py-1 bg-white text-gray-900"
+                          className="fm-input"
                           defaultValue="Jeu"
                         >
                           <option value="Echauffement">Echauffement</option>
@@ -3482,7 +3441,7 @@ export default function CalendarPage() {
                                   placeholder="Rechercher par titre ou objectifs..."
                                   value={procedureSearchTerm}
                                   onChange={(e) => setProcedureSearchTerm(e.target.value)}
-                                  className="w-full pl-10 pr-4 py-2.5 border border-gray-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white placeholder-gray-600"
+                                  className="fm-input" style={{ paddingLeft: 40 }}
                                 />
                               </div>
 
@@ -3588,50 +3547,35 @@ export default function CalendarPage() {
               </form>
             </div>
 
-            {/* Footer fixe */}
-            <div className="flex justify-between items-center gap-2 p-4 border-t bg-gray-50">
-              <button
-                type="button"
-                onClick={handleCloseTrainingModal}
-                className="px-4 py-2 text-sm font-medium text-gray-800 bg-white border border-gray-400 rounded-md hover:bg-gray-50"
-              >
+            <div className="fm-modal-footer" style={{ justifyContent: 'space-between' }}>
+              <button type="button" className="fm-btn fm-btn-ghost" onClick={handleCloseTrainingModal}>
                 Annuler
               </button>
-              
-              <div className="flex gap-2">
+              <div style={{ display: 'flex', gap: 8 }}>
                 {trainingFormPage === 1 ? (
-                  <button
-                    type="button"
-                    onClick={() => setTrainingFormPage(2)}
-                    className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 flex items-center gap-2"
-                  >
+                  <button type="button" className="fm-btn fm-btn-primary" onClick={() => setTrainingFormPage(2)}>
                     Suivant
-                    <ChevronRight className="h-4 w-4" />
+                    <ChevronRight size={15} />
                   </button>
                 ) : (
                   <>
-                    <button
-                      type="button"
-                      onClick={() => setTrainingFormPage(1)}
-                      className="px-4 py-2 text-sm font-medium text-gray-800 bg-white border border-gray-400 rounded-md hover:bg-gray-50 flex items-center gap-2"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
+                    <button type="button" className="fm-btn fm-btn-secondary" onClick={() => setTrainingFormPage(1)}>
+                      <ChevronLeft size={15} />
                       Précédent
                     </button>
                     <button
                       type="button"
+                      className="fm-btn fm-btn-primary"
+                      style={{ background: '#059669', borderColor: '#059669' }}
                       onClick={(e) => {
                         e.preventDefault();
-                        console.log('Bouton Ajouter cliqué');
-                        console.log('Données du formulaire:', watchTraining());
                         handleTrainingSubmit(onSubmitTraining)().catch((err) => {
                           console.error('Erreur lors de la soumission:', err);
                           setError('Erreur lors de la soumission du formulaire');
                         });
                       }}
-                      className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700"
                     >
-                      Ajouter
+                      {isEditing ? 'Enregistrer' : 'Ajouter'}
                     </button>
                   </>
                 )}
@@ -3643,42 +3587,42 @@ export default function CalendarPage() {
 
       {/* Modal de détails du procédé */}
       {viewingProcedure && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="flex justify-between items-start gap-4 border-b px-6 py-4">
+        <div className="fm-overlay">
+          <div className="fm-modal" style={{ maxWidth: '90vw', width: '100%' }}>
+            <div className="fm-modal-header">
               <div>
-                <h2 className="text-xl font-semibold text-gray-900">{viewingProcedure.title}</h2>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                <div className="fm-modal-title" style={{ marginBottom: 8 }}>
+                  <div className="fm-modal-title-bar" />
+                  {viewingProcedure.title}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, paddingLeft: 16 }}>
+                  <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, background: '#EFF6FF', color: '#1D4ED8' }}>
                     {viewingProcedure.theme}
                   </span>
-                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                  <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, background: '#F5F3FF', color: '#7C3AED' }}>
                     {viewingProcedure.type}
                   </span>
                   {viewingProcedure.duration_minutes && (
-                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                    <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, background: '#F3F4F6', color: '#374151' }}>
                       {viewingProcedure.duration_minutes} min
                     </span>
                   )}
                   {viewingProcedure.min_players && (
-                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                      {viewingProcedure.min_players} joueurs minimum
+                    <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, background: '#F3F4F6', color: '#374151' }}>
+                      {viewingProcedure.min_players} joueurs min.
                     </span>
                   )}
                 </div>
               </div>
               <button
-                onClick={() => {
-                  setViewingProcedure(null);
-                  setProcedureDetailSchematic(null);
-                }}
-                className="text-gray-600 hover:text-gray-600 transition-colors"
+                className="fm-modal-close"
+                onClick={() => { setViewingProcedure(null); setProcedureDetailSchematic(null); }}
               >
-                <X className="h-5 w-5" />
+                <X size={16} />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-6 py-4">
+            <div className="fm-modal-body">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Colonne gauche : Texte */}
                 <div className="space-y-4">
@@ -3777,13 +3721,10 @@ export default function CalendarPage() {
               </div>
             </div>
 
-            <div className="border-t px-6 py-4 bg-gray-50 flex justify-end">
+            <div className="fm-modal-footer">
               <button
-                onClick={() => {
-                  setViewingProcedure(null);
-                  setProcedureDetailSchematic(null);
-                }}
-                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+                className="fm-btn fm-btn-primary"
+                onClick={() => { setViewingProcedure(null); setProcedureDetailSchematic(null); }}
               >
                 Fermer
               </button>

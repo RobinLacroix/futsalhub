@@ -1,4 +1,5 @@
 import { useCallback, useState, useEffect, useMemo } from 'react';
+import { useFocusEffect } from 'expo-router';
 import {
   View,
   Text,
@@ -22,6 +23,7 @@ import {
   type PlayerSquadStat,
 } from '../../../lib/services/players';
 import type { Player } from '../../../types';
+import { getFeedbackPlayerIds, markPlayerFeedbackRead } from '../../../lib/services/notifications';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -78,10 +80,11 @@ export default function SquadScreen() {
   const [filter, setFilter]             = useState<MatchTypeFilter>('all');
   const [sortKey, setSortKey]           = useState<SortKey>('name');
   const [sortDir, setSortDir]           = useState<SortDir>('asc');
-  const [loading, setLoading]           = useState(true);
-  const [statsLoading, setStatsLoading] = useState(false);
-  const [refreshing, setRefreshing]     = useState(false);
-  const [error, setError]               = useState<string | null>(null);
+  const [loading, setLoading]               = useState(true);
+  const [statsLoading, setStatsLoading]     = useState(false);
+  const [refreshing, setRefreshing]         = useState(false);
+  const [error, setError]                   = useState<string | null>(null);
+  const [feedbackPlayerIds, setFeedbackPlayerIds] = useState<Set<string>>(new Set());
 
   const loadPlayers = useCallback(async () => {
     if (!activeTeamId) { setPlayers([]); setLoading(false); return; }
@@ -107,6 +110,10 @@ export default function SquadScreen() {
 
   useEffect(() => { setLoading(true); loadPlayers(); }, [loadPlayers]);
   useEffect(() => { loadStats(); }, [loadStats]);
+
+  useFocusEffect(useCallback(() => {
+    getFeedbackPlayerIds().then(ids => setFeedbackPlayerIds(new Set(ids)));
+  }, []));
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -268,11 +275,20 @@ export default function SquadScreen() {
             </TouchableOpacity>
           );
 
+          const hasFeedbackBadge = feedbackPlayerIds.has(item.id);
+
           return (
             <Swipeable renderRightActions={renderRightActions} overshootRight={false}>
               <TouchableOpacity
                 style={[styles.row, { backgroundColor: isEven ? C.rowEven : C.rowOdd }]}
-                onPress={() => router.push(`/(tabs)/squad/${item.id}`)}
+                onPress={() => {
+                  if (hasFeedbackBadge) {
+                    markPlayerFeedbackRead(item.id).then(() =>
+                      setFeedbackPlayerIds(prev => { const n = new Set(prev); n.delete(item.id); return n; })
+                    );
+                  }
+                  router.push(`/(tabs)/squad/${item.id}`);
+                }}
                 activeOpacity={0.6}
               >
                 {/* Filet de couleur position */}
@@ -294,9 +310,12 @@ export default function SquadScreen() {
 
                 {/* Nom */}
                 <View style={styles.colName}>
-                  <Text style={styles.playerName} numberOfLines={1}>
-                    {item.last_name.toUpperCase()}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={styles.playerName} numberOfLines={1}>
+                      {item.last_name.toUpperCase()}
+                    </Text>
+                    {hasFeedbackBadge && <View style={styles.feedbackBadge} />}
+                  </View>
                   <Text style={styles.playerFirst} numberOfLines={1}>
                     {item.first_name}
                   </Text>
@@ -371,6 +390,7 @@ const styles = StyleSheet.create({
   filterRow:   { paddingHorizontal: 12, paddingVertical: 9, gap: 6, flexDirection: 'row' },
   filterRight: { marginLeft: 'auto' },
   playerCount: { fontSize: 11, color: C.textMuted, fontWeight: '600' },
+  feedbackBadge: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444' },
 
   chip: {
     paddingHorizontal: 11, paddingVertical: 4,

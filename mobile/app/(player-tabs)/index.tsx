@@ -21,7 +21,7 @@ import {
   type MyConvolutionRow,
   type MyUpcomingMatchRow,
 } from '../../lib/services/playerConvocations';
-import { pushToMyCoaches } from '../../lib/services/notifications';
+
 
 // ─── Design tokens ─────────────────────────────────────────────────────────
 
@@ -113,10 +113,6 @@ export default function PlayerConvocationsScreen() {
     setUpdatingId(null);
     if (result.ok) {
       setConvocations(prev => prev.map(c => c.training_id === trainingId ? { ...c, my_status: status } : c));
-      if (status === 'absent' || status === 'late' || status === 'injured') {
-        const label = status === 'absent' ? 'absent' : status === 'late' ? 'en retard' : 'blessé';
-        void pushToMyCoaches({ title: 'Réponse à une convocation', body: `Un joueur se déclare ${label}.`, data: { type: 'absence_report', training_id: trainingId } });
-      }
     } else {
       setError(result.error === 'too_late'
         ? 'Il est trop tard pour répondre (jusqu\'à 2 h avant la séance).'

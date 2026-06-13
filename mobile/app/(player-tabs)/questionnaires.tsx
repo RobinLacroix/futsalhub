@@ -19,7 +19,7 @@ import { fr } from 'date-fns/locale';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { supabase } from '../../lib/supabase';
 import { getMyPendingFeedbackTokens, type MyPendingFeedbackRow } from '../../lib/services/playerConvocations';
-import { pushToMyCoaches } from '../../lib/services/notifications';
+
 
 // ─── Design tokens ─────────────────────────────────────────────────────────
 
@@ -163,9 +163,6 @@ export default function PlayerQuestionnairesScreen() {
       }
       setSubmitted(true);
       setItems(prev => prev.filter(i => i.token !== activeItem.token));
-      if (comment.trim()) {
-        void pushToMyCoaches({ title: 'Commentaire de questionnaire', body: comment.trim().slice(0, 80), data: { type: 'feedback_comment' } });
-      }
     } catch (e) {
       Alert.alert('Erreur', e instanceof Error ? e.message : 'Impossible d\'envoyer.');
     } finally {

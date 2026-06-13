@@ -939,92 +939,78 @@ export default function SquadPage() {
 
       {/* ── Modal ────────────────────────────────────────────────────────────── */}
       {isModalOpen && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 50,
-          backgroundColor: 'rgba(0,0,0,0.45)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: 16,
-        }}>
-          <div style={{
-            backgroundColor: T.cardBg,
-            borderRadius: 10,
-            width: '100%',
-            maxWidth: 460,
-            maxHeight: '92vh',
-            display: 'flex',
-            flexDirection: 'column',
-            boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
-          }}>
-            {/* Modal header */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 22px 14px', borderBottom: `1px solid ${T.border}` }}>
-              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: T.text }}>
+        <div className="fm-overlay">
+          <div className="fm-modal" style={{ maxWidth: 480 }}>
+            <div className="fm-modal-header">
+              <div className="fm-modal-title">
+                <div className="fm-modal-title-bar" />
                 {isEditing ? 'Modifier le joueur' : 'Nouveau joueur'}
-              </h2>
-              <button onClick={handleCloseModal} style={{ border: 'none', background: 'none', cursor: 'pointer', color: T.textMuted }}>
-                <X size={18} />
+              </div>
+              <button className="fm-modal-close" onClick={handleCloseModal}>
+                <X size={16} />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-              <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <form id="squad-player-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+              <div className="fm-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
                 {/* Numéro */}
-                <label style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
-                  Numéro de maillot
+                <div>
+                  <label className="fm-label">Numéro de maillot</label>
                   <input
                     type="number" min="1" max="99"
                     value={formData.number}
                     onChange={e => setFormData({ ...formData, number: e.target.value })}
                     placeholder="Ex: 10"
-                    style={inputStyle}
+                    className="fm-input"
                   />
-                </label>
+                </div>
 
                 {/* Prénom + Nom */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  <label style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
-                    Prénom *
-                    <input type="text" required value={formData.first_name} onChange={e => setFormData({ ...formData, first_name: e.target.value })} style={inputStyle} />
-                  </label>
-                  <label style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
-                    Nom *
-                    <input type="text" required value={formData.last_name} onChange={e => setFormData({ ...formData, last_name: e.target.value })} style={inputStyle} />
-                  </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label className="fm-label">Prénom *</label>
+                    <input type="text" required value={formData.first_name} onChange={e => setFormData({ ...formData, first_name: e.target.value })} className="fm-input" />
+                  </div>
+                  <div>
+                    <label className="fm-label">Nom *</label>
+                    <input type="text" required value={formData.last_name} onChange={e => setFormData({ ...formData, last_name: e.target.value })} className="fm-input" />
+                  </div>
                 </div>
 
                 {/* Date de naissance */}
-                <label style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
-                  Date de naissance
-                  <input type="date" value={formData.birth_date} onChange={e => setFormData({ ...formData, birth_date: e.target.value })} style={inputStyle} />
-                </label>
+                <div>
+                  <label className="fm-label">Date de naissance</label>
+                  <input type="date" value={formData.birth_date} onChange={e => setFormData({ ...formData, birth_date: e.target.value })} className="fm-input" />
+                </div>
 
-                {/* Poste */}
-                <label style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
-                  Poste *
-                  <select required value={formData.position} onChange={e => setFormData({ ...formData, position: e.target.value })} style={inputStyle}>
-                    <option value="">Sélectionner</option>
-                    <option value="Gardien">Gardien</option>
-                    <option value="Meneur">Meneur</option>
-                    <option value="Ailier">Ailier</option>
-                    <option value="Pivot">Pivot</option>
-                  </select>
-                </label>
-
-                {/* Pied fort */}
-                <label style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
-                  Pied fort *
-                  <select required value={formData.strong_foot} onChange={e => setFormData({ ...formData, strong_foot: e.target.value })} style={inputStyle}>
-                    <option value="">Sélectionner</option>
-                    <option value="Droit">Droit</option>
-                    <option value="Gauche">Gauche</option>
-                    <option value="Ambidextre">Ambidextre</option>
-                  </select>
-                </label>
+                {/* Poste + Pied fort */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label className="fm-label">Poste *</label>
+                    <select required value={formData.position} onChange={e => setFormData({ ...formData, position: e.target.value })} className="fm-select">
+                      <option value="">Sélectionner</option>
+                      <option value="Gardien">Gardien</option>
+                      <option value="Meneur">Meneur</option>
+                      <option value="Ailier">Ailier</option>
+                      <option value="Pivot">Pivot</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="fm-label">Pied fort *</label>
+                    <select required value={formData.strong_foot} onChange={e => setFormData({ ...formData, strong_foot: e.target.value })} className="fm-select">
+                      <option value="">Sélectionner</option>
+                      <option value="Droit">Droit</option>
+                      <option value="Gauche">Gauche</option>
+                      <option value="Ambidextre">Ambidextre</option>
+                    </select>
+                  </div>
+                </div>
 
                 {/* Statut */}
-                <label style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
-                  Statut *
-                  <select required value={formData.status} onChange={e => setFormData({ ...formData, status: e.target.value })} style={inputStyle}>
+                <div>
+                  <label className="fm-label">Statut *</label>
+                  <select required value={formData.status} onChange={e => setFormData({ ...formData, status: e.target.value })} className="fm-select">
                     <option value="">Sélectionner</option>
                     <option value="Non-muté">Non-Muté</option>
                     <option value="Muté">Muté</option>
@@ -1032,23 +1018,31 @@ export default function SquadPage() {
                     <option value="Blessé">Blessé</option>
                     <option value="Suspendu">Suspendu</option>
                   </select>
-                </label>
+                </div>
 
                 {/* Limite séquence */}
-                <label style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
-                  Limite par séquence (secondes) *
-                  <input type="number" required min="30" step="10" value={formData.sequence_time_limit} onChange={e => setFormData({ ...formData, sequence_time_limit: e.target.value })} style={inputStyle} />
-                  <span style={{ fontSize: 11, color: T.textMuted, marginTop: 4, display: 'block' }}>Durée max avant alerte dans le match recorder (défaut 180 s)</span>
-                </label>
+                <div>
+                  <label className="fm-label">Limite par séquence (secondes) *</label>
+                  <input type="number" required min="30" step="10" value={formData.sequence_time_limit} onChange={e => setFormData({ ...formData, sequence_time_limit: e.target.value })} className="fm-input" />
+                  <p style={{ fontSize: '0.75rem', color: '#9CA3AF', marginTop: 4 }}>Durée max avant alerte dans le match recorder (défaut 180 s)</p>
+                </div>
 
                 {/* Équipes */}
                 <div>
-                  <p style={{ fontSize: 13, fontWeight: 600, color: T.text, margin: '0 0 8px' }}>
-                    Équipes <span style={{ fontSize: 11, fontWeight: 400, color: T.textMuted }}>(sélection multiple)</span>
-                  </p>
-                  <div style={{ border: `1px solid ${T.border}`, borderRadius: 6, maxHeight: 160, overflowY: 'auto', padding: '4px 0' }}>
-                    {teams.map(team => (
-                      <label key={team.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', cursor: 'pointer' }}>
+                  <label className="fm-label">
+                    Équipes <span style={{ fontWeight: 500, textTransform: 'none', letterSpacing: 0, color: '#9CA3AF' }}>(sélection multiple)</span>
+                  </label>
+                  <div style={{ border: '1.5px solid #C8D4E0', borderRadius: 8, maxHeight: 160, overflowY: 'auto' }}>
+                    {teams.map((team, i) => (
+                      <label
+                        key={team.id}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          padding: '9px 14px', cursor: 'pointer',
+                          borderBottom: i < teams.length - 1 ? '1px solid #EEF0F5' : 'none',
+                          background: 'white',
+                        }}
+                      >
                         <input
                           type="checkbox"
                           checked={formData.selectedTeams.includes(team.id)}
@@ -1058,35 +1052,27 @@ export default function SquadPage() {
                               ? [...formData.selectedTeams, team.id]
                               : formData.selectedTeams.filter(id => id !== team.id),
                           })}
+                          style={{ accentColor: '#2563EB', width: 15, height: 15 }}
                         />
-                        <div style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: team.color, flexShrink: 0 }} />
-                        <span style={{ fontSize: 13, color: T.text }}>
+                        <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: team.color, flexShrink: 0 }} />
+                        <span style={{ fontSize: '0.8125rem', color: '#0F172A' }}>
                           {team.name} {team.category && `(${team.category}${team.level ? ` - ${team.level}` : ''})`}
                         </span>
                       </label>
                     ))}
                   </div>
                   {formData.selectedTeams.length === 0 && (
-                    <p style={{ fontSize: 11, color: '#EF4444', margin: '4px 0 0' }}>Veuillez sélectionner au moins une équipe</p>
+                    <p style={{ fontSize: '0.75rem', color: '#DC2626', marginTop: 4 }}>Veuillez sélectionner au moins une équipe</p>
                   )}
                 </div>
               </div>
 
-              {/* Modal footer */}
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', padding: '14px 22px', borderTop: `1px solid ${T.border}`, backgroundColor: '#F8FAFC' }}>
-                <button
-                  type="button"
-                  onClick={handleCloseModal}
-                  style={{ padding: '8px 16px', borderRadius: 6, fontSize: 13, fontWeight: 600, border: `1px solid ${T.border}`, backgroundColor: T.cardBg, color: T.text, cursor: 'pointer' }}
-                >
+              <div className="fm-modal-footer">
+                <button type="button" className="fm-btn fm-btn-secondary" onClick={handleCloseModal}>
                   Annuler
                 </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  style={{ padding: '8px 18px', borderRadius: 6, fontSize: 13, fontWeight: 700, border: 'none', backgroundColor: T.accent, color: '#fff', cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}
-                >
-                  {isSubmitting ? 'Enregistrement...' : isEditing ? 'Modifier' : 'Ajouter'}
+                <button type="submit" disabled={isSubmitting} className="fm-btn fm-btn-primary">
+                  {isSubmitting ? 'Enregistrement...' : isEditing ? 'Enregistrer' : 'Ajouter le joueur'}
                 </button>
               </div>
             </form>

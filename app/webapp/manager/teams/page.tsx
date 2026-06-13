@@ -409,97 +409,87 @@ export default function TeamsPage() {
 
       {/* Modal d'ajout/modification d'équipe */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-md">
-            <div className="flex justify-between items-center p-6 border-b">
-              <h2 className="text-xl font-semibold">
-                {isEditing ? 'Modifier l\'équipe' : 'Ajouter une équipe'}
-              </h2>
-              <button
-                type="button"
-                onClick={handleCloseModal}
-                className="text-gray-600 hover:text-gray-800"
-              >
-                <X className="h-5 w-5" />
+        <div className="fm-overlay">
+          <div className="fm-modal" style={{ maxWidth: 440 }}>
+            <div className="fm-modal-header">
+              <div className="fm-modal-title">
+                <div className="fm-modal-title-bar" />
+                {isEditing ? "Modifier l'équipe" : 'Ajouter une équipe'}
+              </div>
+              <button type="button" className="fm-modal-close" onClick={handleCloseModal}>
+                <X size={16} />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-800 mb-1">
-                  Nom de l'équipe
-                </label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full rounded-md border-2 border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900 placeholder:text-gray-600"
-                  required
-                />
+            <form id="team-form" onSubmit={handleSubmit}>
+              <div className="fm-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div>
+                  <label className="fm-label">Nom de l&apos;équipe</label>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="fm-input"
+                    placeholder="Ex: Seniors A"
+                    required
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div>
+                    <label className="fm-label">Catégorie</label>
+                    <select
+                      value={formData.category}
+                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                      className="fm-select"
+                      required
+                    >
+                      <option value="">Sélectionner</option>
+                      <option value="Senior">Senior</option>
+                      <option value="U19">U19</option>
+                      <option value="U17">U17</option>
+                      <option value="U15">U15</option>
+                      <option value="U13">U13</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="fm-label">Niveau</label>
+                    <select
+                      value={formData.level}
+                      onChange={(e) => setFormData({ ...formData, level: e.target.value })}
+                      className="fm-select"
+                      required
+                    >
+                      <option value="">Sélectionner</option>
+                      <option value="A">A</option>
+                      <option value="B">B</option>
+                      <option value="C">C</option>
+                      <option value="D">D</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="fm-label">Couleur d&apos;équipe</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <input
+                      type="color"
+                      value={formData.color}
+                      onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                      style={{ width: 44, height: 36, padding: 2, border: '1.5px solid #C8D4E0', borderRadius: 8, cursor: 'pointer', background: 'white' }}
+                    />
+                    <span style={{ fontSize: '0.8125rem', color: '#6B7280', fontFamily: 'monospace' }}>{formData.color}</span>
+                  </div>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-800 mb-1">
-                  Catégorie
-                </label>
-                <select
-                  value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  className="w-full rounded-md border-2 border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900 placeholder:text-gray-600"
-                  required
-                >
-                  <option value="">Sélectionner une catégorie</option>
-                  <option value="Senior">Senior</option>
-                  <option value="U19">U19</option>
-                  <option value="U17">U17</option>
-                  <option value="U15">U15</option>
-                  <option value="U13">U13</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-800 mb-1">
-                  Niveau
-                </label>
-                <select
-                  value={formData.level}
-                  onChange={(e) => setFormData({ ...formData, level: e.target.value })}
-                  className="w-full rounded-md border-2 border-gray-400 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-900 placeholder:text-gray-600"
-                  required
-                >
-                  <option value="">Sélectionner un niveau</option>
-                  <option value="A">A</option>
-                  <option value="B">B</option>
-                  <option value="C">C</option>
-                  <option value="D">D</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-800 mb-1">
-                  Couleur
-                </label>
-                <input
-                  type="color"
-                  value={formData.color}
-                  onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                  className="w-full h-10 rounded-md border-2 border-gray-400 bg-white"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-4">
-                <button
-                  type="button"
-                  onClick={handleCloseModal}
-                  className="px-4 py-2 text-sm font-medium text-gray-800 bg-white border-2 border-gray-400 rounded-md hover:bg-gray-50"
-                >
+              <div className="fm-modal-footer">
+                <button type="button" className="fm-btn fm-btn-secondary" onClick={handleCloseModal}>
                   Annuler
                 </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
-                >
-                  {isEditing ? 'Modifier' : 'Ajouter'}
+                <button type="submit" className="fm-btn fm-btn-primary">
+                  {isEditing ? 'Enregistrer' : 'Ajouter'}
                 </button>
               </div>
             </form>

@@ -118,7 +118,6 @@ function Sidebar({
       {
         group: 'Tracker',
         items: [
-          { name: 'Dashboard', href: '/webapp/tracker/dashboard', icon: BarChart3 },
           { name: 'Enregistrer match', href: '/webapp/tracker/matchrecorder', icon: Video },
         ],
       } as NavGroup,
@@ -369,7 +368,6 @@ function getPageMeta(pathname: string): { section: string; page: string } {
     { match: '/webapp/manager/analytics',      section: 'Manager',  page: 'Analytics' },
     { match: '/webapp/manager/teams',          section: 'Manager',  page: 'Équipes' },
     { match: '/webapp/manager/season-planning',section: 'Manager',  page: 'Planification' },
-    { match: '/webapp/tracker/dashboard',      section: 'Tracker',  page: 'Dashboard' },
     { match: '/webapp/tracker/matchrecorder',  section: 'Tracker',  page: 'Enregistrer un match' },
     { match: '/webapp/tracker/match-report',   section: 'Tracker',  page: 'Rapport de match' },
     { match: '/webapp/player/calendar',        section: 'Joueur',   page: 'Calendrier' },

@@ -16,7 +16,8 @@ import {
   Copy,
   Check,
   X,
-  Link2
+  Link2,
+  AlertCircle,
 } from 'lucide-react';
 import type { ClubMemberRole } from '@/types';
 
@@ -230,70 +231,79 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="p-8 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 64 }}>
+        <div className="animate-spin rounded-full h-10 w-10" style={{ border: '3px solid #E8EDF4', borderTopColor: '#1B2D4F' }} />
       </div>
     );
   }
 
   if (!club) {
     return (
-      <div className="p-8 max-w-2xl mx-auto">
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 text-center">
-          <Building2 className="h-12 w-12 text-amber-600 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-amber-900 mb-2">Aucun club associé</h2>
-          <p className="text-amber-800 mb-6">Créez un club pour commencer à gérer vos équipes et vos membres.</p>
+      <div style={{ padding: '32px 24px', maxWidth: 560, margin: '0 auto' }}>
+        <div style={{ background: '#FEF3C7', border: '1.5px solid #FDE68A', borderRadius: 12, padding: 32, textAlign: 'center' }}>
+          <Building2 style={{ width: 40, height: 40, color: '#D97706', margin: '0 auto 16px' }} />
+          <h2 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#92400E', marginBottom: 8 }}>Aucun club associé</h2>
+          <p style={{ color: '#B45309', fontSize: '0.875rem', marginBottom: 24 }}>Créez un club pour commencer à gérer vos équipes et vos membres.</p>
           <button
             onClick={() => { setShowCreateClub(true); setCreateError(null); }}
-            className="inline-flex items-center px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
+            className="fm-btn fm-btn-primary"
           >
-            <Plus className="h-5 w-5 mr-2" />
+            <Plus size={16} />
             Créer un club
           </button>
         </div>
 
         {showCreateClub && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
-              <h3 className="text-lg font-semibold mb-4">Créer un club</h3>
-              {createError && (
-                <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
-                  {createError}
+          <div className="fm-overlay">
+            <div className="fm-modal" style={{ maxWidth: 460 }}>
+              <div className="fm-modal-header">
+                <div className="fm-modal-title">
+                  <div className="fm-modal-title-bar" />
+                  Créer un club
                 </div>
-              )}
-              <form onSubmit={handleCreateClub} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-800 mb-1">Nom du club</label>
-                  <input
-                    type="text"
-                    value={newClubName}
-                    onChange={(e) => setNewClubName(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-400 rounded-lg text-gray-900 bg-white placeholder:text-gray-600"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-800 mb-1">Description</label>
-                  <textarea
-                    value={newClubDesc}
-                    onChange={(e) => setNewClubDesc(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-400 rounded-lg text-gray-900 bg-white placeholder:text-gray-600"
-                    rows={2}
-                  />
-                </div>
-                <div className="flex gap-2 justify-end">
-                  <button type="button" onClick={() => setShowCreateClub(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">
-                    Annuler
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={creating}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    {creating ? 'Création...' : 'Créer'}
-                  </button>
-                </div>
-              </form>
+                <button className="fm-modal-close" onClick={() => setShowCreateClub(false)}>
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="fm-modal-body">
+                {createError && (
+                  <div className="fm-alert fm-alert-error" style={{ marginBottom: 20 }}>
+                    <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                    {createError}
+                  </div>
+                )}
+                <form id="create-club-form" onSubmit={handleCreateClub} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div>
+                    <label className="fm-label">Nom du club</label>
+                    <input
+                      type="text"
+                      value={newClubName}
+                      onChange={(e) => setNewClubName(e.target.value)}
+                      className="fm-input"
+                      placeholder="Ex: FC Paris Futsal"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="fm-label">Description</label>
+                    <textarea
+                      value={newClubDesc}
+                      onChange={(e) => setNewClubDesc(e.target.value)}
+                      className="fm-textarea"
+                      rows={2}
+                      placeholder="Brève description (optionnel)"
+                    />
+                  </div>
+                </form>
+              </div>
+              <div className="fm-modal-footer">
+                <button type="button" className="fm-btn fm-btn-secondary" onClick={() => setShowCreateClub(false)}>
+                  Annuler
+                </button>
+                <button type="submit" form="create-club-form" disabled={creating} className="fm-btn fm-btn-primary">
+                  {creating ? 'Création...' : 'Créer le club'}
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -302,305 +312,371 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold text-gray-900 mb-8">Paramètres du club</h1>
+    <div style={{ padding: '28px 24px', maxWidth: 760, margin: '0 auto' }}>
+      <div style={{ marginBottom: 28 }}>
+        <h1 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0F172A', letterSpacing: '-0.02em', margin: 0 }}>
+          Paramètres du club
+        </h1>
+      </div>
 
-      {/* Infos club */}
-      <section className="bg-white rounded-xl shadow-sm border p-6 mb-6">
-        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <Building2 className="h-5 w-5" />
-          Mon club
-        </h2>
-        {isAdmin ? (
-          <form onSubmit={handleUpdateClub} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-800 mb-1">Nom</label>
-              <input
-                type="text"
-                value={clubName}
-                onChange={(e) => setClubName(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-400 rounded-lg text-gray-900 bg-white placeholder:text-gray-600"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-800 mb-1">Description</label>
-              <textarea
-                value={clubDescription}
-                onChange={(e) => setClubDescription(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-400 rounded-lg text-gray-900 bg-white placeholder:text-gray-600"
-                rows={2}
-              />
-            </div>
-            <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-              Enregistrer
-            </button>
-          </form>
-        ) : (
-          <div>
-            <p className="font-medium">{club.name}</p>
-            {club.description && <p className="text-gray-600 text-sm mt-1">{club.description}</p>}
-          </div>
-        )}
-      </section>
-
-      {/* Lier mon compte joueur */}
-      <section className="bg-white rounded-xl shadow-sm border p-6 mb-6">
-        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <Link2 className="h-5 w-5" />
-          Lier mon compte joueur
-        </h2>
-        <p className="text-gray-600 text-sm mb-4">
-          Si vous êtes joueur, votre coach peut vous donner un code à saisir ici pour accéder au calendrier (présences) et aux questionnaires.
-        </p>
-        {linkedPlayer ? (
-          <div className="flex items-center gap-2 text-green-700">
-            <Check className="h-5 w-5 flex-shrink-0" />
-            <span>Votre compte est lié au joueur <strong>{linkedPlayer.first_name} {linkedPlayer.last_name}</strong>. Vous avez accès à l&apos;espace Joueur dans le menu.</span>
-          </div>
-        ) : (
-          <form
-            onSubmit={async (e) => {
-              e.preventDefault();
-              setLinkClaimError(null);
-              setLinkClaimSuccess(false);
-              setLinkClaimLoading(true);
-              const result = await claimPlayerLinkCode(linkCodeInput.trim());
-              setLinkClaimLoading(false);
-              if (result.ok) {
-                setLinkClaimSuccess(true);
-                setLinkCodeInput('');
-                setTimeout(() => window.location.reload(), 800);
-              } else {
-                const msg = result.error === 'code_not_found' ? 'Code invalide.' : result.error === 'code_expired' ? 'Ce code a expiré.' : result.error === 'already_linked_other' ? 'Votre compte est déjà lié à un autre joueur.' : result.error || 'Erreur';
-                setLinkClaimError(msg);
-              }
-            }}
-            className="flex flex-wrap items-end gap-3"
-          >
-            <div className="flex-1 min-w-[200px]">
-              <label className="block text-sm font-medium text-gray-800 mb-1">Code reçu de votre coach</label>
-              <input
-                type="text"
-                value={linkCodeInput}
-                onChange={(e) => setLinkCodeInput(e.target.value.toUpperCase())}
-                placeholder="Ex: AB12CD34"
-                className="w-full px-3 py-2 border border-gray-400 rounded-lg text-gray-900 bg-white placeholder:text-gray-500 font-mono tracking-wider"
-                maxLength={12}
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={linkClaimLoading || !linkCodeInput.trim()}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-            >
-              {linkClaimLoading ? 'Vérification...' : 'Lier mon compte'}
-            </button>
-          </form>
-        )}
-        {linkClaimError && <p className="mt-3 text-red-600 text-sm">{linkClaimError}</p>}
-        {linkClaimSuccess && <p className="mt-3 text-green-600 text-sm">Compte lié avec succès. Rechargez la page si le menu Joueur n’apparaît pas.</p>}
-      </section>
-
-      {isAdmin && (
-        <>
-          {/* Inviter un membre */}
-          <section className="bg-white rounded-xl shadow-sm border p-6 mb-6">
-            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-              <UserPlus className="h-5 w-5" />
-              Inviter un membre
-            </h2>
-            <form onSubmit={handleInvite} className="space-y-4">
+      {/* ── Mon club ─────────────────────────────────────────────── */}
+      <div className="fm-card">
+        <div className="fm-card-header">
+          <div className="fm-card-accent" />
+          <div className="fm-card-title"><Building2 size={15} /> Mon club</div>
+        </div>
+        <div className="fm-card-body">
+          {isAdmin ? (
+            <form onSubmit={handleUpdateClub} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
-                <label className="block text-sm font-medium text-gray-800 mb-1">Email</label>
+                <label className="fm-label">Nom du club</label>
                 <input
-                  type="email"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-400 rounded-lg text-gray-900 bg-white placeholder:text-gray-600"
-                  placeholder="email@exemple.com"
-                  required
+                  type="text"
+                  value={clubName}
+                  onChange={(e) => setClubName(e.target.value)}
+                  className="fm-input"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-800 mb-1">Rôle</label>
-                <select
-                  value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as ClubMemberRole)}
-                  className="w-full px-3 py-2 border border-gray-400 rounded-lg text-gray-900 bg-white placeholder:text-gray-600"
-                >
-                  <option value="admin">Administrateur</option>
-                  <option value="coach">Entraîneur</option>
-                  <option value="viewer">Lecteur</option>
-                </select>
+                <label className="fm-label">Description</label>
+                <textarea
+                  value={clubDescription}
+                  onChange={(e) => setClubDescription(e.target.value)}
+                  className="fm-textarea"
+                  rows={2}
+                />
               </div>
-              {(inviteRole === 'coach' || inviteRole === 'viewer') && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-800 mb-1">Équipe (optionnel)</label>
-                  <select
-                    value={inviteTeamId}
-                    onChange={(e) => setInviteTeamId(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-400 rounded-lg text-gray-900 bg-white placeholder:text-gray-600"
-                  >
-                    <option value="">Toutes les équipes</option>
-                    {teams.map((t) => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2">
-                <Mail className="h-4 w-4" />
-                Envoyer l&apos;invitation
+              <div>
+                <button type="submit" className="fm-btn fm-btn-primary">Enregistrer</button>
+              </div>
+            </form>
+          ) : (
+            <div>
+              <p style={{ fontWeight: 700, color: '#0F172A' }}>{club.name}</p>
+              {club.description && <p style={{ color: '#6B7280', fontSize: '0.875rem', marginTop: 4 }}>{club.description}</p>}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Lier compte joueur ───────────────────────────────────── */}
+      <div className="fm-card">
+        <div className="fm-card-header">
+          <div className="fm-card-accent" />
+          <div className="fm-card-title"><Link2 size={15} /> Lier mon compte joueur</div>
+        </div>
+        <div className="fm-card-body">
+          <p style={{ color: '#6B7280', fontSize: '0.8125rem', marginBottom: 16, lineHeight: 1.6 }}>
+            Si vous êtes joueur, votre coach peut vous donner un code à saisir ici pour accéder au calendrier (présences) et aux questionnaires.
+          </p>
+          {linkedPlayer ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 8 }}>
+              <Check size={16} style={{ color: '#16A34A', flexShrink: 0 }} />
+              <span style={{ fontSize: '0.875rem', color: '#166534' }}>
+                Votre compte est lié au joueur <strong>{linkedPlayer.first_name} {linkedPlayer.last_name}</strong>. Vous avez accès à l&apos;espace Joueur dans le menu.
+              </span>
+            </div>
+          ) : (
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setLinkClaimError(null);
+                setLinkClaimSuccess(false);
+                setLinkClaimLoading(true);
+                const result = await claimPlayerLinkCode(linkCodeInput.trim());
+                setLinkClaimLoading(false);
+                if (result.ok) {
+                  setLinkClaimSuccess(true);
+                  setLinkCodeInput('');
+                  setTimeout(() => window.location.reload(), 800);
+                } else {
+                  const msg = result.error === 'code_not_found' ? 'Code invalide.' : result.error === 'code_expired' ? 'Ce code a expiré.' : result.error === 'already_linked_other' ? 'Votre compte est déjà lié à un autre joueur.' : result.error || 'Erreur';
+                  setLinkClaimError(msg);
+                }
+              }}
+              style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 12 }}
+            >
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <label className="fm-label">Code reçu de votre coach</label>
+                <input
+                  type="text"
+                  value={linkCodeInput}
+                  onChange={(e) => setLinkCodeInput(e.target.value.toUpperCase())}
+                  placeholder="Ex: AB12CD34"
+                  className="fm-input"
+                  style={{ fontFamily: 'monospace', letterSpacing: '0.12em' }}
+                  maxLength={12}
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={linkClaimLoading || !linkCodeInput.trim()}
+                className="fm-btn fm-btn-blue"
+              >
+                {linkClaimLoading ? 'Vérification...' : 'Lier mon compte'}
               </button>
             </form>
-            {inviteSent && (
-              <p className="mt-4 text-green-600 text-sm">Invitation envoyée.</p>
-            )}
-          </section>
-
-          {/* Invitations en attente */}
-          {invitations.length > 0 && (
-            <section className="bg-white rounded-xl shadow-sm border p-6 mb-6">
-              <h2 className="text-lg font-semibold mb-4">Invitations en attente</h2>
-              <ul className="space-y-3">
-                {invitations.map((inv) => (
-                  <li key={inv.id} className="flex items-center justify-between py-2 border-b last:border-0">
-                    <div>
-                      <span className="font-medium">{inv.email}</span>
-                      <span className="text-gray-600 text-sm ml-2">— {ROLE_LABELS[inv.role as ClubMemberRole]}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => copyInviteLink(inv.token)}
-                        className="p-2 text-gray-600 hover:bg-gray-100 rounded"
-                        title="Copier le lien"
-                      >
-                        {copiedToken === inv.token ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
-                      </button>
-                      <button onClick={() => cancelInvitation(inv.id)} className="p-2 text-red-500 hover:bg-red-50 rounded">
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
           )}
+          {linkClaimError && <p style={{ marginTop: 12, fontSize: '0.8125rem', color: '#DC2626' }}>{linkClaimError}</p>}
+          {linkClaimSuccess && <p style={{ marginTop: 12, fontSize: '0.8125rem', color: '#16A34A' }}>Compte lié avec succès. Rechargez la page si le menu Joueur n&apos;apparaît pas.</p>}
+        </div>
+      </div>
 
-          {/* Membres */}
-          <section className="bg-white rounded-xl shadow-sm border p-6 mb-6">
-            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-              <Users className="h-5 w-5" />
-              Membres
-            </h2>
-            <ul className="space-y-3">
-              {members.map((m) => (
-                <li key={m.id as string} className="flex items-center justify-between py-2 border-b last:border-0">
+      {isAdmin && (
+        <>
+          {/* ── Inviter un membre ───────────────────────────────── */}
+          <div className="fm-card">
+            <div className="fm-card-header">
+              <div className="fm-card-accent" />
+              <div className="fm-card-title"><UserPlus size={15} /> Inviter un membre</div>
+            </div>
+            <div className="fm-card-body">
+              <form onSubmit={handleInvite} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div>
+                  <label className="fm-label">Email</label>
+                  <input
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    className="fm-input"
+                    placeholder="email@exemple.com"
+                    required
+                  />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                   <div>
-                    <span className="font-medium">{m.email as string || '—'}</span>
-                    <span className="text-gray-600 text-sm ml-2">— {ROLE_LABELS[(m.role as ClubMemberRole) || 'viewer']}</span>
+                    <label className="fm-label">Rôle</label>
+                    <select
+                      value={inviteRole}
+                      onChange={(e) => setInviteRole(e.target.value as ClubMemberRole)}
+                      className="fm-select"
+                    >
+                      <option value="admin">Administrateur</option>
+                      <option value="coach">Entraîneur</option>
+                      <option value="viewer">Lecteur</option>
+                    </select>
                   </div>
-                  {editMemberId === m.id ? (
-                    <div className="flex items-center gap-2">
+                  {(inviteRole === 'coach' || inviteRole === 'viewer') && (
+                    <div>
+                      <label className="fm-label">Équipe (optionnel)</label>
                       <select
-                        value={editMemberRole}
-                        onChange={(e) => setEditMemberRole(e.target.value as ClubMemberRole)}
-                        className="px-2 py-1 border border-gray-400 rounded text-sm text-gray-900 bg-white"
+                        value={inviteTeamId}
+                        onChange={(e) => setInviteTeamId(e.target.value)}
+                        className="fm-select"
                       >
-                        <option value="admin">Administrateur</option>
-                        <option value="coach">Entraîneur</option>
-                        <option value="viewer">Lecteur</option>
-                      </select>
-                      <select
-                        value={editMemberTeamId}
-                        onChange={(e) => setEditMemberTeamId(e.target.value)}
-                        className="px-2 py-1 border border-gray-400 rounded text-sm text-gray-900 bg-white"
-                      >
-                        <option value="">Toutes</option>
+                        <option value="">Toutes les équipes</option>
                         {teams.map((t) => (
                           <option key={t.id} value={t.id}>{t.name}</option>
                         ))}
                       </select>
-                      <button onClick={handleUpdateMember} className="text-blue-600 text-sm">OK</button>
-                      <button onClick={() => setEditMemberId(null)} className="text-gray-600 text-sm">Annuler</button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          setEditMemberId(m.id as string);
-                          setEditMemberRole((m.role as ClubMemberRole) || 'viewer');
-                          setEditMemberTeamId((m.team_id as string) || '');
-                        }}
-                        className="p-2 text-gray-600 hover:bg-gray-100 rounded"
-                      >
-                        <Shield className="h-4 w-4" />
-                      </button>
-                      {members.length > 1 && (
-                        <button
-                          onClick={() => setDeleteConfirm(m.id as string)}
-                          className="p-2 text-red-500 hover:bg-red-50 rounded"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      )}
                     </div>
                   )}
-                </li>
-              ))}
-            </ul>
-          </section>
+                </div>
+                <div>
+                  <button type="submit" className="fm-btn fm-btn-primary">
+                    <Mail size={14} />
+                    Envoyer l&apos;invitation
+                  </button>
+                </div>
+              </form>
+              {inviteSent && (
+                <div className="fm-alert fm-alert-success" style={{ marginTop: 16, marginBottom: 0 }}>
+                  <Check size={15} style={{ flexShrink: 0 }} />
+                  Invitation envoyée avec succès.
+                </div>
+              )}
+            </div>
+          </div>
 
-          {/* Supprimer le club */}
-          <section className="bg-white rounded-xl shadow-sm border border-red-200 p-6">
-            <h2 className="text-lg font-semibold text-red-700 mb-4">Zone dangereuse</h2>
-            <p className="text-gray-600 text-sm mb-4">La suppression du club est définitive. Tapez SUPPRIMER pour confirmer.</p>
-            {deleteConfirm ? (
-              <div className="flex items-center gap-4 flex-wrap">
-                <input
-                  type="text"
-                  value={deleteInput}
-                  onChange={(e) => setDeleteInput(e.target.value)}
-                  placeholder="SUPPRIMER"
-                  className="px-3 py-2 border border-gray-400 rounded-lg text-gray-900 bg-white placeholder:text-gray-600"
-                />
-                <button
-                  onClick={handleDeleteClub}
-                  disabled={deleteInput !== 'SUPPRIMER'}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Confirmer la suppression
-                </button>
-                <button onClick={() => { setDeleteConfirm(null); setDeleteInput(''); }} className="text-gray-600">
-                  Annuler
-                </button>
+          {/* ── Invitations en attente ──────────────────────────── */}
+          {invitations.length > 0 && (
+            <div className="fm-card">
+              <div className="fm-card-header">
+                <div className="fm-card-accent" style={{ background: '#D97706' }} />
+                <div className="fm-card-title">Invitations en attente</div>
               </div>
-            ) : (
-              <button
-                onClick={() => setDeleteConfirm('show')}
-                className="px-4 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50"
-              >
-                Supprimer le club
-              </button>
-            )}
-          </section>
+              <div className="fm-card-body" style={{ padding: 0 }}>
+                <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+                  {invitations.map((inv, i) => (
+                    <li
+                      key={inv.id}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '12px 20px',
+                        borderBottom: i < invitations.length - 1 ? '1px solid #EEF0F5' : 'none',
+                      }}
+                    >
+                      <div>
+                        <span style={{ fontWeight: 600, fontSize: '0.875rem', color: '#0F172A' }}>{inv.email}</span>
+                        <span style={{ fontSize: '0.8125rem', color: '#6B7280', marginLeft: 8 }}>— {ROLE_LABELS[inv.role as ClubMemberRole]}</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button
+                          onClick={() => copyInviteLink(inv.token)}
+                          className="fm-btn fm-btn-ghost fm-btn-sm"
+                          title="Copier le lien"
+                        >
+                          {copiedToken === inv.token ? <Check size={14} style={{ color: '#16A34A' }} /> : <Copy size={14} />}
+                        </button>
+                        <button onClick={() => cancelInvitation(inv.id)} className="fm-btn fm-btn-ghost fm-btn-sm" style={{ color: '#DC2626' }}>
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {/* ── Membres ─────────────────────────────────────────── */}
+          <div className="fm-card">
+            <div className="fm-card-header">
+              <div className="fm-card-accent" />
+              <div className="fm-card-title"><Users size={15} /> Membres</div>
+            </div>
+            <div className="fm-card-body" style={{ padding: 0 }}>
+              <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+                {members.map((m, i) => (
+                  <li
+                    key={m.id as string}
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '12px 20px',
+                      borderBottom: i < members.length - 1 ? '1px solid #EEF0F5' : 'none',
+                    }}
+                  >
+                    <div>
+                      <span style={{ fontWeight: 600, fontSize: '0.875rem', color: '#0F172A' }}>{m.email as string || '—'}</span>
+                      <span style={{ fontSize: '0.8125rem', color: '#6B7280', marginLeft: 8 }}>— {ROLE_LABELS[(m.role as ClubMemberRole) || 'viewer']}</span>
+                    </div>
+                    {editMemberId === m.id ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <select
+                          value={editMemberRole}
+                          onChange={(e) => setEditMemberRole(e.target.value as ClubMemberRole)}
+                          className="fm-select"
+                          style={{ width: 140, padding: '5px 28px 5px 10px', fontSize: '0.8125rem' }}
+                        >
+                          <option value="admin">Administrateur</option>
+                          <option value="coach">Entraîneur</option>
+                          <option value="viewer">Lecteur</option>
+                        </select>
+                        <select
+                          value={editMemberTeamId}
+                          onChange={(e) => setEditMemberTeamId(e.target.value)}
+                          className="fm-select"
+                          style={{ width: 120, padding: '5px 28px 5px 10px', fontSize: '0.8125rem' }}
+                        >
+                          <option value="">Toutes</option>
+                          {teams.map((t) => (
+                            <option key={t.id} value={t.id}>{t.name}</option>
+                          ))}
+                        </select>
+                        <button onClick={handleUpdateMember} className="fm-btn fm-btn-blue fm-btn-sm">OK</button>
+                        <button onClick={() => setEditMemberId(null)} className="fm-btn fm-btn-ghost fm-btn-sm">Annuler</button>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button
+                          onClick={() => {
+                            setEditMemberId(m.id as string);
+                            setEditMemberRole((m.role as ClubMemberRole) || 'viewer');
+                            setEditMemberTeamId((m.team_id as string) || '');
+                          }}
+                          className="fm-btn fm-btn-ghost fm-btn-sm"
+                          title="Modifier le rôle"
+                        >
+                          <Shield size={14} />
+                        </button>
+                        {members.length > 1 && (
+                          <button
+                            onClick={() => setDeleteConfirm(m.id as string)}
+                            className="fm-btn fm-btn-ghost fm-btn-sm"
+                            style={{ color: '#DC2626' }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          {/* ── Zone dangereuse ──────────────────────────────────── */}
+          <div className="fm-card" style={{ borderColor: '#FECACA' }}>
+            <div className="fm-card-header" style={{ background: '#FEF2F2' }}>
+              <div className="fm-card-accent fm-card-accent-red" />
+              <div className="fm-card-title" style={{ color: '#DC2626' }}>Zone dangereuse</div>
+            </div>
+            <div className="fm-card-body">
+              <p style={{ color: '#6B7280', fontSize: '0.8125rem', marginBottom: 16 }}>
+                La suppression du club est définitive et irréversible. Tapez <strong>SUPPRIMER</strong> pour confirmer.
+              </p>
+              {deleteConfirm === 'show' ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <input
+                    type="text"
+                    value={deleteInput}
+                    onChange={(e) => setDeleteInput(e.target.value)}
+                    placeholder="SUPPRIMER"
+                    className="fm-input"
+                    style={{ maxWidth: 200, fontFamily: 'monospace', letterSpacing: '0.08em' }}
+                  />
+                  <button
+                    onClick={handleDeleteClub}
+                    disabled={deleteInput !== 'SUPPRIMER'}
+                    className="fm-btn fm-btn-danger"
+                  >
+                    Confirmer la suppression
+                  </button>
+                  <button onClick={() => { setDeleteConfirm(null); setDeleteInput(''); }} className="fm-btn fm-btn-ghost">
+                    Annuler
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setDeleteConfirm('show')}
+                  className="fm-btn fm-btn-outline-danger"
+                >
+                  Supprimer le club
+                </button>
+              )}
+            </div>
+          </div>
         </>
       )}
 
-      {/* Modal confirmation suppression membre */}
+      {/* ── Modal confirmation suppression membre ───────────────── */}
       {deleteConfirm && deleteConfirm !== 'SUPPRIMER' && deleteConfirm !== 'input' && deleteConfirm !== 'show' && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-6 max-w-sm">
-            <p className="mb-4">Retirer ce membre du club ?</p>
-            {removeError && (
-              <p className="mb-4 text-red-600 text-sm">{removeError}</p>
-            )}
-            <div className="flex gap-2 justify-end">
-              <button type="button" onClick={() => { setDeleteConfirm(null); setRemoveError(null); }} className="px-4 py-2 text-gray-600">
+        <div className="fm-overlay">
+          <div className="fm-modal" style={{ maxWidth: 400 }}>
+            <div className="fm-modal-header">
+              <div className="fm-modal-title">
+                <div className="fm-modal-title-bar" style={{ background: '#DC2626' }} />
+                Retirer ce membre ?
+              </div>
+              <button className="fm-modal-close" onClick={() => { setDeleteConfirm(null); setRemoveError(null); }}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className="fm-modal-body">
+              <p style={{ color: '#374151', fontSize: '0.875rem' }}>Cette action retirera le membre du club. Il perdra l&apos;accès à toutes les données.</p>
+              {removeError && (
+                <div className="fm-alert fm-alert-error" style={{ marginTop: 16, marginBottom: 0 }}>
+                  {removeError}
+                </div>
+              )}
+            </div>
+            <div className="fm-modal-footer">
+              <button type="button" className="fm-btn fm-btn-secondary" onClick={() => { setDeleteConfirm(null); setRemoveError(null); }}>
                 Annuler
               </button>
-              <button type="button" onClick={() => handleRemoveMember(deleteConfirm)} className="px-4 py-2 bg-red-600 text-white rounded-lg">
-                Retirer
+              <button type="button" className="fm-btn fm-btn-danger" onClick={() => handleRemoveMember(deleteConfirm)}>
+                Retirer le membre
               </button>
             </div>
           </div>

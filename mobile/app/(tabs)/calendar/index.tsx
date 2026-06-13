@@ -31,6 +31,7 @@ import { fr } from 'date-fns/locale';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 import { deleteTraining } from '../../../lib/services/trainings';
 import { deleteMatch } from '../../../lib/services/matches';
+import { getAbsenceTrainingIds, markTrainingAbsenceRead } from '../../../lib/services/notifications';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import type { Training, Match } from '../../../types';
 
@@ -127,7 +128,8 @@ export default function CalendarScreen() {
   const [error,           setError]           = useState<string | null>(null);
   const [currentMonth,    setCurrentMonth]    = useState(() => startOfMonth(new Date()));
   const [selectedDay,     setSelectedDay]     = useState<string | null>(null);
-  const [addMenuVisible,  setAddMenuVisible]  = useState(false);
+  const [addMenuVisible,     setAddMenuVisible]     = useState(false);
+  const [absenceTrainingIds, setAbsenceTrainingIds] = useState<Set<string>>(new Set());
 
   const flatListRef = useRef<FlatList>(null);
 
@@ -135,6 +137,7 @@ export default function CalendarScreen() {
   useFocusEffect(
     useCallback(() => {
       refetchCalendar();
+      getAbsenceTrainingIds().then(ids => setAbsenceTrainingIds(new Set(ids)));
     }, [refetchCalendar])
   );
 
@@ -404,9 +407,16 @@ export default function CalendarScreen() {
             >
               <EventCard
                 event={ev}
+                hasAbsenceBadge={ev.type === 'training' && absenceTrainingIds.has(ev.id)}
                 onPress={() => {
-                  if (ev.type === 'training') router.push(`/(tabs)/calendar/training/${ev.id}` as any);
-                  else                        router.push(`/(tabs)/calendar/matchDetail/${ev.id}` as any);
+                  if (ev.type === 'training') {
+                    markTrainingAbsenceRead(ev.id).then(() =>
+                      setAbsenceTrainingIds(prev => { const n = new Set(prev); n.delete(ev.id); return n; })
+                    );
+                    router.push(`/(tabs)/calendar/training/${ev.id}` as any);
+                  } else {
+                    router.push(`/(tabs)/calendar/matchDetail/${ev.id}` as any);
+                  }
                 }}
               />
             </Swipeable>
@@ -459,7 +469,11 @@ export default function CalendarScreen() {
 
 // ─── EventCard ────────────────────────────────────────────────────────────────
 
-function EventCard({ event, onPress }: { event: CalendarEvent; onPress: () => void }) {
+function EventCard({ event, onPress, hasAbsenceBadge = false }: {
+  event: CalendarEvent;
+  onPress: () => void;
+  hasAbsenceBadge?: boolean;
+}) {
   const isPast = toDateKey(event.date) < TODAY_KEY;
 
   if (event.type === 'training') {
@@ -489,6 +503,7 @@ function EventCard({ event, onPress }: { event: CalendarEvent; onPress: () => vo
             </Text>
           ) : null}
         </View>
+        {hasAbsenceBadge && <View style={s.absenceBadge} />}
         <Ionicons name="chevron-forward" size={13} color="#cbd5e1" />
       </TouchableOpacity>
     );
@@ -747,6 +762,11 @@ const s = StyleSheet.create({
   cardTraining: {},
   cardMatch: {},
   cardPast: { opacity: 0.6 },
+  absenceBadge: {
+    width: 8, height: 8, borderRadius: 4,
+    backgroundColor: '#ef4444',
+    marginRight: 2,
+  },
 
   cardAccent: {
     position: 'absolute',

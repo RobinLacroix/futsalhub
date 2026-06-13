@@ -70,11 +70,6 @@ export default function Sidebar({ isExpanded, onToggle }: SidebarProps) {
       name: 'Tracker',
       items: [
         {
-          name: 'Dashboard',
-          href: '/webapp/tracker/dashboard',
-          icon: BarChart3
-        },
-        {
           name: 'Enregistrer match',
           href: '/webapp/tracker/matchrecorder',
           icon: Video
