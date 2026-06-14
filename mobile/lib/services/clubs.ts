@@ -103,6 +103,65 @@ export interface CreateClubInput {
   createFirstTeam?: boolean;
 }
 
+export async function getClubInfo(clubId: string): Promise<{ id: string; name: string; description: string | null }> {
+  const { data, error } = await supabase
+    .from('clubs')
+    .select('id, name, description')
+    .eq('id', clubId)
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateClubInfo(
+  clubId: string,
+  updates: { name?: string; description?: string | null },
+): Promise<void> {
+  const { error } = await supabase
+    .from('clubs')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', clubId);
+  if (error) throw error;
+}
+
+export async function deleteClub(clubId: string): Promise<void> {
+  const { error } = await supabase.from('clubs').delete().eq('id', clubId);
+  if (error) throw error;
+}
+
+export async function removeClubMember(memberId: string): Promise<void> {
+  const { error } = await supabase.from('club_members').delete().eq('id', memberId);
+  if (error) throw error;
+}
+
+export async function createClubInvitation(
+  clubId: string,
+  email: string,
+  role: 'admin' | 'coach' | 'viewer',
+  teamId?: string | null,
+): Promise<string> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Non connecté');
+  const { data, error } = await supabase
+    .from('club_invitations')
+    .insert({ club_id: clubId, email, role, team_id: teamId ?? null, created_by: user.id })
+    .select('token')
+    .single();
+  if (error) throw error;
+  return (data as any).token as string;
+}
+
+export async function acceptClubInvitation(token: string): Promise<string> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Non connecté');
+  const { data, error } = await supabase.rpc('accept_club_invitation', {
+    p_token: token,
+    p_user_id: user.id,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
 export async function createUserClub(input: CreateClubInput): Promise<{ clubId: string; teamId?: string }> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Non connecté');

@@ -2,18 +2,13 @@
 
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import TeamSelector from './TeamSelector';
 import SimpleTeamSelector from './SimpleTeamSelector';
-import { useActiveTeam } from '../hooks/useActiveTeam';
 import {
   Home,
   Calendar,
   Users,
-  BarChart3,
   Video,
-  Search,
   FileText,
-  MessageSquare,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -29,11 +24,6 @@ interface SidebarProps {
 
 export default function Sidebar({ isExpanded, onToggle }: SidebarProps) {
   const pathname = usePathname();
-  const { activeTeamId, changeActiveTeam, teams, loading } = useActiveTeam();
-  
-  console.log('Sidebar: activeTeamId:', activeTeamId);
-  console.log('Sidebar: teams:', teams);
-  console.log('Sidebar: loading:', loading);
 
   const navigation = [
     {
@@ -77,21 +67,6 @@ export default function Sidebar({ isExpanded, onToggle }: SidebarProps) {
       ]
     },
     {
-      name: 'Scout',
-      items: [
-        {
-          name: 'Annonce',
-          href: '/webapp/scout/opening',
-          icon: FileText
-        },
-        {
-          name: 'Recrutement',
-          href: '/webapp/scout/profiles',
-          icon: Search
-        }
-      ]
-    },
-    {
       name: 'Share',
       items: [
         {
@@ -103,11 +78,6 @@ export default function Sidebar({ isExpanded, onToggle }: SidebarProps) {
           name: 'Schémas tactiques',
           href: '/webapp/library/schematics',
           icon: Layout
-        },
-        {
-          name: 'Forum',
-          href: '/webapp/share/forum',
-          icon: MessageSquare
         }
       ]
     },

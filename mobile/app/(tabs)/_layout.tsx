@@ -152,6 +152,20 @@ function TabsLayoutContent() {
           title: 'Équipes du club',
         }}
       />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          href: null,
+          title: 'Paramètres',
+        }}
+      />
+      <Tabs.Screen
+        name="join-club-staff"
+        options={{
+          href: null,
+          title: 'Rejoindre un club',
+        }}
+      />
     </Tabs>
   );
 

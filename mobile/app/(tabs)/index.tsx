@@ -156,10 +156,29 @@ export default function HomeScreen() {
             )}
           </TouchableOpacity>
         ) : hasNoClub ? (
-          <TouchableOpacity style={s.noClubCard} onPress={() => router.push('/(tabs)/create-club')}>
-            <Ionicons name="add-circle" size={20} color="#f59e0b" />
-            <Text style={s.noClubText}>Créer votre club pour commencer</Text>
-          </TouchableOpacity>
+          <View style={s.noClubOptions}>
+            <TouchableOpacity style={s.noClubCard} onPress={() => router.push('/(tabs)/create-club')}>
+              <Ionicons name="add-circle" size={20} color="#f59e0b" />
+              <View style={{ flex: 1 }}>
+                <Text style={s.noClubText}>Créer un club</Text>
+                <Text style={s.noClubSub}>Devenez administrateur</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.joinClubCard} onPress={() => router.push('/(tabs)/join-club-staff' as any)}>
+              <Ionicons name="enter-outline" size={20} color="#a78bfa" />
+              <View style={{ flex: 1 }}>
+                <Text style={s.joinClubText}>Rejoindre un club (staff)</Text>
+                <Text style={s.joinClubSub}>Code d'invitation admin</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.linkPlayerCard} onPress={() => router.push('/join-club' as any)}>
+              <Ionicons name="person-add-outline" size={20} color="#34d399" />
+              <View style={{ flex: 1 }}>
+                <Text style={s.linkPlayerText}>Lier un profil joueur</Text>
+                <Text style={s.linkPlayerSub}>Code fourni par le coach</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
         ) : (
           <TouchableOpacity style={s.noTeamCard} onPress={() => router.push('/(tabs)/teams')}>
             <Ionicons name="add-circle" size={20} color="#60a5fa" />
@@ -325,8 +344,16 @@ const s = StyleSheet.create({
   switchBadge:    { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#fff', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99 },
   switchBadgeText:{ fontSize: 11, fontWeight: '700', color: '#1e3a5f' },
 
+  noClubOptions: { gap: 8 },
   noClubCard:  { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(245,158,11,0.15)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: 'rgba(245,158,11,0.3)' },
   noClubText:  { fontSize: 14, color: '#fbbf24', fontWeight: '600' },
+  noClubSub:   { fontSize: 11, color: 'rgba(251,191,36,0.65)', marginTop: 1 },
+  joinClubCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(167,139,250,0.15)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: 'rgba(167,139,250,0.3)' },
+  joinClubText: { fontSize: 14, color: '#a78bfa', fontWeight: '600' },
+  joinClubSub:  { fontSize: 11, color: 'rgba(167,139,250,0.65)', marginTop: 1 },
+  linkPlayerCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(52,211,153,0.15)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: 'rgba(52,211,153,0.3)' },
+  linkPlayerText: { fontSize: 14, color: '#34d399', fontWeight: '600' },
+  linkPlayerSub:  { fontSize: 11, color: 'rgba(52,211,153,0.65)', marginTop: 1 },
   noTeamCard:  { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(96,165,250,0.15)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: 'rgba(96,165,250,0.3)' },
   noTeamText:  { fontSize: 14, color: '#93c5fd', fontWeight: '600' },
 

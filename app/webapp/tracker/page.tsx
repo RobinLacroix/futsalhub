@@ -169,7 +169,7 @@ export default function TrackerPage() {
 
   // Timer pour mettre à jour les temps de jeu
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: ReturnType<typeof setInterval>;
     
     if (matchData.isRunning) {
       interval = setInterval(() => {

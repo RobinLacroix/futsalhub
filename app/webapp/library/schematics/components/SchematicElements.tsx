@@ -637,11 +637,11 @@ export function SchematicElements({
                     `${-coneWidth * 0.5},${coneHeight * 0.5}`,
                     `${coneWidth * 0.5},${coneHeight * 0.5}`
                   ].join(' ')}
+                  {...commonProps}
                   fill={element.fillColor || element.color}
                   stroke={element.color}
                   strokeWidth={Math.max(1, element.strokeWidth * (scale / 10))}
                   fillOpacity={element.fillOpacity || 1}
-                  {...commonProps}
                 />
               </g>
             );
@@ -658,9 +658,6 @@ export function SchematicElements({
                   y={-ladderWidth * 0.5}
                   width={ladderLength}
                   height={ladderWidth}
-                  fill="none"
-                  stroke={element.color}
-                  strokeDasharray={getStrokeDashArray(element.strokeStyle)}
                   {...commonProps}
                 />
                 {Array.from({ length: 5 }, (_, i) => (

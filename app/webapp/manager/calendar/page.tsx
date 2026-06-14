@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm, Controller, type Resolver } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
 import { Calendar as ReactBigCalendar, momentLocalizer } from 'react-big-calendar';
@@ -322,7 +322,7 @@ export default function CalendarPage() {
   });
 
   const { control: trainingControl, handleSubmit: handleTrainingSubmit, reset: resetTraining, watch: watchTraining, setValue: setTrainingValue, getValues: getTrainingValues, formState: { errors: trainingErrors } } = useForm<TrainingFormData>({
-    resolver: yupResolver(trainingSchema),
+    resolver: yupResolver(trainingSchema) as Resolver<TrainingFormData>,
     defaultValues: {
       date: new Date(),
       location: '',

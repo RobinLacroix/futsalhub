@@ -17,7 +17,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { Trophy, Minus, TrendingDown, Zap, BarChart2, Users, Activity } from 'lucide-react';
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface PlayerFilterState      { position: string; strongFoot: string; status: string; selectedPlayers: string[] }
-interface PerformanceFilterState { matchLocationFilter: string; selectedMatches: string[] }
+interface PerformanceFilterState { matchLocationFilter: 'Domicile' | 'Exterieur' | 'Tous'; selectedMatches: string[] }
 
 interface TeamFeedbackEntry {
   training_id: string;

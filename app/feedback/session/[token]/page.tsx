@@ -24,7 +24,7 @@ const MAX = 10;
 export default function FeedbackSessionPage() {
   const params = useParams();
   const token = params.token as string;
-  const [session, setSession] = useState<Awaited<ReturnType<typeof getFeedbackSessionByToken>>>(undefined);
+  const [session, setSession] = useState<Awaited<ReturnType<typeof getFeedbackSessionByToken>> | null>(null);
   const [loading, setLoading] = useState(true);
   const [values, setValues] = useState({
     auto_evaluation: INITIAL,

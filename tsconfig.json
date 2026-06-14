@@ -36,7 +36,10 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "mobile",
+    "supabase/functions",
+    ".expo"
   ],
   "extends": "expo/tsconfig.base"
 }

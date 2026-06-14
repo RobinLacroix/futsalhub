@@ -269,7 +269,7 @@ export default function PlayerProfilePage() {
         );
         setAllSessions(
           sortedAsc.map(t => ({
-            date: t.date,
+            date: typeof t.date === 'string' ? t.date : (t.date as Date).toISOString(),
             status: ((t.attendance as Record<string, string>)?.[playerId] || 'not_recorded') as TrainingSessionStatus,
           }))
         );

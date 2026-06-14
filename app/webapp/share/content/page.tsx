@@ -148,9 +148,9 @@ export default function ShareContentPage() {
   }, [items, currentFolderId, filter, search]);
 
   const itemCount = useCallback(
-    (folderId: string | null) => {
+    (folderId: string | null): number => {
       const directCount = items.filter(i => (i.folder_id ?? null) === folderId).length;
-      const childCount  = folders
+      const childCount: number = folders
         .filter(f => f.parent_id === folderId)
         .reduce((sum, f) => sum + itemCount(f.id), 0);
       return directCount + childCount;

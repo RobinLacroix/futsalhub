@@ -30,6 +30,7 @@ const NAV_ITEMS: NavItem[] = [
   { name: 'Tracker', path: '/(tabs)/tracker', icon: 'stats-chart-outline' },
   { name: 'Analytics', path: '/(tabs)/analytics', icon: 'pie-chart-outline' },
   { name: 'Partages', path: '/(tabs)/share', icon: 'share-social-outline' },
+  { name: 'Paramètres', path: '/(tabs)/settings', icon: 'settings-outline' },
 ];
 
 function isActive(segments: string[], item: NavItem): boolean {
@@ -42,6 +43,7 @@ function isActive(segments: string[], item: NavItem): boolean {
   if (item.path === '/(tabs)/analytics') return first === 'analytics';
   if (item.path === '/(tabs)/share') return first === 'share';
   if (item.path === '/(tabs)/teams') return first === 'teams';
+  if (item.path === '/(tabs)/settings') return first === 'settings';
   return false;
 }
 

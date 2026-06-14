@@ -9,8 +9,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  SafeAreaView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAppRole } from '../contexts/AppRoleContext';
 import { claimPlayerLinkCode } from '../lib/services/playerConvocations';
 
@@ -43,11 +45,16 @@ export default function JoinClubScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={80}
-    >
+    <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={80}
+      >
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} disabled={submitting}>
+          <Ionicons name="chevron-back" size={22} color="#374151" />
+          <Text style={styles.backText}>Retour</Text>
+        </TouchableOpacity>
       <View style={styles.content}>
         <Text style={styles.title}>Rejoindre le club</Text>
         <Text style={styles.subtitle}>
@@ -83,12 +90,15 @@ export default function JoinClubScreen() {
           Le code est valable 24 h. Si vous êtes aussi coach, vous pourrez basculer vers l'espace coach depuis l'en-tête.
         </Text>
       </View>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f3f4f6' },
+  backBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, gap: 4 },
+  backText: { fontSize: 16, color: '#374151', fontWeight: '500' },
   content: { flex: 1, padding: 24, justifyContent: 'center', maxWidth: 400, alignSelf: 'center', width: '100%' },
   title: { fontSize: 22, fontWeight: '700', color: '#111', textAlign: 'center', marginBottom: 12 },
   subtitle: {

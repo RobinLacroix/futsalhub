@@ -14,7 +14,6 @@ export function ResizeHandles({ element, scale, onHandleMouseDown }: ResizeHandl
     fill: '#3B82F6',
     stroke: '#ffffff',
     strokeWidth: 2,
-    cursor: 'pointer',
   };
 
   const renderHandle = (x: number, y: number, cursor: string, handleType: string) => (
@@ -24,7 +23,7 @@ export function ResizeHandles({ element, scale, onHandleMouseDown }: ResizeHandl
       cy={y * scale}
       r={handleSize / 2}
       {...handleStyle}
-      style={{ ...handleStyle.style, cursor }}
+      style={{ cursor }}
       onMouseDown={(e) => {
         e.stopPropagation();
         onHandleMouseDown(handleType, e);

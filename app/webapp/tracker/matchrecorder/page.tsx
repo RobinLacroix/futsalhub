@@ -218,7 +218,7 @@ export default function MatchRecorderPage() {
   const [activeView, setActiveView] = useState<'recording' | 'summary'>('recording');
   
   // États pour le clic long
-  const [longPressTimers, setLongPressTimers] = useState<{ [key: string]: NodeJS.Timeout }>({});
+  const [longPressTimers, setLongPressTimers] = useState<{ [key: string]: ReturnType<typeof setTimeout> }>({});
   const [longPressTriggered, setLongPressTriggered] = useState<{ [key: string]: boolean }>({});
   // Localisation terrain (coordonnées normalisées 0..1)
   const [selectedLocation, setSelectedLocation] = useState<{ x: number; y: number } | null>(null);
@@ -357,7 +357,7 @@ export default function MatchRecorderPage() {
 
   // Timer pour mettre à jour les temps de jeu et le chronomètre du match
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: ReturnType<typeof setInterval>;
     
     if (matchData.isRunning) {
       interval = setInterval(() => {

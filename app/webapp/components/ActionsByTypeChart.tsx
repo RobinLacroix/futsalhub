@@ -27,17 +27,6 @@ export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) 
     ? events 
     : events.filter(event => selectedMatchIds.includes(event.match_id))
   
-  // Debug: afficher les informations de débogage
-  console.log('ActionsByTypeChart Debug:', {
-    totalEvents: events.length,
-    selectedMatchIds,
-    selectedMatchIdsLength: selectedMatchIds.length,
-    filteredEventsLength: filteredEvents.length,
-    eventsWithTime: events.filter(e => e.match_time_seconds !== null).length,
-    sampleEvent: events[0],
-    useAllEvents: selectedMatchIds.length === 0
-  })
-  
   // Créer les séquences temporelles
   const timeSequences = useMemo(() => {
     if (filteredEvents.length === 0) return []
@@ -91,7 +80,6 @@ export default function ActionsByTypeChart({ events, selectedMatchIds }: Props) 
       }
       })
     
-    console.log('Generated aggregate quartile sequences:', sequences.length)
     return sequences
   }, [filteredEvents])
   

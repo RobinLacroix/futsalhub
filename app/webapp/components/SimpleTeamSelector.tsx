@@ -40,14 +40,6 @@ export default function SimpleTeamSelector() {
     return () => { cancelled = true; };
   }, [player?.id]);
 
-  // Debug: afficher les informations du hook
-  console.log('SimpleTeamSelector - Hook data:', {
-    activeTeam,
-    teamsCount: teams.length,
-    loading,
-    teams: teams
-  });
-
   if (loading) {
     return (
       <div className="w-full p-4 bg-blue-500 border-2 border-blue-700 rounded-lg shadow-lg">
