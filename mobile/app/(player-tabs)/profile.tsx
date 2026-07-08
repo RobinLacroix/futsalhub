@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { useAppRole } from '../../contexts/AppRoleContext';
 import { useActiveTeam } from '../../contexts/ActiveTeamContext';
+import { useActiveSeason } from '../../contexts/ActiveSeasonContext';
 import {
   getPlayerStats,
   getPlayerRadarStats,
@@ -18,6 +19,7 @@ import { PlayerDetailView, type TrainingSession, type PlayerStats } from '../../
 export default function PlayerProfileScreen() {
   const { player } = useAppRole();
   const { teams: allTeams } = useActiveTeam();
+  const { activeSeason } = useActiveSeason();
 
   const [teamId, setTeamId]               = useState<string | null>(null);
   const [stats, setStats]                 = useState<PlayerStats | null>(null);
@@ -42,7 +44,7 @@ export default function PlayerProfileScreen() {
       setInitialEvents((eventsRes.data ?? []) as PlayerEvent[]);
 
       if (tid) {
-        const trainings = await getTrainingsByTeam(tid);
+        const trainings = await getTrainingsByTeam(tid, activeSeason);
         const sorted = [...(trainings ?? [])].sort(
           (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
         );
@@ -58,7 +60,7 @@ export default function PlayerProfileScreen() {
     } finally {
       setLoading(false);
     }
-  }, [player?.id]);
+  }, [player?.id, activeSeason]);
 
   useEffect(() => { loadBaseData(); }, [loadBaseData]);
 

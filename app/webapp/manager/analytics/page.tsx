@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
+import { useActiveSeasonContext } from '../../contexts/ActiveSeasonContext';
 import { supabase } from '@/lib/supabaseClient';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
@@ -788,6 +789,7 @@ function ComboRankingSection({
 
 export default function AnalyticsPage() {
   const { activeTeam, activeTeamId } = useActiveTeam();
+  const { activeSeason } = useActiveSeasonContext();
   const router = useRouter();
 
   const [loading, setLoading]             = useState(true);
@@ -809,11 +811,12 @@ export default function AnalyticsPage() {
     }
     setLoading(true);
     try {
-      // 1. Matches for team
+      // 1. Matches for team (saison active)
       const { data: matchData } = await supabase
         .from('matches')
         .select('id, date, location, competition, score_team, score_opponent, players')
         .eq('team_id', activeTeamId)
+        .eq('season', activeSeason)
         .order('date', { ascending: false });
 
       const mList: MatchRow[] = matchData ?? [];
@@ -849,7 +852,7 @@ export default function AnalyticsPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeTeamId, activeTeam?.id]);
+  }, [activeTeamId, activeTeam?.id, activeSeason]);
 
   useEffect(() => { load(); }, [load]);
 

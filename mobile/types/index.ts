@@ -48,6 +48,7 @@ export interface Training {
   /** Joueurs convoqués pour cette séance (ceux qui voient la séance dans leur calendrier). */
   convoked_players?: { id: string }[];
   team_id?: string;
+  season?: string | null; // Saison de rattachement, ex. "2025-2026"
 }
 
 export type GoalsByTypeRecord = Record<'offensive' | 'transition' | 'cpa' | 'superiority', number>;
@@ -65,6 +66,9 @@ export interface Match {
   team_id?: string;
   goals_by_type?: GoalsByTypeRecord;
   conceded_by_type?: GoalsByTypeRecord;
+  fouls_team?: number;
+  fouls_opponent?: number;
+  season?: string | null; // Saison de rattachement, ex. "2025-2026"
 }
 
 export interface MatchPlayer {
@@ -86,7 +90,8 @@ export type MatchEventType =
   | 'ball_loss'
   | 'opponent_goal'
   | 'opponent_shot'
-  | 'opponent_shot_on_target';
+  | 'opponent_shot_on_target'
+  | 'substitution';
 
 export type GoalType = 'offensive' | 'transition' | 'cpa' | 'superiority';
 

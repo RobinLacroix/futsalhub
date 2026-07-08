@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { usePlayers } from '../../../hooks/usePlayers';
 import { useMatches } from '../../../hooks/useMatches';
 import { useTrainings } from '../../../hooks/useTrainings';
+import { useActiveSeasonContext } from '../../../contexts/ActiveSeasonContext';
 import { playersService } from '@/lib/services';
 import { aggregateByField, calculateAverageByField } from '@/lib/utils/chartUtils';
 import type { Player, PlayerFilterState, PerformanceFilterState, ChartData } from '@/types';
@@ -16,15 +17,16 @@ interface UseDashboardDataOptions {
 }
 
 export function useDashboardData({ teamId, filters, performanceFilters, playerCompetitionFilter = 'all' }: UseDashboardDataOptions) {
+  const { activeSeason } = useActiveSeasonContext();
   const { players: allPlayers, loading: playersLoading } = usePlayers({ teamId, autoFetch: !!teamId });
-  const { matchStats, loading: matchesLoading } = useMatches({ teamId, autoFetch: !!teamId });
-  const { 
-    trainingStats, 
-    attendanceStats, 
+  const { matchStats, loading: matchesLoading } = useMatches({ teamId, season: activeSeason, autoFetch: !!teamId });
+  const {
+    trainingStats,
+    attendanceStats,
     trainings,
     totalCount: totalTrainings,
-    loading: trainingsLoading 
-  } = useTrainings({ teamId, autoFetch: !!teamId });
+    loading: trainingsLoading
+  } = useTrainings({ teamId, season: activeSeason, autoFetch: !!teamId });
 
   const [playersWithStats, setPlayersWithStats] = useState<Player[]>([]);
 

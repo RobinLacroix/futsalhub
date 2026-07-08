@@ -7,6 +7,8 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
+import { useActiveSeason } from '../../../contexts/ActiveSeasonContext';
+import { advanceClubSeason } from '../../../lib/services/clubs';
 import { getPlayersByClubWithTeams } from '../../../lib/services/players';
 import {
   loadSeasonPlanning, saveSeasonPlanning, listSeasons,
@@ -300,9 +302,11 @@ type Tab = 'pool' | string | 'departures';
 export default function SeasonPlanningScreen() {
   const router = useRouter();
   const { teams, activeTeam } = useActiveTeam();
+  const { clubSeason, refresh: refreshSeason } = useActiveSeason();
   const clubId = activeTeam?.club_id ?? '';
 
   const [season, setSeason]       = useState(currentSeason());
+  const [activating, setActivating] = useState(false);
   const [seasons, setSeasons]     = useState<string[]>([]);
   const [allPlayers, setAllPlayers] = useState<Player[]>([]);
   const [planning, setPlanning]   = useState<PlanningData | null>(null);
@@ -412,6 +416,32 @@ export default function SeasonPlanningScreen() {
     } finally {
       setSaving(false);
     }
+  };
+
+  // ── rollover : activer la saison consultée comme saison active du club ──────
+  const handleActivateSeason = () => {
+    if (!clubId) return;
+    Alert.alert(
+      `Passer à la saison ${season} ?`,
+      'Les nouveaux matchs et entraînements seront rattachés à cette saison. Les données des saisons précédentes restent consultables.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Confirmer',
+          onPress: async () => {
+            setActivating(true);
+            try {
+              await advanceClubSeason(clubId, season);
+              await refreshSeason();
+            } catch (e) {
+              Alert.alert('Erreur', e instanceof Error ? e.message : 'Changement de saison impossible');
+            } finally {
+              setActivating(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   // ── apply / revert ─────────────────────────────────────────────────────────
@@ -655,10 +685,27 @@ export default function SeasonPlanningScreen() {
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={styles.topTitle}>Planification de saison</Text>
-          <TouchableOpacity onPress={() => setSeasonModal(true)} style={styles.seasonRow}>
-            <Text style={styles.seasonText}>{season}</Text>
-            <Ionicons name="chevron-down" size={12} color="rgba(255,255,255,0.7)" />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TouchableOpacity onPress={() => setSeasonModal(true)} style={styles.seasonRow}>
+              <Text style={styles.seasonText}>{season}</Text>
+              <Ionicons name="chevron-down" size={12} color="rgba(255,255,255,0.7)" />
+            </TouchableOpacity>
+            {clubSeason === season ? (
+              <View style={styles.seasonActiveBadge}>
+                <Text style={styles.seasonActiveBadgeText}>active</Text>
+              </View>
+            ) : (
+              <TouchableOpacity
+                onPress={handleActivateSeason}
+                disabled={activating}
+                style={[styles.seasonActivateBtn, activating && { opacity: 0.6 }]}
+              >
+                <Text style={styles.seasonActivateBtnText}>
+                  {activating ? '…' : 'Passer à cette saison'}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
         {savedAt && (
           <Text style={styles.savedHint}>{savedAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</Text>
@@ -1342,6 +1389,10 @@ const styles = StyleSheet.create({
   topTitle:       { fontSize: 15, fontWeight: '700', color: '#fff', lineHeight: 20 },
   seasonRow:      { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 1 },
   seasonText:     { fontSize: 12, color: 'rgba(255,255,255,0.65)', fontWeight: '500' },
+  seasonActiveBadge:     { backgroundColor: 'rgba(52,211,153,0.2)', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  seasonActiveBadgeText: { fontSize: 10, color: '#34d399', fontWeight: '700' },
+  seasonActivateBtn:     { backgroundColor: '#3b82f6', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  seasonActivateBtnText: { fontSize: 10, color: '#fff', fontWeight: '700' },
   savedHint:      { fontSize: 11, color: 'rgba(255,255,255,0.45)' },
   saveBtn:        {
     flexDirection: 'row', alignItems: 'center', gap: 4,

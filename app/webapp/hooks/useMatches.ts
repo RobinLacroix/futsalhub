@@ -4,11 +4,12 @@ import type { Match, MatchStats } from '@/types';
 
 interface UseMatchesOptions {
   teamId?: string;
+  season?: string;
   autoFetch?: boolean;
 }
 
 export function useMatches(options: UseMatchesOptions = {}) {
-  const { teamId, autoFetch = true } = options;
+  const { teamId, season, autoFetch = true } = options;
   const [matches, setMatches] = useState<Match[]>([]);
   const [matchStats, setMatchStats] = useState<MatchStats[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,8 +27,8 @@ export function useMatches(options: UseMatchesOptions = {}) {
       setLoading(true);
       setError(null);
       const [matchesData, statsData] = await Promise.all([
-        matchesService.getMatchesByTeam(teamId),
-        matchesService.getMatchStats(teamId)
+        matchesService.getMatchesByTeam(teamId, season),
+        matchesService.getMatchStats(teamId, season)
       ]);
       setMatches(matchesData);
       setMatchStats(statsData);
@@ -45,7 +46,7 @@ export function useMatches(options: UseMatchesOptions = {}) {
     if (autoFetch && teamId) {
       fetchMatches();
     }
-  }, [teamId, autoFetch]);
+  }, [teamId, season, autoFetch]);
 
   return {
     matches,

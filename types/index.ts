@@ -6,6 +6,7 @@ export interface Club {
   name: string;
   description?: string;
   logo_url?: string;
+  current_season?: string | null; // Saison active du club, ex. "2025-2026"
   created_at?: string;
   updated_at?: string;
 }
@@ -116,6 +117,7 @@ export interface Match {
     superiority: number;
   };
   team_id?: string; // Le club est hérité via team_id -> teams.club_id
+  season?: string | null; // Saison de rattachement, ex. "2025-2026"
   created_at?: string;
 }
 
@@ -189,6 +191,7 @@ export interface Training {
   key_principle?: string;
   attendance?: Record<string, PlayerStatus>; // JSONB: { player_id: 'present' | 'absent' | 'injured' }
   team_id?: string; // Le club est hérité via team_id -> teams.club_id
+  season?: string | null; // Saison de rattachement, ex. "2025-2026"
   created_at?: string;
 }
 

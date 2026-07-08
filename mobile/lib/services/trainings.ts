@@ -1,22 +1,29 @@
 import { supabase } from '../supabase';
 import type { Training, PlayerStatus } from '../../types';
 
-export async function getTrainingsByTeam(teamId: string): Promise<Training[]> {
-  const { data, error } = await supabase
+/** @param season si fourni, ne renvoie que les entraînements de cette saison ("YYYY-YYYY"). */
+export async function getTrainingsByTeam(teamId: string, season?: string): Promise<Training[]> {
+  let query = supabase
     .from('trainings')
     .select('*')
-    .eq('team_id', teamId)
-    .order('date', { ascending: false });
+    .eq('team_id', teamId);
+  if (season) query = query.eq('season', season);
+  const { data, error } = await query.order('date', { ascending: false });
   if (error) throw error;
   return data ?? [];
 }
 
-/** Liste légère pour le calendrier (sans attendance, convoked_players). Réduit le payload. */
-export async function getTrainingsForCalendar(teamId: string): Promise<Training[]> {
-  const { data, error } = await supabase
+/**
+ * Liste légère pour le calendrier (sans attendance, convoked_players). Réduit le payload.
+ * @param season si fourni, ne renvoie que les entraînements de cette saison ("YYYY-YYYY").
+ */
+export async function getTrainingsForCalendar(teamId: string, season?: string): Promise<Training[]> {
+  let query = supabase
     .from('trainings')
     .select('id, date, theme, location, team_id')
-    .eq('team_id', teamId)
+    .eq('team_id', teamId);
+  if (season) query = query.eq('season', season);
+  const { data, error } = await query
     .order('date', { ascending: false })
     .limit(200);
   if (error) throw error;

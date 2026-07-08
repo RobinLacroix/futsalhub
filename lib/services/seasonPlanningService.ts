@@ -36,6 +36,19 @@ function isRealPlayer(id: string): boolean {
 }
 
 export const seasonPlanningService = {
+  /**
+   * Avance la saison active du club (rollover). Réservé admin/coach côté DB.
+   * Les nouveaux matchs/entraînements seront alors taggés sur cette saison.
+   */
+  async advanceSeason(clubId: string, newSeason: string): Promise<string> {
+    const { data, error } = await supabase.rpc('advance_club_season', {
+      p_club_id: clubId,
+      p_new_season: newSeason,
+    });
+    if (error) throw error;
+    return data as string;
+  },
+
   async load(clubId: string, season: string): Promise<PlanningData | null> {
     const { data, error } = await supabase
       .from('season_planning')

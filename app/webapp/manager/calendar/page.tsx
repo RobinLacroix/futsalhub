@@ -32,6 +32,7 @@ async function notifyPlayers(
   }
 }
 import { useActiveTeam } from '../../hooks/useActiveTeam';
+import { useActiveSeasonContext } from '../../contexts/ActiveSeasonContext';
 import { useUserClub } from '../../hooks/useUserClub';
 import { playersService } from '@/lib/services/playersService';
 import { schematicsService, type SchematicData } from '@/lib/services/schematicsService';
@@ -255,6 +256,7 @@ const DragAndDropCalendar = withDragAndDrop<RBCalendarEvent>(ReactBigCalendar);
 export default function CalendarPage() {
   const router = useRouter();
   const { activeTeam, teams } = useActiveTeam();
+  const { activeSeason } = useActiveSeasonContext();
   const { club } = useUserClub();
   const [matches, setMatches] = useState<Match[]>([]);
   const [trainings, setTrainings] = useState<Training[]>([]);
@@ -469,7 +471,7 @@ export default function CalendarPage() {
       fetchTrainingStats();
       fetchMatchStats();
     }
-  }, [activeTeam]);
+  }, [activeTeam, activeSeason]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -490,11 +492,12 @@ export default function CalendarPage() {
       }
 
       console.log('🏆 Calendar - Chargement des matchs pour l\'équipe:', activeTeam.name);
-      
+
       const { data, error } = await supabase
         .from('matches')
         .select('*')
         .eq('team_id', activeTeam.id)
+        .eq('season', activeSeason)
         .order('date', { ascending: true });
 
       if (error) throw error;
@@ -523,11 +526,12 @@ export default function CalendarPage() {
       }
 
       console.log('🏆 Calendar - Chargement des entraînements pour l\'équipe:', activeTeam.name);
-      
+
       const { data, error } = await supabase
         .from('trainings')
         .select('*')
         .eq('team_id', activeTeam.id)
+        .eq('season', activeSeason)
         .order('date', { ascending: true });
 
       if (error) throw error;
@@ -616,11 +620,12 @@ export default function CalendarPage() {
       }
 
       console.log('🏆 Calendar - Chargement des stats d\'entraînement pour l\'équipe:', activeTeam.name);
-      
+
       const { data, error } = await supabase
         .from('trainings')
         .select('*')
         .eq('team_id', activeTeam.id)
+        .eq('season', activeSeason)
         .order('date', { ascending: true });
 
       if (error) throw error;
@@ -656,11 +661,12 @@ export default function CalendarPage() {
       }
 
       console.log('🏆 Calendar - Chargement des stats de match pour l\'équipe:', activeTeam.name);
-      
+
       const { data, error } = await supabase
         .from('matches')
         .select('*')
         .eq('team_id', activeTeam.id)
+        .eq('season', activeSeason)
         .order('date', { ascending: true });
 
       if (error) throw error;

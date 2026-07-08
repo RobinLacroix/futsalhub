@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useActiveTeam } from '../contexts/ActiveTeamContext';
+import { useActiveSeason } from '../contexts/ActiveSeasonContext';
 import { getMatchesByTeam } from '../lib/services/matches';
 import { getEventsByMatchId } from '../lib/services/matchEvents';
 import { getPlayersByTeam, getPlayersByClubWithTeams } from '../lib/services/players';
@@ -306,6 +307,7 @@ const COLS = [
 
 export function AnalyticsView() {
   const { activeTeamId, activeTeam } = useActiveTeam();
+  const { activeSeason } = useActiveSeason();
   const isTablet = useIsTablet();
 
   const [loading,       setLoading]       = useState(true);
@@ -330,7 +332,7 @@ export function AnalyticsView() {
     }
     try {
       const [matchData, , clubData] = await Promise.all([
-        getMatchesByTeam(activeTeamId),
+        getMatchesByTeam(activeTeamId, activeSeason),
         getPlayersByTeam(activeTeamId),
         getPlayersByClubWithTeams(activeTeam.club_id),
       ]);
@@ -342,7 +344,7 @@ export function AnalyticsView() {
       setEventsByMatch(evMap);
     } catch { /* silent */ }
     finally { setLoading(false); setRefreshing(false); }
-  }, [activeTeamId, activeTeam?.club_id]);
+  }, [activeTeamId, activeTeam?.club_id, activeSeason]);
 
   useEffect(() => { setLoading(true); load(); }, [load]);
 

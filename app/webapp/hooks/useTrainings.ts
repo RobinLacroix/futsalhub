@@ -4,11 +4,12 @@ import type { Training, TrainingStats, PlayerAttendanceStats } from '@/types';
 
 interface UseTrainingsOptions {
   teamId?: string;
+  season?: string;
   autoFetch?: boolean;
 }
 
 export function useTrainings(options: UseTrainingsOptions = {}) {
-  const { teamId, autoFetch = true } = options;
+  const { teamId, season, autoFetch = true } = options;
   const [trainings, setTrainings] = useState<Training[]>([]);
   const [trainingStats, setTrainingStats] = useState<TrainingStats[]>([]);
   const [attendanceStats, setAttendanceStats] = useState<PlayerAttendanceStats[]>([]);
@@ -30,9 +31,9 @@ export function useTrainings(options: UseTrainingsOptions = {}) {
       setLoading(true);
       setError(null);
       const [trainingsData, statsData, count] = await Promise.all([
-        trainingsService.getTrainingsByTeam(teamId),
-        trainingsService.getTrainingStats(teamId),
-        trainingsService.getTotalTrainingsCount(teamId)
+        trainingsService.getTrainingsByTeam(teamId, season),
+        trainingsService.getTrainingStats(teamId, season),
+        trainingsService.getTotalTrainingsCount(teamId, season)
       ]);
       
       setTrainings(trainingsData);
@@ -58,7 +59,7 @@ export function useTrainings(options: UseTrainingsOptions = {}) {
     if (autoFetch && teamId) {
       fetchTrainings();
     }
-  }, [teamId, autoFetch]);
+  }, [teamId, season, autoFetch]);
 
   return {
     trainings,

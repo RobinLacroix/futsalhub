@@ -4,14 +4,18 @@ import { format } from 'date-fns';
 
 export const matchesService = {
   /**
-   * Récupère tous les matchs d'une équipe
+   * Récupère les matchs d'une équipe.
+   * @param season si fourni, ne renvoie que les matchs de cette saison ("YYYY-YYYY").
    */
-  async getMatchesByTeam(teamId: string): Promise<Match[]> {
-    const { data, error } = await supabase
+  async getMatchesByTeam(teamId: string, season?: string): Promise<Match[]> {
+    let query = supabase
       .from('matches')
       .select('*')
-      .eq('team_id', teamId)
-      .order('date', { ascending: true });
+      .eq('team_id', teamId);
+
+    if (season) query = query.eq('season', season);
+
+    const { data, error } = await query.order('date', { ascending: true });
 
     if (error) throw error;
     return data || [];
@@ -121,8 +125,8 @@ export const matchesService = {
   /**
    * Récupère les statistiques de matchs formatées
    */
-  async getMatchStats(teamId: string): Promise<MatchStats[]> {
-    const matches = await this.getMatchesByTeam(teamId);
+  async getMatchStats(teamId: string, season?: string): Promise<MatchStats[]> {
+    const matches = await this.getMatchesByTeam(teamId, season);
 
     return matches.map(match => {
       const title = match.title || '';

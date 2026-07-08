@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { ActiveTeamProvider } from './contexts/ActiveTeamContext';
+import { ActiveSeasonProvider, useActiveSeasonContext } from './contexts/ActiveSeasonContext';
 import { usePlayerProfile } from './hooks/usePlayerProfile';
 import { useActiveTeam } from './hooks/useActiveTeam';
 import {
@@ -318,11 +319,72 @@ function LogoutButton({ show, onLogout }: { show: boolean; onLogout: () => void 
   );
 }
 
+// ─── Season selector ──────────────────────────────────────────────────────────
+function SeasonSelector() {
+  const { activeSeason, clubSeason, availableSeasons, changeActiveSeason } = useActiveSeasonContext();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const isPast = activeSeason !== clubSeason;
+
+  return (
+    <div ref={ref} className="relative ml-4">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full"
+        style={{
+          backgroundColor: isPast ? '#FFF4E0' : '#F0F4FF',
+          border: `1px solid ${isPast ? '#F0C77A' : '#CBD5F0'}`,
+        }}
+        title={isPast ? 'Vous consultez une saison passée' : 'Saison active'}
+      >
+        <Calendar size={11} style={{ color: isPast ? FM.accentAmber : FM.accent, flexShrink: 0 }} />
+        <span style={{ fontSize: '0.7rem', fontWeight: 600, color: FM.text }}>{activeSeason}</span>
+        {availableSeasons.length > 1 && (
+          <ChevronDown size={10} style={{ color: FM.textMuted, flexShrink: 0 }} />
+        )}
+      </button>
+
+      {open && availableSeasons.length > 1 && (
+        <div
+          className="absolute right-0 top-full mt-1 z-50 rounded-md overflow-hidden shadow-xl min-w-[8rem]"
+          style={{ backgroundColor: '#FFFFFF', border: `1px solid ${FM.border}` }}
+        >
+          {availableSeasons.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => { changeActiveSeason(s); setOpen(false); }}
+              className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left"
+              style={{ backgroundColor: s === activeSeason ? '#F0F4FF' : 'transparent' }}
+            >
+              <span style={{ fontSize: '0.72rem', fontWeight: s === activeSeason ? 700 : 500, color: FM.text }}>{s}</span>
+              {s === clubSeason && (
+                <span style={{ fontSize: '0.55rem', fontWeight: 700, color: FM.accent, letterSpacing: '0.05em' }}>ACTIVE</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Top page header (breadcrumb) ─────────────────────────────────────────────
 function PageHeader({ sidebarWidth }: { sidebarWidth: string }) {
   const pathname = usePathname();
   const { activeTeam } = useActiveTeam();
   const { section, page } = getPageMeta(pathname);
+  const showSeason = pathname.startsWith('/webapp/manager') || pathname.startsWith('/webapp/tracker');
 
   return (
     <div
@@ -356,6 +418,9 @@ function PageHeader({ sidebarWidth }: { sidebarWidth: string }) {
           <span style={{ fontSize: '0.65rem', color: FM.textMuted }}>{activeTeam.category}</span>
         </div>
       )}
+
+      {/* Season selector */}
+      {showSeason && <SeasonSelector />}
     </div>
   );
 }
@@ -411,6 +476,7 @@ export default function WebAppLayout({ children }: { children: React.ReactNode }
 
   return (
     <ActiveTeamProvider>
+      <ActiveSeasonProvider>
       <div className="fm-light min-h-screen min-h-[100dvh]" style={{ backgroundColor: FM.pageBg, color: FM.text }}>
 
         <Sidebar
@@ -490,6 +556,7 @@ export default function WebAppLayout({ children }: { children: React.ReactNode }
           </div>
         </main>
       </div>
+      </ActiveSeasonProvider>
     </ActiveTeamProvider>
   );
 }

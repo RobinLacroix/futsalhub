@@ -7,6 +7,7 @@ import { View, ActivityIndicator, Text, StyleSheet, ScrollView, AppState } from 
 import * as Network from 'expo-network';
 import * as Notifications from 'expo-notifications';
 import { ActiveTeamProvider } from '../contexts/ActiveTeamContext';
+import { ActiveSeasonProvider } from '../contexts/ActiveSeasonContext';
 import { AppRoleProvider } from '../contexts/AppRoleContext';
 import { MatchRecorderExitGuardProvider } from '../contexts/MatchRecorderExitGuardContext';
 import { NotificationProvider } from '../contexts/NotificationContext';
@@ -121,6 +122,7 @@ export default function RootLayout() {
             <MatchRecorderOutboxSync />
             <AppRoleProvider>
               <ActiveTeamProvider>
+                <ActiveSeasonProvider>
                 <NotificationProvider>
                   <NotificationDeepLinkHandler />
                   <Stack screenOptions={{ headerShown: false }}>
@@ -134,6 +136,7 @@ export default function RootLayout() {
                     <Stack.Screen name="(player-tabs)" />
                   </Stack>
                 </NotificationProvider>
+                </ActiveSeasonProvider>
               </ActiveTeamProvider>
             </AppRoleProvider>
           </SafeAreaProvider>

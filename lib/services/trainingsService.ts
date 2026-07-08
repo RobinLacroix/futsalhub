@@ -4,14 +4,18 @@ import { format } from 'date-fns';
 
 export const trainingsService = {
   /**
-   * Récupère tous les entraînements d'une équipe
+   * Récupère les entraînements d'une équipe.
+   * @param season si fourni, ne renvoie que les entraînements de cette saison ("YYYY-YYYY").
    */
-  async getTrainingsByTeam(teamId: string): Promise<Training[]> {
-    const { data, error } = await supabase
+  async getTrainingsByTeam(teamId: string, season?: string): Promise<Training[]> {
+    let query = supabase
       .from('trainings')
       .select('*')
-      .eq('team_id', teamId)
-      .order('date', { ascending: true });
+      .eq('team_id', teamId);
+
+    if (season) query = query.eq('season', season);
+
+    const { data, error } = await query.order('date', { ascending: true });
 
     if (error) throw error;
     return data || [];
@@ -109,11 +113,15 @@ export const trainingsService = {
   /**
    * Récupère le nombre total d'entraînements d'une équipe
    */
-  async getTotalTrainingsCount(teamId: string): Promise<number> {
-    const { count, error } = await supabase
+  async getTotalTrainingsCount(teamId: string, season?: string): Promise<number> {
+    let query = supabase
       .from('trainings')
       .select('*', { count: 'exact', head: true })
       .eq('team_id', teamId);
+
+    if (season) query = query.eq('season', season);
+
+    const { count, error } = await query;
 
     if (error) throw error;
     return count || 0;
@@ -122,8 +130,8 @@ export const trainingsService = {
   /**
    * Récupère les statistiques d'entraînement formatées
    */
-  async getTrainingStats(teamId: string): Promise<TrainingStats[]> {
-    const trainings = await this.getTrainingsByTeam(teamId);
+  async getTrainingStats(teamId: string, season?: string): Promise<TrainingStats[]> {
+    const trainings = await this.getTrainingsByTeam(teamId, season);
 
     return trainings.map(training => {
       const attendance = training.attendance || {};

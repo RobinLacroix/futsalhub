@@ -210,7 +210,7 @@ function DropZone({ zoneId, isOver, onDragOver, onDragLeave, onDrop, children, c
 // ── main page ─────────────────────────────────────────────────────────────────
 
 export default function SeasonPlanningPage() {
-  const { club } = useUserClub();
+  const { club, refetch: refetchClub } = useUserClub();
   const { teams } = useActiveTeam();
 
   const [season, setSeason] = useState(currentSeason());
@@ -223,6 +223,7 @@ export default function SeasonPlanningPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [activating, setActivating] = useState(false);
 
   // DnD state
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -339,6 +340,27 @@ export default function SeasonPlanningPage() {
       console.error('Season planning save error:', err);
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ── rollover : activer la saison consultée comme saison active du club ──────
+  const handleActivateSeason = async () => {
+    if (!club?.id) return;
+    const ok = window.confirm(
+      `Passer le club à la saison ${season} ?\n\n` +
+      `Les nouveaux matchs et entraînements seront désormais rattachés à cette saison. ` +
+      `Les données des saisons précédentes restent consultables via le sélecteur de saison.`
+    );
+    if (!ok) return;
+    setActivating(true);
+    try {
+      await seasonPlanningService.advanceSeason(club.id, season);
+      await refetchClub();
+    } catch (err) {
+      console.error('Activate season error:', err);
+      window.alert(err instanceof Error ? err.message : 'Erreur lors du changement de saison active');
+    } finally {
+      setActivating(false);
     }
   };
 
@@ -766,6 +788,21 @@ export default function SeasonPlanningPage() {
             >
               +1 an
             </button>
+            {/* Active season indicator / rollover */}
+            {club?.current_season === season ? (
+              <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded px-2 py-1">
+                Saison active
+              </span>
+            ) : (
+              <button
+                onClick={handleActivateSeason}
+                disabled={activating}
+                className="text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 rounded px-2.5 py-1"
+                title="Passer le club à cette saison"
+              >
+                {activating ? 'Activation…' : 'Passer à cette saison'}
+              </button>
+            )}
           </div>
 
           <div className="flex flex-col items-end gap-2">

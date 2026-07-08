@@ -8,22 +8,29 @@ import type { UpdateMatchInput } from './matchUpdateTypes';
 
 export type { GoalsByType, UpdateMatchInput } from './matchUpdateTypes';
 
-export async function getMatchesByTeam(teamId: string): Promise<Match[]> {
-  const { data, error } = await supabase
+/** @param season si fourni, ne renvoie que les matchs de cette saison ("YYYY-YYYY"). */
+export async function getMatchesByTeam(teamId: string, season?: string): Promise<Match[]> {
+  let query = supabase
     .from('matches')
     .select('*')
-    .eq('team_id', teamId)
-    .order('date', { ascending: false });
+    .eq('team_id', teamId);
+  if (season) query = query.eq('season', season);
+  const { data, error } = await query.order('date', { ascending: false });
   if (error) throw error;
   return data ?? [];
 }
 
-/** Liste légère pour le calendrier (sans players JSONB). Réduit fortement le payload. */
-export async function getMatchesForCalendar(teamId: string): Promise<Match[]> {
-  const { data, error } = await supabase
+/**
+ * Liste légère pour le calendrier (sans players JSONB). Réduit fortement le payload.
+ * @param season si fourni, ne renvoie que les matchs de cette saison ("YYYY-YYYY").
+ */
+export async function getMatchesForCalendar(teamId: string, season?: string): Promise<Match[]> {
+  let query = supabase
     .from('matches')
     .select('id, date, title, location, competition, score_team, score_opponent, team_id')
-    .eq('team_id', teamId)
+    .eq('team_id', teamId);
+  if (season) query = query.eq('season', season);
+  const { data, error } = await query
     .order('date', { ascending: false })
     .limit(200);
   if (error) throw error;

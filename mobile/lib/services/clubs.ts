@@ -6,6 +6,30 @@ export async function isClubAdmin(clubId: string): Promise<boolean> {
   return !!data;
 }
 
+/** Saison active du club ("YYYY-YYYY"), ou null si non définie. */
+export async function getCurrentSeason(clubId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('clubs')
+    .select('current_season')
+    .eq('id', clubId)
+    .single();
+  if (error) throw error;
+  return (data?.current_season as string) ?? null;
+}
+
+/**
+ * Avance la saison active du club (rollover). Réservé admin/coach côté DB.
+ * Les nouveaux matchs/entraînements seront alors taggés sur cette saison.
+ */
+export async function advanceClubSeason(clubId: string, newSeason: string): Promise<string> {
+  const { data, error } = await supabase.rpc('advance_club_season', {
+    p_club_id: clubId,
+    p_new_season: newSeason,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
 export interface ClubMemberWithUser {
   id: string;
   user_id: string;

@@ -15,6 +15,7 @@ import {
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
+import { useActiveSeason } from '../../../contexts/ActiveSeasonContext';
 import {
   getPlayerById,
   getPlayerStats,
@@ -36,6 +37,7 @@ export default function PlayerDetailScreen() {
   const { playerId } = useLocalSearchParams<{ playerId: string }>();
   const router = useRouter();
   const { activeTeamId, teams: allTeams } = useActiveTeam();
+  const { activeSeason } = useActiveSeason();
 
   const [player, setPlayer]           = useState<Player | null>(null);
   const [playerTeams, setPlayerTeams] = useState<Team[]>([]);
@@ -77,7 +79,7 @@ export default function PlayerDetailScreen() {
       setInitialEvents((eventsRes.data ?? []) as PlayerEvent[]);
       if (!playerData) { setError('Joueur introuvable'); return; }
       if (activeTeamId) {
-        const trainings = await getTrainingsByTeam(activeTeamId);
+        const trainings = await getTrainingsByTeam(activeTeamId, activeSeason);
         const sorted = [...(trainings ?? [])].sort(
           (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
         );
@@ -93,7 +95,7 @@ export default function PlayerDetailScreen() {
     } finally {
       setLoading(false);
     }
-  }, [playerId, activeTeamId]);
+  }, [playerId, activeTeamId, activeSeason]);
 
   useEffect(() => { setLoading(true); loadAll(); }, [loadAll]);
 

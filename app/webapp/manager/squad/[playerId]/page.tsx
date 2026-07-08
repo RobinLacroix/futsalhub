@@ -28,6 +28,7 @@ import {
   BarChart2,
 } from 'lucide-react';
 import { useActiveTeam } from '../../../hooks/useActiveTeam';
+import { useActiveSeasonContext } from '../../../contexts/ActiveSeasonContext';
 import { useUserClub } from '../../../hooks/useUserClub';
 import { playersService } from '@/lib/services/playersService';
 import type { PlayerRadarResult, RadarPerMatchStats } from '@/lib/services/playersService';
@@ -183,6 +184,7 @@ const GK_STAT_DEFS: StatDef[] = [
 export default function PlayerProfilePage() {
   const params = useParams();
   const { activeTeam } = useActiveTeam();
+  const { activeSeason } = useActiveSeasonContext();
   const { club } = useUserClub();
   const playerId = params.playerId as string;
 
@@ -257,7 +259,7 @@ export default function PlayerProfilePage() {
         setPlayer(playerData);
 
         const [trainingsData, eventsData] = await Promise.all([
-          trainingsService.getTrainingsByTeam(activeTeam.id),
+          trainingsService.getTrainingsByTeam(activeTeam.id, activeSeason),
           playerEventsService.getByPlayerId(playerId)
         ]);
 
@@ -289,7 +291,7 @@ export default function PlayerProfilePage() {
     };
 
     loadData();
-  }, [playerId, activeTeam]);
+  }, [playerId, activeTeam, activeSeason]);
 
   // ── Reload match stats when filter changes ───────────────────────────────
   useEffect(() => {

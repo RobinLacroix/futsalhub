@@ -11,6 +11,7 @@ import {
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useActiveTeam } from '../contexts/ActiveTeamContext';
+import { useActiveSeason } from '../contexts/ActiveSeasonContext';
 import { getMatchesByTeam } from '../lib/services/matches';
 import { getEventsByMatchId } from '../lib/services/matchEvents';
 import { getPlayersByTeam, getPlayersByClubWithTeams } from '../lib/services/players';
@@ -107,6 +108,7 @@ export type TrackerAnalyticsViewProps = {
 export function TrackerAnalyticsView({ title, showRecordButton = true, showMatchList = true }: TrackerAnalyticsViewProps) {
   const router = useRouter();
   const { activeTeamId, activeTeam } = useActiveTeam();
+  const { activeSeason } = useActiveSeason();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [matches, setMatches] = useState<Match[]>([]);
@@ -146,7 +148,7 @@ export function TrackerAnalyticsView({ title, showRecordButton = true, showMatch
     }
     try {
       const [matchesData, playersData, clubData] = await Promise.all([
-        getMatchesByTeam(activeTeamId),
+        getMatchesByTeam(activeTeamId, activeSeason),
         getPlayersByTeam(activeTeamId),
         getPlayersByClubWithTeams(activeTeam.club_id),
       ]);
@@ -173,7 +175,7 @@ export function TrackerAnalyticsView({ title, showRecordButton = true, showMatch
       setLoading(false);
       setRefreshing(false);
     }
-  }, [activeTeamId, activeTeam?.club_id]);
+  }, [activeTeamId, activeTeam?.club_id, activeSeason]);
 
   useEffect(() => {
     setLoading(true);
