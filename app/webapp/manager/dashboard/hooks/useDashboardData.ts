@@ -41,7 +41,7 @@ export function useDashboardData({ teamId, filters, performanceFilters, playerCo
       const playersWithCalculatedStats = await Promise.all(
         allPlayers.map(async (player) => {
           try {
-            const stats = await playersService.getPlayerStats(player.id, teamId, playerCompetitionFilter);
+            const stats = await playersService.getPlayerStats(player.id, teamId, playerCompetitionFilter, activeSeason);
             return { ...player, ...stats };
           } catch (error) {
             console.error(`Erreur lors du calcul des stats pour le joueur ${player.id}:`, error);
@@ -53,7 +53,7 @@ export function useDashboardData({ teamId, filters, performanceFilters, playerCo
     };
 
     calculateStats();
-  }, [allPlayers, teamId, totalTrainings, playerCompetitionFilter]);
+  }, [allPlayers, teamId, totalTrainings, playerCompetitionFilter, activeSeason]);
 
   // Filtrer les joueurs
   const filteredPlayers = useMemo(() => {
