@@ -355,7 +355,9 @@ export default function SquadPage() {
         .order('players(last_name)');
 
       if (error) throw error;
-      const playersData = (data?.map((item: any) => item.players).filter(Boolean) || []) as any[];
+      // Exclure les joueurs partis (statut 'left') de l'effectif affiché.
+      const playersData = (data?.map((item: any) => item.players).filter(Boolean) || [])
+        .filter((p: any) => p.status !== 'left') as any[];
 
       const statsById = await playersService.getSquadBasicStats(
         activeTeam.id,

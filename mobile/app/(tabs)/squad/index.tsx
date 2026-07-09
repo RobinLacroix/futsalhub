@@ -92,7 +92,9 @@ export default function SquadScreen() {
     if (!activeTeamId) { setPlayers([]); setLoading(false); return; }
     try {
       setError(null);
-      setPlayers(await getPlayersByTeam(activeTeamId));
+      // Exclure les joueurs partis (statut 'left') de l'effectif affiché.
+      const roster = await getPlayersByTeam(activeTeamId);
+      setPlayers(roster.filter((p) => p.status !== 'left'));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur chargement');
       setPlayers([]);
