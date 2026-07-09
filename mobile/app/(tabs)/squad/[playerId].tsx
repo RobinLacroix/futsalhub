@@ -283,9 +283,14 @@ export default function PlayerDetailScreen() {
                 </View>
                 <Text style={styles.editLabel}>Statut</Text>
                 <View style={styles.editChipRow}>
-                  {['Actif', 'Blessé', 'Suspendu'].map(s => (
-                    <TouchableOpacity key={s} style={[styles.editChip, editForm.status === s && styles.editChipActive]} onPress={() => setEditForm(f => ({ ...f, status: s }))} activeOpacity={0.7}>
-                      <Text style={[styles.editChipText, editForm.status === s && styles.editChipTextActive]}>{s}</Text>
+                  {[
+                    { value: 'Actif', label: 'Actif' },
+                    { value: 'Blessé', label: 'Blessé' },
+                    { value: 'Suspendu', label: 'Suspendu' },
+                    { value: 'left', label: 'Parti' },
+                  ].map(({ value, label }) => (
+                    <TouchableOpacity key={value} style={[styles.editChip, editForm.status === value && styles.editChipActive]} onPress={() => setEditForm(f => ({ ...f, status: value }))} activeOpacity={0.7}>
+                      <Text style={[styles.editChipText, editForm.status === value && styles.editChipTextActive]}>{label}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>

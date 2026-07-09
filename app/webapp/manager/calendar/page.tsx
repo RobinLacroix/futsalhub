@@ -60,6 +60,7 @@ interface Player {
   id: string;
   first_name: string;
   last_name: string;
+  status?: string;
   stats?: {
     matches_played: number;
     goals: number;
@@ -398,7 +399,8 @@ export default function CalendarPage() {
   const otherTeamPlayersForForm = useMemo(() => {
     if (!activeTeam) return [];
     const squadIds = new Set(players.map((p) => p.id));
-    return clubPlayersWithTeams.filter(({ player }) => !squadIds.has(player.id));
+    // Exclure les joueurs partis (statut 'left') des convocations exceptionnelles.
+    return clubPlayersWithTeams.filter(({ player }) => !squadIds.has(player.id) && player.status !== 'left');
   }, [clubPlayersWithTeams, players, activeTeam]);
 
   const otherTeamPlayersFiltered = useMemo(() => {
@@ -571,14 +573,15 @@ export default function CalendarPage() {
         .from('player_teams')
         .select(`
           player_id,
-          players (id, first_name, last_name)
+          players (id, first_name, last_name, status)
         `)
         .eq('team_id', activeTeam.id);
-      
+
       if (error) throw error;
-      
-      // Transformer les données pour extraire les joueurs
-      const data = playerTeamsData?.map((item: any) => item.players).filter(Boolean) || [];
+
+      // Transformer les données pour extraire les joueurs (exclure les partis 'left')
+      const data = (playerTeamsData?.map((item: any) => item.players).filter(Boolean) || [])
+        .filter((p: any) => p.status !== 'left');
       
       // Trier par nom de famille
       data.sort((a: any, b: any) => (a.last_name || '').localeCompare(b.last_name || ''));

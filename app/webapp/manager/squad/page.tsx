@@ -189,6 +189,7 @@ const STATUS_MAP: Record<string, { label: string; color: string; bg: string }> =
   'Muté HP':  { label: 'Muté HP',   color: '#F97316', bg: 'rgba(249,115,22,0.10)'   },
   'Blessé':   { label: 'Blessé',    color: '#EF4444', bg: 'rgba(239,68,68,0.10)'    },
   'Suspendu': { label: 'Suspendu',  color: '#FFB020', bg: 'rgba(255,176,32,0.10)'   },
+  'left':     { label: 'Parti',     color: '#6B7280', bg: 'rgba(107,114,128,0.12)'  },
 };
 
 function getStatus(status?: string) {
@@ -928,6 +929,7 @@ export default function SquadPage() {
                     <option value="Muté HP">Muté HP</option>
                     <option value="Blessé">Blessé</option>
                     <option value="Suspendu">Suspendu</option>
+                    <option value="left">Parti (quitte le club)</option>
                   </select>
                 </div>
 

@@ -86,7 +86,7 @@ export default function NewTrainingScreen() {
     }
     let mounted = true;
     getPlayersByTeam(activeTeamId)
-      .then((data) => mounted && setPlayers(data))
+      .then((data) => mounted && setPlayers(data.filter((p) => p.status !== 'left')))
       .catch(() => mounted && setPlayers([]))
       .finally(() => mounted && setLoadingPlayers(false));
     return () => { mounted = false; };
@@ -107,7 +107,7 @@ export default function NewTrainingScreen() {
 
   const squadIds = useMemo(() => new Set(players.map((p) => p.id)), [players]);
   const otherTeamPlayersForForm = useMemo(
-    () => clubPlayersWithTeams.filter(({ player }) => !squadIds.has(player.id)),
+    () => clubPlayersWithTeams.filter(({ player }) => !squadIds.has(player.id) && player.status !== 'left'),
     [clubPlayersWithTeams, squadIds]
   );
   const otherTeamPlayersFiltered = useMemo(() => {
