@@ -67,13 +67,13 @@ export default function PlayerProfileScreen() {
   useEffect(() => {
     if (!player?.id || !teamId) return;
     setStats(null);
-    getPlayerStats(player.id, teamId, matchFilter).then(setStats).catch(() => setStats(null));
+    getPlayerStats(player.id, teamId, matchFilter, activeSeason).then(setStats).catch(() => setStats(null));
     setRadarLoading(true);
-    getPlayerRadarStats(player.id, teamId, matchFilter)
+    getPlayerRadarStats(player.id, teamId, matchFilter, activeSeason)
       .then(setRadarData)
       .catch(() => setRadarData(null))
       .finally(() => setRadarLoading(false));
-  }, [player?.id, teamId, matchFilter]);
+  }, [player?.id, teamId, matchFilter, activeSeason]);
 
   useEffect(() => {
     if (!player?.id) return;

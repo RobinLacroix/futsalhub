@@ -101,13 +101,13 @@ export default function PlayerDetailScreen() {
 
   useEffect(() => {
     if (!playerId || !activeTeamId) return;
-    getPlayerStats(playerId, activeTeamId, matchFilter).then(setStats).catch(() => setStats(null));
+    getPlayerStats(playerId, activeTeamId, matchFilter, activeSeason).then(setStats).catch(() => setStats(null));
     setRadarLoading(true);
-    getPlayerRadarStats(playerId, activeTeamId, matchFilter)
+    getPlayerRadarStats(playerId, activeTeamId, matchFilter, activeSeason)
       .then(setRadarData)
       .catch(() => setRadarData(null))
       .finally(() => setRadarLoading(false));
-  }, [playerId, activeTeamId, matchFilter]);
+  }, [playerId, activeTeamId, matchFilter, activeSeason]);
 
   useEffect(() => {
     if (!playerId) return;

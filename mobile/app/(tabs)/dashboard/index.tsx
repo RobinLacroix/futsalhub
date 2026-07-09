@@ -193,7 +193,7 @@ export default function DashboardScreen() {
         getMatchesByTeam(activeTeamId, activeSeason),
         getPlayersByTeam(activeTeamId),
         getTeamFeedbackForLastSessions(activeTeamId, 5),
-        getSquadBulkStats(activeTeamId, 'all'),
+        getSquadBulkStats(activeTeamId, 'all', activeSeason),
       ]);
       setTrainings(tr); setMatches(ma); setPlayers(pl); setFeedback(fb); setSquadStats(ss);
     } catch {

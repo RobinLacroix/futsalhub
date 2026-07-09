@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
-import { playersService } from '@/lib/services/playersService';
+import { playersService, trainingsService } from '@/lib/services';
+import type { PlayerFormData } from '@/types';
 import {
   Plus,
   X,
@@ -19,6 +20,7 @@ import {
   List,
 } from 'lucide-react';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
+import { useActiveSeasonContext } from '../../contexts/ActiveSeasonContext';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const T = {
@@ -224,17 +226,7 @@ interface Player {
   sequence_time_limit?: number;
 }
 
-interface PlayerFormData {
-  first_name: string;
-  last_name: string;
-  birth_date: string;
-  position: string;
-  strong_foot: string;
-  status: string;
-  number: string;
-  sequence_time_limit: string;
-  selectedTeams: string[];
-}
+// PlayerFormData est importé de @/types (source unique).
 
 const initialFormData: PlayerFormData = {
   first_name: '',
@@ -269,6 +261,7 @@ function SortIcon({ col, sortKey, sortDir }: { col: SortKey; sortKey: SortKey; s
 export default function SquadPage() {
   const router = useRouter();
   const { activeTeam, teams } = useActiveTeam();
+  const { activeSeason } = useActiveSeasonContext();
 
   // Data state
   const [players, setPlayers]           = useState<Player[]>([]);
@@ -314,23 +307,18 @@ export default function SquadPage() {
       setTotalTrainings(0);
       setLoading(false);
     }
-  }, [activeTeam]);
+  }, [activeTeam, activeSeason]);
 
   useEffect(() => {
     if (totalTrainings > 0 && players.length > 0 && activeTeam) {
       recalculatePlayerStats();
     }
-  }, [totalTrainings, players.length, activeTeam]);
+  }, [totalTrainings, players.length, activeTeam, activeSeason]);
 
   const fetchTotalTrainings = async () => {
     try {
       if (!activeTeam) { setTotalTrainings(0); return; }
-      const { count, error } = await supabase
-        .from('trainings')
-        .select('*', { count: 'exact', head: true })
-        .eq('team_id', activeTeam.id);
-      if (error) throw error;
-      setTotalTrainings(count || 0);
+      setTotalTrainings(await trainingsService.getTotalTrainingsCount(activeTeam.id, activeSeason));
     } catch (err) {
       console.error('Erreur trainings:', err);
       setTotalTrainings(0);
@@ -340,56 +328,14 @@ export default function SquadPage() {
   const recalculatePlayerStats = async () => {
     try {
       if (!activeTeam) return;
-      const { data: matchesData, error: matchesError } = await supabase
-        .from('matches')
-        .select('players')
-        .eq('team_id', activeTeam.id);
-      if (matchesError) throw matchesError;
-
-      const { data: trainingsData, error: trainingsError } = await supabase
-        .from('trainings')
-        .select('attendance')
-        .eq('team_id', activeTeam.id);
-      if (trainingsError) throw trainingsError;
-
+      const statsById = await playersService.getSquadBasicStats(
+        activeTeam.id,
+        players.map(p => p.id),
+        activeSeason
+      );
       setPlayers(prev => prev.map(player => {
-        try {
-          const matchesPlayed = (matchesData || []).filter(match => {
-            if (!match.players) return false;
-            try {
-              const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
-              return arr.some((p: { id: string }) => p.id === player.id);
-            } catch { return false; }
-          }).length;
-
-          const goals = (matchesData || []).reduce((sum, match) => {
-            if (!match.players) return sum;
-            try {
-              const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
-              const pm = arr.find((p: { id: string; goals?: number }) => p.id === player.id);
-              return sum + (pm && typeof pm.goals === 'number' ? pm.goals : 0);
-            } catch { return sum; }
-          }, 0);
-
-          const trainingAttendance = (trainingsData || []).filter(training => {
-            if (!training.attendance || typeof training.attendance !== 'object') return false;
-            const s = training.attendance[player.id];
-            return s === 'present' || s === 'late';
-          }).length;
-          const trainingConvoked = (trainingsData || []).filter(training => {
-            if (!training.attendance || typeof training.attendance !== 'object') return false;
-            const s = training.attendance[player.id];
-            return s === 'present' || s === 'late' || s === 'absent' || s === 'injured';
-          }).length;
-
-          return {
-            ...player,
-            matches_played: matchesPlayed,
-            goals,
-            training_attendance: trainingAttendance,
-            attendance_percentage: trainingConvoked > 0 ? Math.round((trainingAttendance / trainingConvoked) * 100) : 0,
-          };
-        } catch { return player; }
+        const stats = statsById.get(player.id);
+        return stats ? { ...player, ...stats } : player;
       }));
     } catch (err) {
       console.error('Erreur recalcul stats:', err);
@@ -408,60 +354,27 @@ export default function SquadPage() {
         .eq('team_id', activeTeam.id)
         .order('players(last_name)');
 
-      const playersData = (data?.map((item: any) => item.players).filter(Boolean) || []) as any[];
       if (error) throw error;
+      const playersData = (data?.map((item: any) => item.players).filter(Boolean) || []) as any[];
 
-      const { data: matchesData, error: matchesError } = await supabase
-        .from('matches')
-        .select('players');
-      if (matchesError) throw matchesError;
-
-      const { data: trainingsData, error: trainingsError } = await supabase
-        .from('trainings')
-        .select('attendance');
-      if (trainingsError) throw trainingsError;
+      const statsById = await playersService.getSquadBasicStats(
+        activeTeam.id,
+        playersData.map(p => p.id),
+        activeSeason
+      );
 
       const playersWithStats = playersData.map(player => {
         const sequenceTimeLimit = typeof player.sequence_time_limit === 'number' ? player.sequence_time_limit : 180;
-
-        const matchesPlayed = (matchesData || []).filter(match => {
-          if (!match.players) return false;
-          try {
-            const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
-            return arr.some((p: { id: string }) => p.id === player.id);
-          } catch { return false; }
-        }).length;
-
-        const goals = (matchesData || []).reduce((sum: number, match) => {
-          if (!match.players) return sum;
-          try {
-            const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players);
-            const pm = arr.find((p: { id: string; goals?: number }) => p.id === player.id);
-            return sum + (pm && typeof pm.goals === 'number' ? pm.goals : 0);
-          } catch { return sum; }
-        }, 0);
-
-        const trainingAttendance = (trainingsData || []).filter(training => {
-          if (!training.attendance) return false;
-          try {
-            const s = training.attendance[player.id];
-            return s === 'present' || s === 'late';
-          } catch { return false; }
-        }).length;
-        const trainingConvoked = (trainingsData || []).filter(training => {
-          if (!training.attendance) return false;
-          try {
-            const s = training.attendance[player.id];
-            return s === 'present' || s === 'late' || s === 'absent' || s === 'injured';
-          } catch { return false; }
-        }).length;
+        const stats = statsById.get(player.id) ?? {
+          matches_played: 0,
+          goals: 0,
+          training_attendance: 0,
+          attendance_percentage: 0,
+        };
 
         return {
           ...player,
-          matches_played: matchesPlayed,
-          goals,
-          training_attendance: trainingAttendance,
-          attendance_percentage: trainingConvoked > 0 ? Math.round((trainingAttendance / trainingConvoked) * 100) : 0,
+          ...stats,
           sequence_time_limit: sequenceTimeLimit,
         };
       });
@@ -581,6 +494,9 @@ export default function SquadPage() {
       let playerId: string;
 
       if (isEditing && currentPlayer) {
+        // NOTE: reste en accès direct volontairement. playersService.updatePlayer
+        // diverge du comportement inline (n'écrit pas team_id, update conditionnel,
+        // ne réinitialise pas sequence_time_limit). À réconcilier séparément (cf. audit §3).
         const { error: updateError } = await supabase.from('players').update(playerData).eq('id', currentPlayer.id);
         if (updateError) throw updateError;
         playerId = currentPlayer.id;
@@ -593,15 +509,8 @@ export default function SquadPage() {
         const teamNames = teams.filter(t => formData.selectedTeams.includes(t.id)).map(t => t.name).join(', ');
         setSuccess(`Joueur modifié dans ${teamNames}`);
       } else {
-        const { data: newPlayer, error: insertError } = await supabase
-          .from('players').insert([playerData]).select().single();
-        if (insertError) throw insertError;
-        if (!newPlayer) throw new Error('Erreur lors de la création du joueur');
-        playerId = newPlayer.id;
-        const { error: relationError } = await supabase.from('player_teams').insert(
-          formData.selectedTeams.map(teamId => ({ player_id: playerId, team_id: teamId }))
-        );
-        if (relationError) throw relationError;
+        // Création : identique à playersService.createPlayer (même insert + relations player_teams), routé via le service.
+        await playersService.createPlayer(formData);
         const teamNames = teams.filter(t => formData.selectedTeams.includes(t.id)).map(t => t.name).join(', ');
         setSuccess(`Joueur ajouté dans ${teamNames}`);
       }

@@ -1,6 +1,72 @@
 import { supabase } from '../supabaseClient';
 import type { Player, PlayerFormData, PlayerStatus } from '@/types';
 
+/**
+ * Stats de base d'un joueur affichées dans la liste Effectif.
+ */
+export interface PlayerBasicStats {
+  matches_played: number;
+  goals: number;
+  training_attendance: number;
+  attendance_percentage: number;
+}
+
+/**
+ * Agrège les stats de base d'un joueur à partir de matchs et entraînements
+ * déjà chargés (aucune requête). Source unique de la logique d'agrégation,
+ * autrefois copiée-collée dans l'écran Effectif.
+ */
+function computePlayerBasicStats(
+  playerId: string,
+  matchesData: Array<{ players: unknown }>,
+  trainingsData: Array<{ attendance: unknown }>
+): PlayerBasicStats {
+  const matchesPlayed = matchesData.filter(match => {
+    if (!match.players) return false;
+    try {
+      const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players as string);
+      return arr.some((p: { id: string }) => p.id === playerId);
+    } catch {
+      return false;
+    }
+  }).length;
+
+  const goals = matchesData.reduce((sum, match) => {
+    if (!match.players) return sum;
+    try {
+      const arr = Array.isArray(match.players) ? match.players : JSON.parse(match.players as string);
+      const pm = arr.find((p: { id: string; goals?: number }) => p.id === playerId);
+      return sum + (pm && typeof pm.goals === 'number' ? pm.goals : 0);
+    } catch {
+      return sum;
+    }
+  }, 0);
+
+  const trainingAttendance = trainingsData.filter(training => {
+    const att = training.attendance;
+    if (!att || typeof att !== 'object') return false;
+    const s = (att as Record<string, string>)[playerId];
+    return s === 'present' || s === 'late';
+  }).length;
+
+  // Dénominateur = séances où le joueur a effectivement été convoqué (a un statut)
+  const trainingConvoked = trainingsData.filter(training => {
+    const att = training.attendance;
+    if (!att || typeof att !== 'object') return false;
+    const s = (att as Record<string, string>)[playerId];
+    return s === 'present' || s === 'late' || s === 'absent' || s === 'injured';
+  }).length;
+
+  return {
+    matches_played: matchesPlayed,
+    goals,
+    training_attendance: trainingAttendance,
+    attendance_percentage: trainingConvoked > 0
+      ? Math.round((trainingAttendance / trainingConvoked) * 100)
+      : 0,
+  };
+}
+
 export const playersService = {
   /**
    * Récupère tous les joueurs du club avec leurs équipes (pour convocations cross-équipes).
@@ -240,13 +306,48 @@ export const playersService = {
   },
 
   /**
+   * Stats de base (matchs joués, buts, présence entraînements) pour l'effectif
+   * d'une équipe. Une seule paire de requêtes team-scopées, agrégation en mémoire
+   * pour tous les joueurs demandés. Source unique partagée par l'écran Effectif
+   * (chargement initial + recalcul), pour garantir un périmètre équipe cohérent.
+   */
+  async getSquadBasicStats(
+    teamId: string,
+    playerIds: string[],
+    season?: string
+  ): Promise<Map<string, PlayerBasicStats>> {
+    let matchesQuery = supabase
+      .from('matches')
+      .select('players')
+      .eq('team_id', teamId);
+    if (season) matchesQuery = matchesQuery.eq('season', season);
+    const { data: matchesData, error: matchesError } = await matchesQuery;
+    if (matchesError) throw matchesError;
+
+    let trainingsQuery = supabase
+      .from('trainings')
+      .select('attendance')
+      .eq('team_id', teamId);
+    if (season) trainingsQuery = trainingsQuery.eq('season', season);
+    const { data: trainingsData, error: trainingsError } = await trainingsQuery;
+    if (trainingsError) throw trainingsError;
+
+    const result = new Map<string, PlayerBasicStats>();
+    for (const playerId of playerIds) {
+      result.set(playerId, computePlayerBasicStats(playerId, matchesData || [], trainingsData || []));
+    }
+    return result;
+  },
+
+  /**
    * Récupère les statistiques d'un joueur.
    * Optionnellement, on peut filtrer par type de compétition (Championnat, Coupe, Amical).
    */
   async getPlayerStats(
     playerId: string,
     teamId: string,
-    matchTypeFilter: 'all' | 'Championnat' | 'Coupe' | 'Amical' = 'all'
+    matchTypeFilter: 'all' | 'Championnat' | 'Coupe' | 'Amical' = 'all',
+    season?: string
   ): Promise<{
     matches_played: number;
     goals: number;
@@ -259,18 +360,22 @@ export const playersService = {
     defeats: number;
   }> {
     // Récupérer les matchs de l'équipe
-    const { data: matchesData, error: matchesError } = await supabase
+    let matchesQuery = supabase
       .from('matches')
       .select('id, competition, players, score_team, score_opponent')
       .eq('team_id', teamId);
+    if (season) matchesQuery = matchesQuery.eq('season', season);
+    const { data: matchesData, error: matchesError } = await matchesQuery;
 
     if (matchesError) throw matchesError;
 
     // Récupérer les entraînements de l'équipe
-    const { data: trainingsData, error: trainingsError } = await supabase
+    let trainingsQuery = supabase
       .from('trainings')
       .select('attendance')
       .eq('team_id', teamId);
+    if (season) trainingsQuery = trainingsQuery.eq('season', season);
+    const { data: trainingsData, error: trainingsError } = await trainingsQuery;
 
     if (trainingsError) throw trainingsError;
 
@@ -403,13 +508,16 @@ export const playersService = {
   async getPlayerRadarStats(
     playerId: string,
     teamId: string,
-    filter: 'all' | 'Championnat' | 'Coupe' | 'Amical' = 'all'
+    filter: 'all' | 'Championnat' | 'Coupe' | 'Amical' = 'all',
+    season?: string
   ): Promise<PlayerRadarResult> {
     // 1. Matchs de l'équipe
-    const { data: matchesData, error: matchesError } = await supabase
+    let matchesQuery = supabase
       .from('matches')
       .select('id, players, competition')
       .eq('team_id', teamId);
+    if (season) matchesQuery = matchesQuery.eq('season', season);
+    const { data: matchesData, error: matchesError } = await matchesQuery;
     if (matchesError) throw matchesError;
 
     const allMatches = matchesData ?? [];

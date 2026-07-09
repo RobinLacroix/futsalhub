@@ -173,7 +173,8 @@ export type MatchTypeFilter = 'all' | 'Championnat' | 'Coupe' | 'Amical';
 export async function getPlayerStats(
   playerId: string,
   teamId: string,
-  matchTypeFilter: MatchTypeFilter = 'all'
+  matchTypeFilter: MatchTypeFilter = 'all',
+  season?: string
 ): Promise<{
   matches_played: number;
   goals: number;
@@ -183,16 +184,20 @@ export async function getPlayerStats(
   draws: number;
   defeats: number;
 }> {
-  const { data: matchesData, error: matchesError } = await supabase
+  let matchesQ = supabase
     .from('matches')
     .select('competition, players, score_team, score_opponent')
     .eq('team_id', teamId);
+  if (season) matchesQ = matchesQ.eq('season', season);
+  const { data: matchesData, error: matchesError } = await matchesQ;
   if (matchesError) throw matchesError;
 
-  const { data: trainingsData, error: trainingsError } = await supabase
+  let trainingsQ = supabase
     .from('trainings')
     .select('attendance')
     .eq('team_id', teamId);
+  if (season) trainingsQ = trainingsQ.eq('season', season);
+  const { data: trainingsData, error: trainingsError } = await trainingsQ;
   if (trainingsError) throw trainingsError;
 
   const allMatches = matchesData ?? [];
@@ -287,16 +292,21 @@ export interface PlayerSquadStat {
 export async function getSquadBulkStats(
   teamId: string,
   filter: MatchTypeFilter = 'all',
+  season?: string,
 ): Promise<Record<string, PlayerSquadStat>> {
+  let matchesQ = supabase
+    .from('matches')
+    .select('competition, players, score_team, score_opponent')
+    .eq('team_id', teamId);
+  if (season) matchesQ = matchesQ.eq('season', season);
+  let trainingsQ = supabase
+    .from('trainings')
+    .select('attendance')
+    .eq('team_id', teamId);
+  if (season) trainingsQ = trainingsQ.eq('season', season);
   const [{ data: matchesData }, { data: trainingsData }] = await Promise.all([
-    supabase
-      .from('matches')
-      .select('competition, players, score_team, score_opponent')
-      .eq('team_id', teamId),
-    supabase
-      .from('trainings')
-      .select('attendance')
-      .eq('team_id', teamId),
+    matchesQ,
+    trainingsQ,
   ]);
 
   const allMatches = matchesData ?? [];
@@ -401,12 +411,15 @@ export async function getPlayerRadarStats(
   playerId: string,
   teamId: string,
   filter: MatchTypeFilter = 'all',
+  season?: string,
 ): Promise<PlayerRadarResult> {
   // 1. Matchs de l'équipe
-  const { data: matchesData, error: matchesError } = await supabase
+  let matchesQ = supabase
     .from('matches')
     .select('id, players, competition')
     .eq('team_id', teamId);
+  if (season) matchesQ = matchesQ.eq('season', season);
+  const { data: matchesData, error: matchesError } = await matchesQ;
   if (matchesError) throw matchesError;
 
   const allMatches = matchesData ?? [];

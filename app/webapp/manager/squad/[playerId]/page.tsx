@@ -298,14 +298,14 @@ export default function PlayerProfilePage() {
     const loadMatchStats = async () => {
       if (!playerId || !activeTeam) return;
       try {
-        const playerStats = await playersService.getPlayerStats(playerId, activeTeam.id, matchTypeFilter);
+        const playerStats = await playersService.getPlayerStats(playerId, activeTeam.id, matchTypeFilter, activeSeason);
         setStats(playerStats);
       } catch {
         // keep previous stats on transient error
       }
     };
     loadMatchStats();
-  }, [playerId, activeTeam, matchTypeFilter]);
+  }, [playerId, activeTeam, matchTypeFilter, activeSeason]);
 
   // ── Reload radar/real stats when filter changes ──────────────────────────
   useEffect(() => {
@@ -313,7 +313,7 @@ export default function PlayerProfilePage() {
       if (!playerId || !activeTeam) return;
       setRadarLoading(true);
       try {
-        const result = await playersService.getPlayerRadarStats(playerId, activeTeam.id, matchTypeFilter);
+        const result = await playersService.getPlayerRadarStats(playerId, activeTeam.id, matchTypeFilter, activeSeason);
         setRadarData(result);
       } catch {
         setRadarData(null);
@@ -322,7 +322,7 @@ export default function PlayerProfilePage() {
       }
     };
     loadRadar();
-  }, [playerId, activeTeam, matchTypeFilter]);
+  }, [playerId, activeTeam, matchTypeFilter, activeSeason]);
 
   // ── Club teams ───────────────────────────────────────────────────────────
   useEffect(() => {

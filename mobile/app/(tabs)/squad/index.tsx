@@ -15,6 +15,7 @@ import { Swipeable } from 'react-native-gesture-handler';
 import { useRouter } from 'expo-router';
 import { useIsTablet } from '../../../hooks/useIsTablet';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
+import { useActiveSeason } from '../../../contexts/ActiveSeasonContext';
 import {
   getPlayersByTeam,
   deletePlayer,
@@ -74,6 +75,7 @@ export default function SquadScreen() {
   const router   = useRouter();
   const isTablet = useIsTablet();
   const { activeTeamId } = useActiveTeam();
+  const { activeSeason } = useActiveSeason();
 
   const [players, setPlayers]           = useState<Player[]>([]);
   const [stats, setStats]               = useState<Record<string, PlayerSquadStat>>({});
@@ -103,10 +105,10 @@ export default function SquadScreen() {
   const loadStats = useCallback(async () => {
     if (!activeTeamId) return;
     setStatsLoading(true);
-    try { setStats(await getSquadBulkStats(activeTeamId, filter)); }
+    try { setStats(await getSquadBulkStats(activeTeamId, filter, activeSeason)); }
     catch { /* non-critical */ }
     finally { setStatsLoading(false); }
-  }, [activeTeamId, filter]);
+  }, [activeTeamId, filter, activeSeason]);
 
   useEffect(() => { setLoading(true); loadPlayers(); }, [loadPlayers]);
   useEffect(() => { loadStats(); }, [loadStats]);
