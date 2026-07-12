@@ -18,6 +18,7 @@ import Svg, { Polygon, Line, Circle, Text as SvgText, Path } from 'react-native-
 import Ionicons from '@expo/vector-icons/Ionicons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SeasonHeaderButton } from './SeasonHeaderButton';
 import { supabase } from '../lib/supabase';
 import type { Player, Team, PlayerEvent, PlayerEventType } from '../types';
 import type {
@@ -296,6 +297,7 @@ export function PlayerDetailView({
               <Text style={styles.editBtnText}>Modifier</Text>
             </TouchableOpacity>
           )}
+          {!isManager && <SeasonHeaderButton />}
         </View>
 
         <View style={styles.playerCard}>

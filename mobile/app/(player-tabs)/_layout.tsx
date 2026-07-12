@@ -2,6 +2,7 @@ import { Tabs } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { View } from 'react-native';
 import { SwitchToCoachButton, SignOutIconButton } from '../../components/SwitchSpaceButton';
+import { SeasonHeaderButton } from '../../components/SeasonHeaderButton';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 import { useNotifications } from '../../contexts/NotificationContext';
 
@@ -17,6 +18,7 @@ export default function PlayerTabsLayout() {
         tabBarActiveTintColor: '#16a34a',
         headerRight: () => (
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <SeasonHeaderButton />
             <SwitchToCoachButton />
             <SignOutIconButton />
           </View>
