@@ -1,7 +1,8 @@
 import { Stack, useRouter } from 'expo-router';
-import { TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { TouchableOpacity, Text, StyleSheet, View } from 'react-native';
 import { useIsTablet } from '../../../hooks/useIsTablet';
 import { PhoneNavMenu } from '../../../components/PhoneNavMenu';
+import { SeasonHeaderButton } from '../../../components/SeasonHeaderButton';
 
 function HeaderAddButton() {
   const router = useRouter();
@@ -32,7 +33,12 @@ export default function SquadLayout() {
         options={{
           title: 'Équipe',
           headerLeft: isTablet ? undefined : () => <PhoneNavMenu />,
-          headerRight: () => <HeaderAddButton />,
+          headerRight: () => (
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <SeasonHeaderButton />
+              <HeaderAddButton />
+            </View>
+          ),
         }}
       />
       <Stack.Screen name="new-player" options={{ title: 'Nouveau joueur' }} />

@@ -5,6 +5,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useIsTablet, LAYOUT } from '../hooks/useIsTablet';
 import { useAppRole } from '../contexts/AppRoleContext';
 import { useNotifications } from '../contexts/NotificationContext';
+import { SeasonHeaderButton } from './SeasonHeaderButton';
 import { supabase } from '../lib/supabase';
 
 export type TabletSidebarProps = {
@@ -119,6 +120,7 @@ export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {
       <View style={[styles.footer, !isExpanded && styles.footerCollapsed]}>
         {isExpanded && (
           <>
+            <SeasonHeaderButton variant="light" />
             {isPlayer && (
               <TouchableOpacity onPress={handleSwitchToPlayer} style={styles.footerBtn}>
                 <Text style={styles.footerBtnText}>Espace joueur</Text>

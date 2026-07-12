@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Stack, useRouter } from 'expo-router';
 import { useIsTablet } from '../../../hooks/useIsTablet';
 import { PhoneNavMenu } from '../../../components/PhoneNavMenu';
+import { SeasonHeaderButton } from '../../../components/SeasonHeaderButton';
 import {
   TouchableOpacity,
   Text,
@@ -73,7 +74,12 @@ export default function CalendarLayout() {
         options={{
           title: 'Calendrier',
           headerLeft: isTablet ? undefined : () => <PhoneNavMenu />,
-          headerRight: () => <HeaderAddButton />,
+          headerRight: () => (
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <SeasonHeaderButton />
+              <HeaderAddButton />
+            </View>
+          ),
         }}
       />
       <Stack.Screen

@@ -7,6 +7,7 @@ import { useIsTablet, LAYOUT } from '../../hooks/useIsTablet';
 import { TabletSidebar } from '../../components/TabletSidebar';
 import { PhoneNavMenu } from '../../components/PhoneNavMenu';
 import { SwitchToPlayerButton, SignOutIconButton } from '../../components/SwitchSpaceButton';
+import { SeasonHeaderButton } from '../../components/SeasonHeaderButton';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 
 function TabsLayoutContent() {
@@ -23,6 +24,7 @@ function TabsLayoutContent() {
     headerLeft: isTablet ? undefined : () => <PhoneNavMenu />,
     headerRight: isTablet ? undefined : () => (
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <SeasonHeaderButton />
         <SwitchToPlayerButton />
         <SignOutIconButton />
       </View>

@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, RefreshControl, useWindowDimensions, Modal,
+  ActivityIndicator, RefreshControl, useWindowDimensions,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
@@ -155,8 +155,7 @@ export default function DashboardScreen() {
   const router  = useRouter();
   const { width } = useWindowDimensions();
   const { activeTeamId, activeTeam } = useActiveTeam();
-  const { activeSeason, clubSeason, availableSeasons, changeActiveSeason } = useActiveSeason();
-  const [seasonPickerOpen, setSeasonPickerOpen] = useState(false);
+  const { activeSeason } = useActiveSeason();
   const isTablet = width >= 768;
 
   const [loading,    setLoading]    = useState(true);
@@ -501,16 +500,6 @@ export default function DashboardScreen() {
           <Text style={s.heroDate}>
             {format(now, "EEEE d MMMM yyyy", { locale: fr })}
           </Text>
-          <TouchableOpacity
-            onPress={() => availableSeasons.length > 1 && setSeasonPickerOpen(true)}
-            style={[s.seasonPill, activeSeason !== clubSeason && s.seasonPillPast]}
-          >
-            <Ionicons name="calendar-outline" size={11} color={activeSeason !== clubSeason ? '#fbbf24' : 'rgba(255,255,255,0.8)'} />
-            <Text style={s.seasonPillText}>Saison {activeSeason}</Text>
-            {availableSeasons.length > 1 && (
-              <Ionicons name="chevron-down" size={10} color="rgba(255,255,255,0.6)" />
-            )}
-          </TouchableOpacity>
           <View style={s.heroCtxRow}>
             <Text style={s.heroCtxIcon}>{ctx.icon}</Text>
             <View>
@@ -528,24 +517,6 @@ export default function DashboardScreen() {
         </View>
       </View>
 
-      {/* ── Season picker ─────────────────────────────────────────────────── */}
-      <Modal visible={seasonPickerOpen} transparent animationType="fade" onRequestClose={() => setSeasonPickerOpen(false)}>
-        <TouchableOpacity style={s.seasonModalOverlay} activeOpacity={1} onPress={() => setSeasonPickerOpen(false)}>
-          <View style={s.seasonModalBox}>
-            <Text style={s.seasonModalTitle}>Choisir une saison</Text>
-            {availableSeasons.map((sn) => (
-              <TouchableOpacity
-                key={sn}
-                onPress={() => { changeActiveSeason(sn); setSeasonPickerOpen(false); }}
-                style={[s.seasonModalRow, sn === activeSeason && s.seasonModalRowActive]}
-              >
-                <Text style={[s.seasonModalRowText, sn === activeSeason && { color: C.blue, fontWeight: '700' }]}>{sn}</Text>
-                {sn === clubSeason && <Text style={s.seasonModalActiveTag}>ACTIVE</Text>}
-              </TouchableOpacity>
-            ))}
-          </View>
-        </TouchableOpacity>
-      </Modal>
 
       {/* ── Next events strip ────────────────────────────────────────────── */}
       <View style={s.nextRow}>
@@ -1454,16 +1425,6 @@ const s = StyleSheet.create({
   },
   heroTeam: { fontSize: 20, fontWeight: '800', color: '#ffffff', letterSpacing: 0.2 },
   heroDate: { fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 2 },
-  seasonPill: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', marginTop: 6, backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
-  seasonPillPast: { backgroundColor: 'rgba(251,191,36,0.18)' },
-  seasonPillText: { fontSize: 11, color: 'rgba(255,255,255,0.9)', fontWeight: '600' },
-  seasonModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center', padding: 32 },
-  seasonModalBox: { backgroundColor: '#fff', borderRadius: 14, padding: 16, width: '100%', maxWidth: 320 },
-  seasonModalTitle: { fontSize: 15, fontWeight: '700', color: '#0f172a', marginBottom: 10 },
-  seasonModalRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 11, paddingHorizontal: 12, borderRadius: 8 },
-  seasonModalRowActive: { backgroundColor: '#eff6ff' },
-  seasonModalRowText: { fontSize: 14, color: '#0f172a', fontWeight: '500' },
-  seasonModalActiveTag: { fontSize: 9, fontWeight: '700', color: '#3b82f6', letterSpacing: 0.5 },
   heroCtxRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
   heroCtxIcon: { fontSize: 20 },
   heroCtxPhase: { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.9)' },
