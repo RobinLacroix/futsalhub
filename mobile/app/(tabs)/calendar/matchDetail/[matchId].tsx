@@ -237,6 +237,12 @@ export default function MatchDetailScreen() {
     setConvoqued((prev) => ({ ...prev, [playerId]: !prev[playerId] }));
   };
 
+  const convokeAllMatch = () => {
+    const next: Record<string, boolean> = { ...convoqued };
+    players.forEach((p) => { next[p.id] = true; });
+    setConvoqued(next);
+  };
+
   const setGoalTypeStat = (
     which: 'scored' | 'conceded',
     key: keyof GoalsByTypeRecord,
@@ -534,6 +540,11 @@ export default function MatchDetailScreen() {
             <Text style={styles.sectionHint}>
               Convoqué ou non, puis buts pour chaque convoqué. {totalGoals > scoreTeamNum ? '(Total buts > score)' : ''}
             </Text>
+            {players.length > 0 && (
+              <TouchableOpacity style={styles.convokeAllMatchBtn} onPress={convokeAllMatch} activeOpacity={0.8}>
+                <Text style={styles.convokeAllMatchBtnText}>Convoquer tous les joueurs</Text>
+              </TouchableOpacity>
+            )}
             {sortedPlayersForMatch.length === 0 ? (
               <Text style={styles.emptyText}>Aucun joueur convoqué. Enregistrez d’abord les convoqués.</Text>
             ) : (
@@ -1120,6 +1131,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   addOtherTeamsBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
+  convokeAllMatchBtn: {
+    marginTop: 4,
+    marginBottom: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: '#16a34a',
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+  },
+  convokeAllMatchBtnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
   invitedSection: { marginBottom: 16 },
   invitedSectionTitle: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 10 },
   invitedMatchRow: {

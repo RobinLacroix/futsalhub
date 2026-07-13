@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity,
   Alert, ActivityIndicator, Modal, Share, Pressable,
@@ -9,12 +9,24 @@ import { supabase } from '../../lib/supabase';
 import {
   getUserClubId, getClubInfo, updateClubInfo, deleteClub,
   getClubMembersWithProfiles, removeClubMember, createClubInvitation,
-  updateClubMemberTeam, ClubMemberWithUser,
+  setCoachTeams, ClubMemberWithUser,
 } from '../../lib/services/clubs';
 import { getTeamsByClubId } from '../../lib/services/teams';
 import type { Team } from '../../types';
 
 type ClubInfo = { id: string; name: string; description: string | null };
+
+/** Un coach consolidé : une entrée par utilisateur, avec toutes ses équipes. */
+type CoachGroup = {
+  userId: string;
+  name: string;
+  email: string | null;
+  teamIds: string[];
+  memberIds: string[];
+};
+type DisplayMember =
+  | { kind: 'single'; member: ClubMemberWithUser }
+  | { kind: 'coach'; group: CoachGroup };
 
 const ROLE_LABELS: Record<string, string> = {
   admin: 'Admin',
@@ -49,7 +61,9 @@ export default function SettingsScreen() {
   const [inviteTeamId, setInviteTeamId] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
   const [generatedToken, setGeneratedToken] = useState<string | null>(null);
-  const [reassignMember, setReassignMember] = useState<ClubMemberWithUser | null>(null);
+  const [reassignCoach, setReassignCoach] = useState<CoachGroup | null>(null);
+  const [reassignSelected, setReassignSelected] = useState<string[]>([]);
+  const [reassignSaving, setReassignSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -133,10 +147,7 @@ export default function SettingsScreen() {
     } catch {}
   };
 
-  const handleRemoveMember = (member: ClubMemberWithUser) => {
-    const label = member.first_name
-      ? `${member.first_name} ${member.last_name ?? ''}`.trim()
-      : (member.email ?? 'ce membre');
+  const handleRemoveMember = (label: string, memberIds: string[]) => {
     Alert.alert('Retirer ce membre', `Retirer ${label} du club ?`, [
       { text: 'Annuler', style: 'cancel' },
       {
@@ -144,8 +155,8 @@ export default function SettingsScreen() {
         style: 'destructive',
         onPress: async () => {
           try {
-            await removeClubMember(member.id);
-            setMembers((prev) => prev.filter((m) => m.id !== member.id));
+            for (const id of memberIds) await removeClubMember(id);
+            setMembers((prev) => prev.filter((m) => !memberIds.includes(m.id)));
           } catch (e) {
             Alert.alert('Erreur', e instanceof Error ? e.message : 'Impossible de retirer ce membre.');
           }
@@ -153,6 +164,40 @@ export default function SettingsScreen() {
       },
     ]);
   };
+
+  // Consolide les membres : une seule entrée par coach, regroupant toutes ses équipes.
+  const displayMembers = useMemo<DisplayMember[]>(() => {
+    const list: DisplayMember[] = [];
+    const coachIndex = new Map<string, number>();
+    for (const m of members) {
+      if (m.role === 'coach') {
+        const idx = coachIndex.get(m.user_id);
+        if (idx == null) {
+          const name = m.first_name
+            ? `${m.first_name} ${m.last_name ?? ''}`.trim()
+            : (m.email ?? 'Inconnu');
+          list.push({
+            kind: 'coach',
+            group: {
+              userId: m.user_id,
+              name,
+              email: m.email ?? null,
+              teamIds: m.team_id ? [m.team_id] : [],
+              memberIds: [m.id],
+            },
+          });
+          coachIndex.set(m.user_id, list.length - 1);
+        } else {
+          const g = (list[idx] as { kind: 'coach'; group: CoachGroup }).group;
+          if (m.team_id && !g.teamIds.includes(m.team_id)) g.teamIds.push(m.team_id);
+          g.memberIds.push(m.id);
+        }
+      } else {
+        list.push({ kind: 'single', member: m });
+      }
+    }
+    return list;
+  }, [members]);
 
   const handleDeleteClub = () => {
     Alert.alert(
@@ -201,13 +246,28 @@ export default function SettingsScreen() {
     setInviteTeamId(null);
   };
 
-  const handleReassignTeam = async (member: ClubMemberWithUser, teamId: string | null) => {
-    setReassignMember(null);
+  const openReassign = (group: CoachGroup) => {
+    setReassignSelected(group.teamIds);
+    setReassignCoach(group);
+  };
+
+  const toggleReassignTeam = (teamId: string) => {
+    setReassignSelected((prev) =>
+      prev.includes(teamId) ? prev.filter((t) => t !== teamId) : [...prev, teamId]
+    );
+  };
+
+  const handleSaveCoachTeams = async () => {
+    if (!reassignCoach || !clubId) return;
+    setReassignSaving(true);
     try {
-      await updateClubMemberTeam(member.id, teamId);
-      setMembers((prev) => prev.map((m) => m.id === member.id ? { ...m, team_id: teamId } : m));
+      await setCoachTeams(clubId, reassignCoach.userId, reassignSelected);
+      setReassignCoach(null);
+      await load();
     } catch (e) {
-      Alert.alert('Erreur', e instanceof Error ? e.message : 'Impossible de changer l\'équipe.');
+      Alert.alert('Erreur', e instanceof Error ? e.message : 'Impossible de mettre à jour les équipes.');
+    } finally {
+      setReassignSaving(false);
     }
   };
 
@@ -290,10 +350,48 @@ export default function SettingsScreen() {
           )}
         </View>
         <View style={s.cardBody}>
-          {members.length === 0 ? (
+          {displayMembers.length === 0 ? (
             <Text style={s.emptyText}>Aucun membre trouve.</Text>
           ) : (
-            members.map((member) => {
+            displayMembers.map((entry) => {
+              if (entry.kind === 'coach') {
+                const g = entry.group;
+                const teamNames = g.teamIds.length > 0
+                  ? g.teamIds.map((id) => teamById.get(id)?.name ?? 'Équipe inconnue').join(', ')
+                  : 'Aucune équipe';
+                const colors = ROLE_COLORS.coach;
+                return (
+                  <View key={`coach-${g.userId}`} style={s.memberRow}>
+                    <View style={s.memberAvatar}>
+                      <Ionicons name="person" size={16} color="#94a3b8" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.memberName} numberOfLines={1}>{g.name}</Text>
+                      {g.email && (
+                        <Text style={s.memberEmail} numberOfLines={1}>{g.email}</Text>
+                      )}
+                      <TouchableOpacity
+                        disabled={!isAdmin}
+                        onPress={() => openReassign(g)}
+                        style={s.teamPill}
+                      >
+                        <Ionicons name="shield-outline" size={11} color="#16a34a" />
+                        <Text style={s.teamPillText} numberOfLines={1}>{teamNames}</Text>
+                        {isAdmin && <Ionicons name="chevron-down" size={11} color="#94a3b8" />}
+                      </TouchableOpacity>
+                    </View>
+                    <View style={[s.roleBadge, { backgroundColor: colors.bg }]}>
+                      <Text style={[s.roleBadgeText, { color: colors.text }]}>{ROLE_LABELS.coach}</Text>
+                    </View>
+                    {isAdmin && (
+                      <TouchableOpacity onPress={() => handleRemoveMember(g.name, g.memberIds)} style={s.removeBtn}>
+                        <Ionicons name="trash-outline" size={16} color="#dc2626" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                );
+              }
+              const member = entry.member;
               const colors = ROLE_COLORS[member.role] ?? ROLE_COLORS.viewer;
               const name = member.first_name
                 ? `${member.first_name} ${member.last_name ?? ''}`.trim()
@@ -308,19 +406,6 @@ export default function SettingsScreen() {
                     {member.email && member.first_name && (
                       <Text style={s.memberEmail} numberOfLines={1}>{member.email}</Text>
                     )}
-                    {member.role === 'coach' && (
-                      <TouchableOpacity
-                        disabled={!isAdmin}
-                        onPress={() => setReassignMember(member)}
-                        style={s.teamPill}
-                      >
-                        <Ionicons name="shield-outline" size={11} color="#16a34a" />
-                        <Text style={s.teamPillText} numberOfLines={1}>
-                          {member.team_id ? (teamById.get(member.team_id)?.name ?? 'Équipe inconnue') : 'Aucune équipe'}
-                        </Text>
-                        {isAdmin && <Ionicons name="chevron-down" size={11} color="#94a3b8" />}
-                      </TouchableOpacity>
-                    )}
                   </View>
                   <View style={[s.roleBadge, { backgroundColor: colors.bg }]}>
                     <Text style={[s.roleBadgeText, { color: colors.text }]}>
@@ -328,7 +413,7 @@ export default function SettingsScreen() {
                     </Text>
                   </View>
                   {isAdmin && (
-                    <TouchableOpacity onPress={() => handleRemoveMember(member)} style={s.removeBtn}>
+                    <TouchableOpacity onPress={() => handleRemoveMember(name, [member.id])} style={s.removeBtn}>
                       <Ionicons name="trash-outline" size={16} color="#dc2626" />
                     </TouchableOpacity>
                   )}
@@ -475,41 +560,45 @@ export default function SettingsScreen() {
         </Pressable>
       </Modal>
 
-      {/* ── Reassign team modal ── */}
-      <Modal visible={!!reassignMember} transparent animationType="slide" onRequestClose={() => setReassignMember(null)}>
-        <Pressable style={s.modalOverlay} onPress={() => setReassignMember(null)}>
+      {/* ── Reassign teams modal (multi-équipes) ── */}
+      <Modal visible={!!reassignCoach} transparent animationType="slide" onRequestClose={() => setReassignCoach(null)}>
+        <Pressable style={s.modalOverlay} onPress={() => setReassignCoach(null)}>
           <Pressable style={s.modalSheet} onPress={() => {}}>
             <View style={s.modalHandle} />
-            <Text style={s.modalTitle}>Équipe gérée</Text>
+            <Text style={s.modalTitle}>Équipes gérées</Text>
             <Text style={s.modalSub}>
-              Choisissez l'équipe gérée par {reassignMember?.first_name
-                ? `${reassignMember.first_name} ${reassignMember.last_name ?? ''}`.trim()
-                : (reassignMember?.email ?? 'ce coach')}.
+              Sélectionnez toutes les équipes gérées par {reassignCoach?.name ?? 'ce coach'}. Un coach peut en gérer plusieurs.
             </Text>
-            {teams.map((t) => (
-              <TouchableOpacity
-                key={t.id}
-                style={[s.reassignRow, reassignMember?.team_id === t.id && s.reassignRowActive]}
-                onPress={() => reassignMember && handleReassignTeam(reassignMember, t.id)}
-              >
-                <View style={[s.teamDot, { backgroundColor: t.color || '#94a3b8' }]} />
-                <Text style={s.reassignRowText}>{t.name}</Text>
-                {reassignMember?.team_id === t.id && (
-                  <Ionicons name="checkmark" size={18} color="#16a34a" style={{ marginLeft: 'auto' as any }} />
-                )}
-              </TouchableOpacity>
-            ))}
+            {teams.length === 0 ? (
+              <Text style={s.roleHint}>Aucune équipe dans ce club.</Text>
+            ) : (
+              teams.map((t) => {
+                const selected = reassignSelected.includes(t.id);
+                return (
+                  <TouchableOpacity
+                    key={t.id}
+                    style={[s.reassignRow, selected && s.reassignRowActive]}
+                    onPress={() => toggleReassignTeam(t.id)}
+                  >
+                    <View style={[s.teamDot, { backgroundColor: t.color || '#94a3b8' }]} />
+                    <Text style={s.reassignRowText}>{t.name}</Text>
+                    {selected && (
+                      <Ionicons name="checkmark" size={18} color="#16a34a" style={{ marginLeft: 'auto' as any }} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })
+            )}
             <TouchableOpacity
-              style={[s.reassignRow, !reassignMember?.team_id && s.reassignRowActive]}
-              onPress={() => reassignMember && handleReassignTeam(reassignMember, null)}
+              style={[s.btn, s.btnPrimary, reassignSaving && { opacity: 0.6 }, { marginTop: 8 }]}
+              onPress={handleSaveCoachTeams}
+              disabled={reassignSaving}
             >
-              <View style={[s.teamDot, { backgroundColor: '#cbd5e1' }]} />
-              <Text style={s.reassignRowText}>Aucune équipe</Text>
-              {!reassignMember?.team_id && (
-                <Ionicons name="checkmark" size={18} color="#16a34a" style={{ marginLeft: 'auto' as any }} />
-              )}
+              {reassignSaving
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Text style={s.btnPrimaryText}>Enregistrer les équipes</Text>}
             </TouchableOpacity>
-            <TouchableOpacity style={s.modalClose} onPress={() => setReassignMember(null)}>
+            <TouchableOpacity style={s.modalClose} onPress={() => setReassignCoach(null)}>
               <Text style={s.modalCloseText}>Fermer</Text>
             </TouchableOpacity>
           </Pressable>

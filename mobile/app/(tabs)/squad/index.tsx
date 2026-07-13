@@ -28,7 +28,7 @@ import { getFeedbackPlayerIds, markPlayerFeedbackRead } from '../../../lib/servi
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
-type SortKey = 'name' | 'seances' | 'matches' | 'goals';
+type SortKey = 'name' | 'position' | 'seances' | 'matches' | 'goals';
 type SortDir = 'asc' | 'desc';
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -47,6 +47,16 @@ const POSITION_MAP: Record<string, { abbr: string; color: string; bg: string }> 
   Meneur:    { abbr: 'MEN', color: '#059669', bg: 'rgba(5,150,105,0.10)'   },
   Pivot:     { abbr: 'PIV', color: '#ea580c', bg: 'rgba(234,88,12,0.10)'   },
 };
+
+// Ordre tactique des postes pour le tri (Gardien → Meneur → Ailier → Pivot).
+const POSITION_ORDER: Record<string, number> = { Gardien: 0, Meneur: 1, Ailier: 2, Pivot: 3 };
+function positionRank(position?: string): number {
+  if (!position) return 99;
+  const key = Object.keys(POSITION_ORDER).find(k =>
+    position.toLowerCase().startsWith(k.toLowerCase())
+  );
+  return key ? POSITION_ORDER[key] : 98;
+}
 
 function getPosition(position?: string) {
   if (!position) return { abbr: '—', color: '#475569', bg: 'rgba(71,85,105,0.15)' };
@@ -127,19 +137,21 @@ export default function SquadScreen() {
 
   const handleDeletePlayer = useCallback((player: Player, close: () => void) => {
     Alert.alert(
-      'Supprimer',
-      `Supprimer ${player.first_name} ${player.last_name} ?`,
+      'Retirer ce joueur ?',
+      `${player.first_name} ${player.last_name} sera marqué « Parti (quitte le club) » et retiré de l'effectif actif.\n\n` +
+      `Ne supprimez pas définitivement un joueur : cela ferait perdre ses données collectives (buts, présences, historique de matchs). ` +
+      `Le passer en « Parti » est la bonne pratique — il quitte l'effectif mais tout son historique est conservé.`,
       [
         { text: 'Annuler', style: 'cancel', onPress: close },
         {
-          text: 'Supprimer', style: 'destructive',
+          text: 'Marquer « Parti »', style: 'destructive',
           onPress: async () => {
             try {
               await deletePlayer(player.id);
               setPlayers(prev => prev.filter(p => p.id !== player.id));
               close();
             } catch (e) {
-              setError(e instanceof Error ? e.message : 'Erreur suppression');
+              setError(e instanceof Error ? e.message : 'Erreur');
             }
           },
         },
@@ -149,7 +161,7 @@ export default function SquadScreen() {
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortKey(key); setSortDir(key === 'name' ? 'asc' : 'desc'); }
+    else { setSortKey(key); setSortDir(key === 'name' || key === 'position' ? 'asc' : 'desc'); }
   };
 
   const sortedPlayers = useMemo(() => {
@@ -158,6 +170,7 @@ export default function SquadScreen() {
       const sB = stats[b.id] ?? { seances: 0, matches: 0, goals: 0 };
       let va: number | string, vb: number | string;
       switch (sortKey) {
+        case 'position': va = positionRank(a.position); vb = positionRank(b.position); break;
         case 'seances': va = sA.seances; vb = sB.seances; break;
         case 'matches': va = sA.matches; vb = sB.matches; break;
         case 'goals':   va = sA.goals;   vb = sB.goals;   break;
@@ -233,9 +246,11 @@ export default function SquadScreen() {
         <View style={styles.colNum}>
           <Text style={styles.headText}>N°</Text>
         </View>
-        <View style={styles.colPos}>
-          <Text style={styles.headText}>POS</Text>
-        </View>
+        <TouchableOpacity style={styles.colPos} onPress={() => handleSort('position')} activeOpacity={0.7}>
+          <Text style={[styles.headText, sortKey === 'position' && styles.headTextActive]}>
+            POS {sortKey === 'position' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+          </Text>
+        </TouchableOpacity>
 
         <TouchableOpacity style={styles.colName} onPress={() => handleSort('name')} activeOpacity={0.7}>
           <Text style={[styles.headText, sortKey === 'name' && styles.headTextActive]}>
@@ -275,7 +290,7 @@ export default function SquadScreen() {
               onPress={() => handleDeletePlayer(item, () => swipeable.close())}
               activeOpacity={0.8}
             >
-              <Text style={styles.deleteBtnText}>Supprimer</Text>
+              <Text style={styles.deleteBtnText}>Retirer</Text>
             </TouchableOpacity>
           );
 

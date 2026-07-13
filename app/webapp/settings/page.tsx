@@ -27,6 +27,41 @@ const ROLE_LABELS: Record<ClubMemberRole, string> = {
   viewer: 'Lecteur'
 };
 
+type WebMember = Record<string, unknown> & { email?: string };
+type WebDisplayMember =
+  | { kind: 'single'; member: WebMember }
+  | { kind: 'coach'; userId: string; email: string; teamIds: string[]; memberIds: string[] };
+
+/** Consolide les membres : une seule entrée par coach, regroupant toutes ses équipes. */
+function consolidateMembers(members: WebMember[]): WebDisplayMember[] {
+  const list: WebDisplayMember[] = [];
+  const coachIndex = new Map<string, number>();
+  for (const m of members) {
+    if (m.role === 'coach') {
+      const userId = String(m.user_id ?? '');
+      const idx = coachIndex.get(userId);
+      const teamId = m.team_id ? String(m.team_id) : null;
+      if (idx == null) {
+        list.push({
+          kind: 'coach',
+          userId,
+          email: (m.email as string) ?? '—',
+          teamIds: teamId ? [teamId] : [],
+          memberIds: [String(m.id)],
+        });
+        coachIndex.set(userId, list.length - 1);
+      } else {
+        const g = list[idx] as Extract<WebDisplayMember, { kind: 'coach' }>;
+        if (teamId && !g.teamIds.includes(teamId)) g.teamIds.push(teamId);
+        g.memberIds.push(String(m.id));
+      }
+    } else {
+      list.push({ kind: 'single', member: m });
+    }
+  }
+  return list;
+}
+
 export default function SettingsPage() {
   const { club, loading, error, refetch } = useUserClub();
   const [members, setMembers] = useState<(Record<string, unknown> & { email?: string })[]>([]);
@@ -45,6 +80,8 @@ export default function SettingsPage() {
   const [editMemberId, setEditMemberId] = useState<string | null>(null);
   const [editMemberRole, setEditMemberRole] = useState<ClubMemberRole>('viewer');
   const [editMemberTeamId, setEditMemberTeamId] = useState<string>('');
+  const [editCoachUserId, setEditCoachUserId] = useState<string | null>(null);
+  const [editCoachTeamIds, setEditCoachTeamIds] = useState<string[]>([]);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [deleteInput, setDeleteInput] = useState('');
@@ -201,6 +238,58 @@ export default function SettingsPage() {
       .update({ role: editMemberRole, team_id: editMemberTeamId || null })
       .eq('id', editMemberId);
     setEditMemberId(null);
+    fetchMembers();
+  };
+
+  const openEditCoach = (g: Extract<WebDisplayMember, { kind: 'coach' }>) => {
+    setEditCoachUserId(g.userId);
+    setEditCoachTeamIds(g.teamIds);
+  };
+
+  const toggleEditCoachTeam = (teamId: string) => {
+    setEditCoachTeamIds((prev) =>
+      prev.includes(teamId) ? prev.filter((t) => t !== teamId) : [...prev, teamId]
+    );
+  };
+
+  /** Réconcilie les équipes d'un coach : une ligne club_members par équipe. */
+  const handleUpdateCoachTeams = async () => {
+    if (!editCoachUserId || !club || !isAdmin) return;
+    const { data: existing } = await supabase
+      .from('club_members')
+      .select('id, team_id')
+      .eq('club_id', club.id)
+      .eq('user_id', editCoachUserId)
+      .eq('role', 'coach');
+    const rows = (existing ?? []) as { id: string; team_id: string | null }[];
+    const existingTeamIds = new Set(rows.map((r) => r.team_id).filter((t): t is string => !!t));
+    const target = new Set(editCoachTeamIds);
+    const toDelete = rows.filter((r) => !r.team_id || !target.has(r.team_id)).map((r) => r.id);
+    if (toDelete.length > 0) {
+      const { error } = await supabase.from('club_members').delete().in('id', toDelete);
+      if (error) { alert(error.message); return; }
+    }
+    const toInsert = editCoachTeamIds
+      .filter((tid) => !existingTeamIds.has(tid))
+      .map((tid) => ({ club_id: club.id, user_id: editCoachUserId, role: 'coach', team_id: tid }));
+    if (toInsert.length > 0) {
+      const { error } = await supabase.from('club_members').insert(toInsert);
+      if (error) { alert(error.message); return; }
+    }
+    setEditCoachUserId(null);
+    fetchMembers();
+  };
+
+  const handleRemoveCoach = async (userId: string, email: string) => {
+    if (!club || !isAdmin) return;
+    if (!confirm(`Retirer ${email} du club ? Il perdra l'accès à toutes ses équipes.`)) return;
+    const { error } = await supabase
+      .from('club_members')
+      .delete()
+      .eq('club_id', club.id)
+      .eq('user_id', userId)
+      .eq('role', 'coach');
+    if (error) { alert(error.message); return; }
     fetchMembers();
   };
 
@@ -537,71 +626,134 @@ export default function SettingsPage() {
             </div>
             <div className="fm-card-body" style={{ padding: 0 }}>
               <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
-                {members.map((m, i) => (
-                  <li
-                    key={m.id as string}
-                    style={{
+                {(() => {
+                  const display = consolidateMembers(members);
+                  return display.map((entry, i) => {
+                    const isLast = i === display.length - 1;
+                    const liStyle = {
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                       padding: '12px 20px',
-                      borderBottom: i < members.length - 1 ? '1px solid #EEF0F5' : 'none',
-                    }}
-                  >
-                    <div>
-                      <span style={{ fontWeight: 600, fontSize: '0.875rem', color: '#0F172A' }}>{m.email as string || '—'}</span>
-                      <span style={{ fontSize: '0.8125rem', color: '#6B7280', marginLeft: 8 }}>— {ROLE_LABELS[(m.role as ClubMemberRole) || 'viewer']}</span>
-                    </div>
-                    {editMemberId === m.id ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <select
-                          value={editMemberRole}
-                          onChange={(e) => setEditMemberRole(e.target.value as ClubMemberRole)}
-                          className="fm-select"
-                          style={{ width: 140, padding: '5px 28px 5px 10px', fontSize: '0.8125rem' }}
-                        >
-                          <option value="admin">Administrateur</option>
-                          <option value="coach">Entraîneur</option>
-                          <option value="viewer">Lecteur</option>
-                        </select>
-                        <select
-                          value={editMemberTeamId}
-                          onChange={(e) => setEditMemberTeamId(e.target.value)}
-                          className="fm-select"
-                          style={{ width: 120, padding: '5px 28px 5px 10px', fontSize: '0.8125rem' }}
-                        >
-                          <option value="">Toutes</option>
-                          {teams.map((t) => (
-                            <option key={t.id} value={t.id}>{t.name}</option>
-                          ))}
-                        </select>
-                        <button onClick={handleUpdateMember} className="fm-btn fm-btn-blue fm-btn-sm">OK</button>
-                        <button onClick={() => setEditMemberId(null)} className="fm-btn fm-btn-ghost fm-btn-sm">Annuler</button>
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <button
-                          onClick={() => {
-                            setEditMemberId(m.id as string);
-                            setEditMemberRole((m.role as ClubMemberRole) || 'viewer');
-                            setEditMemberTeamId((m.team_id as string) || '');
-                          }}
-                          className="fm-btn fm-btn-ghost fm-btn-sm"
-                          title="Modifier le rôle"
-                        >
-                          <Shield size={14} />
-                        </button>
-                        {members.length > 1 && (
-                          <button
-                            onClick={() => setDeleteConfirm(m.id as string)}
-                            className="fm-btn fm-btn-ghost fm-btn-sm"
-                            style={{ color: '#DC2626' }}
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                      borderBottom: !isLast ? '1px solid #EEF0F5' : 'none',
+                    } as const;
+
+                    if (entry.kind === 'coach') {
+                      const teamNames = entry.teamIds.length > 0
+                        ? entry.teamIds.map((id) => teams.find((t) => t.id === id)?.name ?? '?').join(', ')
+                        : 'Aucune équipe';
+                      const editing = editCoachUserId === entry.userId;
+                      return (
+                        <li key={`coach-${entry.userId}`} style={liStyle}>
+                          <div>
+                            <span style={{ fontWeight: 600, fontSize: '0.875rem', color: '#0F172A' }}>{entry.email}</span>
+                            <span style={{ fontSize: '0.8125rem', color: '#6B7280', marginLeft: 8 }}>— {ROLE_LABELS.coach}</span>
+                            {!editing && (
+                              <div style={{ fontSize: '0.75rem', color: '#6B7280', marginTop: 2 }}>{teamNames}</div>
+                            )}
+                          </div>
+                          {editing ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: '70%' }}>
+                              {teams.map((t) => {
+                                const sel = editCoachTeamIds.includes(t.id);
+                                return (
+                                  <button
+                                    key={t.id}
+                                    type="button"
+                                    onClick={() => toggleEditCoachTeam(t.id)}
+                                    className={`fm-btn fm-btn-sm ${sel ? 'fm-btn-blue' : 'fm-btn-ghost'}`}
+                                    style={{ fontSize: '0.75rem' }}
+                                  >
+                                    {sel ? '✓ ' : ''}{t.name}
+                                  </button>
+                                );
+                              })}
+                              <button onClick={handleUpdateCoachTeams} className="fm-btn fm-btn-blue fm-btn-sm">OK</button>
+                              <button onClick={() => setEditCoachUserId(null)} className="fm-btn fm-btn-ghost fm-btn-sm">Annuler</button>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <button
+                                onClick={() => openEditCoach(entry)}
+                                className="fm-btn fm-btn-ghost fm-btn-sm"
+                                title="Modifier les équipes"
+                              >
+                                <Shield size={14} />
+                              </button>
+                              {members.length > 1 && (
+                                <button
+                                  onClick={() => handleRemoveCoach(entry.userId, entry.email)}
+                                  className="fm-btn fm-btn-ghost fm-btn-sm"
+                                  style={{ color: '#DC2626' }}
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </li>
+                      );
+                    }
+
+                    const m = entry.member;
+                    return (
+                      <li key={m.id as string} style={liStyle}>
+                        <div>
+                          <span style={{ fontWeight: 600, fontSize: '0.875rem', color: '#0F172A' }}>{m.email as string || '—'}</span>
+                          <span style={{ fontSize: '0.8125rem', color: '#6B7280', marginLeft: 8 }}>— {ROLE_LABELS[(m.role as ClubMemberRole) || 'viewer']}</span>
+                        </div>
+                        {editMemberId === m.id ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <select
+                              value={editMemberRole}
+                              onChange={(e) => setEditMemberRole(e.target.value as ClubMemberRole)}
+                              className="fm-select"
+                              style={{ width: 140, padding: '5px 28px 5px 10px', fontSize: '0.8125rem' }}
+                            >
+                              <option value="admin">Administrateur</option>
+                              <option value="coach">Entraîneur</option>
+                              <option value="viewer">Lecteur</option>
+                            </select>
+                            <select
+                              value={editMemberTeamId}
+                              onChange={(e) => setEditMemberTeamId(e.target.value)}
+                              className="fm-select"
+                              style={{ width: 120, padding: '5px 28px 5px 10px', fontSize: '0.8125rem' }}
+                            >
+                              <option value="">Toutes</option>
+                              {teams.map((t) => (
+                                <option key={t.id} value={t.id}>{t.name}</option>
+                              ))}
+                            </select>
+                            <button onClick={handleUpdateMember} className="fm-btn fm-btn-blue fm-btn-sm">OK</button>
+                            <button onClick={() => setEditMemberId(null)} className="fm-btn fm-btn-ghost fm-btn-sm">Annuler</button>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            <button
+                              onClick={() => {
+                                setEditMemberId(m.id as string);
+                                setEditMemberRole((m.role as ClubMemberRole) || 'viewer');
+                                setEditMemberTeamId((m.team_id as string) || '');
+                              }}
+                              className="fm-btn fm-btn-ghost fm-btn-sm"
+                              title="Modifier le rôle"
+                            >
+                              <Shield size={14} />
+                            </button>
+                            {members.length > 1 && (
+                              <button
+                                onClick={() => setDeleteConfirm(m.id as string)}
+                                className="fm-btn fm-btn-ghost fm-btn-sm"
+                                style={{ color: '#DC2626' }}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </div>
                         )}
-                      </div>
-                    )}
-                  </li>
-                ))}
+                      </li>
+                    );
+                  });
+                })()}
               </ul>
             </div>
           </div>

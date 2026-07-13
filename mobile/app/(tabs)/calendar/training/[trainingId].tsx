@@ -9,6 +9,7 @@ import {
   Alert,
   Modal,
   Pressable,
+  Switch,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { format, parseISO } from 'date-fns';
@@ -32,6 +33,7 @@ export default function TrainingDetailScreen() {
   const [training, setTraining] = useState<Training | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [attendance, setAttendance] = useState<Record<string, PlayerStatus>>({});
+  const [convoked, setConvoked] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +65,16 @@ export default function TrainingDetailScreen() {
       setTraining(t);
       setPlayers(pl);
       setAttendance(t.attendance ?? {});
+      // Initialise la convocation : si des convoqués sont enregistrés, on les respecte ;
+      // sinon (séance historique sans liste), tout le groupe est convoqué par défaut.
+      const savedConvoked = t.convoked_players?.map((x) => x.id) ?? [];
+      const conv: Record<string, boolean> = {};
+      if (savedConvoked.length > 0) {
+        savedConvoked.forEach((id) => { conv[id] = true; });
+      } else {
+        pl.forEach((p) => { conv[p.id] = true; });
+      }
+      setConvoked(conv);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');
     } finally {
@@ -111,13 +123,30 @@ export default function TrainingDetailScreen() {
     setAttendance((prev) => ({ ...prev, [playerId]: status }));
   };
 
+  const toggleConvoked = (playerId: string) => {
+    setConvoked((prev) => ({ ...prev, [playerId]: !prev[playerId] }));
+  };
+
+  const convokeAll = () => {
+    const next: Record<string, boolean> = {};
+    players.forEach((p) => { next[p.id] = true; });
+    setConvoked(next);
+  };
+
+  const clearAllConvoked = () => setConvoked({});
+
   const saveAttendance = async () => {
     if (!trainingId) return;
     setSaving(true);
     try {
-      const convokedPlayerIds = Object.keys(attendance);
-      await updateTrainingAttendance(trainingId, attendance, convokedPlayerIds);
-      setTraining((t) => (t ? { ...t, attendance, convoked_players: convokedPlayerIds.map((id) => ({ id })) } : null));
+      const squadConvokedIds = players.filter((p) => convoked[p.id]).map((p) => p.id);
+      const convokedPlayerIds = [...squadConvokedIds, ...invitedPlayerIds];
+      // On ne conserve les statuts que pour les joueurs effectivement convoqués.
+      const cleanedAttendance: Record<string, PlayerStatus> = {};
+      convokedPlayerIds.forEach((id) => { if (attendance[id]) cleanedAttendance[id] = attendance[id]; });
+      await updateTrainingAttendance(trainingId, cleanedAttendance, convokedPlayerIds);
+      setAttendance(cleanedAttendance);
+      setTraining((t) => (t ? { ...t, attendance: cleanedAttendance, convoked_players: convokedPlayerIds.map((id) => ({ id })) } : null));
       Alert.alert('Enregistré', 'Les présences ont été mises à jour.');
     } catch (e) {
       Alert.alert('Erreur', e instanceof Error ? e.message : 'Impossible d\'enregistrer');
@@ -147,9 +176,8 @@ export default function TrainingDetailScreen() {
 
   const isGoalkeeper = (p: Player) =>
     p.position?.toLowerCase().includes('gardien') ?? false;
-  const convokedIds = training.convoked_players?.map((x) => x.id) ?? [];
-  const listPlayers = convokedIds.length > 0 ? players.filter((p) => convokedIds.includes(p.id)) : players;
-  const filteredPlayers = showGoalkeepers ? listPlayers : listPlayers.filter((p) => !isGoalkeeper(p));
+  // On affiche tout le groupe : la convocation se gère via l'interrupteur par joueur.
+  const squadPlayers = showGoalkeepers ? players : players.filter((p) => !isGoalkeeper(p));
 
   const handleSendQuestionnaires = async () => {
     if (!trainingId) return;
@@ -168,16 +196,17 @@ export default function TrainingDetailScreen() {
     }
   };
 
-  // Stats: équipe active (filteredPlayers) + joueurs d'autres équipes (dans attendance, hors effectif)
-  const squadPresentOnly = filteredPlayers.filter((p) => attendance[p.id] === 'present').length;
-  const squadLate = filteredPlayers.filter((p) => attendance[p.id] === 'late').length;
+  // Stats: seuls les convoqués comptent (groupe convoqué + joueurs d'autres équipes)
+  const convokedSquad = squadPlayers.filter((p) => convoked[p.id]);
+  const squadPresentOnly = convokedSquad.filter((p) => attendance[p.id] === 'present').length;
+  const squadLate = convokedSquad.filter((p) => attendance[p.id] === 'late').length;
   const invitedPresentOnly = invitedPlayerIds.filter((id) => attendance[id] === 'present').length;
   const invitedLate = invitedPlayerIds.filter((id) => attendance[id] === 'late').length;
   const presentOnlyCount = squadPresentOnly + invitedPresentOnly;
   const lateCount = squadLate + invitedLate;
   const presentCount = presentOnlyCount + lateCount;
   const absentCount =
-    filteredPlayers.filter((p) => attendance[p.id] === 'absent' || attendance[p.id] === 'injured')
+    convokedSquad.filter((p) => attendance[p.id] === 'absent' || attendance[p.id] === 'injured')
       .length +
     invitedPlayerIds.filter((id) => attendance[id] === 'absent' || attendance[id] === 'injured')
       .length;
@@ -236,47 +265,71 @@ export default function TrainingDetailScreen() {
 
       <Text style={styles.sectionTitle}>Présences</Text>
 
-      {filteredPlayers.length === 0 ? (
+      {squadPlayers.length === 0 ? (
         <Text style={styles.emptyText}>
           {players.length === 0 ? 'Aucun joueur dans cette équipe' : 'Aucun joueur de champ (gardiens masqués).'}
         </Text>
       ) : (
         <>
-          {filteredPlayers.map((p) => (
+          <Text style={styles.convocHint}>
+            Activez l&apos;interrupteur pour convoquer un joueur, désactivez-le pour le retirer.
+          </Text>
+          <View style={styles.convocActions}>
+            <TouchableOpacity style={styles.convocAllBtn} onPress={convokeAll} activeOpacity={0.8}>
+              <Text style={styles.convocAllBtnText}>Convoquer tous</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.convocClearBtn} onPress={clearAllConvoked} activeOpacity={0.8}>
+              <Text style={styles.convocClearBtnText}>Tout retirer</Text>
+            </TouchableOpacity>
+          </View>
+          {squadPlayers.map((p) => {
+            const isConv = !!convoked[p.id];
+            return (
             <View key={p.id} style={styles.playerRow}>
-              <View style={styles.playerInfo}>
-                {p.number != null && (
-                  <View style={styles.numberBadge}>
-                    <Text style={styles.numberText}>{p.number}</Text>
-                  </View>
-                )}
-                <Text style={styles.playerName}>
-                  {p.first_name} {p.last_name}
-                </Text>
+              <View style={styles.playerRowHeader}>
+                <View style={styles.playerInfo}>
+                  {p.number != null && (
+                    <View style={[styles.numberBadge, !isConv && styles.numberBadgeInactive]}>
+                      <Text style={styles.numberText}>{p.number}</Text>
+                    </View>
+                  )}
+                  <Text style={[styles.playerName, !isConv && styles.playerNameInactive]}>
+                    {p.first_name} {p.last_name}
+                  </Text>
+                </View>
+                <Switch
+                  value={isConv}
+                  onValueChange={() => toggleConvoked(p.id)}
+                  trackColor={{ false: '#e5e7eb', true: '#22c55e' }}
+                  thumbColor="#fff"
+                />
               </View>
-              <View style={styles.statusRow}>
-                {STATUS_OPTIONS.map((opt) => (
-                  <TouchableOpacity
-                    key={opt.value}
-                    style={[
-                      styles.statusBtn,
-                      attendance[p.id] === opt.value && styles.statusBtnActive,
-                    ]}
-                    onPress={() => setPlayerStatus(p.id, opt.value)}
-                  >
-                    <Text
+              {isConv && (
+                <View style={styles.statusRow}>
+                  {STATUS_OPTIONS.map((opt) => (
+                    <TouchableOpacity
+                      key={opt.value}
                       style={[
-                        styles.statusBtnText,
-                        attendance[p.id] === opt.value && styles.statusBtnTextActive,
+                        styles.statusBtn,
+                        attendance[p.id] === opt.value && styles.statusBtnActive,
                       ]}
+                      onPress={() => setPlayerStatus(p.id, opt.value)}
                     >
-                      {opt.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+                      <Text
+                        style={[
+                          styles.statusBtnText,
+                          attendance[p.id] === opt.value && styles.statusBtnTextActive,
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
             </View>
-          ))}
+            );
+          })}
           {otherTeamPlayersForForm.length > 0 && (
             <TouchableOpacity
               style={styles.addOtherTeamsBtn}
@@ -505,7 +558,14 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 8,
   },
-  playerInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  playerRowHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  playerInfo: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  convocHint: { fontSize: 12, color: '#6b7280', marginBottom: 10 },
+  convocActions: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  convocAllBtn: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: '#16a34a' },
+  convocAllBtnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  convocClearBtn: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: '#e5e7eb' },
+  convocClearBtnText: { color: '#374151', fontWeight: '600', fontSize: 13 },
   numberBadge: {
     width: 28,
     height: 28,
@@ -515,9 +575,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 10,
   },
+  numberBadgeInactive: { backgroundColor: '#cbd5e1' },
   numberText: { color: '#fff', fontWeight: '700', fontSize: 12 },
   playerName: { fontSize: 15, fontWeight: '600', color: '#111' },
-  statusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  playerNameInactive: { color: '#9ca3af' },
+  statusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
   statusBtn: {
     paddingVertical: 6,
     paddingHorizontal: 10,

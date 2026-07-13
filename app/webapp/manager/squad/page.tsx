@@ -174,6 +174,16 @@ const POSITION_MAP: Record<string, { abbr: string; color: string; bg: string }> 
   Pivot:     { abbr: 'PIV', color: '#8B5CF6', bg: 'rgba(139,92,246,0.10)'  },
 };
 
+// Ordre tactique des postes pour le tri (Gardien → Meneur → Ailier → Pivot).
+const POSITION_ORDER: Record<string, number> = { Gardien: 0, Meneur: 1, Ailier: 2, Pivot: 3 };
+function positionRank(position?: string): number {
+  if (!position) return 99;
+  const key = Object.keys(POSITION_ORDER).find(k =>
+    position.toLowerCase().startsWith(k.toLowerCase())
+  );
+  return key ? POSITION_ORDER[key] : 98;
+}
+
 function getPosition(position?: string) {
   if (!position) return { abbr: '—', color: T.textMuted, bg: '#F1F5F9' };
   const key = Object.keys(POSITION_MAP).find(k =>
@@ -207,7 +217,7 @@ const MATCH_FILTERS: { label: string; value: MatchTypeFilter }[] = [
 ];
 
 // ─── Sort ─────────────────────────────────────────────────────────────────────
-type SortKey = 'name' | 'seances' | 'matches' | 'goals';
+type SortKey = 'name' | 'position' | 'seances' | 'matches' | 'goals';
 type SortDir = 'asc' | 'desc';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
@@ -395,7 +405,7 @@ export default function SquadPage() {
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortKey(key); setSortDir(key === 'name' ? 'asc' : 'desc'); }
+    else { setSortKey(key); setSortDir(key === 'name' || key === 'position' ? 'asc' : 'desc'); }
   };
 
   // ── Filtering + sorting pipeline ────────────────────────────────────────────
@@ -413,6 +423,7 @@ export default function SquadPage() {
     list.sort((a, b) => {
       let va: number | string, vb: number | string;
       switch (sortKey) {
+        case 'position': va = positionRank(a.position); vb = positionRank(b.position); break;
         case 'seances': va = a.training_attendance ?? 0; vb = b.training_attendance ?? 0; break;
         case 'matches': va = a.matches_played ?? 0;      vb = b.matches_played ?? 0;      break;
         case 'goals':   va = a.goals ?? 0;               vb = b.goals ?? 0;               break;
@@ -528,11 +539,17 @@ export default function SquadPage() {
   };
 
   const handleDelete = async (playerId: string) => {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer ce joueur ?')) return;
+    const player = players.find(p => p.id === playerId);
+    const name = player ? `${player.first_name} ${player.last_name}` : 'ce joueur';
+    if (!confirm(
+      `Retirer ${name} de l'effectif ?\n\n` +
+      `${name} sera marqué « Parti (quitte le club) » : il quitte l'effectif actif mais son historique (matchs, buts, présences) est conservé.\n\n` +
+      `Ne supprimez jamais définitivement un joueur : cela ferait perdre les données collectives des matchs. Le statut « Parti » est la bonne pratique.`
+    )) return;
     try {
       setError(null);
       await playersService.deletePlayer(playerId);
-      setSuccess('Joueur supprimé avec succès');
+      setSuccess(`${name} marqué « Parti »`);
       setPlayers(players.filter(p => p.id !== playerId));
     } catch (err: any) {
       setError(err?.message || 'Erreur lors de la suppression');
@@ -648,7 +665,7 @@ export default function SquadPage() {
         {/* Sort by (for card view) */}
         {viewMode === 'cards' && (
           <div style={{ display: 'flex', gap: 4 }}>
-            {([['name', 'Nom'], ['goals', 'Buts'], ['matches', 'Matchs'], ['seances', 'Séances']] as [SortKey, string][]).map(([key, label]) => (
+            {([['name', 'Nom'], ['position', 'Poste'], ['goals', 'Buts'], ['matches', 'Matchs'], ['seances', 'Séances']] as [SortKey, string][]).map(([key, label]) => (
               <button
                 key={key}
                 onClick={() => handleSort(key)}
@@ -759,7 +776,11 @@ export default function SquadPage() {
               <thead>
                 <tr style={{ backgroundColor: '#F8FAFC', borderBottom: `1px solid ${T.border}` }}>
                   <th style={{ padding: '10px 12px 10px 20px', textAlign: 'center', width: 44, fontSize: 11, fontWeight: 700, color: T.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>N°</th>
-                  <th style={{ padding: '10px 8px', width: 64, fontSize: 11, fontWeight: 700, color: T.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>POS</th>
+                  <th style={{ padding: '10px 8px', width: 64, cursor: 'pointer', userSelect: 'none' }} onClick={() => handleSort('position')}>
+                    <div style={{ display: 'flex', alignItems: 'center', fontSize: 11, fontWeight: 700, color: sortKey === 'position' ? T.accent : T.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                      POS <SortIcon col="position" sortKey={sortKey} sortDir={sortDir} />
+                    </div>
+                  </th>
                   <th style={{ padding: '10px 8px', textAlign: 'left', cursor: 'pointer', userSelect: 'none' }} onClick={() => handleSort('name')}>
                     <div style={{ display: 'flex', alignItems: 'center', fontSize: 11, fontWeight: 700, color: sortKey === 'name' ? T.accent : T.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
                       NOM <SortIcon col="name" sortKey={sortKey} sortDir={sortDir} />

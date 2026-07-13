@@ -1893,9 +1893,27 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
     }
   };
 
+  // Met un remplaçant directement sur le terrain (sans substitution).
+  const addPlayerToField = (playerId: string) => {
+    setMatchData(prev => ({
+      ...prev,
+      players: prev.players.map(p =>
+        p.id === playerId
+          ? { ...p, isOnField: true, isStarter: true, currentSequenceTime: 0 }
+          : p
+      ),
+    }));
+  };
+
   const handlePlayerSelection = (playerId: string, playerIsOnField: boolean) => {
+    const onFieldCount = matchData.players.filter(p => p.isOnField).length;
     if (!selectedPlayerForChange) {
-      // Premier joueur sélectionné
+      // Terrain incomplet : un remplaçant tapé rejoint directement le terrain.
+      if (!playerIsOnField && onFieldCount < 5) {
+        addPlayerToField(playerId);
+        return;
+      }
+      // Premier joueur sélectionné (pour substitution / échange)
       setSelectedPlayerForChange(playerId);
       setChangeType(playerIsOnField ? 'substitution' : 'substitution');
     } else if (selectedPlayerForChange === playerId) {
@@ -2449,13 +2467,23 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                   </div>
                 )}
               </div>
-              <button
-                onClick={() => setCurrentStep('match')}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-              >
-                <ArrowLeft className="h-5 w-5" />
-                Retour aux matchs
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setActiveView('recording'); setCurrentStep('recording'); }}
+                  className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                  title="Basculer vers la saisie pour compléter ou corriger les données"
+                >
+                  <Play className="h-5 w-5" />
+                  Saisie
+                </button>
+                <button
+                  onClick={() => setCurrentStep('match')}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                  Retour aux matchs
+                </button>
+              </div>
             </div>
 
             {/* Score final */}
@@ -3048,10 +3076,10 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
               </div>
             ) : (
               <>
-                {/* Ligne 1: Titulaires + Terrain */}
-                <div className="flex flex-col lg:flex-row gap-6 mb-6">
-                  {/* Colonne gauche : Titulaires */}
-                  <div className="w-full min-w-0" style={{ flexBasis: '80%', flexGrow: 0, flexShrink: 0 }}>
+                {/* Ligne 1: Titulaires (pleine largeur) */}
+                <div className="mb-6">
+                  {/* Titulaires : occupent toute la largeur disponible */}
+                  <div className="w-full min-w-0">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
                         <div className="w-3 h-3 bg-green-500 rounded-full"></div>
@@ -3245,7 +3273,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                     <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
                     Remplaçants
                   </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
+                  <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
                     {matchData.players
                       .filter(player => !player.isOnField)
                       .sort((a, b) => {

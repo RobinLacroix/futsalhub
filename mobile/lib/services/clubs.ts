@@ -167,6 +167,38 @@ export async function updateClubMemberTeam(memberId: string, teamId: string | nu
   if (error) throw error;
 }
 
+/**
+ * Définit l'ensemble des équipes gérées par un coach (une ligne club_members par équipe).
+ * Réconcilie l'existant : crée les lignes manquantes, supprime celles retirées.
+ */
+export async function setCoachTeams(clubId: string, userId: string, teamIds: string[]): Promise<void> {
+  const { data: existing, error: readErr } = await supabase
+    .from('club_members')
+    .select('id, team_id')
+    .eq('club_id', clubId)
+    .eq('user_id', userId)
+    .eq('role', 'coach');
+  if (readErr) throw readErr;
+
+  const rows = (existing ?? []) as { id: string; team_id: string | null }[];
+  const existingTeamIds = new Set(rows.map((r) => r.team_id).filter((t): t is string => !!t));
+  const target = new Set(teamIds);
+
+  const toDelete = rows.filter((r) => !r.team_id || !target.has(r.team_id)).map((r) => r.id);
+  if (toDelete.length > 0) {
+    const { error } = await supabase.from('club_members').delete().in('id', toDelete);
+    if (error) throw error;
+  }
+
+  const toInsert = teamIds
+    .filter((tid) => !existingTeamIds.has(tid))
+    .map((tid) => ({ club_id: clubId, user_id: userId, role: 'coach', team_id: tid }));
+  if (toInsert.length > 0) {
+    const { error } = await supabase.from('club_members').insert(toInsert);
+    if (error) throw error;
+  }
+}
+
 export async function createClubInvitation(
   clubId: string,
   email: string,

@@ -952,15 +952,9 @@ export default function CalendarPage() {
         });
       }
 
-      // S'assurer que tous les joueurs ont un statut
-      players.forEach(player => {
-        if (!playersData[player.id]) {
-          playersData[player.id] = {
-            id: player.id,
-            status: 'present' // Par défaut
-          };
-        }
-      });
+      // Ne PAS convoquer automatiquement tous les joueurs : on ne garde que ceux
+      // réellement convoqués (attendance / convoked_players de la séance). Les autres
+      // restent non convoqués et affichent le bouton « Convoquer ».
 
       console.log('Données des joueurs préparées:', playersData);
 
@@ -2723,7 +2717,34 @@ export default function CalendarPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-gray-800 mb-1.5">Statut des joueurs</label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-medium text-gray-800">Statut des joueurs</label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = { ...(getTrainingValues('players') || {}) };
+                          players.forEach((p) => { if (!next[p.id]) next[p.id] = { id: p.id, status: 'present' }; });
+                          setTrainingValue('players', next, { shouldDirty: true });
+                        }}
+                        className="text-xs px-2.5 py-1 rounded bg-[#16a34a] text-white hover:bg-[#15803d]"
+                      >
+                        Convoquer tous
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const cur = getTrainingValues('players') || {};
+                          const squadIds = new Set(players.map((p) => p.id));
+                          const next = Object.fromEntries(Object.entries(cur).filter(([id]) => !squadIds.has(id)));
+                          setTrainingValue('players', next, { shouldDirty: true });
+                        }}
+                        className="text-xs px-2.5 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300"
+                      >
+                        Tout retirer
+                      </button>
+                    </div>
+                  </div>
                   <div className="border rounded-md overflow-hidden">
                     <div className="max-h-[200px] overflow-y-auto divide-y">
                       {players.map(player => {
