@@ -158,6 +158,15 @@ export async function removeClubMember(memberId: string): Promise<void> {
   if (error) throw error;
 }
 
+/** Réaffecte un membre (coach) à une équipe. teamId null = aucune équipe. */
+export async function updateClubMemberTeam(memberId: string, teamId: string | null): Promise<void> {
+  const { error } = await supabase
+    .from('club_members')
+    .update({ team_id: teamId })
+    .eq('id', memberId);
+  if (error) throw error;
+}
+
 export async function createClubInvitation(
   clubId: string,
   email: string,

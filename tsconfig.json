@@ -40,6 +40,5 @@
     "mobile",
     "supabase/functions",
     ".expo"
-  ],
-  "extends": "expo/tsconfig.base"
+  ]
 }

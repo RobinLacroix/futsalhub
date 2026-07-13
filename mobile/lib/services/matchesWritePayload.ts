@@ -28,6 +28,8 @@ export async function buildRemoteMatchUpdatePayload(
   if (input.date !== undefined) updateData.date = input.date;
   if (input.score_team !== undefined) updateData.score_team = input.score_team;
   if (input.score_opponent !== undefined) updateData.score_opponent = input.score_opponent;
+  if (input.fouls_team !== undefined) updateData.fouls_team = input.fouls_team;
+  if (input.fouls_opponent !== undefined) updateData.fouls_opponent = input.fouls_opponent;
   if (input.goals_by_type !== undefined) updateData.goals_by_type = input.goals_by_type;
   if (input.conceded_by_type !== undefined) updateData.conceded_by_type = input.conceded_by_type;
 
@@ -60,6 +62,8 @@ export function applyUpdateMatchLocal(base: Match, input: UpdateMatchInput): Mat
   if (input.date !== undefined) next.date = input.date;
   if (input.score_team !== undefined) next.score_team = input.score_team;
   if (input.score_opponent !== undefined) next.score_opponent = input.score_opponent;
+  if (input.fouls_team !== undefined) next.fouls_team = input.fouls_team;
+  if (input.fouls_opponent !== undefined) next.fouls_opponent = input.fouls_opponent;
   if (input.goals_by_type !== undefined) next.goals_by_type = input.goals_by_type;
   if (input.conceded_by_type !== undefined) next.conceded_by_type = input.conceded_by_type;
 

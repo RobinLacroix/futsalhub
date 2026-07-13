@@ -9,6 +9,8 @@ export interface UpdateMatchInput {
   convoquedPlayerIds?: string[];
   score_team?: number;
   score_opponent?: number;
+  fouls_team?: number;
+  fouls_opponent?: number;
   playerStats?: Record<string, { goals: number; yellow_cards: number; red_cards: number; time_played?: number }>;
   goals_by_type?: GoalsByType;
   conceded_by_type?: GoalsByType;

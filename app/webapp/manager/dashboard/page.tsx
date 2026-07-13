@@ -732,7 +732,6 @@ export default function DashboardPage() {
                       const vb = (b as any)[playerSort.col] ?? 0;
                       return dir * (va - vb);
                     })
-                    .slice(0, 12)
                     .map((p, i) => {
                       const att = attendanceStats.find((a) => a.player_id === p.id);
                       return (

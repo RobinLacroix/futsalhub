@@ -497,10 +497,22 @@ export function AnalyticsView() {
           const v = key === 'totalShots' ? p.shot + p.shot_on_target : (p as any)[key] ?? 0;
           return v > 0;
         });
+    // Efficacité au tir : goals / (shot + shot_on_target + goals) × 100
+    const shooterEff = [...playerStatsList]
+      .map(p => {
+        const totalShots = p.shot + p.shot_on_target + p.goals;
+        const eff = totalShots > 0 ? Math.round((p.goals / totalShots) * 100) : 0;
+        return { ...p, shotEff: eff, totalShotsAll: totalShots };
+      })
+      .filter(p => p.totalShotsAll >= 3)   // au moins 3 tirs pour être pertinent
+      .sort((a, b) => b.shotEff - a.shotEff)
+      .slice(0, 3);
     return {
       scorers:    topN('goals'),
+      assists:    topN('assist'),
       recoveries: topN('recovery'),
       plusMinus:  topN('plusMinusGoals'),
+      shooterEff,
     };
   }, [playerStatsList]);
 
@@ -768,6 +780,12 @@ export function AnalyticsView() {
                         title="Buteurs" icon="football" color="#16a34a"
                         items={tops.scorers.map(p => ({ name: abbrevName(p.playerName), value: String(p.goals) }))}
                       />
+                      {tops.assists.length > 0 && (
+                        <TopList
+                          title="Passes déc." icon="share-social" color="#0ea5e9"
+                          items={tops.assists.map(p => ({ name: abbrevName(p.playerName), value: String(p.assist) }))}
+                        />
+                      )}
                       <TopList
                         title="Récupérations" icon="refresh" color="#2563eb"
                         items={tops.recoveries.map(p => ({ name: abbrevName(p.playerName), value: String(p.recovery) }))}
@@ -779,6 +797,17 @@ export function AnalyticsView() {
                           value: p.plusMinusGoals > 0 ? `+${p.plusMinusGoals}` : String(p.plusMinusGoals),
                         }))}
                       />
+                      {tops.shooterEff.length > 0 && (
+                        <TopList
+                          title="Efficacité au tir" icon="locate" color="#f59e0b"
+                          items={tops.shooterEff.map(p => ({
+                            name: abbrevName(p.playerName),
+                            value: `${p.shotEff}%`,
+                            sub: `${p.goals}B/${p.totalShotsAll}T`,
+                            valueColor: p.shotEff >= 40 ? '#16a34a' : p.shotEff >= 20 ? '#d97706' : '#dc2626',
+                          }))}
+                        />
+                      )}
                     </View>
                   </>
                 )}
@@ -924,7 +953,7 @@ function TopList({
   title: string;
   icon: keyof typeof Ionicons.glyphMap;
   color: string;
-  items: { name: string; value: string }[];
+  items: { name: string; value: string; sub?: string; valueColor?: string }[];
 }) {
   const RANK_COLORS = ['#f59e0b', '#94a3b8', '#b45309'];
   return (
@@ -942,7 +971,8 @@ function TopList({
           <View key={i} style={[ss.topRow, i === 0 && ss.topRowFirst]}>
             <Text style={[ss.topRank, { color: RANK_COLORS[i] ?? '#94a3b8' }]}>{i + 1}</Text>
             <Text style={ss.topName} numberOfLines={1}>{item.name}</Text>
-            <Text style={[ss.topValue, { color }]}>{item.value}</Text>
+            {item.sub ? <Text style={ss.topSub} numberOfLines={1}>{item.sub}</Text> : null}
+            <Text style={[ss.topValue, { color: item.valueColor ?? color }]}>{item.value}</Text>
           </View>
         ))
       )}
@@ -1164,10 +1194,6 @@ function StatsTable({
                 case 'plusMinusGoals':
                   content   = row.plusMinusGoals > 0 ? `+${row.plusMinusGoals}` : String(row.plusMinusGoals);
                   cellColor = row.plusMinusGoals > 0 ? '#16a34a' : row.plusMinusGoals < 0 ? '#dc2626' : undefined;
-                  break;
-                case 'plusMinusShots':
-                  content   = row.plusMinusShots > 0 ? `+${row.plusMinusShots}` : String(row.plusMinusShots);
-                  cellColor = row.plusMinusShots > 0 ? '#16a34a' : row.plusMinusShots < 0 ? '#dc2626' : undefined;
                   break;
                 case 'goals':
                   content   = String(row.goals);
@@ -1435,6 +1461,7 @@ const ss = StyleSheet.create({
   topRowFirst:{ borderTopWidth: 0 },
   topRank:    { fontSize: 11, fontWeight: '800', width: 14, textAlign: 'center' },
   topName:    { flex: 1, fontSize: 12, color: '#334155', fontWeight: '500' },
+  topSub:     { fontSize: 10, color: '#94a3b8', fontWeight: '600', marginRight: 6 },
   topValue:   { fontSize: 14, fontWeight: '800' },
 
   // Stats table — full width, no horizontal scroll

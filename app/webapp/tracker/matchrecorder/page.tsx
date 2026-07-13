@@ -8,7 +8,6 @@ import { useActiveTeam } from '../../hooks/useActiveTeam';
 import { 
   Play, 
   Pause, 
-  Download,
   Users,
   Target,
   Crosshair,
@@ -34,117 +33,15 @@ import {
   FileText
 } from 'lucide-react';
 
-interface Player {
-  id: string;
-  name: string;
-  number: number;
-  position: string;
-  isStarter: boolean;
-  isOnField: boolean;
-  totalTime: number;
-  currentSequenceTime: number;
-  sequenceTimeLimit: number;
-  yellowCards: number;
-  redCards: number;
-  stats: {
-    shotsOnTarget: number;
-    shotsOffTarget: number;
-    goals: number;
-    ballLoss: number;
-    ballRecovery: number;
-    assists: number;
-    oneOnOneDefLost: number;
-    [key: string]: number;
-  };
-}
-
-interface Match {
-  id: string;
-  title: string;
-  date: string;
-  competition: string;
-  location?: string;
-  score_team?: number;
-  score_opponent?: number;
-  opponent_team?: string;
-}
-
-interface MatchData {
-  selectedMatch: Match | null;
-  isRunning: boolean;
-  currentSequence: number;
-  players: Player[];
-  teamScore: number;
-  opponentScore: number;
-  matchTime: number; // en secondes
-  currentHalf: 1 | 2; // 1 = première mi-temps, 2 = deuxième mi-temps
-  teamFouls: number;
-  opponentFouls: number;
-  opponentActions: {
-    shotsOnTarget: number;
-    shotsOffTarget: number;
-  };
-  firstHalfOpponentActions: {
-    shotsOnTarget: number;
-    shotsOffTarget: number;
-  };
-}
-
-interface LocalMatchEvent {
-  id: string;
-  match_id: string;
-  event_type: string;
-  match_time_seconds: number;
-  half: number;
-  player_id: string | null;
-  players_on_field: string[];
-  created_at: string;
-  synced?: boolean;
-  location_x?: number | null;
-  location_y?: number | null;
-}
-
-interface LocalMatchSnapshot {
-  match_id: string;
-  timestamp: string;
-  matchData: MatchData;
-  events: LocalMatchEvent[];
-  lastSavedAt: string;
-}
-
-const ACTIONS = [
-  { id: 'shotsOnTarget', name: 'Tir cadré', acronym: 'TC', icon: Target, color: 'bg-green-500' },
-  { id: 'shotsOffTarget', name: 'Tir non cadré', acronym: 'TnC', icon: Crosshair, color: 'bg-yellow-500' },
-  { id: 'goals', name: 'But', acronym: 'B', icon: Goal, color: 'bg-blue-500' },
-  { id: 'ballLoss', name: 'Perte de balle', acronym: 'PdB', icon: AlertTriangle, color: 'bg-red-500' },
-  { id: 'ballRecovery', name: 'Récupération', acronym: 'R', icon: RefreshCw, color: 'bg-green-600' },
-  { id: 'assists', name: 'Passe décisive', acronym: 'Pdec', icon: ArrowRight, color: 'bg-purple-500' },
-];
-
-const DEFAULT_SEQUENCE_TIME_LIMIT = 180;
-
-async function insertMatchEvent(params: {
-  match_id: string;
-  event_type: string;
-  match_time_seconds: number;
-  half: number;
-  player_id: string | null;
-  players_on_field: string[];
-  location_x?: number | null;
-  location_y?: number | null;
-}) {
-  const { data, error } = await supabase.rpc('insert_match_event', {
-    p_match_id: params.match_id,
-    p_event_type: params.event_type,
-    p_match_time_seconds: params.match_time_seconds,
-    p_half: params.half,
-    p_player_id: params.player_id,
-    p_players_on_field: params.players_on_field,
-    p_location_x: params.location_x ?? null,
-    p_location_y: params.location_y ?? null,
-  });
-  return { data, error };
-}
+import type { Player, Match, MatchData, LocalMatchEvent, LocalMatchSnapshot } from './types';
+import { ACTIONS, DEFAULT_SEQUENCE_TIME_LIMIT } from './constants';
+import { formatClock, formatDate } from './utils';
+import LiveSummary from './components/LiveSummary';
+import { useMatchTimer } from './hooks/useMatchTimer';
+import { useOnlineStatus } from './hooks/useOnlineStatus';
+import { useOfflineSync } from './hooks/useOfflineSync';
+import { useLongPress } from './hooks/useLongPress';
+import { insertMatchEvent } from './data';
 
 export default function MatchRecorderPage() {
   const { activeTeam } = useActiveTeam();
@@ -217,24 +114,9 @@ export default function MatchRecorderPage() {
   // État pour la vue active (saisie ou bilan)
   const [activeView, setActiveView] = useState<'recording' | 'summary'>('recording');
   
-  // États pour le clic long
-  const [longPressTimers, setLongPressTimers] = useState<{ [key: string]: ReturnType<typeof setTimeout> }>({});
-  const [longPressTriggered, setLongPressTriggered] = useState<{ [key: string]: boolean }>({});
-  // Localisation terrain (coordonnées normalisées 0..1)
-  const [selectedLocation, setSelectedLocation] = useState<{ x: number; y: number } | null>(null);
-  
-  // État pour le filtre d'action dans le bilan (multichoix)
-  const [actionFilter, setActionFilter] = useState<string[]>(['all']);
-  const [matchEvents, setMatchEvents] = useState<Array<{
-    id: string;
-    action_type: string;
-    location_x: number | null;
-    location_y: number | null;
-    player_name?: string;
-    half: number;
-    match_time_seconds?: number;
-  }>>([]);
-  
+  // Clic long générique (souris + tactile), état géré par le hook.
+  const { start: startLongPress, end: endLongPress, triggered: longPressTriggered } = useLongPress();
+
   // État pour le tri des statistiques des joueurs
   const [sortConfig, setSortConfig] = useState<{
     key: string | null;
@@ -245,11 +127,9 @@ export default function MatchRecorderPage() {
   const [selectedPlayerForChange, setSelectedPlayerForChange] = useState<string | null>(null);
   const [changeType, setChangeType] = useState<'substitution' | 'swap' | null>(null);
 
-  // États pour la gestion hors ligne
-  const [isOnline, setIsOnline] = useState(true);
-  const [localEvents, setLocalEvents] = useState<LocalMatchEvent[]>([]);
-  const [lastSyncTime, setLastSyncTime] = useState<string>('');
-  const [isSyncing, setIsSyncing] = useState(false);
+  // Gestion hors ligne : état réseau + persistance/sync locale (extraits dans ./hooks).
+  const isOnline = useOnlineStatus();
+  const { localEvents, isSyncing, saveToLocalStorage, syncLocalData } = useOfflineSync(matchData, isOnline);
 
   // Charger les données depuis Supabase
   useEffect(() => {
@@ -308,7 +188,7 @@ export default function MatchRecorderPage() {
           console.error('Erreur lors du chargement des joueurs:', playersError);
           setPlayers([]);
         } else {
-          const transformedPlayers: Player[] = (playersData || []).map((player: { id: string; first_name: string; last_name: string; number?: number; age?: number; position?: string }) => {
+          const transformedPlayers: Player[] = (playersData || []).filter((p: any) => p?.status !== 'left').map((player: { id: string; first_name: string; last_name: string; number?: number; age?: number; position?: string }) => {
             if (!player || !player.id || !player.first_name || !player.last_name) {
               return null;
             }
@@ -355,207 +235,17 @@ export default function MatchRecorderPage() {
     }
   }, [activeTeam]);
 
-  // Timer pour mettre à jour les temps de jeu et le chronomètre du match
-  useEffect(() => {
-    let interval: ReturnType<typeof setInterval>;
-    
-    if (matchData.isRunning) {
-      interval = setInterval(() => {
-        setMatchData(prev => ({
-          ...prev,
-          matchTime: prev.matchTime + 1,
-          players: prev.players.map(player => ({
-            ...player,
-            totalTime: player.isOnField ? player.totalTime + 1 : player.totalTime,
-            currentSequenceTime: player.isOnField ? player.currentSequenceTime + 1 : player.currentSequenceTime,
-          }))
-        }));
-      }, 1000);
-    }
+  // Timer du match : temps de match + temps de jeu par joueur (extrait dans ./hooks).
+  useMatchTimer(matchData.isRunning, setMatchData);
 
-    return () => clearInterval(interval);
-  }, [matchData.isRunning]);
-
-  // Charger les événements du match pour l'affichage sur le terrain
-  useEffect(() => {
-    const loadMatchEvents = async () => {
-      if ((activeView === 'summary' || currentStep === 'summary') && matchData.selectedMatch) {
-        try {
-          const { data: events, error } = await supabase
-            .from('match_events')
-            .select('id, event_type, location_x, location_y, half, player_id, match_time_seconds')
-            .eq('match_id', matchData.selectedMatch.id)
-            .not('location_x', 'is', null)
-            .not('location_y', 'is', null)
-            .order('created_at', { ascending: true });
-
-          if (error) {
-            console.error('Erreur lors du chargement des événements:', error);
-            return;
-          }
-
-          if (events) {
-            // Récupérer les noms des joueurs
-            const playerIds = [...new Set(events.map((e: any) => e.player_id).filter(Boolean))];
-            const playerMap = new Map<string, string>();
-            
-            if (playerIds.length > 0) {
-              let playersData: any[] | null = null;
-              let playersError: any = null;
-              
-              if (activeTeam?.id) {
-                // Utiliser la table de liaison pour filtrer par équipe
-                const { data: playerTeamsData, error: ptError } = await supabase
-                  .from('player_teams')
-                  .select(`
-                    player_id,
-                    players (id, first_name, last_name)
-                  `)
-                  .eq('team_id', activeTeam.id)
-                  .in('player_id', playerIds);
-                
-                if (ptError) {
-                  playersError = ptError;
-                } else {
-                  playersData = playerTeamsData?.map((item: any) => ({
-                    id: item.players?.id,
-                    name: item.players ? `${item.players.first_name} ${item.players.last_name}` : null
-                  })).filter((p: any) => p.id && p.name) || [];
-                }
-              }
-              
-              // Si aucun joueur trouvé avec le filtre équipe, essayer sans filtre
-              if (!playersData || playersData.length === 0) {
-                console.warn('Aucun joueur trouvé avec filtre équipe, recherche sans filtre...');
-                const { data: allPlayersData, error: allPlayersError } = await supabase
-                  .from('players')
-                  .select('id, first_name, last_name')
-                  .in('id', playerIds);
-                
-                if (!allPlayersError && allPlayersData) {
-                  playersData = allPlayersData.map((p: any) => ({
-                    id: p.id,
-                    name: `${p.first_name} ${p.last_name}`
-                  }));
-                  playersError = null;
-                }
-              }
-              
-              if (playersError) {
-                console.error('Erreur lors de la récupération des joueurs:', playersError);
-              }
-              
-              if (playersData && playersData.length > 0) {
-                console.log('Joueurs récupérés:', playersData.length, 'sur', playerIds.length, 'IDs recherchés:', playerIds);
-                playersData.forEach((p: any) => {
-                  // S'assurer que l'ID est bien une string pour la correspondance
-                  playerMap.set(String(p.id), p.name);
-                });
-                console.log('PlayerMap créé:', Array.from(playerMap.entries()));
-              } else {
-                console.warn('Aucun joueur trouvé pour les IDs:', playerIds);
-              }
-            }
-
-            setMatchEvents(events.map((event: any) => {
-              let playerName = 'Adversaire';
-              if (event.player_id) {
-                // S'assurer que l'ID est converti en string pour la correspondance
-                const playerIdStr = String(event.player_id);
-                playerName = playerMap.get(playerIdStr) || 'Inconnu';
-                if (playerName === 'Inconnu') {
-                  console.warn('Joueur non trouvé pour player_id:', event.player_id, '(string:', playerIdStr, ') dans l\'événement:', event.id);
-                  console.warn('IDs disponibles dans playerMap:', Array.from(playerMap.keys()));
-                }
-              }
-              return {
-                id: event.id,
-                action_type: event.event_type,
-                location_x: event.location_x,
-                location_y: event.location_y,
-                player_name: playerName,
-                half: event.half || 1,
-                match_time_seconds: event.match_time_seconds || 0,
-              };
-            }));
-          }
-        } catch (error) {
-          console.error('Erreur lors du chargement des événements:', error);
-        }
-      } else {
-        setMatchEvents([]);
-      }
-    };
-
-    loadMatchEvents();
-  }, [activeView, currentStep, matchData.selectedMatch, activeTeam]);
 
   // Détecter l'état de connexion
-  useEffect(() => {
-    const handleOnline = () => {
-      console.log('✅ Connexion internet rétablie');
-      setIsOnline(true);
-    };
+  // L'état online/offline est géré par useOnlineStatus (./hooks).
 
-    const handleOffline = () => {
-      console.log('⚠️ Perte de connexion internet');
-      setIsOnline(false);
-    };
+  // Le chargement localStorage et l'auto-synchronisation sont gérés par useOfflineSync.
 
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    
-    // Vérifier l'état initial
-    setIsOnline(navigator.onLine);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  // Charger les données locales sauvegardées au démarrage
-  useEffect(() => {
-    const loadLocalData = () => {
-      try {
-        const savedData = localStorage.getItem('matchRecorder_localData');
-        if (savedData) {
-          const parsedData = JSON.parse(savedData) as LocalMatchSnapshot;
-          console.log('📦 Données locales trouvées:', parsedData);
-          
-          // Vérifier si les données sont récentes (moins de 7 jours)
-          const savedDate = new Date(parsedData.lastSavedAt);
-          const daysSinceSave = (Date.now() - savedDate.getTime()) / (1000 * 60 * 60 * 24);
-          
-          if (daysSinceSave < 7) {
-            setLocalEvents(parsedData.events || []);
-            console.log(`📦 ${parsedData.events.length} événements locaux chargés`);
-          } else {
-            console.log('🗑️ Données locales trop anciennes, suppression...');
-            localStorage.removeItem('matchRecorder_localData');
-          }
-        }
-      } catch (error) {
-        console.error('Erreur lors du chargement des données locales:', error);
-      }
-    };
-
-    loadLocalData();
-  }, []);
-
-  // Synchroniser automatiquement quand on revient en ligne avec des données non synchronisées
-  useEffect(() => {
-    if (isOnline && localEvents.length > 0 && !localEvents.every(e => e.synced) && !isSyncing && matchData.selectedMatch) {
-      console.log('Auto-synchronisation des données locales...');
-      syncLocalData();
-    }
-  }, [isOnline, localEvents.length, matchData.selectedMatch, isSyncing]);
-
-  const formatTime = (seconds: number): string => {
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
-  };
+  // Alias vers le helper pur ./utils (formatClock), pour ne pas toucher les call sites.
+  const formatTime = formatClock;
 
   // Fonction pour gérer le tri
   const handleSort = (key: string) => {
@@ -668,205 +358,7 @@ export default function MatchRecorderPage() {
   };
 
   // Fonctions de gestion hors ligne
-  const saveToLocalStorage = (event?: LocalMatchEvent) => {
-    try {
-      if (!matchData.selectedMatch) return;
-      
-      // Ajouter le nouvel événement s'il existe
-      let updatedEvents = [...localEvents];
-      if (event) {
-        updatedEvents.push(event);
-        setLocalEvents(updatedEvents);
-      }
-
-      // Créer un snapshot complet
-      const snapshot: LocalMatchSnapshot = {
-        match_id: matchData.selectedMatch.id,
-        timestamp: new Date().toISOString(),
-        matchData: matchData,
-        events: updatedEvents,
-        lastSavedAt: new Date().toISOString()
-      };
-
-      // Sauvegarder dans localStorage
-      localStorage.setItem('matchRecorder_localData', JSON.stringify(snapshot));
-      console.log('💾 Données sauvegardées localement:', {
-        matchId: snapshot.match_id,
-        eventsCount: snapshot.events.length,
-        timestamp: snapshot.lastSavedAt
-      });
-    } catch (error) {
-      console.error('Erreur lors de la sauvegarde locale:', error);
-    }
-  };
-
-  const syncLocalData = async () => {
-    if (!matchData.selectedMatch || localEvents.length === 0) {
-      console.log('Aucune donnée à synchroniser');
-      return;
-    }
-
-    // Filtrer les événements non synchronisés
-    const unsyncedEvents = localEvents.filter(event => !event.synced);
-
-    if (unsyncedEvents.length === 0) {
-      console.log('Tous les événements sont déjà synchronisés');
-      return;
-    }
-
-    setIsSyncing(true);
-    console.log(`🔄 Synchronisation de ${unsyncedEvents.length} événements...`);
-
-    try {
-      // Tenter de sauvegarder chaque événement non synchronisé
-      for (const event of unsyncedEvents) {
-        const { error } = await insertMatchEvent({
-          match_id: event.match_id,
-          event_type: event.event_type,
-          match_time_seconds: event.match_time_seconds,
-          half: event.half,
-          player_id: event.player_id,
-          players_on_field: event.players_on_field ?? [],
-          location_x: event.location_x ?? null,
-          location_y: event.location_y ?? null
-        });
-
-        if (!error) {
-          // Marquer comme synchronisé dans la liste locale
-          const updatedEvents = localEvents.map(e => 
-            e.id === event.id ? { ...e, synced: true } : e
-          );
-          setLocalEvents(updatedEvents);
-          
-          // Mettre à jour localStorage
-          const snapshot: LocalMatchSnapshot = {
-            match_id: matchData.selectedMatch.id,
-            timestamp: new Date().toISOString(),
-            matchData: matchData,
-            events: updatedEvents,
-            lastSavedAt: new Date().toISOString()
-          };
-          localStorage.setItem('matchRecorder_localData', JSON.stringify(snapshot));
-          console.log(`✅ Événement ${event.id} synchronisé`);
-        } else {
-          break; // Arrêter si erreur
-        }
-      }
-
-      // Nettoyer les événements synchronisés après un délai
-      const allSynced = localEvents.every(e => e.synced);
-      if (allSynced) {
-        console.log('✅ Tous les événements sont synchronisés');
-        setTimeout(() => {
-          localStorage.removeItem('matchRecorder_localData');
-          setLocalEvents([]);
-        }, 5000);
-      }
-
-      setLastSyncTime(new Date().toISOString());
-    } catch (error) {
-      console.error('Erreur lors de la synchronisation:', error);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const exportLocalDataToCSV = () => {
-    try {
-      const savedData = localStorage.getItem('matchRecorder_localData');
-      if (!savedData) {
-        alert('Aucune donnée locale à exporter');
-        return;
-      }
-
-      const parsedData = JSON.parse(savedData) as LocalMatchSnapshot;
-      
-      if (!parsedData.events || parsedData.events.length === 0) {
-        alert('Aucun événement local à exporter');
-        return;
-      }
-
-      // En-têtes CSV pour les événements
-      const headers = [
-        'ID Événement',
-        'Type d\'événement',
-        'Temps de match (secondes)',
-        'Mi-temps',
-        'ID Joueur',
-        'Joueurs sur le terrain',
-        'Date de création',
-        'Synchronisé'
-      ];
-
-      // Données des événements
-      const eventData = parsedData.events.map(event => [
-        event.id,
-        event.event_type,
-        event.match_time_seconds || 0,
-        event.half || 1,
-        event.player_id || 'N/A',
-        event.players_on_field ? event.players_on_field.join(';') : 'N/A',
-        new Date(event.created_at).toLocaleString('fr-FR'),
-        event.synced ? 'Oui' : 'Non'
-      ]);
-
-      // Informations du match
-      const matchInfo = [
-        [''],
-        ['INFORMATIONS DU MATCH (DONNÉES LOCALES)'],
-        ['ID Match', parsedData.match_id],
-        ['Date de sauvegarde', new Date(parsedData.lastSavedAt).toLocaleString('fr-FR')],
-        [''],
-        ['ÉVÉNEMENTS DU MATCH']
-      ];
-
-      // Combiner toutes les données
-      const csvContent = [
-        headers.join(','),
-        ...eventData.map(row => row.map(cell => `"${cell}"`).join(',')),
-        ...matchInfo.map(row => row.map(cell => `"${cell}"`).join(','))
-      ].join('\n');
-
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `match_data_local_${parsedData.match_id}_${new Date().toISOString().split('T')[0]}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      console.log('📥 Export CSV local réussi');
-    } catch (error) {
-      console.error('Erreur lors de l\'export CSV local:', error);
-      alert('Erreur lors de l\'export des données locales');
-    }
-  };
-
-  const formatMatchTime = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const formatDate = (dateString: string): string => {
-    try {
-      const date = new Date(dateString);
-      if (isNaN(date.getTime())) {
-        return 'Date invalide';
-      }
-      return date.toLocaleDateString('fr-FR', {
-        day: '2-digit',
-        month: '2-digit'
-      });
-    } catch (error) {
-      console.error('Erreur lors du formatage de la date:', error);
-      return 'Date invalide';
-    }
-  };
-
-
+  // saveToLocalStorage et syncLocalData sont fournis par useOfflineSync (./hooks).
 
   const toggleMatch = () => {
     setMatchData(prev => ({
@@ -1057,8 +549,6 @@ export default function MatchRecorderPage() {
         players_on_field: playersOnField,
         created_at: new Date().toISOString(),
         synced: false,
-        location_x: selectedLocation?.x ?? null,
-        location_y: selectedLocation?.y ?? null
       };
 
       // Essayer de sauvegarder en ligne
@@ -1069,8 +559,6 @@ export default function MatchRecorderPage() {
         half: matchData.currentHalf,
         player_id: playerId,
         players_on_field: playersOnField,
-        location_x: selectedLocation?.x ?? null,
-        location_y: selectedLocation?.y ?? null
       });
 
       if (insertError) {
@@ -1083,8 +571,6 @@ export default function MatchRecorderPage() {
         // Sauvegarder aussi localement pour backup
         saveToLocalStorage(localEvent);
       }
-      // Reset de la position sélectionnée après enregistrement
-      setSelectedLocation(null);
     } else {
       if (actualDeltaResult === 0) {
         return;
@@ -1174,8 +660,6 @@ export default function MatchRecorderPage() {
         players_on_field: playersOnField,
         created_at: new Date().toISOString(),
         synced: false,
-        location_x: selectedLocation?.x ?? null,
-        location_y: selectedLocation?.y ?? null
       };
 
       const { error: insertError } = await insertMatchEvent({
@@ -1185,8 +669,6 @@ export default function MatchRecorderPage() {
         half: matchData.currentHalf,
         player_id: null,
         players_on_field: playersOnField,
-        location_x: selectedLocation?.x ?? null,
-        location_y: selectedLocation?.y ?? null
       });
 
       if (insertError) {
@@ -1198,7 +680,6 @@ export default function MatchRecorderPage() {
         localEvent.synced = true;
         saveToLocalStorage(localEvent);
       }
-      setSelectedLocation(null);
     } else {
       // Supprimer le dernier événement de ce type
       const { error: deleteError } = await supabase.rpc('delete_last_event_by_type', {
@@ -1273,8 +754,6 @@ export default function MatchRecorderPage() {
         players_on_field: playersOnField,
         created_at: new Date().toISOString(),
         synced: false,
-        location_x: selectedLocation?.x ?? null,
-        location_y: selectedLocation?.y ?? null
       };
 
       const { error: insertError } = await insertMatchEvent({
@@ -1284,8 +763,6 @@ export default function MatchRecorderPage() {
         half: matchData.currentHalf,
         player_id: null,
         players_on_field: playersOnField,
-        location_x: selectedLocation?.x ?? null,
-        location_y: selectedLocation?.y ?? null
       });
 
       if (insertError) {
@@ -1296,7 +773,6 @@ export default function MatchRecorderPage() {
         localEvent.synced = true;
         saveToLocalStorage(localEvent);
       }
-      setSelectedLocation(null);
     } else {
       if (actualDeltaResult === 0) {
         return;
@@ -1314,145 +790,39 @@ export default function MatchRecorderPage() {
 
   // Fonctions pour le clic long
   const handleLongPressStart = (playerId: string, statKey: string) => {
-    const timerKey = `${playerId}-${statKey}`;
-    
-    const timerId = setTimeout(async () => {
-      await updatePlayerStat(playerId, statKey, false); // Décrémenter
-      setLongPressTriggered(prev => ({
-        ...prev,
-        [timerKey]: true
-      }));
-    }, 500); // 500ms pour déclencher le clic long
-    
-    setLongPressTimers(prev => ({
-      ...prev,
-      [timerKey]: timerId
-    }));
+    startLongPress(`${playerId}-${statKey}`, () => updatePlayerStat(playerId, statKey, false));
   };
 
   const handleLongPressEnd = (playerId: string, statKey: string) => {
-    const timerKey = `${playerId}-${statKey}`;
-    const timer = longPressTimers[timerKey];
-    
-    if (timer) {
-      clearTimeout(timer);
-      setLongPressTimers(prev => {
-        const newTimers = { ...prev };
-        delete newTimers[timerKey];
-        return newTimers;
-      });
-    }
-    
-    // Réinitialiser le flag après un court délai pour éviter le double comptage
-    setTimeout(() => {
-      setLongPressTriggered(prev => {
-        const newTriggered = { ...prev };
-        delete newTriggered[timerKey];
-        return newTriggered;
-      });
-    }, 100);
+    endLongPress(`${playerId}-${statKey}`);
   };
 
   const handleOpponentLongPressStart = (actionType: 'shotsOnTarget' | 'shotsOffTarget' | 'goals') => {
-    const timerKey = `opponent-${actionType}`;
-    
-    const timerId = setTimeout(async () => {
-      if (actionType === 'goals') {
-        await updateOpponentGoal(false); // Décrémenter le but adverse
-      } else {
-        await updateOpponentAction(actionType, false); // Décrémenter
-      }
-      setLongPressTriggered(prev => ({
-        ...prev,
-        [timerKey]: true
-      }));
-    }, 500);
-    
-    setLongPressTimers(prev => ({
-      ...prev,
-      [timerKey]: timerId
-    }));
+    startLongPress(`opponent-${actionType}`, () =>
+      actionType === 'goals'
+        ? updateOpponentGoal(false)
+        : updateOpponentAction(actionType, false)
+    );
   };
 
   const handleOpponentLongPressEnd = (actionType: 'shotsOnTarget' | 'shotsOffTarget' | 'goals') => {
-    const timerKey = `opponent-${actionType}`;
-    const timer = longPressTimers[timerKey];
-    
-    if (timer) {
-      clearTimeout(timer);
-      setLongPressTimers(prev => {
-        const newTimers = { ...prev };
-        delete newTimers[timerKey];
-        return newTimers;
-      });
-    }
-    
-    // Réinitialiser le flag après un court délai pour éviter le double comptage
-    setTimeout(() => {
-      setLongPressTriggered(prev => {
-        const newTriggered = { ...prev };
-        delete newTriggered[timerKey];
-        return newTriggered;
-      });
-    }, 100);
-  };
-
-  const handleSimpleLongPressStart = (timerKey: string, callback: () => Promise<void> | void) => {
-    const timerId = setTimeout(async () => {
-      await callback();
-      setLongPressTriggered(prev => ({
-        ...prev,
-        [timerKey]: true
-      }));
-    }, 500);
-
-    setLongPressTimers(prev => ({
-      ...prev,
-      [timerKey]: timerId
-    }));
-  };
-
-  const handleSimpleLongPressEnd = (timerKey: string) => {
-    const timer = longPressTimers[timerKey];
-
-    if (timer) {
-      clearTimeout(timer);
-      setLongPressTimers(prev => {
-        const newTimers = { ...prev };
-        delete newTimers[timerKey];
-        return newTimers;
-      });
-    }
-
-    setTimeout(() => {
-      setLongPressTriggered(prev => {
-        const newTriggered = { ...prev };
-        delete newTriggered[timerKey];
-        return newTriggered;
-      });
-    }, 100);
+    endLongPress(`opponent-${actionType}`);
   };
 
   const handleTeamScoreLongPressStart = () => {
-    handleSimpleLongPressStart('score-team', async () => {
-      updateTeamScore(false);
-    });
+    startLongPress('score-team', () => updateTeamScore(false));
   };
 
   const handleTeamScoreLongPressEnd = () => {
-    handleSimpleLongPressEnd('score-team');
+    endLongPress('score-team');
   };
 
   const handleFoulLongPressStart = (isTeamFoul: boolean) => {
-    const timerKey = isTeamFoul ? 'foul-team' : 'foul-opponent';
-    handleSimpleLongPressStart(timerKey, async () => {
-      updateFouls(isTeamFoul, false);
-    });
+    startLongPress(isTeamFoul ? 'foul-team' : 'foul-opponent', () => updateFouls(isTeamFoul, false));
   };
 
   const handleFoulLongPressEnd = (isTeamFoul: boolean) => {
-    const timerKey = isTeamFoul ? 'foul-team' : 'foul-opponent';
-    handleSimpleLongPressEnd(timerKey);
+    endLongPress(isTeamFoul ? 'foul-team' : 'foul-opponent');
   };
 
   // Fonctions pour calculer les statistiques du bilan
@@ -1509,469 +879,6 @@ export default function MatchRecorderPage() {
   };
 
   // Vue de bilan en direct pendant l'enregistrement
-  const renderLiveSummary = () => (
-    <div className="space-y-3">
-      {/* Statistiques générales */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 border border-gray-200 dark:border-gray-700">
-        <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
-          <Trophy className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-          Bilan du Match
-        </h2>
-        
-        {/* Statistiques des tirs */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-          {/* Notre équipe */}
-          <div className="bg-blue-50 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-600 rounded p-3 shadow-sm">
-            <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2 flex items-center gap-1">
-              <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-              Notre Équipe
-            </h3>
-            <div className="space-y-1">
-              <div className="flex justify-between items-center py-1 px-2 bg-blue-100 dark:bg-blue-800/60 rounded border border-blue-200 dark:border-blue-700">
-                <span className="text-xs font-medium text-blue-800 dark:text-blue-200">Tirs totaux</span>
-                <span className="font-bold text-blue-950 dark:text-white text-sm">{getTeamStats().totalShots}</span>
-              </div>
-              <div className="flex justify-between items-center py-1 px-2 bg-green-100 dark:bg-green-800/60 rounded border border-green-200 dark:border-green-700">
-                <span className="text-xs font-medium text-green-800 dark:text-green-200">Tirs cadrés</span>
-                <span className="font-bold text-green-950 dark:text-white text-sm">{getTeamStats().totalShotsOnTarget}</span>
-              </div>
-              <div className="flex justify-between items-center py-1 px-2 bg-yellow-100 dark:bg-yellow-800/60 rounded border border-yellow-200 dark:border-yellow-700">
-                <span className="text-xs font-medium text-yellow-800 dark:text-yellow-200">Tirs non cadrés</span>
-                <span className="font-bold text-yellow-950 dark:text-white text-sm">{getTeamStats().totalShotsOffTarget}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Équipe adverse */}
-          <div className="bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-600 rounded p-3 shadow-sm">
-            <h3 className="text-sm font-semibold text-red-900 dark:text-red-100 mb-2 flex items-center gap-1">
-              <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-              Équipe Adverse
-            </h3>
-            <div className="space-y-1">
-              <div className="flex justify-between items-center py-1 px-2 bg-red-100 dark:bg-red-800/60 rounded border border-red-200 dark:border-red-700">
-                <span className="text-xs font-medium text-red-800 dark:text-red-200">Total tirs</span>
-                <span className="font-bold text-red-950 dark:text-white text-sm">
-                  {getTeamStats().opponentShots}
-                  {matchData.currentHalf === 2 && matchData.firstHalfOpponentActions.shotsOnTarget + matchData.firstHalfOpponentActions.shotsOffTarget > 0 && (
-                    <span className="text-xs text-red-600 dark:text-red-400 ml-1">
-                      ({matchData.firstHalfOpponentActions.shotsOnTarget + matchData.firstHalfOpponentActions.shotsOffTarget})
-                    </span>
-                  )}
-                </span>
-              </div>
-              <div className="flex justify-between items-center py-1 px-2 bg-orange-100 dark:bg-orange-800/60 rounded border border-orange-200 dark:border-orange-700">
-                <span className="text-xs font-medium text-orange-800 dark:text-orange-200">Tirs cadrés</span>
-                <span className="font-bold text-orange-950 dark:text-orange-200 text-sm">
-                  {getTeamStats().opponentShotsOnTarget}
-                  {matchData.currentHalf === 2 && matchData.firstHalfOpponentActions.shotsOnTarget > 0 && (
-                    <span className="text-xs text-orange-600 dark:text-orange-400 ml-1">
-                      ({matchData.firstHalfOpponentActions.shotsOnTarget})
-                    </span>
-                  )}
-                </span>
-              </div>
-              <div className="flex justify-between items-center py-1 px-2 bg-yellow-100 dark:bg-yellow-800/60 rounded border border-yellow-200 dark:border-yellow-700">
-                <span className="text-xs font-medium text-yellow-800 dark:text-yellow-200">Tirs non cadrés</span>
-                <span className="font-bold text-yellow-950 dark:text-white text-sm">
-                  {getTeamStats().opponentShotsOffTarget}
-                  {matchData.currentHalf === 2 && matchData.firstHalfOpponentActions.shotsOffTarget > 0 && (
-                    <span className="text-xs text-yellow-600 dark:text-yellow-400 ml-1">
-                      ({matchData.firstHalfOpponentActions.shotsOffTarget})
-                    </span>
-                  )}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Top joueurs par catégorie */}
-        <div className="grid grid-cols-2 gap-3">
-          {/* Temps de jeu */}
-          <div className="bg-green-50 dark:bg-green-900/40 border border-green-200 dark:border-green-600 rounded p-3 shadow-sm">
-            <h3 className="text-sm font-semibold text-green-900 dark:text-green-100 mb-2 flex items-center gap-1">
-              <Clock className="h-4 w-4" />
-              Plus de temps de jeu
-            </h3>
-            <div className="space-y-1">
-              {getTopPlayersByTime().map((player, index) => (
-                <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-green-100 dark:bg-green-800/60 rounded border border-green-200 dark:border-green-700">
-                  <div className="flex items-center gap-1">
-                    <span className="text-xs font-medium text-green-800 dark:text-green-200">
-                      {index + 1}. {player.name}
-                    </span>
-                  </div>
-                  <span className="font-mono text-xs font-bold text-green-950 dark:text-white">
-                    {formatTime(player.totalTime)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Tirs */}
-          <div className="bg-yellow-50 dark:bg-yellow-900/40 border border-yellow-200 dark:border-yellow-600 rounded p-3 shadow-sm">
-            <h3 className="text-sm font-semibold text-yellow-900 dark:text-yellow-100 mb-2 flex items-center gap-1">
-              <Target className="h-4 w-4" />
-              Plus de tirs
-            </h3>
-            <div className="space-y-1">
-              {getTopPlayersByTotalShots().map((player, index) => {
-                const totalShots = (player.stats.shotsOnTarget || 0) + (player.stats.shotsOffTarget || 0);
-                return (
-                  <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-yellow-100 dark:bg-yellow-800/60 rounded border border-yellow-200 dark:border-yellow-700">
-                    <div className="flex items-center gap-1">
-                      <span className="text-xs font-medium text-yellow-800 dark:text-yellow-200">
-                        {index + 1}. {player.name}
-                      </span>
-                    </div>
-                    <span className="font-mono text-xs font-bold text-yellow-950 dark:text-white">
-                      {totalShots} ({player.stats.shotsOnTarget || 0} cadrés)
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Récupérations */}
-          <div className="bg-blue-50 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-600 rounded p-3 shadow-sm">
-            <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2 flex items-center gap-1">
-              <RefreshCw className="h-4 w-4" />
-              Plus de récupérations
-            </h3>
-            <div className="space-y-1">
-              {getTopPlayers('ballRecovery').map((player, index) => (
-                <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-blue-100 dark:bg-blue-800/60 rounded border border-blue-200 dark:border-blue-700">
-                  <div className="flex items-center gap-1">
-                    <span className="text-xs font-medium text-blue-800 dark:text-blue-200">
-                      {index + 1}. {player.name}
-                    </span>
-                  </div>
-                  <span className="font-mono text-xs font-bold text-blue-950 dark:text-white">
-                    {player.stats.ballRecovery || 0}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Pertes de balle */}
-          <div className="bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-600 rounded p-3 shadow-sm">
-            <h3 className="text-sm font-semibold text-red-900 dark:text-red-100 mb-2 flex items-center gap-1">
-              <AlertTriangle className="h-4 w-4" />
-              Plus de pertes de balle
-            </h3>
-            <div className="space-y-1">
-              {getTopPlayers('ballLoss').map((player, index) => (
-                <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-red-100 dark:bg-red-800/60 rounded border border-red-200 dark:border-red-700">
-                  <div className="flex items-center gap-1">
-                    <span className="text-xs font-medium text-red-800 dark:text-red-200">
-                      {index + 1}. {player.name}
-                    </span>
-                  </div>
-                  <span className="font-mono text-xs font-bold text-red-950 dark:text-white">
-                    {player.stats.ballLoss || 0}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Passes décisives */}
-          <div className="bg-purple-50 dark:bg-purple-900/40 border border-purple-200 dark:border-purple-600 rounded p-3 shadow-sm">
-            <h3 className="text-sm font-semibold text-purple-900 dark:text-purple-100 mb-2 flex items-center gap-1">
-              <ArrowRight className="h-4 w-4" />
-              Plus de passes décisives
-            </h3>
-            <div className="space-y-1">
-              {getTopPlayers('assists').map((player, index) => (
-                <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-purple-100 dark:bg-purple-800/60 rounded border border-purple-200 dark:border-purple-700">
-                  <div className="flex items-center gap-1">
-                    <span className="text-xs font-medium text-purple-800 dark:text-purple-200">
-                      {index + 1}. {player.name}
-                    </span>
-                  </div>
-                  <span className="font-mono text-xs font-bold text-purple-950 dark:text-white">
-                    {player.stats.assists || 0}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* 1v1 perdus */}
-          <div className="bg-orange-50 dark:bg-orange-900/40 border border-orange-200 dark:border-orange-600 rounded p-3 shadow-sm">
-            <h3 className="text-sm font-semibold text-orange-900 dark:text-orange-100 mb-2 flex items-center gap-1">
-              <AlertTriangle className="h-4 w-4" />
-              Plus de 1v1 perdus
-            </h3>
-            <div className="space-y-1">
-              {getTopPlayers('oneOnOneDefLost').map((player, index) => (
-                <div key={player.id} className="flex justify-between items-center py-1 px-2 bg-orange-100 dark:bg-orange-800/60 rounded border border-orange-200 dark:border-orange-700">
-                  <div className="flex items-center gap-1">
-                    <span className="text-xs font-medium text-orange-800 dark:text-orange-200">
-                      {index + 1}. {player.name}
-                    </span>
-                  </div>
-                  <span className="font-mono text-xs font-bold text-orange-950 dark:text-white">
-                    {player.stats.oneOnOneDefLost || 0}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Terrain avec actions */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 border border-gray-200 dark:border-gray-700 mt-6">
-        <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-          <Target className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-          Visualisation des actions sur le terrain
-        </h2>
-
-        {/* Filtre par type d'action (multichoix) */}
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Filtrer par type d'action (sélection multiple) :
-          </label>
-          <div className="flex flex-wrap gap-2">
-            {[
-              { value: 'all', label: 'Toutes les actions' },
-              { value: 'goal', label: 'Buts' },
-              { value: 'shot_on_target', label: 'Tirs cadrés' },
-              { value: 'shot', label: 'Tirs non cadrés' },
-              { value: 'ball_loss', label: 'Pertes de balle' },
-              { value: 'ball_recovery', label: 'Récupérations' },
-              { value: 'assist', label: 'Passes décisives' },
-              { value: 'opponent_goal', label: 'Buts adverses' },
-              { value: 'opponent_shot_on_target', label: 'Tirs cadrés adverses' },
-              { value: 'opponent_shot', label: 'Tirs adverses' },
-            ].map((option) => {
-              const isSelected = actionFilter.includes(option.value);
-              return (
-                <button
-                  key={option.value}
-                  onClick={() => {
-                    if (option.value === 'all') {
-                      // Si "Toutes" est cliqué, basculer entre tout sélectionner et tout désélectionner
-                      setActionFilter(actionFilter.includes('all') ? [] : ['all']);
-                    } else {
-                      // Retirer "all" si présent et ajouter/retirer l'option
-                      const newFilter = actionFilter.filter(f => f !== 'all');
-                      if (isSelected) {
-                        setActionFilter(newFilter.filter(f => f !== option.value));
-                      } else {
-                        setActionFilter([...newFilter, option.value]);
-                      }
-                    }
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                    isSelected
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
-                  }`}
-                >
-                  {option.label}
-                </button>
-              );
-            })}
-          </div>
-          {actionFilter.length === 0 && (
-            <p className="text-xs text-gray-500 dark:text-gray-600 mt-2">
-              Aucun filtre sélectionné. Sélectionnez au moins un type d'action pour afficher les résultats.
-            </p>
-          )}
-        </div>
-
-        {/* Terrain avec actions */}
-        <div className="relative w-full max-w-2xl mx-auto scale-90 origin-center">
-          <div
-            className="relative w-full overflow-hidden"
-            style={{
-              aspectRatio: '432 / 262',
-              borderRadius: 12,
-              border: '1px solid rgba(255,176,32,0.18)',
-              backgroundColor: '#050505',
-              boxShadow: '0 0 40px rgba(255,176,32,0.06)',
-            }}
-          >
-            {/* SVG terrain — fond noir, lignes amber */}
-            <svg viewBox="0 0 432 262" className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
-              {/* Fond noir du terrain */}
-              <rect x="16" y="12" width="400" height="238" fill="#080808" />
-              {/* Léger dégradé radial central */}
-              <defs>
-                <radialGradient id="pitchGlow" cx="50%" cy="50%" r="50%">
-                  <stop offset="0%"   stopColor="#FFB020" stopOpacity="0.04" />
-                  <stop offset="100%" stopColor="#FFB020" stopOpacity="0" />
-                </radialGradient>
-              </defs>
-              <rect x="16" y="12" width="400" height="238" fill="url(#pitchGlow)" />
-
-              {/* Bordure terrain */}
-              <rect x="16" y="12" width="400" height="238" fill="none" stroke="#FFB020" strokeWidth="1.5" strokeOpacity="0.65" />
-
-              {/* Ligne médiane */}
-              <line x1="216" y1="12" x2="216" y2="250" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
-
-              {/* Cercle central + point */}
-              <ellipse cx="216" cy="131" rx="35" ry="35" fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
-              <circle cx="216" cy="131" r="2.5" fill="#FFB020" fillOpacity="0.65" />
-
-              {/* Arcs de coin (r≈10px) */}
-              <path d="M 16 22 A 10 10 0 0 1 26 12"   fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
-              <path d="M 406 12 A 10 10 0 0 1 416 22"  fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
-              <path d="M 16 240 A 10 10 0 0 0 26 250"  fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
-              <path d="M 406 250 A 10 10 0 0 0 416 240" fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
-
-              {/* Surface en D gauche — rx=60, ry=69 (6m à l'échelle sx=10, sy=11.5) */}
-              <path d="M 16 45 A 60 69 0 0 1 76 114 L 76 148 A 60 69 0 0 1 16 217"
-                fill="rgba(255,176,32,0.04)" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
-              {/* Surface en D droite */}
-              <path d="M 416 45 A 60 69 0 0 0 356 114 L 356 148 A 60 69 0 0 0 416 217"
-                fill="rgba(255,176,32,0.04)" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
-
-              {/* But gauche (3m) */}
-              <rect x="0" y="114" width="16" height="34" rx="1"
-                fill="rgba(255,176,32,0.08)" stroke="#FFB020" strokeWidth="1.4" strokeOpacity="0.85" />
-              {/* But droit */}
-              <rect x="416" y="114" width="16" height="34" rx="1"
-                fill="rgba(255,176,32,0.08)" stroke="#FFB020" strokeWidth="1.4" strokeOpacity="0.85" />
-
-              {/* 1er point de penalty gauche (6m) et droit */}
-              <circle cx="76"  cy="131" r="2.5" fill="#FFB020" fillOpacity="0.65" />
-              <circle cx="356" cy="131" r="2.5" fill="#FFB020" fillOpacity="0.65" />
-              {/* 2e point de penalty gauche (10m) et droit */}
-              <circle cx="116" cy="131" r="2" fill="#FFB020" fillOpacity="0.35" />
-              <circle cx="316" cy="131" r="2" fill="#FFB020" fillOpacity="0.35" />
-            </svg>
-
-            {/* Afficher les actions filtrées */}
-            {matchEvents
-              .filter(event => {
-                // Si aucun filtre n'est sélectionné, ne rien afficher
-                if (actionFilter.length === 0) return false;
-                // Si "all" est sélectionné, tout afficher
-                if (actionFilter.includes('all')) return true;
-                
-                // Mapping entre event_type de la DB et les IDs du filtre
-                const eventTypeMap: { [key: string]: string } = {
-                  'goal': 'goal',
-                  'shot_on_target': 'shot_on_target',
-                  'shot': 'shot',
-                  'ball_loss': 'ball_loss',
-                  'recovery': 'ball_recovery',
-                  'assist': 'assist',
-                  'opponent_goal': 'opponent_goal',
-                  'opponent_shot_on_target': 'opponent_shot_on_target',
-                  'opponent_shot': 'opponent_shot',
-                };
-                
-                const mappedType = eventTypeMap[event.action_type] || event.action_type;
-                // Vérifier si le type d'événement correspond à l'un des filtres sélectionnés
-                return actionFilter.includes(mappedType) || actionFilter.includes(event.action_type);
-              })
-              .map((event) => {
-                // Mapping entre event_type de la DB et les IDs des ACTIONS
-                const eventTypeToActionId: { [key: string]: string } = {
-                  'goal': 'goals',
-                  'shot_on_target': 'shotsOnTarget',
-                  'shot': 'shotsOffTarget',
-                  'ball_loss': 'ballLoss',
-                  'recovery': 'ballRecovery',
-                  'assist': 'assists',
-                };
-                const actionId = eventTypeToActionId[event.action_type] || event.action_type;
-                let actionConfig = ACTIONS.find(a => a.id === actionId);
-                
-                // Gérer les actions adverses
-                if (!actionConfig && event.action_type.includes('opponent')) {
-                  const opponentActionNames: { [key: string]: string } = {
-                    'opponent_goal': 'But adverse',
-                    'opponent_shot_on_target': 'Tir cadré adverse',
-                    'opponent_shot': 'Tir adverse',
-                  };
-                  actionConfig = {
-                    color: 'bg-red-500',
-                    icon: Target,
-                    name: opponentActionNames[event.action_type] || event.action_type,
-                    id: event.action_type,
-                    acronym: 'Adv',
-                  };
-                }
-                
-                if (!actionConfig) {
-                  actionConfig = { color: 'bg-gray-500', icon: Target, name: event.action_type, id: event.action_type, acronym: '?' };
-                }
-                
-                const IconComponent = actionConfig.icon;
-                
-                return (
-                  <div
-                    key={event.id}
-                    className="absolute -translate-x-1/2 -translate-y-1/2 group cursor-pointer"
-                    style={{
-                      // Adaptation pour terrain horizontal : inverser x et y + symétrie horizontale
-                      // x (horizontal du terrain vertical) → top (vertical du terrain horizontal)
-                      // y (vertical du terrain vertical) → left (horizontal du terrain horizontal) inversé
-                      left: `${(1 - (event.location_y || 0)) * 100}%`,
-                      top: `${(event.location_x || 0) * 100}%`,
-                    }}
-                    title={`${actionConfig.name} - ${event.player_name} (M${event.half}) ${event.match_time_seconds ? formatTime(event.match_time_seconds) : ''}`}
-                  >
-                    <div className={`w-4 h-4 rounded-full ${actionConfig.color} ring-1 ring-white/30 shadow-lg flex items-center justify-center transition-transform group-hover:scale-125 opacity-75 group-hover:opacity-100`}>
-                      <IconComponent className="h-2.5 w-2.5 text-white" />
-                    </div>
-                    {/* Tooltip au survol */}
-                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
-                      {actionConfig.name} - {event.player_name} (M{event.half} {event.match_time_seconds ? formatTime(event.match_time_seconds) : ''})
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
-        </div>
-
-        {/* Légende */}
-        <div className="mt-4 flex flex-wrap gap-3 justify-center">
-          {ACTIONS.map((action) => {
-            const IconComponent = action.icon;
-            // Mapping inverse : action.id → event_type de la DB
-            const actionIdToEventType: { [key: string]: string[] } = {
-              'goals': ['goal'],
-              'shotsOnTarget': ['shot_on_target'],
-              'shotsOffTarget': ['shot'],
-              'ballLoss': ['ball_loss'],
-              'ballRecovery': ['recovery'],
-              'assists': ['assist'],
-            };
-            const eventTypes = actionIdToEventType[action.id] || [];
-            const count = matchEvents.filter(e => eventTypes.includes(e.action_type)).length;
-            return (
-              <div key={action.id} className="flex items-center gap-2 px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-lg">
-                <div className={`w-3 h-3 rounded-full ${action.color} flex items-center justify-center`}>
-                  <IconComponent className="h-2 w-2 text-white" />
-                </div>
-                <span className="text-xs text-gray-700 dark:text-gray-300">{action.name}</span>
-                <span className="text-xs font-bold text-gray-900 dark:text-white">({count})</span>
-              </div>
-            );
-          })}
-          {/* Actions adverses */}
-          <div className="flex items-center gap-2 px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-lg">
-            <div className="w-3 h-3 rounded-full bg-red-500"></div>
-            <span className="text-xs text-gray-700 dark:text-gray-300">But adverse</span>
-            <span className="text-xs font-bold text-gray-900 dark:text-white">
-              ({matchEvents.filter(e => e.action_type === 'opponent_goal').length})
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
 
   const updateFouls = (isTeamFoul: boolean, increment: boolean = true) => {
     setMatchData(prev => {
@@ -2074,43 +981,11 @@ export default function MatchRecorderPage() {
   };
 
   const handleCardLongPressStart = (playerId: string, cardType: 'yellow' | 'red') => {
-    const timerKey = `${playerId}-${cardType}Card`;
-    
-    const timerId = setTimeout(() => {
-      updatePlayerCard(playerId, cardType, false); // Décrémenter
-      setLongPressTriggered(prev => ({
-        ...prev,
-        [timerKey]: true
-      }));
-    }, 500); // 500ms pour déclencher le clic long
-    
-    setLongPressTimers(prev => ({
-      ...prev,
-      [timerKey]: timerId
-    }));
+    startLongPress(`${playerId}-${cardType}Card`, () => updatePlayerCard(playerId, cardType, false));
   };
 
   const handleCardLongPressEnd = (playerId: string, cardType: 'yellow' | 'red') => {
-    const timerKey = `${playerId}-${cardType}Card`;
-    const timer = longPressTimers[timerKey];
-    
-    if (timer) {
-      clearTimeout(timer);
-      setLongPressTimers(prev => {
-        const newTimers = { ...prev };
-        delete newTimers[timerKey];
-        return newTimers;
-      });
-    }
-    
-    // Réinitialiser le flag après un court délai pour éviter le double comptage
-    setTimeout(() => {
-      setLongPressTriggered(prev => {
-        const newTriggered = { ...prev };
-        delete newTriggered[timerKey];
-        return newTriggered;
-      });
-    }, 100);
+    endLongPress(`${playerId}-${cardType}Card`);
   };
 
   const selectMatch = async (match: Match) => {
@@ -2873,33 +1748,6 @@ export default function MatchRecorderPage() {
     }
   };
 
-  const exportData = () => {
-    const data = {
-      matchInfo: matchData.selectedMatch,
-      matchData,
-      exportTime: new Date().toISOString(),
-      summary: {
-        totalGoals: matchData.players.reduce((sum, player) => sum + player.stats.goals, 0),
-        teamScore: matchData.teamScore,
-        opponentScore: matchData.opponentScore,
-        matchTime: formatMatchTime(matchData.matchTime),
-        currentHalf: matchData.currentHalf,
-        teamFouls: matchData.teamFouls,
-        opponentFouls: matchData.opponentFouls,
-      }
-    };
-    
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `match_data_${matchData.selectedMatch?.title || 'unknown'}_${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
   const finishMatch = async () => {
     if (!matchData.selectedMatch) {
       alert('Aucun match sélectionné');
@@ -3007,7 +1855,7 @@ export default function MatchRecorderPage() {
         
 Résumé :
 - Score final : ${matchData.teamScore} - ${matchData.opponentScore}
-- Temps de jeu : ${formatMatchTime(matchData.matchTime)}
+- Temps de jeu : ${formatTime(matchData.matchTime)}
 - Buts marqués : ${totalGoals}
 - Cartons jaunes : ${totalYellowCards}
 - Cartons rouges : ${totalRedCards}
@@ -3045,177 +1893,6 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
     }
   };
 
-  const exportCSV = () => {
-    if (!matchData.selectedMatch || matchData.players.length === 0) {
-      alert('Aucune donnée à exporter');
-      return;
-    }
-
-    // En-têtes CSV
-    const headers = [
-      'Joueur',
-      'Numéro',
-      'Position',
-      'Titulaire',
-      'Sur le terrain',
-      'Temps total (s)',
-      'Temps séquence (s)',
-      'Limite séquence (s)',
-      'Cartons jaunes',
-      'Cartons rouges',
-      'Tirs cadrés',
-      'Tirs non cadrés',
-      'Buts',
-      'Pertes de balle',
-      'Récupérations',
-      'Passes décisives',
-      '1v1 déf perdu'
-    ];
-
-    // Données des joueurs
-    const playerData = matchData.players.map(player => [
-      player.name,
-      player.number,
-      player.position,
-      player.isStarter ? 'Oui' : 'Non',
-      player.isOnField ? 'Oui' : 'Non',
-      player.totalTime,
-      player.currentSequenceTime,
-      player.sequenceTimeLimit,
-      player.yellowCards || 0,
-      player.redCards || 0,
-      player.stats.shotsOnTarget || 0,
-      player.stats.shotsOffTarget || 0,
-      player.stats.goals || 0,
-      player.stats.ballLoss || 0,
-      player.stats.ballRecovery || 0,
-      player.stats.assists || 0,
-      player.stats.oneOnOneDefLost || 0
-    ]);
-
-    // Données du match
-    const matchSummary = [
-      [''],
-      ['RÉSUMÉ DU MATCH'],
-      ['Titre', matchData.selectedMatch.title],
-      ['Date', matchData.selectedMatch.date],
-      ['Compétition', matchData.selectedMatch.competition],
-      ['Score Équipe', matchData.teamScore],
-      ['Score Adversaire', matchData.opponentScore],
-      ['Temps de jeu', formatMatchTime(matchData.matchTime)],
-      ['Mi-temps', matchData.currentHalf],
-      ['Fautes Équipe', matchData.teamFouls],
-      ['Fautes Adversaire', matchData.opponentFouls],
-      ['Tirs cadrés adverses', matchData.opponentActions.shotsOnTarget],
-      ['Tirs adverses', matchData.opponentActions.shotsOffTarget],
-      [''],
-      ['DONNÉES DES JOUEURS']
-    ];
-
-    // Combiner toutes les données
-    const csvContent = [
-      headers.join(','),
-      ...playerData.map(row => row.join(',')),
-      ...matchSummary.map(row => row.join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `match_data_${matchData.selectedMatch.title}_${new Date().toISOString().split('T')[0]}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  // Fonction pour exporter les événements de match au format CSV
-  const exportMatchEventsCSV = async () => {
-    if (!matchData.selectedMatch) {
-      alert('Aucun match sélectionné');
-      return;
-    }
-
-    try {
-      // Récupérer tous les événements du match depuis la base de données
-      const { data: events, error } = await supabase
-        .from('match_events')
-        .select('*')
-        .eq('match_id', matchData.selectedMatch.id)
-        .order('match_time_seconds', { ascending: true });
-
-      if (error) {
-        console.error('Erreur lors de la récupération des événements:', error);
-        alert('Erreur lors de la récupération des événements');
-        return;
-      }
-
-      if (!events || events.length === 0) {
-        alert('Aucun événement trouvé pour ce match');
-        return;
-      }
-
-      // En-têtes CSV pour les événements
-      const headers = [
-        'ID Événement',
-        'Type d\'événement',
-        'Temps de match (secondes)',
-        'Mi-temps',
-        'ID Joueur',
-        'Joueurs sur le terrain',
-        'Date de création'
-      ];
-
-      // Données des événements
-      const eventData = events.map(event => [
-        event.id,
-        event.event_type,
-        event.match_time_seconds || 0,
-        event.half || 1,
-        event.player_id || 'N/A',
-        event.players_on_field ? event.players_on_field.join(';') : 'N/A',
-        new Date(event.created_at).toLocaleString('fr-FR')
-      ]);
-
-      // Informations du match
-      const matchInfo = [
-        [''],
-        ['INFORMATIONS DU MATCH'],
-        ['Titre', matchData.selectedMatch.title],
-        ['Date', matchData.selectedMatch.date],
-        ['Compétition', matchData.selectedMatch.competition],
-        ['Score Équipe', matchData.teamScore],
-        ['Score Adversaire', matchData.opponentScore],
-        [''],
-        ['ÉVÉNEMENTS DU MATCH']
-      ];
-
-      // Combiner toutes les données
-      const csvContent = [
-        headers.join(','),
-        ...eventData.map(row => row.join(',')),
-        ...matchInfo.map(row => row.join(','))
-      ].join('\n');
-
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `match_events_${matchData.selectedMatch.title}_${new Date().toISOString().split('T')[0]}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      console.log(`Export CSV des événements réussi: ${events.length} événements exportés`);
-    } catch (error) {
-      console.error('Erreur lors de l\'export CSV des événements:', error);
-      alert('Erreur lors de l\'export CSV des événements');
-    }
-  };
-
-  // Fonction pour gérer la sélection d'un joueur pour changement
   const handlePlayerSelection = (playerId: string, playerIsOnField: boolean) => {
     if (!selectedPlayerForChange) {
       // Premier joueur sélectionné
@@ -4052,217 +2729,6 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
             </div>
           </div>
 
-          {/* Terrain avec actions */}
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4 border border-gray-200 dark:border-gray-700 mt-6">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-              <Target className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-              Visualisation des actions sur le terrain
-            </h2>
-
-            {/* Filtre par type d'action (multichoix) */}
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Filtrer par type d'action (sélection multiple) :
-              </label>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  { value: 'all', label: 'Toutes les actions' },
-                  { value: 'goal', label: 'Buts' },
-                  { value: 'shot_on_target', label: 'Tirs cadrés' },
-                  { value: 'shot', label: 'Tirs non cadrés' },
-                  { value: 'ball_loss', label: 'Pertes de balle' },
-                  { value: 'ball_recovery', label: 'Récupérations' },
-                  { value: 'assist', label: 'Passes décisives' },
-                  { value: 'opponent_goal', label: 'Buts adverses' },
-                  { value: 'opponent_shot_on_target', label: 'Tirs cadrés adverses' },
-                  { value: 'opponent_shot', label: 'Tirs adverses' },
-                ].map((option) => {
-                  const isSelected = actionFilter.includes(option.value);
-                  return (
-                    <button
-                      key={option.value}
-                      onClick={() => {
-                        if (option.value === 'all') {
-                          setActionFilter(actionFilter.includes('all') ? [] : ['all']);
-                        } else {
-                          const newFilter = actionFilter.filter(f => f !== 'all');
-                          if (isSelected) {
-                            setActionFilter(newFilter.filter(f => f !== option.value));
-                          } else {
-                            setActionFilter([...newFilter, option.value]);
-                          }
-                        }
-                      }}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                        isSelected
-                          ? 'bg-blue-600 text-white shadow-md'
-                          : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
-                      }`}
-                    >
-                      {option.label}
-                    </button>
-                  );
-                })}
-              </div>
-              {actionFilter.length === 0 && (
-                <p className="text-xs text-gray-500 dark:text-gray-600 mt-2">
-                  Aucun filtre sélectionné. Sélectionnez au moins un type d'action pour afficher les résultats.
-                </p>
-              )}
-            </div>
-
-            {/* Terrain avec actions */}
-            <div className="relative w-full max-w-2xl mx-auto scale-90 origin-center">
-              <div
-                className="relative w-full overflow-hidden"
-                style={{
-                  aspectRatio: '432 / 262',
-                  borderRadius: 12,
-                  border: '1px solid rgba(255,176,32,0.18)',
-                  backgroundColor: '#050505',
-                  boxShadow: '0 0 40px rgba(255,176,32,0.06)',
-                }}
-              >
-                {/* SVG terrain — fond noir, lignes amber */}
-                <svg viewBox="0 0 432 262" className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
-                  <rect x="16" y="12" width="400" height="238" fill="#080808" />
-                  <defs>
-                    <radialGradient id="pitchGlow2" cx="50%" cy="50%" r="50%">
-                      <stop offset="0%"   stopColor="#FFB020" stopOpacity="0.04" />
-                      <stop offset="100%" stopColor="#FFB020" stopOpacity="0" />
-                    </radialGradient>
-                  </defs>
-                  <rect x="16" y="12" width="400" height="238" fill="url(#pitchGlow2)" />
-                  <rect x="16" y="12" width="400" height="238" fill="none" stroke="#FFB020" strokeWidth="1.5" strokeOpacity="0.65" />
-                  <line x1="216" y1="12" x2="216" y2="250" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
-                  <ellipse cx="216" cy="131" rx="35" ry="35" fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
-                  <circle cx="216" cy="131" r="2.5" fill="#FFB020" fillOpacity="0.65" />
-                  <path d="M 16 22 A 10 10 0 0 1 26 12"    fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
-                  <path d="M 406 12 A 10 10 0 0 1 416 22"  fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
-                  <path d="M 16 240 A 10 10 0 0 0 26 250"  fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
-                  <path d="M 406 250 A 10 10 0 0 0 416 240" fill="none" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
-                  <path d="M 16 45 A 60 69 0 0 1 76 114 L 76 148 A 60 69 0 0 1 16 217"
-                    fill="rgba(255,176,32,0.04)" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
-                  <path d="M 416 45 A 60 69 0 0 0 356 114 L 356 148 A 60 69 0 0 0 416 217"
-                    fill="rgba(255,176,32,0.04)" stroke="#FFB020" strokeWidth="1" strokeOpacity="0.55" />
-                  <rect x="0" y="114" width="16" height="34" rx="1"
-                    fill="rgba(255,176,32,0.08)" stroke="#FFB020" strokeWidth="1.4" strokeOpacity="0.85" />
-                  <rect x="416" y="114" width="16" height="34" rx="1"
-                    fill="rgba(255,176,32,0.08)" stroke="#FFB020" strokeWidth="1.4" strokeOpacity="0.85" />
-                  <circle cx="76"  cy="131" r="2.5" fill="#FFB020" fillOpacity="0.65" />
-                  <circle cx="356" cy="131" r="2.5" fill="#FFB020" fillOpacity="0.65" />
-                  <circle cx="116" cy="131" r="2" fill="#FFB020" fillOpacity="0.35" />
-                  <circle cx="316" cy="131" r="2" fill="#FFB020" fillOpacity="0.35" />
-                </svg>
-                {/* Afficher les actions filtrées */}
-                {matchEvents
-                  .filter(event => {
-                    if (actionFilter.length === 0) return false;
-                    if (actionFilter.includes('all')) return true;
-                    
-                    const eventTypeMap: { [key: string]: string } = {
-                      'goal': 'goal',
-                      'shot_on_target': 'shot_on_target',
-                      'shot': 'shot',
-                      'ball_loss': 'ball_loss',
-                      'recovery': 'ball_recovery',
-                      'assist': 'assist',
-                      'opponent_goal': 'opponent_goal',
-                      'opponent_shot_on_target': 'opponent_shot_on_target',
-                      'opponent_shot': 'opponent_shot',
-                    };
-                    
-                    const mappedType = eventTypeMap[event.action_type] || event.action_type;
-                    return actionFilter.includes(mappedType) || actionFilter.includes(event.action_type);
-                  })
-                  .map((event) => {
-                    const eventTypeToActionId: { [key: string]: string } = {
-                      'goal': 'goals',
-                      'shot_on_target': 'shotsOnTarget',
-                      'shot': 'shotsOffTarget',
-                      'ball_loss': 'ballLoss',
-                      'recovery': 'ballRecovery',
-                      'assist': 'assists',
-                    };
-                    const actionId = eventTypeToActionId[event.action_type] || event.action_type;
-                    let actionConfig = ACTIONS.find(a => a.id === actionId);
-                    
-                    if (!actionConfig && event.action_type.includes('opponent')) {
-                      const opponentActionNames: { [key: string]: string } = {
-                        'opponent_goal': 'But adverse',
-                        'opponent_shot_on_target': 'Tir cadré adverse',
-                        'opponent_shot': 'Tir adverse',
-                      };
-                      actionConfig = {
-                        color: 'bg-red-500',
-                        icon: Target,
-                        name: opponentActionNames[event.action_type] || event.action_type,
-                        id: event.action_type,
-                        acronym: 'Adv',
-                      };
-                    }
-                    
-                    if (!actionConfig) {
-                      actionConfig = { color: 'bg-gray-500', icon: Target, name: event.action_type, id: event.action_type, acronym: '?' };
-                    }
-                    
-                    const IconComponent = actionConfig.icon;
-                    
-                    return (
-                      <div
-                        key={event.id}
-                        className="absolute -translate-x-1/2 -translate-y-1/2 group cursor-pointer"
-                        style={{
-                          left: `${(1 - (event.location_y || 0)) * 100}%`,
-                          top: `${(event.location_x || 0) * 100}%`,
-                        }}
-                        title={`${actionConfig.name} - ${event.player_name} (M${event.half}) ${event.match_time_seconds ? formatTime(event.match_time_seconds) : ''}`}
-                      >
-                        <div className={`w-4 h-4 rounded-full ${actionConfig.color} ring-1 ring-white/30 shadow-lg flex items-center justify-center transition-transform group-hover:scale-125 opacity-75 group-hover:opacity-100`}>
-                          <IconComponent className="h-2.5 w-2.5 text-white" />
-                        </div>
-                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
-                          {actionConfig.name} - {event.player_name} (M{event.half} {event.match_time_seconds ? formatTime(event.match_time_seconds) : ''})
-                        </div>
-                      </div>
-                    );
-                  })}
-              </div>
-            </div>
-
-            {/* Légende */}
-            <div className="mt-4 flex flex-wrap gap-3 justify-center">
-              {ACTIONS.map((action) => {
-                const IconComponent = action.icon;
-                const actionIdToEventType: { [key: string]: string[] } = {
-                  'goals': ['goal'],
-                  'shotsOnTarget': ['shot_on_target'],
-                  'shotsOffTarget': ['shot'],
-                  'ballLoss': ['ball_loss'],
-                  'ballRecovery': ['recovery'],
-                  'assists': ['assist'],
-                };
-                const eventTypes = actionIdToEventType[action.id] || [];
-                const count = matchEvents.filter(e => eventTypes.includes(e.action_type)).length;
-                return (
-                  <div key={action.id} className="flex items-center gap-2 px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-lg">
-                    <div className={`w-3 h-3 rounded-full ${action.color} flex items-center justify-center`}>
-                      <IconComponent className="h-2 w-2 text-white" />
-                    </div>
-                    <span className="text-xs text-gray-700 dark:text-gray-300">{action.name}</span>
-                    <span className="text-xs font-bold text-gray-900 dark:text-white">({count})</span>
-                  </div>
-                );
-              })}
-              <div className="flex items-center gap-2 px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-lg">
-                <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                <span className="text-xs text-gray-700 dark:text-gray-300">But adverse</span>
-                <span className="text-xs font-bold text-gray-900 dark:text-white">
-                  ({matchEvents.filter(e => e.action_type === 'opponent_goal').length})
-                </span>
-              </div>
-            </div>
-          </div>
 
           {/* Boutons d'action */}
           <div className="flex flex-wrap justify-center gap-4 mt-4">
@@ -4275,27 +2741,6 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                 Rapport PDF
               </button>
             )}
-            <button
-              onClick={exportData}
-              className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <Download className="h-5 w-5" />
-              Exporter JSON
-            </button>
-            <button
-              onClick={exportCSV}
-              className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-            >
-              <Download className="h-5 w-5" />
-              Exporter CSV
-            </button>
-            <button
-              onClick={exportMatchEventsCSV}
-              className="flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-            >
-              <Download className="h-5 w-5" />
-              Exporter Événements
-            </button>
           </div>
         </div>
       </div>
@@ -4344,16 +2789,6 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                 </button>
               )}
               
-              {localEvents.length > 0 && (
-                <button
-                  onClick={exportLocalDataToCSV}
-                  className="flex items-center gap-1 px-2 py-1 bg-amber-600 text-white rounded hover:bg-amber-700 transition-colors text-xs font-semibold"
-                  title="Exporter les données locales"
-                >
-                  <Database className="h-3 w-3" />
-                  Local CSV
-                </button>
-              )}
               
               <button
                 onClick={() => setActiveView(activeView === 'recording' ? 'summary' : 'recording')}
@@ -4383,28 +2818,6 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                 Changer
               </button>
               <button
-                onClick={exportData}
-                className="flex items-center gap-1 px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors text-xs"
-              >
-                <Download className="h-3 w-3" />
-                JSON
-              </button>
-              <button
-                onClick={exportCSV}
-                className="flex items-center gap-1 px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 transition-colors text-xs"
-              >
-                <Download className="h-3 w-3" />
-                CSV
-              </button>
-              <button
-                onClick={exportMatchEventsCSV}
-                className="flex items-center gap-1 px-2 py-1 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors text-xs"
-                title="Exporter les événements du match au format CSV"
-              >
-                <Download className="h-3 w-3" />
-                Événements
-              </button>
-              <button
                 onClick={finishMatch}
                 className="flex items-center gap-1 px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors text-xs font-semibold"
               >
@@ -4429,7 +2842,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                 {/* Temps à gauche */}
                 <div className="text-center flex-1">
                   <div className="text-lg font-mono font-bold text-blue-600 dark:text-blue-400">
-                    {formatMatchTime(matchData.matchTime)}
+                    {formatTime(matchData.matchTime)}
                   </div>
                 </div>
                 
@@ -4824,60 +3237,6 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
                     </div>
                   </div>
 
-                  {/* Colonne droite: terrain cliquable */}
-                  <div className="w-full lg:w-[25%] lg:flex-none min-w-0">
-                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 border border-gray-200 dark:border-gray-700 lg:sticky lg:top-4">
-                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
-                        Sélectionner la zone de terrain
-                      </h3>
-                      <div className="relative w-full">
-                        <div
-                          onClick={(e) => {
-                            const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-                            const x = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
-                            const y = Math.min(Math.max((e.clientY - rect.top) / rect.height, 0), 1);
-                            setSelectedLocation({ x, y });
-                          }}
-                          className="relative w-full"
-                          style={{
-                            aspectRatio: '262 / 432',
-                            backgroundImage: `url('/futsal_pitch.png')`,
-                            backgroundSize: 'cover',
-                            backgroundPosition: 'center',
-                            backgroundRepeat: 'no-repeat',
-                            borderRadius: 12,
-                            border: '1px solid rgba(209,213,219,1)',
-                          }}
-                          title="Touchez/cliquez pour définir la position"
-                        >
-                          {selectedLocation && (
-                            <div
-                              className="absolute -translate-x-1/2 -translate-y-1/2"
-                              style={{
-                                left: `${selectedLocation.x * 100}%`,
-                                top: `${selectedLocation.y * 100}%`,
-                              }}
-                            >
-                              <div className="w-3 h-3 rounded-full bg-blue-600 ring-2 ring-white shadow" />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="mt-2 text-xs text-gray-600 dark:text-gray-600">
-                        {selectedLocation
-                          ? `Position: x=${selectedLocation.x.toFixed(2)}, y=${selectedLocation.y.toFixed(2)}`
-                          : 'Aucune position sélectionnée. Les actions seront enregistrées sans coordonnées.'}
-                        {selectedLocation && (
-                          <button
-                            onClick={() => setSelectedLocation(null)}
-                            className="ml-2 px-2 py-0.5 rounded bg-gray-100 hover:bg-gray-200 text-gray-700"
-                          >
-                            Effacer
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
                 </div>
 
                 {/* Ligne 2: Remplaçants (pleine largeur) */}
@@ -4992,7 +3351,15 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
             )
           )}
 
-          {activeView === 'summary' && renderLiveSummary()}
+          {activeView === 'summary' && (
+            <LiveSummary
+              matchData={matchData}
+              getTeamStats={getTeamStats}
+              getTopPlayers={getTopPlayers}
+              getTopPlayersByTotalShots={getTopPlayersByTotalShots}
+              getTopPlayersByTime={getTopPlayersByTime}
+            />
+          )}
         </div>
       </div>
     </div>

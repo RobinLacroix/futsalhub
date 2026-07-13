@@ -25,6 +25,9 @@ import { getPlayersByTeam } from '../lib/services/players';
 import type { Match, MatchPlayer } from '../types';
 import type { Player } from '../types';
 import type { MatchEventType } from '../types';
+import { useVoiceCommand } from '../hooks/useVoiceCommand';
+import { getOutboxLength } from '../lib/offline/matchRecorderOutbox';
+import { parseMatchPlayers, formatSeconds } from '../utils/matchUtils';
 
 const GOAL_TYPES: { value: GoalType; label: string }[] = [
   { value: 'offensive', label: 'Phase offensive' },
@@ -69,17 +72,6 @@ interface PlayerState {
   stats: Record<string, number>;
 }
 
-function parseMatchPlayers(m: Match): MatchPlayer[] {
-  if (!m.players) return [];
-  const raw = m.players;
-  if (Array.isArray(raw)) return raw;
-  try {
-    const arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    return Array.isArray(arr) ? arr : [];
-  } catch {
-    return [];
-  }
-}
 
 interface TabletMatchRecorderProps {
   initialMatchId?: string | null;
@@ -128,12 +120,23 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
   const [goalsByType,    setGoalsByType]    = useState<Record<string, number>>({ offensive: 0, transition: 0, cpa: 0, superiority: 0 });
   const [concededByType, setConcededByType] = useState<Record<string, number>>({ offensive: 0, transition: 0, cpa: 0, superiority: 0 });
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [voiceFeedback, setVoiceFeedback] = useState<string | null>(null);
+  const voiceFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [outboxLength, setOutboxLength] = useState(0);
+  const [timeoutUs, setTimeoutUs] = useState(false);
+  const [timeoutOpponent, setTimeoutOpponent] = useState(false);
 
   // Enregistre le timestamp à chaque ouverture du modal pour éviter le "ghost tap"
   // (l'événement "doigt levé" du bouton d'ouverture qui traverse vers l'overlay et ferme immédiatement)
   useEffect(() => {
     if (goalTypeModal) modalOpenedAtRef.current = Date.now();
   }, [goalTypeModal]);
+
+  const showVoiceFeedback = useCallback((msg: string) => {
+    if (voiceFeedbackTimeoutRef.current) clearTimeout(voiceFeedbackTimeoutRef.current);
+    setVoiceFeedback(msg);
+    voiceFeedbackTimeoutRef.current = setTimeout(() => setVoiceFeedback(null), 3000);
+  }, []);
 
   const convoquedIds = useMemo(() => {
     if (!match) return [];
@@ -156,11 +159,7 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
     return convoquedPlayers.filter((p) => !onField.has(p.id));
   }, [convoquedPlayers, playersOnField]);
 
-  const formatTime = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
-  };
+  const formatTime = formatSeconds;
 
   const loadMatches = useCallback(async () => {
     if (!activeTeamId) {
@@ -201,9 +200,13 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
         ]);
         if (!cancelled && m) {
           setMatch(m);
-          setPlayers(pl);
 
           const ids = parseMatchPlayers(m).map((p) => p.id);
+          // Exclure les joueurs partis ('left') du roster, sauf s'ils sont déjà
+          // convoqués dans ce match (on garde l'historique d'un match joué).
+          const convokedIds = new Set(ids);
+          setPlayers(pl.filter((p) => p.status !== 'left' || convokedIds.has(p.id)));
+
           const starters = ids.slice(0, 5);
 
           setScoreUs(m.score_team ?? 0);
@@ -522,6 +525,32 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
     setSelectedPlayerForChange(null);
   }, []);
 
+  const { isListening, startListening, stopListening } = useVoiceCommand({
+    players: convoquedPlayers,
+    playersOnField,
+    onEvent: (eventType, player, statKey) => {
+      if (eventType === 'goal' || eventType === 'opponent_goal') {
+        setGoalTypeModal({ eventType, playerId: player?.id ?? null, statKey });
+        const playerLabel = player ? `${player.first_name} · ` : '';
+        showVoiceFeedback(`${playerLabel}But — choisissez le type`);
+      } else {
+        recordEvent(eventType, player?.id ?? null, statKey || undefined);
+        const playerLabel = player ? `${player.first_name} ${player.last_name}` : 'Adversaire';
+        const actionLabel = ACTIONS.find((a) => a.eventType === eventType)?.label ?? eventType;
+        showVoiceFeedback(`${playerLabel} · ${actionLabel}`);
+      }
+    },
+    onSubstitution: (outId, inId) => {
+      handleSubstitution(outId, inId);
+      const out = convoquedPlayers.find((p) => p.id === outId);
+      const inn = convoquedPlayers.find((p) => p.id === inId);
+      showVoiceFeedback(`Changement · ${out?.first_name ?? '?'} → ${inn?.first_name ?? '?'}`);
+    },
+    onUnknown: (transcript) => {
+      showVoiceFeedback(`Non reconnu : "${transcript}"`);
+    },
+  });
+
   const handlePlayerSelection = useCallback(
     (playerId: string, isOnField: boolean) => {
       if (selectedPlayerForChange) {
@@ -598,12 +627,22 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
     [playersOnField]
   );
 
+  useEffect(() => {
+    if (step !== 'record') return;
+    const poll = setInterval(async () => {
+      setOutboxLength(await getOutboxLength());
+    }, 5000);
+    return () => clearInterval(poll);
+  }, [step]);
+
   const nextHalf = useCallback(() => {
     if (half === 1) {
       setHalf(2);
       setSeconds(0);
       setFoulsUs(0);
       setFoulsOpponent(0);
+      setTimeoutUs(false);
+      setTimeoutOpponent(false);
       setPlayerStates((prev) => {
         const next = { ...prev };
         Object.keys(next).forEach((id) => {
@@ -746,7 +785,7 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
           <Text style={styles.empty}>Aucun match. Créez-en un dans le Calendrier.</Text>
         ) : (
           <View style={styles.matchList}>
-            {matches.slice(0, 20).map((m) => (
+            {[...matches].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((m) => (
               <TouchableOpacity
                 key={m.id}
                 style={styles.matchCard}
@@ -799,6 +838,12 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
             {match.title || match.opponent_team || 'Match'} - {match.competition}
           </Text>
           <View style={styles.controlActions}>
+            {outboxLength > 0 && (
+              <View style={styles.syncBadge}>
+                <Ionicons name="cloud-offline-outline" size={14} color="#fff" />
+                <Text style={styles.syncBadgeText}>{outboxLength}</Text>
+              </View>
+            )}
             <TouchableOpacity
               style={[styles.headerBtn, activeView === 'saisie' && styles.headerBtnActive]}
               onPress={() => setActiveView('saisie')}
@@ -823,6 +868,13 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
             >
               <Ionicons name="swap-horizontal" size={16} color="#fff" />
               <Text style={styles.headerBtnText}>Changer</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.headerBtn, isListening && styles.headerBtnVoiceActive]}
+              onPress={isListening ? stopListening : startListening}
+            >
+              <Ionicons name={isListening ? 'mic' : 'mic-outline'} size={16} color="#fff" />
+              <Text style={styles.headerBtnText}>{isListening ? 'Écoute…' : 'Voix'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.headerBtn, styles.finishBtn]} onPress={saveAndExit} disabled={saving}>
               {saving ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="flag" size={16} color="#fff" />}
@@ -881,11 +933,25 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
               <Text style={styles.foulValues}>{foulsUs} - {foulsOpponent}</Text>
             </View>
             <View style={styles.foulButtons}>
-              <TouchableOpacity style={styles.foulBtnEq} onPress={() => setFoulsUs((n) => n + 1)}>
-                <Text style={styles.foulBtnText}>Faute Éq</Text>
+              <TouchableOpacity
+                style={[styles.foulBtnEq, foulsUs >= 5 && styles.foulBtnWarning]}
+                onPress={() => setFoulsUs((n) => {
+                  const next = n + 1;
+                  if (next === 5) Alert.alert('5e faute équipe', 'La prochaine = jet franc adverse à 10m !');
+                  return next;
+                })}
+              >
+                <Text style={styles.foulBtnText}>F. Éq ({foulsUs})</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.foulBtnAdv} onPress={() => setFoulsOpponent((n) => n + 1)}>
-                <Text style={styles.foulBtnText}>Faute Adv</Text>
+              <TouchableOpacity
+                style={[styles.foulBtnAdv, foulsOpponent >= 5 && styles.foulBtnWarning]}
+                onPress={() => setFoulsOpponent((n) => {
+                  const next = n + 1;
+                  if (next === 5) Alert.alert('5e faute adverse', 'La prochaine = jet franc pour vous à 10m !');
+                  return next;
+                })}
+              >
+                <Text style={styles.foulBtnText}>F. Adv ({foulsOpponent})</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -924,6 +990,24 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
                   </TouchableOpacity>
                 ))}
               </View>
+            </View>
+          </View>
+
+          <View style={styles.timeoutBox}>
+            <Text style={styles.opponentLabel}>Temps morts</Text>
+            <View style={styles.timeoutButtons}>
+              <TouchableOpacity
+                style={[styles.timeoutBtn, timeoutUs && styles.timeoutBtnUsed]}
+                onPress={() => setTimeoutUs((v) => !v)}
+              >
+                <Text style={styles.timeoutBtnText}>{timeoutUs ? 'TM Éq ✓' : 'TM Éq'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.timeoutBtn, timeoutOpponent && styles.timeoutBtnUsedAdv]}
+                onPress={() => setTimeoutOpponent((v) => !v)}
+              >
+                <Text style={styles.timeoutBtnText}>{timeoutOpponent ? 'TM Adv ✓' : 'TM Adv'}</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -1330,6 +1414,15 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
         ) : null}
       </ScrollView>
 
+      {voiceFeedback && (
+        <View style={styles.voiceFeedbackOverlay} pointerEvents="none">
+          <View style={styles.voiceFeedbackBox}>
+            <Ionicons name="mic" size={16} color="#fff" style={{ marginRight: 6 }} />
+            <Text style={styles.voiceFeedbackText} numberOfLines={2}>{voiceFeedback}</Text>
+          </View>
+        </View>
+      )}
+
       <Modal visible={!!goalTypeModal} transparent animationType="fade">
         <Pressable
           style={styles.goalTypeOverlay}
@@ -1417,8 +1510,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#64748b',
   },
   headerBtnActive: { backgroundColor: '#8b5cf6' },
+  headerBtnVoiceActive: { backgroundColor: '#16a34a' },
   finishBtn: { backgroundColor: '#dc2626' },
   headerBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+
+  voiceFeedbackOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 99 },
+  voiceFeedbackBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(15,23,42,0.88)', borderRadius: 14, paddingHorizontal: 20, paddingVertical: 14, maxWidth: '80%', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 10 },
+  voiceFeedbackText: { color: '#fff', fontWeight: '700', fontSize: 15, flexShrink: 1 },
 
   controlsGrid: {
     flexDirection: 'row',
@@ -1486,7 +1584,24 @@ const styles = StyleSheet.create({
   foulButtons: { flexDirection: 'row', gap: 8, marginTop: 4 },
   foulBtnEq: { flex: 1, backgroundColor: '#3b82f6', paddingVertical: 10, borderRadius: 8, alignItems: 'center', minHeight: 40 },
   foulBtnAdv: { flex: 1, backgroundColor: '#dc2626', paddingVertical: 10, borderRadius: 8, alignItems: 'center', minHeight: 40 },
+  foulBtnWarning: { backgroundColor: '#f97316' },
   foulBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+
+  timeoutBox: {
+    backgroundColor: '#f1f5f9',
+    borderRadius: 12,
+    padding: 8,
+    flex: 16,
+    minWidth: 100,
+  },
+  timeoutButtons: { flexDirection: 'row', gap: 6, marginTop: 4 },
+  timeoutBtn: { flex: 1, backgroundColor: '#64748b', paddingVertical: 10, borderRadius: 8, alignItems: 'center', minHeight: 40 },
+  timeoutBtnUsed: { backgroundColor: '#3b82f6' },
+  timeoutBtnUsedAdv: { backgroundColor: '#dc2626' },
+  timeoutBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+
+  syncBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#f97316', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6 },
+  syncBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
 
   opponentBox: {
     backgroundColor: '#f1f5f9',

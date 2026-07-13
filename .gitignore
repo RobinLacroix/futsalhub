@@ -14,6 +14,13 @@ mobile/node_modules
 # testing
 /coverage
 
+# expo / local tooling
+.expo/
+.claude/
+
+# build artifacts / archives
+*.zip
+
 # next.js
 /.next/
 /out/
@@ -24,6 +31,10 @@ mobile/node_modules
 # misc
 .DS_Store
 *.pem
+
+# secrets (Apple push keys, signing keys)
+*.p8
+.secrets/
 
 # debug
 npm-debug.log*

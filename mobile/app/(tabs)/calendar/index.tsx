@@ -132,6 +132,7 @@ export default function CalendarScreen() {
   const [absenceTrainingIds, setAbsenceTrainingIds] = useState<Set<string>>(new Set());
 
   const flatListRef = useRef<FlatList>(null);
+  const didScrollRef = useRef(false);
 
   // ── Refetch au retour sur l'écran (ex: après modification d'un événement) ──
   useFocusEffect(
@@ -430,7 +431,12 @@ export default function CalendarScreen() {
 
   return (
     <View style={s.root}>
-      {/* Same layout for both phone and tablet: calendar on top, agenda below */}
+      {error && (
+        <TouchableOpacity style={s.errorBanner} onPress={() => { setError(null); onRefresh(); }} activeOpacity={0.8}>
+          <Ionicons name="warning-outline" size={14} color="#fff" />
+          <Text style={s.errorBannerText}>{error} — Appuyer pour réessayer</Text>
+        </TouchableOpacity>
+      )}
       {calendarPanel}
       <View style={s.agendaDivider} />
       {agendaList}
@@ -565,6 +571,8 @@ const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#f1f5f9' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, gap: 12 },
   emptyText: { fontSize: 15, color: '#94a3b8', textAlign: 'center' },
+  errorBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#dc2626', paddingHorizontal: 16, paddingVertical: 10 },
+  errorBannerText: { color: '#fff', fontSize: 13, fontWeight: '500', flex: 1 },
 
   // ── Calendar panel ──────────────────────────────────────────────────────
   calPanel: {

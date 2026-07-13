@@ -1014,6 +1014,7 @@ export default function AnalyticsPage() {
 
     return {
       scorers:    topN('goals', 5),
+      assists:    topN('assist', 5),
       recoveries: topN('recovery', 5),
       plusMinus:  topN('plusMinusGoals', 5),
       shooterEff,
@@ -1257,13 +1258,21 @@ export default function AnalyticsPage() {
           {playerStatsList.length > 0 && (
             <section style={{ width: '100%' }}>
               <SectionHeader label="Meilleurs joueurs" />
-              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${tops.shooterEff.length > 0 ? 4 : 3}, 1fr)`, gap: 10, width: '100%' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${3 + (tops.assists.length > 0 ? 1 : 0) + (tops.shooterEff.length > 0 ? 1 : 0)}, 1fr)`, gap: 10, width: '100%' }}>
                 <TopList
                   title="Meilleurs buteurs"
                   color={T.green}
                   icon="⚽"
                   items={tops.scorers.map(p => ({ name: abbrevName(p.playerName), value: String(p.goals) }))}
                 />
+                {tops.assists.length > 0 && (
+                  <TopList
+                    title="Meilleures passes déc."
+                    color="#0EA5E9"
+                    icon="🅰️"
+                    items={tops.assists.map(p => ({ name: abbrevName(p.playerName), value: String(p.assist) }))}
+                  />
+                )}
                 <TopList
                   title="Meilleures récupérations"
                   color={T.accent}

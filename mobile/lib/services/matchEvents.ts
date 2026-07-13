@@ -24,6 +24,7 @@ const MATCH_EVENT_TYPES_ALLOWED = new Set<MatchEventType>([
   'opponent_goal',
   'opponent_shot',
   'opponent_shot_on_target',
+  'substitution',
 ]);
 
 function sanitizePlayersOnField(ids: string[]): string[] {

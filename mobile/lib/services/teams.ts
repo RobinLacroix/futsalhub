@@ -27,6 +27,7 @@ export interface TeamFormData {
   category: string;
   level: string;
   color: string;
+  mainCoachUserId?: string | null;
 }
 
 export async function createTeam(clubId: string, data: TeamFormData): Promise<Team> {
@@ -58,7 +59,7 @@ export async function updateTeam(teamId: string, data: Partial<TeamFormData>): P
     .select()
     .single();
   if (error) throw error;
-  if (data.mainCoachUserId !== undefined) {
+  if (data.mainCoachUserId) {
     try {
       await setTeamMainCoach(teamId, data.mainCoachUserId);
     } catch (e) {

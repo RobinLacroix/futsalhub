@@ -7,14 +7,18 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TouchableWithoutFeedback, ActivityIndicator, Alert, SafeAreaView, Modal,
 } from 'react-native';
+import { useVoiceCommand } from '../hooks/useVoiceCommand';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useActiveTeam } from '../contexts/ActiveTeamContext';
 import { getMatchesByTeam, getMatchById, updateMatch } from '../lib/services/matches';
 import { getEventsByMatchId, createMatchEvent, deleteLastMatchEventByType, type GoalType } from '../lib/services/matchEvents';
 import { getPlayersByTeam } from '../lib/services/players';
+import { getOutboxLength } from '../lib/offline/matchRecorderOutbox';
+import { saveRecorderState, loadRecorderState, clearRecorderState } from '../lib/offline/matchRecorderState';
 import type { Match, MatchPlayer } from '../types';
 import type { Player } from '../types';
+import { parseMatchPlayers, formatSeconds } from '../utils/matchUtils';
 import type { MatchEventType } from '../types';
 
 // ─── Constantes ─────────────────────────────────────────────────────────────
@@ -31,16 +35,16 @@ const GOAL_TYPES: { value: GoalType; label: string }[] = [
 
 const PLAYER_ACTIONS: {
   eventType: MatchEventType; statKey: string;
-  label: string; icon: string; color: string;
+  label: string; icon: React.ComponentProps<typeof Ionicons>['name']; color: string;
 }[] = [
-  { eventType: 'goal',           statKey: 'goals',          label: 'But',       icon: '⚽', color: '#3b82f6' },
-  { eventType: 'shot_on_target', statKey: 'shotsOnTarget',  label: 'Tir cadré', icon: '🎯', color: '#22c55e' },
-  { eventType: 'shot',           statKey: 'shotsOffTarget', label: 'Tir',       icon: '○',  color: '#eab308' },
-  { eventType: 'assist',         statKey: 'assists',        label: 'Passe déc.',icon: '🎯', color: '#a855f7' },
-  { eventType: 'recovery',       statKey: 'ballRecovery',   label: 'Récup',     icon: '↑',  color: '#16a34a' },
-  { eventType: 'ball_loss',      statKey: 'ballLoss',       label: 'Perte',     icon: '↓',  color: '#ef4444' },
-  { eventType: 'yellow_card',    statKey: '',               label: 'Jaune',     icon: '⚠',  color: '#f59e0b' },
-  { eventType: 'red_card',       statKey: '',               label: 'Rouge',     icon: '🔴', color: '#dc2626' },
+  { eventType: 'goal',           statKey: 'goals',          label: 'But',       icon: 'football-outline',           color: '#3b82f6' },
+  { eventType: 'shot_on_target', statKey: 'shotsOnTarget',  label: 'Tir cadré', icon: 'checkmark-circle-outline',   color: '#22c55e' },
+  { eventType: 'shot',           statKey: 'shotsOffTarget', label: 'Tir',       icon: 'ellipse-outline',            color: '#eab308' },
+  { eventType: 'assist',         statKey: 'assists',        label: 'Passe déc.',icon: 'git-network-outline',        color: '#a855f7' },
+  { eventType: 'recovery',       statKey: 'ballRecovery',   label: 'Récup',     icon: 'arrow-up-circle-outline',    color: '#16a34a' },
+  { eventType: 'ball_loss',      statKey: 'ballLoss',       label: 'Perte',     icon: 'arrow-down-circle-outline',  color: '#ef4444' },
+  { eventType: 'yellow_card',    statKey: '',               label: 'Jaune',     icon: 'card-outline',               color: '#f59e0b' },
+  { eventType: 'red_card',       statKey: '',               label: 'Rouge',     icon: 'card',                       color: '#dc2626' },
 ];
 
 // Colonnes du tableau Bilan joueurs
@@ -75,21 +79,7 @@ interface PhoneMatchRecorderProps {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function parseMatchPlayers(m: Match): MatchPlayer[] {
-  if (!m.players) return [];
-  const raw = m.players;
-  if (Array.isArray(raw)) return raw;
-  try {
-    const arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    return Array.isArray(arr) ? arr : [];
-  } catch { return []; }
-}
-
-function fmt(s: number) {
-  const m = Math.floor(s / 60);
-  const sec = s % 60;
-  return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
-}
+const fmt = formatSeconds;
 
 // ─── Composant ───────────────────────────────────────────────────────────────
 
@@ -136,9 +126,23 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
     eventType: 'goal' | 'opponent_goal'; playerId?: string | null; statKey?: string;
   } | null>(null);
 
+  // ── Feedback vocal
+  const [voiceFeedback, setVoiceFeedback] = useState<string | null>(null);
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // ── Tri tableau Bilan
   const [sortCol, setSortCol]   = useState<string>('name');
   const [sortDir, setSortDir]   = useState<'asc' | 'desc'>('asc');
+
+  // ── Score modal (correction manuelle)
+  const [scoreModal, setScoreModal] = useState(false);
+
+  // ── Temps morts (1 par équipe par mi-temps)
+  const [timeoutUs, setTimeoutUs]           = useState(false);
+  const [timeoutOpponent, setTimeoutOpponent] = useState(false);
+
+  // ── Sync offline : nb d'actions en attente dans l'outbox
+  const [outboxLength, setOutboxLength] = useState(0);
 
   // ── Données dérivées ─────────────────────────────────────────────────
 
@@ -205,11 +209,61 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
   }, [convoquedPlayers, playerStates, sortCol, sortDir]);
 
   const handleSort = (col: string) => {
-    setSortCol((prev) => {
-      setSortDir(prev === col ? (d => d === 'asc' ? 'desc' : 'asc') : () => 'desc');
-      return col;
-    });
+    setSortDir(sortCol === col ? (d => d === 'asc' ? 'desc' : 'asc') : 'desc');
+    setSortCol(col);
   };
+
+  // ── Outbox polling (indicateur sync offline) ─────────────────────────
+
+  useEffect(() => {
+    if (step !== 'record') return;
+    const check = () => getOutboxLength().then(setOutboxLength).catch(() => {});
+    check();
+    const t = setInterval(check, 5000);
+    return () => clearInterval(t);
+  }, [step]);
+
+  // ── Persistance état recorder (throttle 5s sur le chrono) ────────────
+
+  const persistThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const persistState = useCallback(() => {
+    if (!matchId) return;
+    if (persistThrottleRef.current) clearTimeout(persistThrottleRef.current);
+    persistThrottleRef.current = setTimeout(() => {
+      saveRecorderState({
+        matchId,
+        half, seconds, scoreUs, scoreOpponent,
+        foulsUs, foulsOpponent, playersOnField, playerStates,
+        savedAt: Date.now(),
+      });
+    }, 5000);
+  }, [matchId, half, seconds, scoreUs, scoreOpponent, foulsUs, foulsOpponent, playersOnField, playerStates]);
+
+  useEffect(() => { persistState(); }, [persistState]);
+
+  // Restaurer l'état depuis AsyncStorage si disponible (crash / kill app)
+  useEffect(() => {
+    if (step !== 'record' || !matchId) return;
+    loadRecorderState(matchId).then((saved) => {
+      if (!saved) return;
+      setHalf(saved.half);
+      setSeconds(saved.seconds);
+      setScoreUs(saved.scoreUs);
+      setScoreOpponent(saved.scoreOpponent);
+      setFoulsUs(saved.foulsUs);
+      setFoulsOpponent(saved.foulsOpponent);
+      setPlayersOnField(saved.playersOnField);
+      setPlayerStates((prev) => {
+        const merged = { ...prev };
+        Object.entries(saved.playerStates).forEach(([id, st]) => {
+          if (merged[id]) merged[id] = { ...merged[id], ...st };
+        });
+        return merged;
+      });
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, matchId]);
 
   // ── Chargement ───────────────────────────────────────────────────────
 
@@ -238,11 +292,17 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
           activeTeamId ? getPlayersByTeam(activeTeamId) : Promise.resolve([]),
         ]);
         if (!cancelled && m) {
-          setMatch(m); setPlayers(pl);
+          setMatch(m);
           const ids = parseMatchPlayers(m).map((p) => p.id);
+          // Exclure les joueurs partis ('left') du roster, sauf s'ils sont déjà
+          // convoqués dans ce match (on garde l'historique d'un match joué).
+          const convokedIds = new Set(ids);
+          setPlayers(pl.filter((p) => p.status !== 'left' || convokedIds.has(p.id)));
           setPlayersOnField(ids.slice(0, 5));
           setScoreUs(m.score_team ?? 0);
           setScoreOpponent(m.score_opponent ?? 0);
+          setFoulsUs(m.fouls_team ?? 0);
+          setFoulsOpponent(m.fouls_opponent ?? 0);
           const timeMap = new Map(parseMatchPlayers(m).map((mp) => [mp.id, mp.time_played ?? 0]));
           const states: Record<string, PlayerState> = {};
           pl.forEach((p) => {
@@ -352,14 +412,25 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
   }, [matchId, seconds, half, playersOnField]);
 
   const handleSubstitution = useCallback((outId: string, inId: string) => {
-    setPlayersOnField((prev) => prev.map((id) => (id === outId ? inId : id)));
+    const newPlayersOnField = playersOnField.map((id) => (id === outId ? inId : id));
+    setPlayersOnField(newPlayersOnField);
     setPlayerStates((prev) => {
       const next = { ...prev };
       [outId, inId].forEach((id) => { if (next[id]) next[id] = { ...next[id], currentSequenceTime: 0 }; });
       return next;
     });
     setSubModalPlayer(null);
-  }, []);
+    if (matchId) {
+      createMatchEvent({
+        match_id: matchId,
+        event_type: 'substitution',
+        match_time_seconds: seconds,
+        half,
+        player_id: outId,
+        players_on_field: newPlayersOnField,
+      }).catch(() => {});
+    }
+  }, [matchId, seconds, half, playersOnField]);
 
   const resetSequences = useCallback(() => {
     setPlayerStates((prev) => {
@@ -371,6 +442,7 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
 
   const nextHalf = useCallback(() => {
     setIsRunning(false); setHalf(2); setSeconds(0); setFoulsUs(0); setFoulsOpponent(0);
+    setTimeoutUs(false); setTimeoutOpponent(false);
     setPlayerStates((prev) => {
       const next = { ...prev };
       Object.keys(next).forEach((id) => { next[id] = { ...next[id], currentSequenceTime: 0 }; });
@@ -415,8 +487,12 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
       Object.entries(playerStates).forEach(([id, st]) => {
         statsMap[id] = { goals: st.stats.goals ?? 0, yellow_cards: st.yellowCards, red_cards: st.redCards, time_played: st.totalTime ?? 0 };
       });
-      await updateMatch(matchId, { score_team: scoreUs, score_opponent: scoreOpponent,
-        convoquedPlayerIds: convoquedIds, playerStats: statsMap });
+      await updateMatch(matchId, {
+        score_team: scoreUs, score_opponent: scoreOpponent,
+        fouls_team: foulsUs, fouls_opponent: foulsOpponent,
+        convoquedPlayerIds: convoquedIds, playerStats: statsMap,
+      });
+      await clearRecorderState(matchId);
       Alert.alert('Match enregistré', 'Score et événements enregistrés.', [
         { text: 'Voir le rapport', onPress: () => { onMatchFinished?.(); router.push(`/(tabs)/tracker/match-report/${matchId}`); } },
         { text: 'Terminer', onPress: () => onMatchFinished?.() },
@@ -425,6 +501,41 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
       Alert.alert('Erreur', e instanceof Error ? e.message : "Impossible d'enregistrer le match");
     } finally { setSaving(false); }
   }, [matchId, scoreUs, scoreOpponent, playerStates, convoquedIds]);
+
+  // ── Commandes vocales ─────────────────────────────────────────────────
+
+  const showVoiceFeedback = useCallback((msg: string) => {
+    setVoiceFeedback(msg);
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    feedbackTimerRef.current = setTimeout(() => setVoiceFeedback(null), 2500);
+  }, []);
+
+  const { isListening, startListening, stopListening } = useVoiceCommand({
+    players: convoquedPlayers,
+    playersOnField,
+    onEvent: (eventType, player, statKey) => {
+      if (eventType === 'goal' || eventType === 'opponent_goal') {
+        // Déclenche la modal de sélection du type de but, comme le bouton manuel
+        setGoalModal({ eventType, playerId: player?.id ?? null, statKey });
+        const playerLabel = player ? `${player.first_name} · ` : '';
+        showVoiceFeedback(`${playerLabel}But — choisissez le type`);
+      } else {
+        recordEvent(eventType, player?.id ?? null, statKey || undefined);
+        const playerLabel = player ? `${player.first_name} ${player.last_name}` : 'Adversaire';
+        const actionLabel = PLAYER_ACTIONS.find((a) => a.eventType === eventType)?.label ?? eventType;
+        showVoiceFeedback(`${playerLabel} · ${actionLabel}`);
+      }
+    },
+    onSubstitution: (outId, inId) => {
+      handleSubstitution(outId, inId);
+      const out = convoquedPlayers.find((p) => p.id === outId);
+      const inn = convoquedPlayers.find((p) => p.id === inId);
+      showVoiceFeedback(`Changement · ${out?.first_name ?? '?'} → ${inn?.first_name ?? '?'}`);
+    },
+    onUnknown: (transcript) => {
+      showVoiceFeedback(`Non reconnu : "${transcript}"`);
+    },
+  });
 
   // ── Sélection match ───────────────────────────────────────────────────
 
@@ -437,7 +548,7 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
           ? <ActivityIndicator size="large" color="#3b82f6" style={{ marginTop: 24 }} />
           : matches.length === 0
           ? <Text style={s.empty}>Aucun match. Créez-en un dans le Calendrier.</Text>
-          : matches.slice(0, 20).map((m) => (
+          : [...matches].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((m) => (
             <TouchableOpacity key={m.id} style={s.matchCard}
               onPress={() => { setMatchId(m.id); setStep('record'); }}>
               <View style={{ flex: 1 }}>
@@ -477,6 +588,12 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
         <Text style={s.headerTitle} numberOfLines={1}>
           {match.title || match.opponent_team || 'Match'}
         </Text>
+        {outboxLength > 0 && (
+          <View style={s.syncBadge}>
+            <Ionicons name="cloud-offline-outline" size={12} color="#f59e0b" />
+            <Text style={s.syncBadgeText}>{outboxLength} action{outboxLength > 1 ? 's' : ''} en attente de sync</Text>
+          </View>
+        )}
 
         {/* Chrono + Score */}
         <View style={s.chronoRow}>
@@ -487,32 +604,57 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
           <TouchableOpacity style={[s.playBtn, isRunning && s.playBtnActive]} onPress={() => setIsRunning((r) => !r)}>
             <Ionicons name={isRunning ? 'pause' : 'play'} size={22} color="#fff" />
           </TouchableOpacity>
-          <View style={s.scoreBox}>
+          <TouchableOpacity style={s.scoreBox} onLongPress={() => setScoreModal(true)} delayLongPress={400}>
             <Text style={s.scoreText}>{scoreUs} – {scoreOpponent}</Text>
-            <Text style={s.scoreLabel}>Score</Text>
-          </View>
+            <Text style={s.scoreLabel}>Score · appui long = corriger</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Fautes */}
         <View style={s.foulsRow}>
-          <TouchableOpacity style={s.foulBtn}
-            onPress={() => setFoulsUs((n) => n + 1)}
+          <TouchableOpacity style={[s.foulBtn, foulsUs >= 5 && s.foulBtnWarning]}
+            onPress={() => setFoulsUs((n) => {
+              const next = n + 1;
+              if (next === 5) Alert.alert('5e faute équipe', 'La prochaine = jet franc adverse à 10m !');
+              return next;
+            })}
             onLongPress={() => setFoulsUs((n) => Math.max(0, n - 1))}>
-            <Text style={s.foulBtnText}>+1 Éq</Text>
+            <Text style={s.foulBtnText}>+1 Éq ({foulsUs})</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[s.foulBtn, s.foulBtnAdv]}
-            onPress={() => setFoulsOpponent((n) => n + 1)}
+          <TouchableOpacity style={[s.foulBtn, s.foulBtnAdv, foulsOpponent >= 5 && s.foulBtnWarningAdv]}
+            onPress={() => setFoulsOpponent((n) => {
+              const next = n + 1;
+              if (next === 5) Alert.alert('5e faute adverse', 'La prochaine = jet franc pour votre équipe !');
+              return next;
+            })}
             onLongPress={() => setFoulsOpponent((n) => Math.max(0, n - 1))}>
-            <Text style={s.foulBtnText}>+1 Adv</Text>
+            <Text style={s.foulBtnText}>+1 Adv ({foulsOpponent})</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={s.foulBtnSmall} onPress={() => setFoulsUs(0)}>
-            <Text style={s.foulBtnSmallText}>F. Éq</Text>
+          <TouchableOpacity style={s.foulBtnSmall} onPress={() => Alert.alert(
+            'Remettre à 0', 'Remettre les fautes équipe à 0 ?',
+            [{ text: 'Annuler', style: 'cancel' }, { text: 'Confirmer', style: 'destructive', onPress: () => setFoulsUs(0) }]
+          )}>
+            <Text style={s.foulBtnSmallText}>Reset Éq</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[s.foulBtnSmall, s.foulBtnSmallAdv]} onPress={() => setFoulsOpponent(0)}>
-            <Text style={s.foulBtnSmallText}>F. Adv</Text>
+          <TouchableOpacity style={[s.foulBtnSmall, s.foulBtnSmallAdv]} onPress={() => Alert.alert(
+            'Remettre à 0', 'Remettre les fautes adverses à 0 ?',
+            [{ text: 'Annuler', style: 'cancel' }, { text: 'Confirmer', style: 'destructive', onPress: () => setFoulsOpponent(0) }]
+          )}>
+            <Text style={s.foulBtnSmallText}>Reset Adv</Text>
           </TouchableOpacity>
         </View>
-        <Text style={s.foulsText}>Fautes {foulsUs} – {foulsOpponent} · appui long = −1 · idem actions adverses</Text>
+        <Text style={s.foulsText}>Fautes {foulsUs} – {foulsOpponent} · appui long sur +1 = −1 · idem actions adverses</Text>
+
+        {/* Micro vocal */}
+        <TouchableOpacity
+          style={[s.voiceBtn, isListening && s.voiceBtnActive]}
+          onPress={isListening ? stopListening : startListening}
+        >
+          <Ionicons name={isListening ? 'mic' : 'mic-outline'} size={18} color={isListening ? '#fff' : 'rgba(255,255,255,0.8)'} />
+          <Text style={[s.voiceBtnText, isListening && s.voiceBtnTextActive]}>
+            {isListening ? 'Écoute…' : 'Commande vocale'}
+          </Text>
+        </TouchableOpacity>
 
         {/* Actions adverses */}
         <View style={s.oppRow}>
@@ -626,6 +768,29 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
               })}
             </View>
 
+            {/* Temps morts */}
+            <Text style={[s.sectionLabel, { marginTop: 14 }]}>TEMPS MORTS (1 par équipe par mi-temps)</Text>
+            <View style={s.timeoutRow}>
+              <TouchableOpacity
+                style={[s.timeoutBtn, timeoutUs && s.timeoutBtnUsed]}
+                onPress={() => setTimeoutUs((v) => !v)}
+              >
+                <Ionicons name={timeoutUs ? 'time' : 'time-outline'} size={15} color={timeoutUs ? '#fff' : '#475569'} />
+                <Text style={[s.timeoutBtnText, timeoutUs && s.timeoutBtnTextUsed]}>
+                  {timeoutUs ? 'TM Éq. UTILISÉ' : 'TM Équipe dispo'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.timeoutBtn, timeoutOpponent && s.timeoutBtnUsedAdv]}
+                onPress={() => setTimeoutOpponent((v) => !v)}
+              >
+                <Ionicons name={timeoutOpponent ? 'time' : 'time-outline'} size={15} color={timeoutOpponent ? '#fff' : '#475569'} />
+                <Text style={[s.timeoutBtnText, timeoutOpponent && s.timeoutBtnTextUsed]}>
+                  {timeoutOpponent ? 'TM Adv. UTILISÉ' : 'TM Adverse dispo'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             {/* Contrôles */}
             <View style={s.controlBtns}>
               {half === 1 && (
@@ -667,6 +832,7 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
             </Text>
 
             {/* Grille 4 colonnes */}
+            <Text style={s.undoHint}>Appui long sur une action = annuler la dernière</Text>
             <View style={s.actionsGrid}>
               {PLAYER_ACTIONS.map((a) => (
                 <TouchableOpacity key={a.eventType} style={[s.actionBtn, { backgroundColor: a.color }]}
@@ -688,7 +854,7 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
                   }}
                   delayLongPress={400}
                 >
-                  <Text style={s.actionBtnIcon}>{a.icon}</Text>
+                  <Ionicons name={a.icon} size={22} color="#fff" />
                   <Text style={s.actionBtnLabel}>{a.label}</Text>
                 </TouchableOpacity>
               ))}
@@ -836,6 +1002,59 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
           </View>
         </TouchableWithoutFeedback>
       )}
+
+      {/* ─── Modal correction score ─── */}
+      {scoreModal && (
+        <TouchableWithoutFeedback onPress={() => setScoreModal(false)}>
+          <View style={s.subOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={s.subSheet}>
+                <View style={s.subSheetHandle} />
+                <Text style={s.subSheetTitle}>Corriger le score</Text>
+                <View style={s.scoreEditRow}>
+                  <View style={s.scoreEditCol}>
+                    <Text style={s.scoreEditColLabel}>NOTRE ÉQUIPE</Text>
+                    <View style={s.scoreEditControls}>
+                      <TouchableOpacity onPress={() => setScoreUs((n) => Math.max(0, n - 1))} style={s.scoreEditBtn}>
+                        <Text style={s.scoreEditBtnText}>−</Text>
+                      </TouchableOpacity>
+                      <Text style={s.scoreEditValue}>{scoreUs}</Text>
+                      <TouchableOpacity onPress={() => setScoreUs((n) => n + 1)} style={s.scoreEditBtn}>
+                        <Text style={s.scoreEditBtnText}>+</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                  <View style={s.scoreEditCol}>
+                    <Text style={s.scoreEditColLabel}>ADVERSAIRE</Text>
+                    <View style={s.scoreEditControls}>
+                      <TouchableOpacity onPress={() => setScoreOpponent((n) => Math.max(0, n - 1))} style={s.scoreEditBtn}>
+                        <Text style={s.scoreEditBtnText}>−</Text>
+                      </TouchableOpacity>
+                      <Text style={s.scoreEditValue}>{scoreOpponent}</Text>
+                      <TouchableOpacity onPress={() => setScoreOpponent((n) => n + 1)} style={s.scoreEditBtn}>
+                        <Text style={s.scoreEditBtnText}>+</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+                <TouchableOpacity style={s.subCancel} onPress={() => setScoreModal(false)}>
+                  <Text style={s.subCancelText}>Fermer</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      )}
+
+      {/* ─── Feedback vocal ─── */}
+      {voiceFeedback && (
+        <View style={s.voiceFeedbackOverlay} pointerEvents="none">
+          <View style={s.voiceFeedbackBox}>
+            <Ionicons name="mic" size={16} color="#fff" style={{ marginRight: 6 }} />
+            <Text style={s.voiceFeedbackText} numberOfLines={2}>{voiceFeedback}</Text>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -951,9 +1170,8 @@ const s = StyleSheet.create({
 
   // Grille 4 colonnes
   actionsGrid:  { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  actionBtn:    { width: '23%', aspectRatio: 1, borderRadius: 10, alignItems: 'center', justifyContent: 'center', gap: 2 },
-  actionBtnIcon:{ fontSize: 18 },
-  actionBtnLabel: { fontSize: 11, fontWeight: '700', color: '#fff', textAlign: 'center' },
+  actionBtn:    { width: '23%', aspectRatio: 1, borderRadius: 10, alignItems: 'center', justifyContent: 'center', flexDirection: 'column' },
+  actionBtnLabel: { fontSize: 10, fontWeight: '700', color: '#fff', textAlign: 'center', marginTop: 3 },
 
   // Bilan
   bilanSection: { fontSize: 11, fontWeight: '800', color: '#1e293b', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8, marginTop: 6 },
@@ -992,4 +1210,43 @@ const s = StyleSheet.create({
   subPlayerTime:{ fontSize: 11, color: '#94a3b8', marginTop: 1 },
   subCancel:    { marginTop: 14, paddingVertical: 12, alignItems: 'center' },
   subCancelText:{ fontSize: 14, color: '#94a3b8', fontWeight: '500' },
+
+  // Commande vocale
+  voiceBtn:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)', marginBottom: 6 },
+  voiceBtnActive: { backgroundColor: '#ef4444', borderColor: '#ef4444' },
+  voiceBtnText: { fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.8)' },
+  voiceBtnTextActive: { color: '#fff' },
+
+  // Feedback vocal overlay
+  voiceFeedbackOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 99 },
+  voiceFeedbackBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(15,23,42,0.88)', borderRadius: 14, paddingHorizontal: 20, paddingVertical: 14, maxWidth: '80%', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 10 },
+  voiceFeedbackText: { color: '#fff', fontWeight: '700', fontSize: 15, flexShrink: 1 },
+
+  // Fautes — état warning (≥4)
+  foulBtnWarning:    { backgroundColor: '#f97316' },
+  foulBtnWarningAdv: { backgroundColor: '#f97316' },
+
+  // Sync offline badge
+  syncBadge:     { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(245,158,11,0.18)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'center' },
+  syncBadgeText: { fontSize: 10, color: '#f59e0b', fontWeight: '600' },
+
+  // Score modal
+  scoreEditRow:      { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 16 },
+  scoreEditCol:      { alignItems: 'center', gap: 10 },
+  scoreEditColLabel: { fontSize: 11, fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 },
+  scoreEditControls: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  scoreEditBtn:      { width: 38, height: 38, borderRadius: 19, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#e2e8f0' },
+  scoreEditBtnText:  { fontSize: 22, fontWeight: '700', color: '#1e293b', lineHeight: 26 },
+  scoreEditValue:    { fontSize: 30, fontWeight: '800', color: '#1e293b', minWidth: 40, textAlign: 'center' },
+
+  // Temps morts
+  timeoutRow:        { flexDirection: 'row', gap: 8, marginBottom: 6 },
+  timeoutBtn:        { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#f1f5f9', paddingVertical: 9, paddingHorizontal: 8, borderRadius: 10, borderWidth: 1, borderColor: '#e2e8f0', justifyContent: 'center' },
+  timeoutBtnUsed:    { backgroundColor: '#3b82f6', borderColor: '#3b82f6' },
+  timeoutBtnUsedAdv: { backgroundColor: '#dc2626', borderColor: '#dc2626' },
+  timeoutBtnText:    { fontSize: 10, fontWeight: '600', color: '#475569', textAlign: 'center' },
+  timeoutBtnTextUsed:{ color: '#fff' },
+
+  // Hint undo
+  undoHint: { fontSize: 10, color: '#94a3b8', textAlign: 'center', marginBottom: 7, fontStyle: 'italic' },
 });
