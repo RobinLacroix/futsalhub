@@ -135,6 +135,15 @@ export default function NewTrainingScreen() {
     setAttendanceSquad((prev) => ({ ...prev, [playerId]: status }));
   };
 
+  const convokeAllSquad = () => {
+    setAttendanceSquad((prev) => {
+      const next = { ...prev };
+      players.forEach((p) => { if (!next[p.id]) next[p.id] = 'present'; });
+      return next;
+    });
+  };
+  const clearAllSquad = () => setAttendanceSquad({});
+
   const onDateChange = (_: unknown, value?: Date) => {
     setShowDatePicker(Platform.OS === 'ios' ? true : false);
     if (value) {
@@ -319,6 +328,16 @@ export default function NewTrainingScreen() {
         <Text style={styles.themeHint}>
           Seuls les joueurs cochés verront cette séance dans leur calendrier.
         </Text>
+        {!loadingPlayers && players.length > 0 && (
+          <View style={styles.convocActions}>
+            <TouchableOpacity style={styles.convocAllBtn} onPress={convokeAllSquad} activeOpacity={0.8}>
+              <Text style={styles.convocAllBtnText}>Convoquer tous</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.convocClearBtn} onPress={clearAllSquad} activeOpacity={0.8}>
+              <Text style={styles.convocClearBtnText}>Tout retirer</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         {loadingPlayers ? (
           <ActivityIndicator size="small" color="#3b82f6" style={styles.loader} />
         ) : players.length === 0 ? (
@@ -617,6 +636,11 @@ const styles = StyleSheet.create({
   themeChipText: { fontSize: 14, fontWeight: '500', color: '#374151' },
   themeChipTextActive: { color: '#fff' },
   sectionTitle: { fontSize: 18, fontWeight: '600', marginTop: 8, marginBottom: 12 },
+  convocActions: { flexDirection: 'row', gap: 8, marginBottom: 12, marginTop: 4 },
+  convocAllBtn: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: '#16a34a' },
+  convocAllBtnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  convocClearBtn: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: '#e5e7eb' },
+  convocClearBtnText: { color: '#374151', fontWeight: '600', fontSize: 13 },
   loader: { marginVertical: 16 },
   emptyText: { fontSize: 14, color: '#6b7280', marginBottom: 16 },
   playerRow: {

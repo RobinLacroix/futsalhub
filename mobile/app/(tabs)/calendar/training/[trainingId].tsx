@@ -124,13 +124,23 @@ export default function TrainingDetailScreen() {
   };
 
   const toggleConvoked = (playerId: string) => {
+    const willConvoke = !convoked[playerId];
     setConvoked((prev) => ({ ...prev, [playerId]: !prev[playerId] }));
+    // Un joueur convoqué est compté présent par défaut (sauf statut déjà posé).
+    if (willConvoke) {
+      setAttendance((att) => (att[playerId] ? att : { ...att, [playerId]: 'present' }));
+    }
   };
 
   const convokeAll = () => {
     const next: Record<string, boolean> = {};
     players.forEach((p) => { next[p.id] = true; });
     setConvoked(next);
+    setAttendance((att) => {
+      const updated = { ...att };
+      players.forEach((p) => { if (!updated[p.id]) updated[p.id] = 'present'; });
+      return updated;
+    });
   };
 
   const clearAllConvoked = () => setConvoked({});
