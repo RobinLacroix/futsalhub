@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabaseClient';
 import { playersService, trainingsService } from '@/lib/services';
 import type { PlayerFormData } from '@/types';
 import {
@@ -359,16 +358,9 @@ export default function SquadPage() {
       setError(null);
       if (!activeTeam) { setPlayers([]); return; }
 
-      const { data, error } = await supabase
-        .from('player_teams')
-        .select(`player_id, players (*)`)
-        .eq('team_id', activeTeam.id)
-        .order('players(last_name)');
-
-      if (error) throw error;
-      // Exclure les joueurs partis (statut 'left') de l'effectif affiché.
-      const playersData = (data?.map((item: any) => item.players).filter(Boolean) || [])
-        .filter((p: any) => p.status !== 'left') as any[];
+      // Chargement via la couche service (exclut déjà les joueurs partis 'left').
+      // L'ordre est indifférent ici : displayedPlayers re-trie côté client.
+      const playersData = await playersService.getPlayersByTeam(activeTeam.id);
 
       const statsById = await playersService.getSquadBasicStats(
         activeTeam.id,
@@ -451,11 +443,7 @@ export default function SquadPage() {
       setCurrentPlayer(player);
       let playerTeamIds: string[] = [];
       try {
-        const { data: ptData } = await supabase
-          .from('player_teams')
-          .select('team_id')
-          .eq('player_id', player.id);
-        playerTeamIds = ptData?.map((pt: { team_id: string }) => pt.team_id) || [];
+        playerTeamIds = await playersService.getPlayerTeamIds(player.id);
       } catch { /* ignore */ }
       if (playerTeamIds.length === 0) playerTeamIds = [activeTeam.id];
       setFormData({
@@ -493,37 +481,14 @@ export default function SquadPage() {
         setError('Veuillez sélectionner au moins une équipe.');
         return;
       }
-      const playerData = {
-        first_name: formData.first_name,
-        last_name: formData.last_name,
-        birth_date: formData.birth_date || null,
-        position: formData.position,
-        strong_foot: formData.strong_foot,
-        status: formData.status,
-        number: formData.number ? parseInt(formData.number) : null,
-        sequence_time_limit: formData.sequence_time_limit ? parseInt(formData.sequence_time_limit) : 180,
-        team_id: formData.selectedTeams[0],
-      };
-
-      let playerId: string;
-
       if (isEditing && currentPlayer) {
-        // NOTE: reste en accès direct volontairement. playersService.updatePlayer
-        // diverge du comportement inline (n'écrit pas team_id, update conditionnel,
-        // ne réinitialise pas sequence_time_limit). À réconcilier séparément (cf. audit §3).
-        const { error: updateError } = await supabase.from('players').update(playerData).eq('id', currentPlayer.id);
-        if (updateError) throw updateError;
-        playerId = currentPlayer.id;
-        const { error: deleteError } = await supabase.from('player_teams').delete().eq('player_id', playerId);
-        if (deleteError) throw deleteError;
-        const { error: insertError } = await supabase.from('player_teams').insert(
-          formData.selectedTeams.map(teamId => ({ player_id: playerId, team_id: teamId }))
-        );
-        if (insertError) throw insertError;
+        // Update routé via le service (updatePlayer réécrit tous les champs,
+        // team_id inclus, et resynchronise player_teams — cf. playersService).
+        await playersService.updatePlayer(currentPlayer.id, formData);
         const teamNames = teams.filter(t => formData.selectedTeams.includes(t.id)).map(t => t.name).join(', ');
         setSuccess(`Joueur modifié dans ${teamNames}`);
       } else {
-        // Création : identique à playersService.createPlayer (même insert + relations player_teams), routé via le service.
+        // Création routée via le service (même insert + relations player_teams).
         await playersService.createPlayer(formData);
         const teamNames = teams.filter(t => formData.selectedTeams.includes(t.id)).map(t => t.name).join(', ');
         setSuccess(`Joueur ajouté dans ${teamNames}`);

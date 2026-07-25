@@ -206,52 +206,54 @@ export const playersService = {
   /**
    * Met à jour un joueur
    */
-  async updatePlayer(playerId: string, playerData: Partial<PlayerFormData>): Promise<Player> {
-    const updateData: any = {};
-
-    if (playerData.first_name) updateData.first_name = playerData.first_name;
-    if (playerData.last_name) updateData.last_name = playerData.last_name;
-    if (playerData.birth_date !== undefined) updateData.birth_date = playerData.birth_date || null;
-    if (playerData.position) updateData.position = playerData.position;
-    if (playerData.strong_foot) updateData.strong_foot = playerData.strong_foot;
-    if (playerData.status) updateData.status = playerData.status;
-    if (playerData.number !== undefined) {
-      updateData.number = playerData.number ? parseInt(playerData.number) : null;
-    }
-    if (playerData.sequence_time_limit) {
-      updateData.sequence_time_limit = parseInt(playerData.sequence_time_limit);
-    }
+  async updatePlayer(playerId: string, playerData: PlayerFormData): Promise<Player> {
+    // Réécriture complète du joueur, symétrique de createPlayer : tous les champs
+    // sont écrits (pas d'update conditionnel), y compris team_id (équipe primaire)
+    // dont dépend le fallback des convocations, et sequence_time_limit réinitialisé
+    // à 180 quand vide.
+    const primaryTeamId =
+      playerData.selectedTeams.length > 0 ? playerData.selectedTeams[0] : null;
 
     const { data, error } = await supabase
       .from('players')
-      .update(updateData)
+      .update({
+        first_name: playerData.first_name,
+        last_name: playerData.last_name,
+        birth_date: playerData.birth_date || null,
+        position: playerData.position,
+        strong_foot: playerData.strong_foot,
+        status: playerData.status,
+        number: playerData.number ? parseInt(playerData.number) : null,
+        sequence_time_limit: playerData.sequence_time_limit
+          ? parseInt(playerData.sequence_time_limit)
+          : 180,
+        team_id: primaryTeamId,
+      })
       .eq('id', playerId)
       .select()
       .single();
 
     if (error) throw error;
 
-    // Mettre à jour les relations avec les équipes
-    if (playerData.selectedTeams !== undefined) {
-      // Supprimer les anciennes relations
-      await supabase
+    // Resynchroniser les relations player_teams (remplacement complet)
+    const { error: deleteError } = await supabase
+      .from('player_teams')
+      .delete()
+      .eq('player_id', playerId);
+
+    if (deleteError) throw deleteError;
+
+    if (playerData.selectedTeams.length > 0) {
+      const { error: relationError } = await supabase
         .from('player_teams')
-        .delete()
-        .eq('player_id', playerId);
+        .insert(
+          playerData.selectedTeams.map(teamId => ({
+            player_id: playerId,
+            team_id: teamId,
+          }))
+        );
 
-      // Créer les nouvelles relations
-      if (playerData.selectedTeams.length > 0) {
-        const playerTeamRelations = playerData.selectedTeams.map(teamId => ({
-          player_id: playerId,
-          team_id: teamId
-        }));
-
-        const { error: relationError } = await supabase
-          .from('player_teams')
-          .insert(playerTeamRelations);
-
-        if (relationError) throw relationError;
-      }
+      if (relationError) throw relationError;
     }
 
     return data;
