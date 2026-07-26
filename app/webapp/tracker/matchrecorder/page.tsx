@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
+import { useActiveSeasonContext } from '../../contexts/ActiveSeasonContext';
 import { 
   Play, 
   Pause, 
@@ -45,6 +46,7 @@ import { insertMatchEvent } from './data';
 
 export default function MatchRecorderPage() {
   const { activeTeam } = useActiveTeam();
+  const { activeSeason } = useActiveSeasonContext();
   const [matchData, setMatchData] = useState<MatchData>({
     selectedMatch: null,
     isRunning: false,
@@ -144,6 +146,7 @@ export default function MatchRecorderPage() {
           .from('matches')
           .select('id, title, date, competition, location, score_team, score_opponent, opponent_team')
             .eq('team_id', activeTeam.id)
+            .eq('season', activeSeason)
           .order('date', { ascending: false });
 
         if (matchesError) {
@@ -233,7 +236,7 @@ export default function MatchRecorderPage() {
 
     loadData();
     }
-  }, [activeTeam]);
+  }, [activeTeam, activeSeason]);
 
   // Timer du match : temps de match + temps de jeu par joueur (extrait dans ./hooks).
   useMatchTimer(matchData.isRunning, setMatchData);
