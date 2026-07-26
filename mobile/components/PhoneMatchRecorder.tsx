@@ -9,8 +9,9 @@ import {
 } from 'react-native';
 import { useVoiceCommand } from '../hooks/useVoiceCommand';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useRouter } from 'expo-router';
+import { useRouter, useNavigation } from 'expo-router';
 import { useActiveTeam } from '../contexts/ActiveTeamContext';
+import { useMatchRecorderExitGuard, confirmLeaveMatchRecorder } from '../contexts/MatchRecorderExitGuardContext';
 import { getMatchesByTeam, getMatchById, updateMatch } from '../lib/services/matches';
 import { getEventsByMatchId, createMatchEvent, deleteLastMatchEventByType, type GoalType } from '../lib/services/matchEvents';
 import { getPlayersByTeam } from '../lib/services/players';
@@ -86,6 +87,8 @@ const fmt = formatSeconds;
 export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, onBack }: PhoneMatchRecorderProps) {
   const { activeTeamId } = useActiveTeam();
   const router = useRouter();
+  const navigation = useNavigation();
+  const { setIsRecordingActive, suppressExitGuard, setSuppressExitGuard } = useMatchRecorderExitGuard();
 
   // ── Navigation / UI
   const [step, setStep]         = useState<'select' | 'record'>(initialMatchId ? 'record' : 'select');
@@ -281,6 +284,24 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
       setMatchId(initialMatchId); setStep('record');
     }
   }, [initialMatchId, matches]);
+
+  // ── Confirmation avant de quitter le suivi live (perte des temps de jeu) ──
+
+  useEffect(() => {
+    const active = step === 'record' && !!match;
+    setIsRecordingActive(active);
+    if (active) setSuppressExitGuard(false);
+    return () => setIsRecordingActive(false);
+  }, [step, match, setIsRecordingActive, setSuppressExitGuard]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      if (step !== 'record' || !match || suppressExitGuard) return;
+      e.preventDefault();
+      confirmLeaveMatchRecorder(() => navigation.dispatch(e.data.action), setSuppressExitGuard);
+    });
+    return unsubscribe;
+  }, [navigation, step, match, suppressExitGuard, setSuppressExitGuard]);
 
   useEffect(() => {
     if (step !== 'record' || !matchId) return;
@@ -493,6 +514,7 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
         convoquedPlayerIds: convoquedIds, playerStats: statsMap,
       });
       await clearRecorderState(matchId);
+      setSuppressExitGuard(true);
       Alert.alert('Match enregistré', 'Score et événements enregistrés.', [
         { text: 'Voir le rapport', onPress: () => { onMatchFinished?.(); router.push(`/(tabs)/tracker/match-report/${matchId}`); } },
         { text: 'Terminer', onPress: () => onMatchFinished?.() },
@@ -500,7 +522,7 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
     } catch (e) {
       Alert.alert('Erreur', e instanceof Error ? e.message : "Impossible d'enregistrer le match");
     } finally { setSaving(false); }
-  }, [matchId, scoreUs, scoreOpponent, playerStates, convoquedIds]);
+  }, [matchId, scoreUs, scoreOpponent, playerStates, convoquedIds, onMatchFinished, router, setSuppressExitGuard]);
 
   // ── Commandes vocales ─────────────────────────────────────────────────
 
@@ -930,9 +952,9 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
             : <><Ionicons name="checkmark-circle" size={20} color="#fff" /><Text style={s.saveBtnText}>Enregistrer</Text></>
           }
         </TouchableOpacity>
-        <TouchableOpacity style={s.quitBtn} onPress={() => Alert.alert('Quitter', 'Quitter sans enregistrer le score ?', [
+        <TouchableOpacity style={s.quitBtn} onPress={() => Alert.alert('Quitter', 'Quitter sans enregistrer le score ? Les temps de jeu des joueurs seront perdus.', [
           { text: 'Annuler', style: 'cancel' },
-          { text: 'Quitter', style: 'destructive', onPress: () => onMatchFinished?.() },
+          { text: 'Quitter', style: 'destructive', onPress: () => { setSuppressExitGuard(true); onMatchFinished?.(); } },
         ])}>
           <Text style={s.quitBtnText}>Quitter sans enregistrer le score</Text>
         </TouchableOpacity>

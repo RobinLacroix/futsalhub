@@ -7,6 +7,7 @@ import { useAppRole } from '../contexts/AppRoleContext';
 import { useNotifications } from '../contexts/NotificationContext';
 import { SeasonHeaderButton } from './SeasonHeaderButton';
 import { supabase } from '../lib/supabase';
+import { useMatchRecorderExitGuard, confirmLeaveMatchRecorder } from '../contexts/MatchRecorderExitGuardContext';
 
 export type TabletSidebarProps = {
   isExpanded: boolean;
@@ -51,6 +52,7 @@ export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {
   const isTablet = useIsTablet();
   const { isPlayer, setAppRole } = useAppRole();
   const { counts, markRead } = useNotifications();
+  const { isRecordingActive, setSuppressExitGuard } = useMatchRecorderExitGuard();
 
   if (!isTablet) return null;
 
@@ -87,9 +89,16 @@ export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {
             <TouchableOpacity
               key={item.path}
               onPress={() => {
-                if (item.path === '/(tabs)/calendar') void markRead(['absence_report']);
-                if (item.path === '/(tabs)/squad')    void markRead(['feedback_comment']);
-                router.push(item.path as any);
+                const go = () => {
+                  if (item.path === '/(tabs)/calendar') void markRead(['absence_report']);
+                  if (item.path === '/(tabs)/squad')    void markRead(['feedback_comment']);
+                  router.push(item.path as any);
+                };
+                if (isRecordingActive) {
+                  confirmLeaveMatchRecorder(go, setSuppressExitGuard);
+                } else {
+                  go();
+                }
               }}
               style={[
                 styles.navItem,

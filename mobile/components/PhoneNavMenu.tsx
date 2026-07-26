@@ -14,6 +14,7 @@ import { useIsTablet } from '../hooks/useIsTablet';
 import { useAppRole } from '../contexts/AppRoleContext';
 import { useNotifications } from '../contexts/NotificationContext';
 import { supabase } from '../lib/supabase';
+import { useMatchRecorderExitGuard, confirmLeaveMatchRecorder } from '../contexts/MatchRecorderExitGuardContext';
 
 type NavItem = {
   name: string;
@@ -54,6 +55,7 @@ export function PhoneNavMenu() {
   const { isPlayer, setAppRole } = useAppRole();
   const { counts, markRead } = useNotifications();
   const [visible, setVisible] = useState(false);
+  const { isRecordingActive, setSuppressExitGuard } = useMatchRecorderExitGuard();
 
   if (isTablet) return null;
 
@@ -61,9 +63,16 @@ export function PhoneNavMenu() {
 
   const navigate = (path: string) => {
     close();
-    if (path === '/(tabs)/calendar') void markRead(['absence_report']);
-    if (path === '/(tabs)/squad')    void markRead(['feedback_comment']);
-    router.push(path as any);
+    const go = () => {
+      if (path === '/(tabs)/calendar') void markRead(['absence_report']);
+      if (path === '/(tabs)/squad')    void markRead(['feedback_comment']);
+      router.push(path as any);
+    };
+    if (isRecordingActive) {
+      confirmLeaveMatchRecorder(go, setSuppressExitGuard);
+    } else {
+      go();
+    }
   };
 
   const calendarBadge = counts.absence_report;

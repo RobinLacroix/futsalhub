@@ -16,9 +16,10 @@ import {
   Pressable,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { useRouter } from 'expo-router';
+import { useRouter, useNavigation } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useActiveTeam } from '../contexts/ActiveTeamContext';
+import { useMatchRecorderExitGuard, confirmLeaveMatchRecorder } from '../contexts/MatchRecorderExitGuardContext';
 import { getMatchesByTeam, getMatchById, updateMatch } from '../lib/services/matches';
 import { getEventsByMatchId, createMatchEvent, deleteLastMatchEventByType, type GoalType } from '../lib/services/matchEvents';
 import { getPlayersByTeam } from '../lib/services/players';
@@ -82,6 +83,8 @@ interface TabletMatchRecorderProps {
 export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, onBack }: TabletMatchRecorderProps) {
   const { activeTeamId } = useActiveTeam();
   const router = useRouter();
+  const navigation = useNavigation();
+  const { setIsRecordingActive, suppressExitGuard, setSuppressExitGuard } = useMatchRecorderExitGuard();
   const [step, setStep] = useState<'select' | 'record'>(initialMatchId ? 'record' : 'select');
   const [matchId, setMatchId] = useState<string | null>(initialMatchId ?? null);
   const [matches, setMatches] = useState<Match[]>([]);
@@ -188,6 +191,24 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
       setStep('record');
     }
   }, [initialMatchId, matches]);
+
+  // ── Confirmation avant de quitter le suivi live (perte des temps de jeu) ──
+
+  useEffect(() => {
+    const active = step === 'record' && !!match;
+    setIsRecordingActive(active);
+    if (active) setSuppressExitGuard(false);
+    return () => setIsRecordingActive(false);
+  }, [step, match, setIsRecordingActive, setSuppressExitGuard]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      if (step !== 'record' || !match || suppressExitGuard) return;
+      e.preventDefault();
+      confirmLeaveMatchRecorder(() => navigation.dispatch(e.data.action), setSuppressExitGuard);
+    });
+    return unsubscribe;
+  }, [navigation, step, match, suppressExitGuard, setSuppressExitGuard]);
 
   useEffect(() => {
     if (step !== 'record' || !matchId) return;
@@ -684,6 +705,7 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
           superiority: concededByType.superiority ?? 0,
         },
       });
+      setSuppressExitGuard(true);
       Alert.alert('Match enregistré', 'Score et événements enregistrés.', [
         {
           text: 'Voir le rapport',
@@ -699,7 +721,7 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
     } finally {
       setSaving(false);
     }
-  }, [matchId, scoreUs, scoreOpponent, playerStates, convoquedIds, goalsByType, concededByType]);
+  }, [matchId, scoreUs, scoreOpponent, playerStates, convoquedIds, goalsByType, concededByType, onMatchFinished, router, setSuppressExitGuard]);
 
   const opponentActions = [
     { type: 'opponent_goal' as const, label: 'But adverse', color: '#ef4444' },
@@ -861,9 +883,17 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
             <TouchableOpacity
               style={styles.headerBtn}
               onPress={() => {
-                setStep('select');
-                setMatchId(null);
-                setMatch(null);
+                const go = () => {
+                  setSuppressExitGuard(true);
+                  setStep('select');
+                  setMatchId(null);
+                  setMatch(null);
+                };
+                if (step === 'record' && match) {
+                  confirmLeaveMatchRecorder(go, setSuppressExitGuard);
+                } else {
+                  go();
+                }
               }}
             >
               <Ionicons name="swap-horizontal" size={16} color="#fff" />
