@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { supabase } from '@/lib/supabaseClient';
 import { usePlayerProfile } from '../../hooks/usePlayerProfile';
 import type { SharedContent, SharedFolder } from '@/types';
+import { sharedContentService } from '@/lib/services';
 import {
   BookOpen, ChevronLeft, ChevronRight, ExternalLink,
   Folder, Link2, Loader2, Youtube,
@@ -54,12 +54,17 @@ export default function PlayerSharedPage() {
     if (playerLoading) return;
     if (!player) { setLoading(false); return; }
     (async () => {
-      const [fRes, iRes] = await Promise.all([
-        supabase.rpc('get_my_shared_folders'),
-        supabase.rpc('get_my_shared_content'),
-      ]);
-      setFolders((fRes.data ?? []) as SharedFolder[]);
-      setItems((iRes.data ?? []) as SharedContent[]);
+      try {
+        const [f, i] = await Promise.all([
+          sharedContentService.getSharedFoldersForPlayer(),
+          sharedContentService.getSharedContentForPlayer(),
+        ]);
+        setFolders(f);
+        setItems(i);
+      } catch {
+        setFolders([]);
+        setItems([]);
+      }
       setLoading(false);
     })();
   }, [player, playerLoading]);
@@ -272,7 +277,7 @@ function PlayerContentCard({ item }: { item: SharedContent }) {
   const [expanded, setExpanded] = useState(false);
 
   const logView = () => {
-    supabase.rpc('log_shared_content_view', { p_content_id: item.id }).then(null, () => {});
+    void sharedContentService.logSharedContentView(item.id);
   };
 
   return (

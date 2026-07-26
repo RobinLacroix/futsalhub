@@ -94,6 +94,27 @@ export const sharedContentService = {
     if (error) throw error;
   },
 
+  // ─── Côté joueur (RPC SECURITY DEFINER, bypass RLS player_teams) ──────────────
+
+  async getSharedContentForPlayer(): Promise<SharedContent[]> {
+    const { data, error } = await supabase.rpc('get_my_shared_content');
+    if (error) throw error;
+    return (data ?? []) as SharedContent[];
+  },
+
+  async getSharedFoldersForPlayer(): Promise<SharedFolder[]> {
+    const { data, error } = await supabase.rpc('get_my_shared_folders');
+    if (error) throw error;
+    return (data ?? []) as SharedFolder[];
+  },
+
+  /** Enregistre l'ouverture d'un contenu par le joueur connecté (fire & forget). */
+  async logSharedContentView(contentId: string): Promise<void> {
+    try {
+      await supabase.rpc('log_shared_content_view', { p_content_id: contentId });
+    } catch { /* non-critique */ }
+  },
+
   async getSharedContentAnalytics(teamId: string): Promise<ContentAnalyticsRow[]> {
     const { data, error } = await supabase.rpc('get_shared_content_analytics', { p_team_id: teamId });
     if (error) throw error;
