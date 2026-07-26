@@ -309,6 +309,7 @@ export default function PlayerQuestionnairesScreen() {
                     lowLabel={metric.lowLabel}
                     highLabel={metric.highLabel}
                     value={form[metric.key]}
+                    reverse={metric.key !== 'rpe'}
                     onChange={v => setForm(prev => ({ ...prev, [metric.key]: v }))}
                   />
                 ))}
@@ -363,10 +364,10 @@ export default function PlayerQuestionnairesScreen() {
 // ─── MetricRow ──────────────────────────────────────────────────────────────
 
 function MetricRow({
-  label, desc, lowLabel, highLabel, value, onChange,
+  label, desc, lowLabel, highLabel, value, reverse, onChange,
 }: {
   label: string; desc: string; lowLabel: string; highLabel: string;
-  value: number | null; onChange: (v: number) => void;
+  value: number | null; reverse?: boolean; onChange: (v: number) => void;
 }) {
   return (
     <View style={mr.wrap}>
@@ -375,7 +376,9 @@ function MetricRow({
       <View style={mr.grid}>
         {[1,2,3,4,5,6,7,8,9,10].map(n => {
           const active = value === n;
-          const color  = n <= 3 ? C.green : n <= 6 ? C.amber : n <= 8 ? '#ea580c' : C.red;
+          // RPE : note basse = vert. Auto-eval / plaisir / forme : note basse = rouge (echelle inversee).
+          const s      = reverse ? 11 - n : n;
+          const color  = s <= 3 ? C.green : s <= 6 ? C.amber : s <= 8 ? '#ea580c' : C.red;
           return (
             <TouchableOpacity
               key={n}
