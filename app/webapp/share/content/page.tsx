@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { supabase } from '@/lib/supabaseClient';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
 import type { SharedContent, SharedFolder } from '@/types';
+import { sharedContentService, type ContentAnalyticsRow } from '@/lib/services';
 import {
   BarChart2, BookOpen, CheckCircle2, ChevronDown, ChevronRight, ChevronUp,
   Download, ExternalLink, Eye, Folder, FolderOpen,
@@ -41,15 +41,6 @@ function isYoutubeUrl(url: string) { return /youtube\.com|youtu\.be/.test(url); 
 type ContentFilter = 'all' | 'youtube' | 'link';
 type PageView = 'library' | 'analytics';
 
-interface ContentAnalyticsRow {
-  content_id:    string;
-  content_title: string;
-  content_type:  string;
-  folder_name:   string | null;
-  player_id:     string | null;
-  player_name:   string | null;
-  viewed_at:     string | null;
-}
 
 interface ContentStat {
   id:            string;
@@ -115,13 +106,16 @@ export default function ShareContentPage() {
     if (!activeTeamId) { setLoading(false); return; }
     setLoading(true);
     setLoadError(null);
-    const [fRes, iRes] = await Promise.all([
-      supabase.from('shared_content_folders').select('*').eq('team_id', activeTeamId).order('name'),
-      supabase.from('shared_content').select('*').eq('team_id', activeTeamId).order('created_at', { ascending: false }),
-    ]);
-    if (fRes.error || iRes.error) setLoadError((fRes.error ?? iRes.error)!.message);
-    setFolders(fRes.data ?? []);
-    setItems(iRes.data ?? []);
+    try {
+      const [f, i] = await Promise.all([
+        sharedContentService.getSharedFolders(activeTeamId),
+        sharedContentService.getSharedContent(activeTeamId),
+      ]);
+      setFolders(f);
+      setItems(i);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'Erreur de chargement');
+    }
     setLoading(false);
   }, [activeTeamId]);
 
@@ -164,9 +158,11 @@ export default function ShareContentPage() {
     if (!activeTeamId) return;
     setAnalyticsLoading(true);
     setAnalyticsError(null);
-    const { data, error } = await supabase.rpc('get_shared_content_analytics', { p_team_id: activeTeamId });
-    if (error) setAnalyticsError(error.message);
-    else setAnalyticsRows((data ?? []) as ContentAnalyticsRow[]);
+    try {
+      setAnalyticsRows(await sharedContentService.getSharedContentAnalytics(activeTeamId));
+    } catch (e) {
+      setAnalyticsError(e instanceof Error ? e.message : 'Erreur analytics');
+    }
     setAnalyticsLoading(false);
   }, [activeTeamId]);
 
@@ -309,18 +305,20 @@ export default function ShareContentPage() {
     e.preventDefault();
     if (!activeTeamId || !title.trim() || !url.trim()) return;
     setSaving(true); setFormError(null);
-    const { error: err } = await supabase.from('shared_content').insert({
-      team_id: activeTeamId, title: title.trim(), description: description.trim() || null,
-      content_type: isYoutubeUrl(url) ? 'youtube' : 'link', url: url.trim(),
-      folder_id: addFolderId,
-    });
-    if (err) { setFormError(err.message); setSaving(false); return; }
+    try {
+      await sharedContentService.createSharedContent({
+        teamId: activeTeamId, title, description, url, folderId: addFolderId,
+      });
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Une erreur est survenue');
+      setSaving(false); return;
+    }
     closeAddModal(); await load(); setSaving(false);
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('Supprimer ce contenu ?')) return;
-    await supabase.from('shared_content').delete().eq('id', id);
+    try { await sharedContentService.deleteSharedContent(id); } catch { /* ignore */ }
     setItems(prev => prev.filter(i => i.id !== id));
   };
 
@@ -332,10 +330,10 @@ export default function ShareContentPage() {
     e.preventDefault();
     if (!activeTeamId || !folderName.trim()) return;
     setFolderSaving(true);
-    const { data, error } = await supabase.from('shared_content_folders').insert({
-      team_id: activeTeamId, name: folderName.trim(), parent_id: currentFolderId,
-    }).select().single();
-    if (!error && data) { setFolders(prev => [...prev, data as SharedFolder].sort((a, b) => a.name.localeCompare(b.name, 'fr'))); }
+    try {
+      const data = await sharedContentService.createSharedFolder(activeTeamId, folderName, currentFolderId);
+      setFolders(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name, 'fr')));
+    } catch { /* ignore */ }
     setFolderName(''); setShowFolderModal(false); setFolderSaving(false);
   };
 
@@ -343,7 +341,7 @@ export default function ShareContentPage() {
     e.preventDefault();
     if (!renameTarget || !folderName.trim()) return;
     setFolderSaving(true);
-    await supabase.from('shared_content_folders').update({ name: folderName.trim() }).eq('id', renameTarget.id);
+    try { await sharedContentService.renameSharedFolder(renameTarget.id, folderName); } catch { /* ignore */ }
     setFolders(prev => prev.map(f => f.id === renameTarget.id ? { ...f, name: folderName.trim() } : f).sort((a, b) => a.name.localeCompare(b.name, 'fr')));
     // update breadcrumb if renamed folder is in path
     setFolderPath(prev => prev.map(f => f.id === renameTarget.id ? { ...f, name: folderName.trim() } : f));
@@ -356,7 +354,7 @@ export default function ShareContentPage() {
       ? `Supprimer le dossier "${f.name}" et déplacer ses ${count} ressource(s) à la racine ?`
       : `Supprimer le dossier "${f.name}" ?`;
     if (!confirm(msg)) return;
-    await supabase.from('shared_content_folders').delete().eq('id', f.id);
+    try { await sharedContentService.deleteSharedFolder(f.id); } catch { /* ignore */ }
     setFolders(prev => prev.filter(x => x.id !== f.id));
     // If we were inside this folder, go up
     if (currentFolderId === f.id) navigateTo(-1);

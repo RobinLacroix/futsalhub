@@ -5,6 +5,8 @@ export { trainingsService } from './trainingsService';
 export { teamsService } from './teamsService';
 export { matchEventsService } from './matchEventsService';
 export { schematicsService } from './schematicsService';
+export { sharedContentService } from './sharedContentService';
+export type { ContentAnalyticsRow, CreateSharedContentInput } from './sharedContentService';
 export {
   createTokensForTraining,
   getFeedbackSessionByToken,
