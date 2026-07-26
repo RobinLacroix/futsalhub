@@ -6,6 +6,10 @@ import { supabase } from '@/lib/supabaseClient';
 import { useActiveTeam } from './hooks/useActiveTeam';
 import { usePlayerProfile } from './hooks/usePlayerProfile';
 import { claimPlayerLinkCode } from '@/lib/services/playerConvocationsService';
+import { clubsService } from '@/lib/services/clubsService';
+import { matchesService } from '@/lib/services/matchesService';
+import { trainingsService } from '@/lib/services/trainingsService';
+import { playersService } from '@/lib/services/playersService';
 import {
   Calendar, Users, BarChart3, Video, FileText, Layout,
   ChevronRight, Trophy, Target, TrendingUp, Activity,
@@ -154,22 +158,32 @@ export default function WebApp() {
   const [dataLoading, setDataLoading] = useState(true);
 
   useEffect(() => {
-    supabase.rpc('get_user_club_id').then(({ data }) => setHasClub(!!data));
+    clubsService.getUserClubId().then((id) => setHasClub(!!id));
   }, []);
 
   useEffect(() => {
     if (!activeTeam?.id) { setDataLoading(false); return; }
+    const teamId = activeTeam.id;
     setDataLoading(true);
-    Promise.all([
-      supabase.from('matches').select('*').eq('team_id', activeTeam.id).order('date', { ascending: false }),
-      supabase.from('trainings').select('id,date,theme,key_principle').eq('team_id', activeTeam.id).order('date', { ascending: false }),
-      supabase.from('player_teams').select('players(id,first_name,last_name,position,status)').eq('team_id', activeTeam.id),
-    ]).then(([m, t, p]) => {
-      setMatches(m.data ?? []);
-      setTrainings(t.data ?? []);
-      setPlayers((p.data ?? []).map((x: any) => x.players).filter(Boolean));
+    (async () => {
+      try {
+        // L'ordre du fetch est indifférent : accueil re-trie matchs/entraînements.
+        // includeLeft:true préserve l'affichage de tout l'effectif (count + preview).
+        const [m, t, p] = await Promise.all([
+          matchesService.getMatchesByTeam(teamId),
+          trainingsService.getTrainingsByTeam(teamId),
+          playersService.getPlayersByTeam(teamId, { includeLeft: true }),
+        ]);
+        setMatches(m);
+        setTrainings(t);
+        setPlayers(p);
+      } catch {
+        setMatches([]);
+        setTrainings([]);
+        setPlayers([]);
+      }
       setDataLoading(false);
-    });
+    })();
   }, [activeTeam?.id]);
 
   const handleClaimCode = async (e: React.FormEvent) => {
@@ -200,13 +214,9 @@ export default function WebApp() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setCreateError('Vous devez être connecté.'); return; }
-      const { data, error } = await supabase.rpc('create_user_club', {
-        p_user_id: user.id, p_user_email: user.email ?? undefined,
-      });
-      if (error) { setCreateError(error.message); return; }
-      const clubId = Array.isArray(data) ? data[0] : data;
+      const clubId = await clubsService.createUserClub(user.id, user.email ?? undefined);
       if (!clubId) { setCreateError('Impossible de créer le club.'); return; }
-      await supabase.from('clubs').update({ name: newClubName, description: newClubDesc }).eq('id', clubId);
+      await clubsService.setClubNameDescription(clubId, newClubName, newClubDesc);
       setShowCreateClub(false);
       setNewClubName('');
       setNewClubDesc('');

@@ -113,7 +113,7 @@ export const playersService = {
   /**
    * Récupère tous les joueurs d'une équipe
    */
-  async getPlayersByTeam(teamId: string): Promise<Player[]> {
+  async getPlayersByTeam(teamId: string, opts?: { includeLeft?: boolean }): Promise<Player[]> {
     const { data: playerTeamsData, error } = await supabase
       .from('player_teams')
       .select(`
@@ -124,8 +124,10 @@ export const playersService = {
 
     if (error) throw error;
 
-    const players = (playerTeamsData?.map((item: any) => item.players).filter(Boolean) || [])
-      .filter((p: Player) => p.status !== 'left');
+    let players = (playerTeamsData?.map((item: any) => item.players).filter(Boolean) || []) as Player[];
+    if (!opts?.includeLeft) {
+      players = players.filter((p: Player) => p.status !== 'left');
+    }
     return players.sort((a: Player, b: Player) =>
       (a.last_name || '').localeCompare(b.last_name || '')
     );
