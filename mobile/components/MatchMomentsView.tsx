@@ -46,13 +46,15 @@ function getQuarterFromEvent(
   return half === 1 ? q : QUARTERS_PER_HALF + q;
 }
 
-const EVENT_TYPES: { key: MatchEventType; label: string; color: string }[] = [
+const EVENT_TYPES: { key: MatchEventType | 'total_shots' | 'opponent_total_shots'; label: string; color: string }[] = [
   { key: 'goal', label: 'But', color: '#3b82f6' },
+  { key: 'total_shots', label: 'Tirs', color: '#f97316' },
   { key: 'shot_on_target', label: 'Tir cadré', color: '#22c55e' },
-  { key: 'shot', label: 'Tir', color: '#eab308' },
+  { key: 'shot', label: 'Tir non cadré', color: '#eab308' },
   { key: 'opponent_goal', label: 'But adv', color: '#dc2626' },
+  { key: 'opponent_total_shots', label: 'Tirs adv', color: '#7c3aed' },
   { key: 'opponent_shot_on_target', label: 'TC adv', color: '#94a3b8' },
-  { key: 'opponent_shot', label: 'Tir adv', color: '#64748b' },
+  { key: 'opponent_shot', label: 'Tir adv non cadré', color: '#64748b' },
 ];
 
 function formatQuarterLabel(q: number): string {
@@ -108,6 +110,14 @@ export function MatchMomentsView({
         }
       });
     });
+
+    // Le nombre de tirs est dérivé (tirs cadrés + tirs non cadrés), pas un type d'événement brut.
+    for (let q = 0; q < 8; q++) {
+      byQuarter[q].byType.total_shots =
+        (byQuarter[q].byType.shot ?? 0) + (byQuarter[q].byType.shot_on_target ?? 0);
+      byQuarter[q].byType.opponent_total_shots =
+        (byQuarter[q].byType.opponent_shot ?? 0) + (byQuarter[q].byType.opponent_shot_on_target ?? 0);
+    }
 
     return { quartersData: byQuarter, totalEvents: total };
   }, [eventsByMatch, filteredMatchIds]);
