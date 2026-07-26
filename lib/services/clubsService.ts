@@ -31,6 +31,22 @@ export const clubsService = {
     return !!data;
   },
 
+  /** Id du club de l'utilisateur connecté (ne throw pas, miroir inline). */
+  async getUserClubId(): Promise<string | null> {
+    const { data } = await supabase.rpc('get_user_club_id');
+    return (data as string | null) ?? null;
+  },
+
+  /** Saison active du club (clubs.current_season). Ne throw pas (miroir inline). */
+  async getCurrentSeason(clubId: string): Promise<string | null> {
+    const { data } = await supabase
+      .from('clubs')
+      .select('current_season')
+      .eq('id', clubId)
+      .single();
+    return (data?.current_season as string | undefined) ?? null;
+  },
+
   async getClubMembers(clubId: string): Promise<(Record<string, unknown>)[]> {
     const { data, error } = await supabase
       .from('club_members')

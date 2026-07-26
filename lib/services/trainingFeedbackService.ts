@@ -86,15 +86,18 @@ export async function getFeedbackSessionByToken(token: string): Promise<{
  */
 export async function submitTrainingFeedback(
   token: string,
-  values: { auto_evaluation: number; rpe: number; physical_form: number; pleasure: number }
+  values: { auto_evaluation: number; rpe: number; physical_form: number; pleasure: number; comment?: string | null }
 ): Promise<{ success: boolean; error?: string }> {
-  const { data, error } = await supabase.rpc('submit_training_feedback', {
+  const params: Record<string, unknown> = {
     p_token: token,
     p_auto_evaluation: values.auto_evaluation,
     p_rpe: values.rpe,
     p_physical_form: values.physical_form,
     p_pleasure: values.pleasure
-  });
+  };
+  // p_comment n'est passé que s'il est fourni (préserve l'appelant public sans commentaire).
+  if (values.comment !== undefined) params.p_comment = values.comment;
+  const { data, error } = await supabase.rpc('submit_training_feedback', params);
 
   if (error) {
     console.error('submit_training_feedback', error);

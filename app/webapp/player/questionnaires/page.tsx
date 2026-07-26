@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { supabase } from '@/lib/supabaseClient';
 import { getMyPendingFeedbackTokens, type MyPendingFeedbackRow } from '@/lib/services/playerConvocationsService';
+import { getFeedbackSessionByToken, submitTrainingFeedback } from '@/lib/services';
 import { AlertCircle, CheckCircle2, ChevronRight, FileText, Loader2, MessageCircle, RefreshCw, X } from 'lucide-react';
 
 // ─── Theme FM light ───────────────────────────────────────────────────────────
@@ -89,9 +89,7 @@ export default function PlayerQuestionnairesPage() {
     setSessionTheme(null);
 
     try {
-      const { data, error: rpcErr } = await supabase.rpc('get_feedback_session_by_token', { p_token: item.token });
-      if (rpcErr) throw rpcErr;
-      const result = data as Record<string, string> | null;
+      const result = await getFeedbackSessionByToken(item.token);
       if (!result) throw new Error('Token introuvable');
       if ('error' in result) {
         setSessionError(
@@ -118,15 +116,10 @@ export default function PlayerQuestionnairesPage() {
     setSubmitting(true);
     setSessionError(null);
     try {
-      const { data } = await supabase.rpc('submit_training_feedback', {
-        p_token:           activeItem.token,
-        p_auto_evaluation: auto_evaluation,
-        p_rpe:             rpe,
-        p_physical_form:   physical_form,
-        p_pleasure:        pleasure,
-        p_comment:         comment.trim() || null,
+      const res = await submitTrainingFeedback(activeItem.token, {
+        auto_evaluation, rpe, physical_form, pleasure,
+        comment: comment.trim() || null,
       });
-      const res = data as { success: boolean; error?: string } | null;
       if (!res?.success) {
         setSessionError(
           res?.error === 'already_used' ? 'Ce questionnaire a déjà été rempli.'

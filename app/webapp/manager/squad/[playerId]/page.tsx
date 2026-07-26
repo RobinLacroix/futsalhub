@@ -36,7 +36,7 @@ import { trainingsService } from '@/lib/services/trainingsService';
 import { playerEventsService } from '@/lib/services/playerEventsService';
 import { getPlayerTrainingFeedback, type PlayerTrainingFeedbackRow } from '@/lib/services/trainingFeedbackService';
 import { createPlayerLinkCode } from '@/lib/services/playerConvocationsService';
-import { supabase } from '@/lib/supabaseClient';
+import { teamsService } from '@/lib/services/teamsService';
 import type { Player, PlayerEvent, PlayerEventType, Team } from '@/types';
 import {
   LineChart,
@@ -328,12 +328,7 @@ export default function PlayerProfilePage() {
   useEffect(() => {
     if (!club?.id) { setClubTeams([]); return; }
     (async () => {
-      const { data, error } = await supabase
-        .from('teams')
-        .select('id, name, category, level, color, club_id')
-        .eq('club_id', club.id)
-        .order('name');
-      if (!error) setClubTeams(data || []);
+      setClubTeams(await teamsService.getTeamsByClub(club.id));
     })();
   }, [club?.id]);
 
@@ -1028,9 +1023,14 @@ export default function PlayerProfilePage() {
                 onClick={async () => {
                   setLinkCodeError(null);
                   setUnlinkLoading(true);
-                  const { error } = await supabase.from('players').update({ user_id: null }).eq('id', playerId);
+                  try {
+                    await playersService.unlinkPlayerAccount(playerId);
+                  } catch (e) {
+                    setUnlinkLoading(false);
+                    setLinkCodeError(e instanceof Error ? e.message : 'Une erreur est survenue');
+                    return;
+                  }
                   setUnlinkLoading(false);
-                  if (error) { setLinkCodeError(error.message); return; }
                   setPlayer((p: Player | null) => p ? { ...p, user_id: undefined } : null);
                 }}
                 className="text-sm font-medium disabled:opacity-50"

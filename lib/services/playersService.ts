@@ -273,6 +273,16 @@ export const playersService = {
     if (error) throw error;
   },
 
+  /** Délie le compte utilisateur d'un joueur (players.user_id = null). */
+  async unlinkPlayerAccount(playerId: string): Promise<void> {
+    const { error } = await supabase
+      .from('players')
+      .update({ user_id: null })
+      .eq('id', playerId);
+
+    if (error) throw error;
+  },
+
   /**
    * Liste des équipes auxquelles le joueur est associé (ids)
    */

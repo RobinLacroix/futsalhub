@@ -249,6 +249,15 @@ export const trainingsService = {
     });
 
     return count;
+  },
+
+  /** Saisons distinctes présentes pour un ensemble d'équipes (ne throw pas, miroir inline). */
+  async getSeasonsForTeams(teamIds: string[]): Promise<string[]> {
+    if (teamIds.length === 0) return [];
+    const { data } = await supabase.from('trainings').select('season').in('team_id', teamIds);
+    return (data ?? [])
+      .map((r: { season: string | null }) => r.season)
+      .filter((s): s is string => !!s);
   }
 };
 

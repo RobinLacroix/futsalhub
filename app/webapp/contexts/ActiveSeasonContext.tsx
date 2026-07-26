@@ -1,7 +1,9 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { clubsService } from '@/lib/services/clubsService';
+import { matchesService } from '@/lib/services/matchesService';
+import { trainingsService } from '@/lib/services/trainingsService';
 import { currentSeason } from '@/lib/utils/season';
 import { useActiveTeamContext } from './ActiveTeamContext';
 
@@ -33,15 +35,11 @@ export function ActiveSeasonProvider({ children }: { children: React.ReactNode }
       setLoading(true);
 
       // 1. Saison active du club
-      const { data: clubId } = await supabase.rpc('get_user_club_id');
+      const clubId = await clubsService.getUserClubId();
       let resolvedClubSeason = currentSeason();
       if (clubId) {
-        const { data: clubRow } = await supabase
-          .from('clubs')
-          .select('current_season')
-          .eq('id', clubId)
-          .single();
-        if (clubRow?.current_season) resolvedClubSeason = clubRow.current_season as string;
+        const clubSeasonValue = await clubsService.getCurrentSeason(clubId);
+        if (clubSeasonValue) resolvedClubSeason = clubSeasonValue;
       }
       setClubSeason(resolvedClubSeason);
 
@@ -50,15 +48,11 @@ export function ActiveSeasonProvider({ children }: { children: React.ReactNode }
       const teamIds = teams.map((t) => t.id);
       if (teamIds.length > 0) {
         const [matchSeasons, trainingSeasons] = await Promise.all([
-          supabase.from('matches').select('season').in('team_id', teamIds),
-          supabase.from('trainings').select('season').in('team_id', teamIds),
+          matchesService.getSeasonsForTeams(teamIds),
+          trainingsService.getSeasonsForTeams(teamIds),
         ]);
-        for (const row of matchSeasons.data ?? []) {
-          if (row.season) seasonSet.add(row.season as string);
-        }
-        for (const row of trainingSeasons.data ?? []) {
-          if (row.season) seasonSet.add(row.season as string);
-        }
+        for (const s of matchSeasons) seasonSet.add(s);
+        for (const s of trainingSeasons) seasonSet.add(s);
       }
       const sorted = Array.from(seasonSet).sort().reverse();
       setAvailableSeasons(sorted);

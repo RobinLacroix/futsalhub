@@ -15,6 +15,16 @@ export const teamsService = {
     return data || [];
   },
 
+  /** Équipes d'un club (ne throw pas : miroir du comportement inline appelant). */
+  async getTeamsByClub(clubId: string): Promise<Team[]> {
+    const { data } = await supabase
+      .from('teams')
+      .select('id, name, category, level, color, club_id')
+      .eq('club_id', clubId)
+      .order('name');
+    return data || [];
+  },
+
   /**
    * Récupère une équipe par son ID
    */
