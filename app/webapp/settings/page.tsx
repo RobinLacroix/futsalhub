@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { useUserClub } from '../hooks/useUserClub';
 import { usePlayerProfile } from '../hooks/usePlayerProfile';
 import { claimPlayerLinkCode } from '@/lib/services/playerConvocationsService';
+import { clubsService } from '@/lib/services';
 import {
   Building2,
   Plus,
@@ -108,51 +109,40 @@ export default function SettingsPage() {
 
   const checkAdmin = async () => {
     if (!club) return;
-    const { data } = await supabase.rpc('is_club_admin', { p_club_id: club.id });
-    setIsAdmin(!!data);
+    setIsAdmin(await clubsService.isClubAdmin(club.id));
   };
 
   const fetchMembers = async () => {
     if (!club) return;
-    const { data: membersData, error } = await supabase
-      .from('club_members')
-      .select('*')
-      .eq('club_id', club.id);
-    if (error) return;
-    const { data: usersData } = await supabase.from('users').select('id, email');
-    const usersMap = new Map((usersData || []).map((u) => [u.id, u.email]));
-    const withEmails = (membersData || []).map((m) => ({
+    let membersData: Record<string, unknown>[];
+    try {
+      membersData = await clubsService.getClubMembers(club.id);
+    } catch { return; }
+    const usersData = await clubsService.listUserEmails();
+    const usersMap = new Map(usersData.map((u) => [u.id, u.email]));
+    const withEmails = membersData.map((m) => ({
       ...m,
-      email: usersMap.get(m.user_id) ?? '—'
+      email: usersMap.get(m.user_id as string) ?? '—'
     }));
     setMembers(withEmails);
   };
 
   const fetchTeams = async () => {
     if (!club) return;
-    const { data } = await supabase
-      .from('teams')
-      .select('id, name, category, level, color')
-      .eq('club_id', club.id)
-      .order('name');
-    setTeams(data || []);
+    setTeams(await clubsService.getClubTeams(club.id));
   };
 
   const fetchInvitations = async () => {
     if (!club) return;
-    const { data } = await supabase
-      .from('club_invitations')
-      .select('*')
-      .eq('club_id', club.id)
-      .eq('status', 'pending')
-      .gt('expires_at', new Date().toISOString());
-    setInvitations(data || []);
+    setInvitations(await clubsService.getPendingInvitations(club.id));
   };
 
   const handleUpdateClub = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!club || !isAdmin) return;
-    await supabase.from('clubs').update({ name: clubName, description: clubDescription, updated_at: new Date().toISOString() }).eq('id', club.id);
+    try {
+      await clubsService.updateClubInfo(club.id, { name: clubName, description: clubDescription });
+    } catch { /* ignore */ }
     refetch();
   };
 
@@ -166,27 +156,12 @@ export default function SettingsPage() {
         setCreateError('Vous devez être connecté.');
         return;
       }
-      const { data, error } = await supabase.rpc('create_user_club', {
-        p_user_id: user.id,
-        p_user_email: user.email ?? undefined
-      });
-      if (error) {
-        setCreateError(error.message);
-        return;
-      }
-      const clubId = Array.isArray(data) ? data[0] : data;
+      const clubId = await clubsService.createUserClub(user.id, user.email ?? undefined);
       if (!clubId) {
         setCreateError('Impossible de créer le club.');
         return;
       }
-      const { error: updateError } = await supabase
-        .from('clubs')
-        .update({ name: newClubName, description: newClubDesc })
-        .eq('id', clubId);
-      if (updateError) {
-        setCreateError(updateError.message);
-        return;
-      }
+      await clubsService.setClubNameDescription(clubId, newClubName, newClubDesc);
       setShowCreateClub(false);
       setNewClubName('');
       setNewClubDesc('');
@@ -203,15 +178,16 @@ export default function SettingsPage() {
     if (!club || !isAdmin) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    const { error } = await supabase.from('club_invitations').insert({
-      club_id: club.id,
-      email: inviteEmail.trim().toLowerCase(),
-      role: inviteRole,
-      team_id: inviteTeamId || null,
-      created_by: user.id
-    });
-    if (error) {
-      alert(error.message);
+    try {
+      await clubsService.createInvitation({
+        clubId: club.id,
+        email: inviteEmail.trim().toLowerCase(),
+        role: inviteRole,
+        teamId: inviteTeamId || null,
+        createdBy: user.id,
+      });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Une erreur est survenue');
       return;
     }
     setInviteEmail('');
@@ -233,10 +209,9 @@ export default function SettingsPage() {
 
   const handleUpdateMember = async () => {
     if (!editMemberId || !club || !isAdmin) return;
-    await supabase
-      .from('club_members')
-      .update({ role: editMemberRole, team_id: editMemberTeamId || null })
-      .eq('id', editMemberId);
+    try {
+      await clubsService.updateMember(editMemberId, { role: editMemberRole, teamId: editMemberTeamId || null });
+    } catch { /* ignore */ }
     setEditMemberId(null);
     fetchMembers();
   };
@@ -255,26 +230,11 @@ export default function SettingsPage() {
   /** Réconcilie les équipes d'un coach : une ligne club_members par équipe. */
   const handleUpdateCoachTeams = async () => {
     if (!editCoachUserId || !club || !isAdmin) return;
-    const { data: existing } = await supabase
-      .from('club_members')
-      .select('id, team_id')
-      .eq('club_id', club.id)
-      .eq('user_id', editCoachUserId)
-      .eq('role', 'coach');
-    const rows = (existing ?? []) as { id: string; team_id: string | null }[];
-    const existingTeamIds = new Set(rows.map((r) => r.team_id).filter((t): t is string => !!t));
-    const target = new Set(editCoachTeamIds);
-    const toDelete = rows.filter((r) => !r.team_id || !target.has(r.team_id)).map((r) => r.id);
-    if (toDelete.length > 0) {
-      const { error } = await supabase.from('club_members').delete().in('id', toDelete);
-      if (error) { alert(error.message); return; }
-    }
-    const toInsert = editCoachTeamIds
-      .filter((tid) => !existingTeamIds.has(tid))
-      .map((tid) => ({ club_id: club.id, user_id: editCoachUserId, role: 'coach', team_id: tid }));
-    if (toInsert.length > 0) {
-      const { error } = await supabase.from('club_members').insert(toInsert);
-      if (error) { alert(error.message); return; }
+    try {
+      await clubsService.setCoachTeams(club.id, editCoachUserId, editCoachTeamIds);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Une erreur est survenue');
+      return;
     }
     setEditCoachUserId(null);
     fetchMembers();
@@ -283,22 +243,22 @@ export default function SettingsPage() {
   const handleRemoveCoach = async (userId: string, email: string) => {
     if (!club || !isAdmin) return;
     if (!confirm(`Retirer ${email} du club ? Il perdra l'accès à toutes ses équipes.`)) return;
-    const { error } = await supabase
-      .from('club_members')
-      .delete()
-      .eq('club_id', club.id)
-      .eq('user_id', userId)
-      .eq('role', 'coach');
-    if (error) { alert(error.message); return; }
+    try {
+      await clubsService.removeCoach(club.id, userId);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Une erreur est survenue');
+      return;
+    }
     fetchMembers();
   };
 
   const handleRemoveMember = async (memberId: string) => {
     if (!club || !isAdmin) return;
     setRemoveError(null);
-    const { error } = await supabase.from('club_members').delete().eq('id', memberId);
-    if (error) {
-      setRemoveError(error.message);
+    try {
+      await clubsService.removeClubMember(memberId);
+    } catch (err) {
+      setRemoveError(err instanceof Error ? err.message : 'Une erreur est survenue');
       return;
     }
     setDeleteConfirm(null);
@@ -307,14 +267,14 @@ export default function SettingsPage() {
 
   const handleDeleteClub = async () => {
     if (!club || !isAdmin || deleteInput !== 'SUPPRIMER') return;
-    await supabase.from('clubs').delete().eq('id', club.id);
+    try { await clubsService.deleteClub(club.id); } catch { /* ignore */ }
     setDeleteConfirm(null);
     setDeleteInput('');
     refetch();
   };
 
   const cancelInvitation = async (id: string) => {
-    await supabase.from('club_invitations').update({ status: 'expired' }).eq('id', id);
+    try { await clubsService.expireInvitation(id); } catch { /* ignore */ }
     fetchInvitations();
   };
 

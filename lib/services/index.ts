@@ -7,6 +7,8 @@ export { matchEventsService } from './matchEventsService';
 export { schematicsService } from './schematicsService';
 export { sharedContentService } from './sharedContentService';
 export type { ContentAnalyticsRow, CreateSharedContentInput } from './sharedContentService';
+export { clubsService } from './clubsService';
+export type { ClubInvitationRow, ClubTeamRow } from './clubsService';
 export {
   createTokensForTraining,
   getFeedbackSessionByToken,
