@@ -38,6 +38,25 @@ export interface PlayerEvent {
 
 export type PlayerStatus = 'present' | 'late' | 'absent' | 'injured';
 
+// ─── Douleurs (body-map) ─────────────────────────────────────────────────────
+export interface PainReportZone {
+  zone: string;
+  side: 'L' | 'R' | 'C';
+  intensity: 1 | 2 | 3;
+  mode: 'zone' | 'articulation';
+}
+
+export interface PainReportGroup {
+  report_group: string;
+  reported_at: string;
+  source: 'questionnaire' | 'spontane';
+  max_intensity: 1 | 2 | 3;
+  note: string | null;
+  onset: 'aigu' | 'chronique' | null;
+  training_id: string | null;
+  zones: PainReportZone[];
+}
+
 export interface Training {
   id: string;
   date: string;
@@ -69,7 +88,64 @@ export interface Match {
   fouls_team?: number;
   fouls_opponent?: number;
   season?: string | null; // Saison de rattachement, ex. "2025-2026"
+  coach_evaluation?: CoachEvaluation | null; // Évaluation qualitative coach (Volet A), NULL si non évalué
 }
+
+// ==================== ÉVALUATION DE MATCH ====================
+// Spec : livrables/futsalhub/SPEC_EVALUATION_MATCH_2026-07.md
+// Volet A : évaluation qualitative du match par le coach (5 niveaux).
+export type CoachEvaluation = 'bad' | 'poor' | 'neutral' | 'good' | 'great';
+
+// Volet B : note data /10 d'un joueur de champ pour un match (calculée en RPC).
+export interface MatchPlayerRating {
+  player_id: string;
+  player_name: string;
+  rating: number; // [0.0 ; 10.0], 1 décimale
+  indiv_pts: number;
+  coll_pts: number;
+}
+
+// Ligne d'une note par (match, joueur), pour l'agrégation analytics et la courbe page joueur.
+export interface MatchPlayerRatingRow extends MatchPlayerRating {
+  match_id: string;
+  match_date: string;
+}
+
+// Échelle de notation personnalisable (par club). Poids individuels (w_*) et collectifs (cw_*).
+export interface RatingWeights {
+  w_goal: number;
+  w_assist: number;
+  w_recovery: number;
+  w_shot_on_target: number;
+  w_shot: number;
+  w_ball_loss: number;
+  w_yellow_card: number;
+  w_red_card: number;
+  cw_goal: number;
+  cw_shot: number;
+  cw_opponent_shot: number;
+  cw_opponent_goal: number;
+}
+
+export interface RatingWeightsResult extends RatingWeights {
+  is_custom: boolean;
+}
+
+// Échelle par défaut (miroir des DEFAULT de la table match_rating_weights).
+export const DEFAULT_RATING_WEIGHTS: RatingWeights = {
+  w_goal: 0.8,
+  w_assist: 0.4,
+  w_recovery: 0.3,
+  w_shot_on_target: 0.1,
+  w_shot: 0.05,
+  w_ball_loss: -0.3,
+  w_yellow_card: -0.2,
+  w_red_card: -0.7,
+  cw_goal: 0.2,
+  cw_shot: 0.05,
+  cw_opponent_shot: -0.05,
+  cw_opponent_goal: -0.2,
+};
 
 export interface MatchPlayer {
   id: string;

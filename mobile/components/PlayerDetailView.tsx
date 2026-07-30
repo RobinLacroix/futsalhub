@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -15,12 +15,16 @@ import {
   Dimensions,
 } from 'react-native';
 import Svg, { Polygon, Line, Circle, Text as SvgText, Path } from 'react-native-svg';
+import { Swipeable } from 'react-native-gesture-handler';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SeasonHeaderButton } from './SeasonHeaderButton';
 import { supabase } from '../lib/supabase';
-import type { Player, Team, PlayerEvent, PlayerEventType } from '../types';
+import { getPlayerPainReports, deleteMyPainReport } from '../lib/services/painReports';
+import PainReportModal from './PainReportModal';
+import { INTENSITY_COLORS, INTENSITY_LABELS, zoneLabel } from '../lib/painMap';
+import type { Player, Team, PlayerEvent, PlayerEventType, PainReportGroup } from '../types';
 import type {
   MatchTypeFilter,
   PlayerRadarResult,
@@ -194,6 +198,7 @@ export interface PlayerDetailViewProps {
   radarLoading: boolean;
   feedbackRows: PlayerFeedbackRow[];
   feedbackLoading: boolean;
+  ratingSeries?: { date: string; rating: number }[]; // Volet B : note data par match (ordre chronologique)
   allSessions: TrainingSession[];
   initialEvents: PlayerEvent[];
   matchFilter: MatchTypeFilter;
@@ -211,7 +216,7 @@ export interface PlayerDetailViewProps {
 export function PlayerDetailView({
   player, playerTeams, availableTeams,
   stats, radarData, radarLoading,
-  feedbackRows, feedbackLoading, allSessions, initialEvents,
+  feedbackRows, feedbackLoading, ratingSeries = [], allSessions, initialEvents,
   matchFilter, updatingTeamId, isManager,
   onMatchFilterChange, onBack, onEdit, onAddToTeam, onRemoveFromTeam,
 }: PlayerDetailViewProps) {
@@ -228,6 +233,30 @@ export function PlayerDetailView({
   const [matchesSusp, setMatchesSusp]       = useState('');
   const [savingEvent, setSavingEvent]       = useState(false);
   const [assignModal, setAssignModal]       = useState(false);
+  const [painReports, setPainReports]       = useState<PainReportGroup[]>([]);
+  const [painModalOpen, setPainModalOpen]   = useState(false);
+
+  const loadPain = useCallback(() => {
+    return getPlayerPainReports(player.id)
+      .then(setPainReports)
+      .catch(() => setPainReports([]));
+  }, [player.id]);
+
+  useEffect(() => { loadPain(); }, [loadPain]);
+
+  const handleDeletePain = useCallback((reportGroup: string) => {
+    Alert.alert('Supprimer ce signalement ?', 'Cette action est définitive.', [
+      { text: 'Annuler', style: 'cancel' },
+      {
+        text: 'Supprimer', style: 'destructive',
+        onPress: async () => {
+          const res = await deleteMyPainReport(reportGroup);
+          if (res.success) setPainReports(prev => prev.filter(g => g.report_group !== reportGroup));
+          else Alert.alert('Erreur', res.error || 'Suppression impossible.');
+        },
+      },
+    ]);
+  }, []);
 
   const handleSaveEvent = async () => {
     setSavingEvent(true);
@@ -319,6 +348,13 @@ export function PlayerDetailView({
               )}
             </View>
           </View>
+
+          {!isManager && (
+            <TouchableOpacity style={styles.painHeaderBtn} onPress={() => setPainModalOpen(true)} activeOpacity={0.85}>
+              <Ionicons name="body-outline" size={16} color="#fff" />
+              <Text style={styles.painHeaderBtnText}>Signaler une douleur</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.filterRow}>
@@ -390,6 +426,13 @@ export function PlayerDetailView({
             : <EmptyState text="Aucune donnée du match recorder disponible" />
           }
         </FMSection>
+
+        {/* ── Note de match (Volet B) ── */}
+        {!isGoalkeeper(player.position) && ratingSeries.length > 0 && (
+          <FMSection title="Note de match — Évolution">
+            <RatingLineChart series={ratingSeries} />
+          </FMSection>
+        )}
 
         {/* ── Feedback ── */}
         <FMSection title="Questionnaire — Évolution">
@@ -522,6 +565,71 @@ export function PlayerDetailView({
           }
         </FMSection>
 
+        {/* ── Suivi des douleurs ── */}
+        <FMSection
+          title="Suivi des douleurs"
+          count={painReports.length}
+          action={painReports.length > 0 && painReports[0].max_intensity >= 3 ? (
+            <View style={styles.painAlert}>
+              <Ionicons name="warning-outline" size={13} color={C.red} />
+              <Text style={styles.painAlertText}>Intense récent</Text>
+            </View>
+          ) : undefined}
+        >
+          {painReports.length === 0 ? (
+            <EmptyState text="Aucune douleur signalée par le joueur" />
+          ) : (
+            <View style={{ gap: 10, marginBottom: 4 }}>
+              {!isManager && (
+                <Text style={styles.painSwipeHint}>Glisse un signalement vers la gauche pour le supprimer.</Text>
+              )}
+              {painReports.map(g => {
+                const card = (
+                  <View style={styles.painCard}>
+                    <View style={styles.painCardHead}>
+                      <Text style={styles.painDate}>
+                        {new Date(g.reported_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}
+                      </Text>
+                      <Text style={[styles.painSev, { color: INTENSITY_COLORS[g.max_intensity] }]}>
+                        {INTENSITY_LABELS[g.max_intensity]}
+                      </Text>
+                    </View>
+                    <View style={styles.painMeta}>
+                      <View style={styles.painTag}><Text style={styles.painTagText}>{g.source === 'questionnaire' ? 'Fin de séance' : 'Spontané'}</Text></View>
+                      {g.onset && <View style={styles.painTag}><Text style={styles.painTagText}>{g.onset === 'aigu' ? 'Aigu' : 'Chronique'}</Text></View>}
+                    </View>
+                    <View style={styles.painChips}>
+                      {g.zones.map((z, i) => (
+                        <View key={i} style={[styles.painChip, { borderColor: INTENSITY_COLORS[z.intensity], backgroundColor: INTENSITY_COLORS[z.intensity] + '1a' }]}>
+                          <View style={[styles.painDot, { backgroundColor: INTENSITY_COLORS[z.intensity] }]} />
+                          <Text style={[styles.painChipText, { color: INTENSITY_COLORS[z.intensity] }]}>{zoneLabel(z.zone)}</Text>
+                        </View>
+                      ))}
+                    </View>
+                    {g.note ? <Text style={styles.painNote}>{g.note}</Text> : null}
+                  </View>
+                );
+
+                if (isManager) return <View key={g.report_group}>{card}</View>;
+
+                return (
+                  <Swipeable
+                    key={g.report_group}
+                    renderRightActions={() => (
+                      <TouchableOpacity style={styles.painDelete} onPress={() => handleDeletePain(g.report_group)} activeOpacity={0.85}>
+                        <Ionicons name="trash-outline" size={18} color="#fff" />
+                        <Text style={styles.painDeleteText}>Supprimer</Text>
+                      </TouchableOpacity>
+                    )}
+                  >
+                    {card}
+                  </Swipeable>
+                );
+              })}
+            </View>
+          )}
+        </FMSection>
+
         {/* ── Équipes (coach seulement) ── */}
         {isManager && (
           <FMSection title="Équipes" last>
@@ -587,6 +695,14 @@ export function PlayerDetailView({
             </View>
           </TouchableOpacity>
         </Modal>
+      )}
+
+      {!isManager && (
+        <PainReportModal
+          visible={painModalOpen}
+          onClose={() => setPainModalOpen(false)}
+          onSubmitted={loadPain}
+        />
       )}
     </KeyboardAvoidingView>
   );
@@ -1012,6 +1128,84 @@ const fb = StyleSheet.create({
   lastLabel:   { fontSize: 8, color: C.text3, fontWeight: '600', textTransform: 'uppercase', marginTop: 2 },
 });
 
+// ─── RatingLineChart (Volet B) ───────────────────────────────────────────────
+
+function ratingColorRC(rating: number): string {
+  if (rating >= 6.5) return '#059669';
+  if (rating >= 5.5) return '#16a34a';
+  if (rating > 4.5)  return '#6b7280';
+  if (rating > 3.5)  return '#f97316';
+  return '#dc2626';
+}
+
+function RatingLineChart({ series }: { series: { date: string; rating: number }[] }) {
+  const [chartWidth, setChartWidth] = useState(0);
+  const data = series.slice(-20);
+  const n = data.length;
+  const avg = n > 0 ? data.reduce((s, r) => s + r.rating, 0) / n : 0;
+
+  const PAD_L = 22; const PAD_R = 8; const PAD_T = 10; const PAD_B = 32;
+  const plotW = Math.max(0, chartWidth - PAD_L - PAD_R);
+  const plotH = 130;
+  const svgH  = PAD_T + plotH + PAD_B;
+  const toY   = (v: number) => PAD_T + plotH - (v / 10) * plotH;
+  const toX   = (i: number) => PAD_L + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const dateIdxs = (() => {
+    if (n <= 5) return data.map((_, i) => i);
+    const st = Math.floor((n - 1) / 4);
+    const r = [0]; for (let k = 1; k <= 3; k++) r.push(st * k); r.push(n - 1);
+    return [...new Set(r)];
+  })();
+
+  const pts = data.map((r, i) => ({ x: toX(i), y: toY(r.rating) }));
+  const path = buildSmoothPath(pts);
+
+  return (
+    <View>
+      <View style={rc.summaryRow}>
+        <Text style={rc.summaryLabel}>Moyenne</Text>
+        <View style={[rc.summaryBadge, { backgroundColor: ratingColorRC(avg) }]}>
+          <Text style={rc.summaryVal}>{avg.toFixed(1)}</Text>
+        </View>
+        <Text style={rc.summaryCount}>· {n} match{n > 1 ? 's' : ''}</Text>
+      </View>
+
+      <View onLayout={e => setChartWidth(e.nativeEvent.layout.width)} style={{ width: '100%' }}>
+        {chartWidth > 0 && (
+          <Svg width={chartWidth} height={svgH}>
+            {[0, 2, 4, 6, 8, 10].map(v => {
+              const gy = toY(v);
+              return (
+                <React.Fragment key={v}>
+                  <Line x1={PAD_L} y1={gy} x2={PAD_L + plotW} y2={gy} stroke="rgba(26,39,68,0.06)" strokeWidth={1} />
+                  <SvgText x={PAD_L - 4} y={gy + 4} textAnchor="end" fontSize={8} fill={C.text3}>{v}</SvgText>
+                </React.Fragment>
+              );
+            })}
+            {path ? <Path d={path} fill="none" stroke="#059669" strokeWidth={2} strokeLinecap="round" /> : null}
+            {data.map((r, i) => (
+              <Circle key={i} cx={toX(i)} cy={toY(r.rating)} r={3} fill={ratingColorRC(r.rating)} />
+            ))}
+            {dateIdxs.map(i => (
+              <SvgText key={i} x={toX(i)} y={PAD_T + plotH + 14} textAnchor="middle" fontSize={8} fill={C.text3}>
+                {new Date(data[i].date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
+              </SvgText>
+            ))}
+          </Svg>
+        )}
+      </View>
+    </View>
+  );
+}
+
+const rc = StyleSheet.create({
+  summaryRow:   { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  summaryLabel: { fontSize: 11, color: C.text3, fontWeight: '700' },
+  summaryBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+  summaryVal:   { color: '#fff', fontSize: 14, fontWeight: '800' },
+  summaryCount: { fontSize: 11, color: C.text3 },
+});
+
 // ─── Styles ────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
@@ -1102,6 +1296,26 @@ const styles = StyleSheet.create({
   teamName:      { flex: 1, fontSize: 13, fontWeight: '600', color: C.text1 },
   assignBtn:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: C.navy, paddingVertical: 10, borderRadius: 7 },
   assignBtnText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+
+  painAlert:     { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fecaca', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  painAlertText: { fontSize: 10, fontWeight: '800', color: C.red },
+  painHeaderBtn:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.red, borderRadius: 10, paddingVertical: 11, marginTop: 12 },
+  painHeaderBtnText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  painSwipeHint:     { fontSize: 11, color: C.text3, marginBottom: 2 },
+  painDelete:        { backgroundColor: C.red, justifyContent: 'center', alignItems: 'center', width: 96, borderRadius: 10, marginLeft: 8, gap: 3 },
+  painDeleteText:    { color: '#fff', fontSize: 11, fontWeight: '800' },
+  painCard:      { backgroundColor: C.surface2, borderRadius: 10, borderWidth: 1, borderColor: C.border, padding: 12 },
+  painCardHead:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  painDate:      { fontSize: 13, fontWeight: '700', color: C.text1 },
+  painSev:       { fontSize: 11, fontWeight: '800' },
+  painMeta:      { flexDirection: 'row', gap: 6, marginBottom: 8 },
+  painTag:       { backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 5, paddingHorizontal: 7, paddingVertical: 2 },
+  painTagText:   { fontSize: 9, fontWeight: '800', color: C.text2, letterSpacing: 0.5, textTransform: 'uppercase' },
+  painChips:     { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  painChip:      { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
+  painDot:       { width: 7, height: 7, borderRadius: 4 },
+  painChipText:  { fontSize: 12, fontWeight: '700' },
+  painNote:      { fontSize: 13, color: C.text1, marginTop: 8 },
 
   // Modal
   modalOverlay:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 24 },

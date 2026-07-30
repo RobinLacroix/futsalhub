@@ -19,6 +19,12 @@ import { fr } from 'date-fns/locale';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { supabase } from '../../lib/supabase';
 import { getMyPendingFeedbackTokens, type MyPendingFeedbackRow } from '../../lib/services/playerConvocations';
+import { reportPainByToken } from '../../lib/services/painReports';
+import BodyMap, { type PainSelection } from '../../components/BodyMap';
+import PainReportModal from '../../components/PainReportModal';
+import { toPayload } from '../../lib/painMap';
+
+type Onset = 'aigu' | 'chronique' | null;
 
 
 // ─── Design tokens ─────────────────────────────────────────────────────────
@@ -79,8 +85,13 @@ export default function PlayerQuestionnairesScreen() {
   const [sessionError, setSessionError]   = useState<string | null>(null);
   const [form, setForm]                   = useState<FormValues>({ auto_evaluation: null, rpe: null, physical_form: null, pleasure: null });
   const [comment, setComment]             = useState('');
+  const [pain, setPain]                   = useState<PainSelection>({});
+  const [onset, setOnset]                 = useState<Onset>(null);
   const [submitting, setSubmitting]       = useState(false);
   const [submitted, setSubmitted]         = useState(false);
+
+  // Signalement spontané (modale partagée)
+  const [spontOpen, setSpontOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -107,6 +118,8 @@ export default function PlayerQuestionnairesScreen() {
     setSubmitted(false);
     setForm({ auto_evaluation: null, rpe: null, physical_form: null, pleasure: null });
     setComment('');
+    setPain({});
+    setOnset(null);
 
     try {
       const { data, error: rpcError } = await supabase.rpc('get_feedback_session_by_token', { p_token: item.token });
@@ -161,6 +174,10 @@ export default function PlayerQuestionnairesScreen() {
         Alert.alert('Erreur', msg);
         return;
       }
+      const zones = toPayload(pain);
+      if (zones.length > 0) {
+        await reportPainByToken(activeItem.token, zones, null, onset);
+      }
       setSubmitted(true);
       setItems(prev => prev.filter(i => i.token !== activeItem.token));
     } catch (e) {
@@ -168,7 +185,7 @@ export default function PlayerQuestionnairesScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [activeItem, form, comment]);
+  }, [activeItem, form, comment, pain, onset]);
 
   const allAnswered = Object.values(form).every(v => v !== null);
 
@@ -195,12 +212,24 @@ export default function PlayerQuestionnairesScreen() {
         contentContainerStyle={s.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.navy} />}
         ListHeaderComponent={
-          items.length > 0 ? (
-            <View style={s.listHeader}>
-              <View style={s.accentBar} />
-              <Text style={s.listHeaderText}>{items.length} questionnaire{items.length > 1 ? 's' : ''} en attente</Text>
-            </View>
-          ) : null
+          <View>
+            <TouchableOpacity style={s.painCta} onPress={() => setSpontOpen(true)} activeOpacity={0.8}>
+              <View style={s.painCtaIcon}>
+                <Ionicons name="body-outline" size={18} color={C.red} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.painCtaTitle}>Signaler une douleur</Text>
+                <Text style={s.painCtaSub}>À tout moment, sans attendre un questionnaire</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={C.text3} />
+            </TouchableOpacity>
+            {items.length > 0 && (
+              <View style={s.listHeader}>
+                <View style={s.accentBar} />
+                <Text style={s.listHeaderText}>{items.length} questionnaire{items.length > 1 ? 's' : ''} en attente</Text>
+              </View>
+            )}
+          </View>
         }
         ListEmptyComponent={
           <View style={s.emptyWrap}>
@@ -333,6 +362,19 @@ export default function PlayerQuestionnairesScreen() {
                   />
                 </View>
 
+                {/* Body-map douleur */}
+                <View style={m.commentCard}>
+                  <View style={m.commentHeader}>
+                    <Ionicons name="body-outline" size={13} color={C.red} />
+                    <Text style={[m.commentLabel, { color: C.red }]}>UNE DOULEUR ?</Text>
+                    <View style={m.optionalBadge}><Text style={m.optionalText}>optionnel</Text></View>
+                  </View>
+                  <BodyMap value={pain} onChange={setPain} />
+                  {Object.keys(pain).length > 0 && (
+                    <OnsetPicker value={onset} onChange={setOnset} />
+                  )}
+                </View>
+
                 {/* Bouton submit */}
                 <TouchableOpacity
                   style={[m.submitBtn, (!allAnswered || submitting) && m.submitBtnDisabled]}
@@ -357,6 +399,35 @@ export default function PlayerQuestionnairesScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Modale signalement spontané (partagée avec la fiche joueur) */}
+      <PainReportModal visible={spontOpen} onClose={() => setSpontOpen(false)} />
+    </View>
+  );
+}
+
+// ─── OnsetPicker ─────────────────────────────────────────────────────────────
+
+function OnsetPicker({ value, onChange }: { value: Onset; onChange: (v: Onset) => void }) {
+  return (
+    <View style={{ marginTop: 12 }}>
+      <Text style={{ fontSize: 10, fontWeight: '800', color: C.text3, letterSpacing: 1, marginBottom: 6 }}>DEPUIS QUAND ?</Text>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        {([['aigu', 'Récent / aigu'], ['chronique', 'Qui traîne']] as const).map(([v, lbl]) => {
+          const active = value === v;
+          return (
+            <TouchableOpacity
+              key={v}
+              onPress={() => onChange(active ? null : v)}
+              style={{ flex: 1, paddingVertical: 9, borderRadius: 8, borderWidth: 1.5, alignItems: 'center',
+                borderColor: active ? C.navy : C.border, backgroundColor: active ? C.navy : C.surface2 }}
+              activeOpacity={0.8}
+            >
+              <Text style={{ fontSize: 12, fontWeight: '700', color: active ? '#fff' : C.text2 }}>{lbl}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -413,6 +484,11 @@ const s = StyleSheet.create({
 
   errorBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#fef2f2', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#fee2e2' },
   errorText:   { flex: 1, fontSize: 13, color: C.red },
+
+  painCta:      { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.surface, borderRadius: 12, borderWidth: 1, borderColor: C.border, borderLeftWidth: 4, borderLeftColor: C.red, padding: 14, marginBottom: 12 },
+  painCtaIcon:  { width: 38, height: 38, borderRadius: 10, backgroundColor: '#fef2f2', justifyContent: 'center', alignItems: 'center' },
+  painCtaTitle: { fontSize: 14, fontWeight: '800', color: C.text1 },
+  painCtaSub:   { fontSize: 11, color: C.text3, marginTop: 1 },
 
   listHeader:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
   accentBar:      { width: 3, height: 14, borderRadius: 2, backgroundColor: C.amber },

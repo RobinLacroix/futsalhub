@@ -8,6 +8,9 @@ import {
   getFeedbackSessionByToken,
   submitTrainingFeedback
 } from '@/lib/services/trainingFeedbackService';
+import { reportPainByToken } from '@/lib/services/painReportsService';
+import BodyMap, { type PainSelection } from '@/components/BodyMap';
+import { toPayload } from '@/lib/painMap';
 
 type FeedbackKeys = 'auto_evaluation' | 'rpe' | 'physical_form' | 'pleasure';
 const LABELS: Record<FeedbackKeys, string> = {
@@ -35,6 +38,8 @@ export default function FeedbackSessionPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [pain, setPain] = useState<PainSelection>({});
+  const [onset, setOnset] = useState<'aigu' | 'chronique' | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,9 +58,17 @@ export default function FeedbackSessionPage() {
     setSubmitting(true);
     setSubmitError(null);
     const result = await submitTrainingFeedback(token, values);
-    setSubmitting(false);
-    if (result.success) setSubmitted(true);
-    else setSubmitError(result.error || 'Erreur lors de l\'envoi');
+    if (result.success) {
+      const zones = toPayload(pain);
+      if (zones.length > 0) {
+        await reportPainByToken(token, zones, null, onset);
+      }
+      setSubmitting(false);
+      setSubmitted(true);
+    } else {
+      setSubmitting(false);
+      setSubmitError(result.error || 'Erreur lors de l\'envoi');
+    }
   };
 
   if (loading) {
@@ -134,6 +147,32 @@ export default function FeedbackSessionPage() {
               />
             </div>
           ))}
+
+          {/* Body-map douleur (optionnel) */}
+          <div className="rounded-2xl bg-white p-4 text-slate-900">
+            <p className="text-sm font-bold mb-0.5">Une douleur à signaler ?</p>
+            <p className="text-xs text-slate-500 mb-3">
+              Optionnel. Touche une zone : 1 fois (modérée), 2 fois (assez intense), 3 fois (très intense).
+            </p>
+            <BodyMap value={pain} onChange={setPain} />
+            {Object.keys(pain).length > 0 && (
+              <div className="mt-4">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">Depuis quand ?</p>
+                <div className="flex gap-2">
+                  {([['aigu', 'Récent / aigu'], ['chronique', 'Qui traîne / chronique']] as const).map(([v, lbl]) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setOnset(o => (o === v ? null : v))}
+                      className={`flex-1 py-2 rounded-lg text-xs font-semibold border ${onset === v ? 'bg-slate-800 text-white border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
 
           {submitError && (
             <p className="text-red-400 text-sm">{submitError}</p>

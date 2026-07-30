@@ -1,6 +1,7 @@
 // Export centralisé de tous les services
 export { playersService } from './playersService';
 export { matchesService } from './matchesService';
+export { matchRatingsService } from './matchRatingsService';
 export { trainingsService } from './trainingsService';
 export { teamsService } from './teamsService';
 export { matchEventsService } from './matchEventsService';
@@ -25,4 +26,10 @@ export {
   claimPlayerLinkCode
 } from './playerConvocationsService';
 export type { MyConvolutionRow, MyPendingFeedbackRow } from './playerConvocationsService';
+export {
+  reportMyPain,
+  reportPainByToken,
+  getPlayerPainReports,
+  deleteMyPainReport
+} from './painReportsService';
 
