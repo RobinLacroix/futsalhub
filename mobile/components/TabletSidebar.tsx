@@ -82,16 +82,16 @@ export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {
       <View style={styles.nav}>
         {NAV_ITEMS.map((item) => {
           const active = isActive(segments as string[], item);
-          const badge = item.path === '/(tabs)/calendar' ? counts.absence_report
-                      : item.path === '/(tabs)/squad'    ? counts.feedback_comment
+          const badge = item.path === '/(tabs)/calendar' ? counts.absence_report + counts.injury
+                      : item.path === '/(tabs)/squad'    ? counts.feedback_comment + counts.questionnaire_response
                       : 0;
           return (
             <TouchableOpacity
               key={item.path}
               onPress={() => {
                 const go = () => {
-                  if (item.path === '/(tabs)/calendar') void markRead(['absence_report']);
-                  if (item.path === '/(tabs)/squad')    void markRead(['feedback_comment']);
+                  if (item.path === '/(tabs)/calendar') void markRead(['absence_report', 'injury']);
+                  if (item.path === '/(tabs)/squad')    void markRead(['feedback_comment', 'questionnaire_response']);
                   router.push(item.path as any);
                 };
                 if (isRecordingActive) {

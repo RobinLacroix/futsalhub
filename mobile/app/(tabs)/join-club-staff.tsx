@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { acceptClubInvitation } from '../../lib/services/clubs';
+import { acceptClubInvitationByCode } from '../../lib/services/clubs';
 import { useActiveTeam } from '../../contexts/ActiveTeamContext';
 
 export default function JoinClubStaffScreen() {
@@ -22,7 +22,7 @@ export default function JoinClubStaffScreen() {
     }
     setSubmitting(true);
     try {
-      await acceptClubInvitation(trimmed);
+      await acceptClubInvitationByCode(trimmed);
       await refetchTeams();
       Alert.alert('Club rejoint !', 'Vous avez rejoint le club avec succes.', [
         { text: 'OK', onPress: () => router.replace('/(tabs)') },
@@ -52,11 +52,12 @@ export default function JoinClubStaffScreen() {
         <TextInput
           style={styles.input}
           value={token}
-          onChangeText={setToken}
-          placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+          onChangeText={(t) => setToken(t.replace(/\s/g, '').toUpperCase())}
+          placeholder="ABC12XYZ"
           placeholderTextColor="#9ca3af"
-          autoCapitalize="none"
+          autoCapitalize="characters"
           autoCorrect={false}
+          maxLength={12}
           editable={!submitting}
         />
 

@@ -64,8 +64,8 @@ export function PhoneNavMenu() {
   const navigate = (path: string) => {
     close();
     const go = () => {
-      if (path === '/(tabs)/calendar') void markRead(['absence_report']);
-      if (path === '/(tabs)/squad')    void markRead(['feedback_comment']);
+      if (path === '/(tabs)/calendar') void markRead(['absence_report', 'injury']);
+      if (path === '/(tabs)/squad')    void markRead(['feedback_comment', 'questionnaire_response']);
       router.push(path as any);
     };
     if (isRecordingActive) {
@@ -75,8 +75,8 @@ export function PhoneNavMenu() {
     }
   };
 
-  const calendarBadge = counts.absence_report;
-  const squadBadge    = counts.feedback_comment;
+  const calendarBadge = counts.absence_report + counts.injury;
+  const squadBadge    = counts.feedback_comment + counts.questionnaire_response;
 
   const handleSwitchToPlayer = async () => {
     close();

@@ -10,6 +10,8 @@ export { sharedContentService } from './sharedContentService';
 export type { ContentAnalyticsRow, CreateSharedContentInput } from './sharedContentService';
 export { clubsService } from './clubsService';
 export type { ClubInvitationRow, ClubTeamRow } from './clubsService';
+export { notificationsService, DEFAULT_NOTIF_PREFS } from './notificationsService';
+export type { CoachNotifType, NotificationPreferences } from './notificationsService';
 export {
   createTokensForTraining,
   getFeedbackSessionByToken,

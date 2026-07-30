@@ -3,9 +3,12 @@ import { TouchableOpacity, Text, StyleSheet, View } from 'react-native';
 import { useIsTablet } from '../../../hooks/useIsTablet';
 import { PhoneNavMenu } from '../../../components/PhoneNavMenu';
 import { SeasonHeaderButton } from '../../../components/SeasonHeaderButton';
+import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 
 function HeaderAddButton() {
   const router = useRouter();
+  const { canEditActiveTeam } = useActiveTeam();
+  if (!canEditActiveTeam) return null; // lecture seule : équipe non rattachée
   return (
     <TouchableOpacity
       style={styles.addButton}

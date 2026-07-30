@@ -4,7 +4,9 @@ export interface NotificationCounts {
   convocation: number;
   questionnaire: number;
   absence_report: number;
+  injury: number;
   feedback_comment: number;
+  questionnaire_response: number;
   total: number;
 }
 
@@ -12,9 +14,44 @@ export const EMPTY_COUNTS: NotificationCounts = {
   convocation: 0,
   questionnaire: 0,
   absence_report: 0,
+  injury: 0,
   feedback_comment: 0,
+  questionnaire_response: 0,
   total: 0,
 };
+
+/** Types de notification staff activables/désactivables par le coach. */
+export type CoachNotifType =
+  | 'absence_report'
+  | 'injury'
+  | 'feedback_comment'
+  | 'questionnaire_response';
+
+export type NotificationPreferences = Record<CoachNotifType, boolean>;
+
+export const DEFAULT_NOTIF_PREFS: NotificationPreferences = {
+  absence_report: true,
+  injury: true,
+  feedback_comment: true,
+  questionnaire_response: true,
+};
+
+export async function getNotificationPreferences(): Promise<NotificationPreferences> {
+  const { data, error } = await supabase.rpc('get_my_notification_preferences');
+  if (error) throw error;
+  return { ...DEFAULT_NOTIF_PREFS, ...(data ?? {}) } as NotificationPreferences;
+}
+
+export async function setNotificationPreference(
+  type: CoachNotifType,
+  enabled: boolean,
+): Promise<void> {
+  const { error } = await supabase.rpc('set_my_notification_preference', {
+    p_type: type,
+    p_enabled: enabled,
+  });
+  if (error) throw error;
+}
 
 export async function getNotificationCounts(): Promise<NotificationCounts> {
   const { data, error } = await supabase.rpc('get_my_notification_counts');

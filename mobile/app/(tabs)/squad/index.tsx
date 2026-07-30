@@ -84,7 +84,7 @@ const C = {
 export default function SquadScreen() {
   const router   = useRouter();
   const isTablet = useIsTablet();
-  const { activeTeamId } = useActiveTeam();
+  const { activeTeamId, canEditActiveTeam } = useActiveTeam();
   const { activeSeason } = useActiveSeason();
 
   const [players, setPlayers]           = useState<Player[]>([]);
@@ -136,6 +136,7 @@ export default function SquadScreen() {
   }, [loadPlayers, loadStats]);
 
   const handleDeletePlayer = useCallback((player: Player, close: () => void) => {
+    if (!canEditActiveTeam) { close(); return; } // lecture seule : équipe non rattachée
     Alert.alert(
       'Retirer ce joueur ?',
       `${player.first_name} ${player.last_name} sera marqué « Parti (quitte le club) » et retiré de l'effectif actif.\n\n` +
@@ -157,7 +158,7 @@ export default function SquadScreen() {
         },
       ]
     );
-  }, []);
+  }, [canEditActiveTeam]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -213,9 +214,11 @@ export default function SquadScreen() {
           <TouchableOpacity style={styles.tabletBtn} onPress={() => router.push('/(tabs)/squad/season-planning')} activeOpacity={0.8}>
             <Text style={styles.tabletBtnText}>Planification</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.tabletBtnPrimary} onPress={() => router.push('/(tabs)/squad/new-player')} activeOpacity={0.8}>
-            <Text style={styles.tabletBtnPrimaryText}>+ Joueur</Text>
-          </TouchableOpacity>
+          {canEditActiveTeam && (
+            <TouchableOpacity style={styles.tabletBtnPrimary} onPress={() => router.push('/(tabs)/squad/new-player')} activeOpacity={0.8}>
+              <Text style={styles.tabletBtnPrimaryText}>+ Joueur</Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
@@ -297,7 +300,7 @@ export default function SquadScreen() {
           const hasFeedbackBadge = feedbackPlayerIds.has(item.id);
 
           return (
-            <Swipeable renderRightActions={renderRightActions} overshootRight={false}>
+            <Swipeable renderRightActions={canEditActiveTeam ? renderRightActions : undefined} overshootRight={false}>
               <TouchableOpacity
                 style={[styles.row, { backgroundColor: isEven ? C.rowEven : C.rowOdd }]}
                 onPress={() => {

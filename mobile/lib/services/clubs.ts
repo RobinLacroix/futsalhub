@@ -210,17 +210,18 @@ export async function createClubInvitation(
   const { data, error } = await supabase
     .from('club_invitations')
     .insert({ club_id: clubId, email, role, team_id: teamId ?? null, created_by: user.id })
-    .select('token')
+    .select('code')
     .single();
   if (error) throw error;
-  return (data as any).token as string;
+  return (data as { code: string }).code;
 }
 
-export async function acceptClubInvitation(token: string): Promise<string> {
+/** Rejoindre un club en tant que staff via le code court d'invitation (nominatif). */
+export async function acceptClubInvitationByCode(code: string): Promise<string> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Non connecté');
-  const { data, error } = await supabase.rpc('accept_club_invitation', {
-    p_token: token,
+  const { data, error } = await supabase.rpc('accept_club_invitation_by_code', {
+    p_code: code.trim().toUpperCase(),
     p_user_id: user.id,
   });
   if (error) throw error;

@@ -17,6 +17,7 @@ import {
   ChevronsUpDown,
   LayoutGrid,
   List,
+  Lock,
 } from 'lucide-react';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
 import { useActiveSeasonContext } from '../../contexts/ActiveSeasonContext';
@@ -35,7 +36,7 @@ const T = {
 
 // ─── Player Card component ────────────────────────────────────────────────────
 function PlayerCard({
-  player, pos, st, attPct, onOpen, onEdit, onDelete,
+  player, pos, st, attPct, onOpen, onEdit, onDelete, canEdit,
 }: {
   player: any;
   pos: { abbr: string; color: string; bg: string };
@@ -44,6 +45,7 @@ function PlayerCard({
   onOpen: () => void;
   onEdit: (e: React.MouseEvent) => void;
   onDelete: (e: React.MouseEvent) => void;
+  canEdit: boolean;
 }) {
   const [hov, setHov] = useState(false);
   const goals = player.goals ?? 0;
@@ -137,7 +139,7 @@ function PlayerCard({
       </div>
 
       {/* Hover actions */}
-      {hov && (
+      {hov && canEdit && (
         <div
           style={{
             position: 'absolute', top: 10, right: 10,
@@ -270,7 +272,7 @@ function SortIcon({ col, sortKey, sortDir }: { col: SortKey; sortKey: SortKey; s
 // ─── Page component ───────────────────────────────────────────────────────────
 export default function SquadPage() {
   const router = useRouter();
-  const { activeTeam, teams } = useActiveTeam();
+  const { activeTeam, teams, canEditActiveTeam } = useActiveTeam();
   const { activeSeason } = useActiveSeasonContext();
 
   // Data state
@@ -438,6 +440,7 @@ export default function SquadPage() {
       setError('Aucune équipe active sélectionnée.');
       return;
     }
+    if (!canEditActiveTeam) return; // lecture seule : équipe non rattachée
     if (player) {
       setIsEditing(true);
       setCurrentPlayer(player);
@@ -504,6 +507,7 @@ export default function SquadPage() {
   };
 
   const handleDelete = async (playerId: string) => {
+    if (!canEditActiveTeam) return; // lecture seule : équipe non rattachée
     const player = players.find(p => p.id === playerId);
     const name = player ? `${player.first_name} ${player.last_name}` : 'ce joueur';
     if (!confirm(
@@ -684,20 +688,30 @@ export default function SquadPage() {
           </button>
         </div>
 
-        {/* New player */}
-        <button
-          onClick={() => handleOpenModal()}
-          disabled={!activeTeam}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50"
-          style={{
-            backgroundColor: activeTeam ? T.accentAmber : '#CBD5E1',
-            color: activeTeam ? '#1A0A00' : '#94A3B8',
-            border: 'none',
-            cursor: activeTeam ? 'pointer' : 'not-allowed',
-          }}
-        >
-          <Plus size={15} /> Nouveau joueur
-        </button>
+        {/* New player — masqué en lecture seule (équipe non rattachée) */}
+        {canEditActiveTeam ? (
+          <button
+            onClick={() => handleOpenModal()}
+            disabled={!activeTeam}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50"
+            style={{
+              backgroundColor: activeTeam ? T.accentAmber : '#CBD5E1',
+              color: activeTeam ? '#1A0A00' : '#94A3B8',
+              border: 'none',
+              cursor: activeTeam ? 'pointer' : 'not-allowed',
+            }}
+          >
+            <Plus size={15} /> Nouveau joueur
+          </button>
+        ) : (
+          <span
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold"
+            style={{ backgroundColor: '#F1F5F9', color: '#64748B', border: '1px solid #E2E8F0' }}
+            title="Vous n'êtes pas rattaché à cette équipe : consultation uniquement."
+          >
+            <Lock size={13} /> Lecture seule
+          </span>
+        )}
       </div>
 
       {/* ── Card grid view ──────────────────────────────────────────────────── */}
@@ -722,6 +736,7 @@ export default function SquadPage() {
                     pos={pos}
                     st={st}
                     attPct={attPct}
+                    canEdit={canEditActiveTeam}
                     onOpen={() => router.push(`/webapp/manager/squad/${player.id}`)}
                     onEdit={e => { e.stopPropagation(); handleOpenModal(player); }}
                     onDelete={e => { e.stopPropagation(); handleDelete(player.id); }}
@@ -817,14 +832,16 @@ export default function SquadPage() {
                         {player.goals ?? 0}
                       </td>
                       <td style={{ padding: '10px 20px 10px 8px', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }} onClick={e => e.stopPropagation()}>
-                          <button onClick={() => handleOpenModal(player)} style={{ padding: 4, border: 'none', background: 'none', cursor: 'pointer', color: T.accent, borderRadius: 4 }} title="Modifier">
-                            <Pencil size={15} />
-                          </button>
-                          <button onClick={() => handleDelete(player.id)} style={{ padding: 4, border: 'none', background: 'none', cursor: 'pointer', color: '#EF4444', borderRadius: 4 }} title="Supprimer">
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
+                        {canEditActiveTeam && (
+                          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }} onClick={e => e.stopPropagation()}>
+                            <button onClick={() => handleOpenModal(player)} style={{ padding: 4, border: 'none', background: 'none', cursor: 'pointer', color: T.accent, borderRadius: 4 }} title="Modifier">
+                              <Pencil size={15} />
+                            </button>
+                            <button onClick={() => handleDelete(player.id)} style={{ padding: 4, border: 'none', background: 'none', cursor: 'pointer', color: '#EF4444', borderRadius: 4 }} title="Supprimer">
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );

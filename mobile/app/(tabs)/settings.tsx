@@ -13,6 +13,7 @@ import {
 } from '../../lib/services/clubs';
 import { getTeamsByClubId } from '../../lib/services/teams';
 import { RatingScaleEditor } from '../../components/RatingScaleEditor';
+import { NotificationPreferencesEditor } from '../../components/NotificationPreferencesEditor';
 import type { Team } from '../../types';
 
 type ClubInfo = { id: string; name: string; description: string | null };
@@ -425,7 +426,9 @@ export default function SettingsScreen() {
         </View>
       </View>
 
-      {/* ── Account ── */}
+      {/* ── Préférences de notification ── */}
+      <NotificationPreferencesEditor />
+
       {/* ── Échelle de notation ── */}
       <RatingScaleEditor />
 

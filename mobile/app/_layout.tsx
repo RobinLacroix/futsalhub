@@ -28,13 +28,15 @@ function NotificationDeepLinkHandler() {
         case 'questionnaire':
           router.push('/(player-tabs)/questionnaires');
           break;
-        case 'absence_report': {
+        case 'absence_report':
+        case 'injury': {
           const tid = data?.training_id;
           if (tid) router.push(`/(tabs)/calendar/training/${tid}` as any);
           else router.push('/(tabs)/calendar');
           break;
         }
-        case 'feedback_comment': {
+        case 'feedback_comment':
+        case 'questionnaire_response': {
           const pid = data?.player_id;
           if (pid) router.push(`/(tabs)/squad/${pid}` as any);
           else router.push('/(tabs)/squad');
