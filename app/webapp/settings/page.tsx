@@ -6,6 +6,7 @@ import { useUserClub } from '../hooks/useUserClub';
 import { usePlayerProfile } from '../hooks/usePlayerProfile';
 import { claimPlayerLinkCode } from '@/lib/services/playerConvocationsService';
 import { clubsService } from '@/lib/services';
+import { RatingScaleEditor } from './RatingScaleEditor';
 import {
   Building2,
   Plus,
@@ -717,6 +718,9 @@ export default function SettingsPage() {
               </ul>
             </div>
           </div>
+
+          {/* ── Échelle de notation ──────────────────────────────── */}
+          <RatingScaleEditor />
 
           {/* ── Zone dangereuse ──────────────────────────────────── */}
           <div className="fm-card" style={{ borderColor: '#FECACA' }}>

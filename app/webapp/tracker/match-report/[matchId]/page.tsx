@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabaseClient'
+import { matchRatingsService } from '@/lib/services'
+import type { CoachEvaluation, MatchPlayerRating } from '@/types'
 import {
   PieChart,
   Pie,
@@ -16,7 +18,17 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from 'recharts'
-import { Printer, MapPin, Calendar } from 'lucide-react'
+import {
+  Printer,
+  MapPin,
+  Calendar,
+  ArrowDown,
+  ArrowDownRight,
+  ArrowRight,
+  ArrowUpRight,
+  ArrowUp,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,6 +60,7 @@ interface MatchRow {
   conceded_by_type: GoalsByType | null
   players: MatchPlayer[] | null
   team_id: string | null
+  coach_evaluation: CoachEvaluation | null
 }
 
 interface EventRow {
@@ -84,6 +97,29 @@ const GOAL_TYPE_COLORS: Record<string, string> = {
   superiority: '#8B5CF6',
 }
 
+// ── Volet A : évaluation coach (5 niveaux, flèche blanche sur box colorée) ──
+const COACH_EVAL_ORDER: CoachEvaluation[] = ['bad', 'poor', 'neutral', 'good', 'great']
+
+const COACH_EVAL_CONFIG: Record<
+  CoachEvaluation,
+  { label: string; color: string; Icon: LucideIcon }
+> = {
+  bad: { label: 'Mauvais', color: '#EF4444', Icon: ArrowDown },
+  poor: { label: 'Médiocre', color: '#F97316', Icon: ArrowDownRight },
+  neutral: { label: 'Équilibré', color: '#6B7280', Icon: ArrowRight },
+  good: { label: 'Bon', color: '#34D399', Icon: ArrowUpRight },
+  great: { label: 'Très bon', color: '#059669', Icon: ArrowUp },
+}
+
+// Couleur d'une note /10 : rouge sous 5, gris autour de 5, vert au-dessus.
+function ratingColor(rating: number): string {
+  if (rating >= 6.5) return '#059669'
+  if (rating >= 5.5) return '#34D399'
+  if (rating > 4.5) return '#6B7280'
+  if (rating > 3.5) return '#F97316'
+  return '#EF4444'
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatDate(dateStr: string) {
@@ -112,6 +148,9 @@ export default function MatchReportPage() {
   const [players, setPlayers] = useState<PlayerRow[]>([])
   const [teamName, setTeamName] = useState('')
   const [loading, setLoading] = useState(true)
+  const [coachEval, setCoachEval] = useState<CoachEvaluation | null>(null)
+  const [savingEval, setSavingEval] = useState(false)
+  const [ratings, setRatings] = useState<Record<string, MatchPlayerRating>>({})
 
   useEffect(() => {
     async function load() {
@@ -126,6 +165,16 @@ export default function MatchReportPage() {
         return
       }
       setMatch(matchData)
+      setCoachEval(matchData.coach_evaluation ?? null)
+
+      // Volet B : notes data des joueurs de champ (calculées en RPC).
+      try {
+        const ratingRows = await matchRatingsService.getPlayerRatings(matchId)
+        setRatings(Object.fromEntries(ratingRows.map(r => [r.player_id, r])))
+      } catch {
+        // Absence de notes (aucun event) ne doit pas casser le bilan.
+        setRatings({})
+      }
 
       if (matchData.team_id) {
         const { data: teamData } = await supabase
@@ -162,6 +211,21 @@ export default function MatchReportPage() {
     }
     load()
   }, [matchId])
+
+  // Volet A : bascule l'évaluation coach (re-clic sur le niveau actif = efface).
+  async function handleSelectEval(next: CoachEvaluation) {
+    const value = coachEval === next ? null : next
+    const previous = coachEval
+    setCoachEval(value)
+    setSavingEval(true)
+    try {
+      await matchRatingsService.setCoachEvaluation(matchId, value)
+    } catch {
+      setCoachEval(previous) // rollback optimiste en cas d'échec
+    } finally {
+      setSavingEval(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -255,6 +319,7 @@ export default function MatchReportPage() {
         yellowCards: count(pe, 'yellow_card'),
         redCards: count(pe, 'red_card'),
         plusMinus,
+        rating: ratings[p.id]?.rating ?? null,
       }
     })
     .filter(p => p.timePlayed > 0 || p.goals > 0 || p.shotsOnTarget > 0 || p.recovery > 0)
@@ -337,6 +402,48 @@ export default function MatchReportPage() {
               <Calendar size={13} />
               {new Date(match.date).toLocaleDateString('fr-FR')}
             </span>
+          </div>
+        </div>
+
+        {/* ── Volet A : évaluation du match par le coach ── */}
+        <div className="bg-gray-50 rounded-xl p-5 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest">
+              Évaluation du match
+            </h3>
+            {savingEval && <span className="text-xs text-gray-400 print:hidden">Enregistrement…</span>}
+          </div>
+          <div className="flex items-stretch gap-2">
+            {COACH_EVAL_ORDER.map(level => {
+              const cfg = COACH_EVAL_CONFIG[level]
+              const active = coachEval === level
+              const Icon = cfg.Icon
+              return (
+                <button
+                  key={level}
+                  type="button"
+                  onClick={() => handleSelectEval(level)}
+                  aria-pressed={active}
+                  className={`flex-1 flex flex-col items-center gap-1.5 rounded-xl p-3 transition-all print:cursor-default ${
+                    active ? 'ring-2 ring-offset-1' : 'opacity-40 hover:opacity-80'
+                  }`}
+                  style={active ? { boxShadow: `0 0 0 2px ${cfg.color}` } : undefined}
+                >
+                  <span
+                    className="flex items-center justify-center w-9 h-9 rounded-lg"
+                    style={{ backgroundColor: cfg.color }}
+                  >
+                    <Icon size={18} color="#fff" strokeWidth={2.5} />
+                  </span>
+                  <span
+                    className="text-xs font-semibold"
+                    style={{ color: active ? cfg.color : '#9CA3AF' }}
+                  >
+                    {cfg.label}
+                  </span>
+                </button>
+              )
+            })}
           </div>
         </div>
 
@@ -465,7 +572,7 @@ export default function MatchReportPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200">
-                  {['#', 'Joueur', 'Min.', '+/-', 'Buts', 'Cadrés', 'Tirs', 'Récup.', 'Pertes', '🟨', '🟥'].map(h => (
+                  {['#', 'Joueur', 'Min.', '+/-', 'Buts', 'Cadrés', 'Tirs', 'Récup.', 'Pertes', '🟨', '🟥', 'Note'].map(h => (
                     <th key={h} className={`pb-2 text-xs font-semibold text-gray-400 ${h === '#' || h === 'Joueur' ? 'text-left' : 'text-center'}`}>
                       {h}
                     </th>
@@ -498,6 +605,18 @@ export default function MatchReportPage() {
                       {p.redCards > 0
                         ? <span className="inline-block w-3 h-4 bg-red-500 rounded-sm" />
                         : <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="py-2 text-center">
+                      {p.rating !== null ? (
+                        <span
+                          className="inline-block min-w-[2.4rem] px-2 py-0.5 rounded-md text-xs font-bold text-white tabular-nums"
+                          style={{ backgroundColor: ratingColor(p.rating) }}
+                        >
+                          {p.rating.toFixed(1)}
+                        </span>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
                     </td>
                   </tr>
                 ))}

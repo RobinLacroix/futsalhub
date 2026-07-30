@@ -9,9 +9,19 @@ import { useActiveSeason } from '../contexts/ActiveSeasonContext';
 import { getMatchesByTeam } from '../lib/services/matches';
 import { getEventsByMatchId } from '../lib/services/matchEvents';
 import { getPlayersByTeam, getPlayersByClubWithTeams } from '../lib/services/players';
+import { getMatchPlayerRatingsBulk } from '../lib/services/matchRatings';
 import { MatchMomentsView } from './MatchMomentsView';
 import { useIsTablet } from '../hooks/useIsTablet';
-import type { Match, MatchEvent, Player } from '../types';
+import type { Match, MatchEvent, Player, MatchPlayerRatingRow } from '../types';
+
+// Couleur d'une note /10 : rouge sous 5, gris autour de 5, vert au-dessus.
+function ratingColor(rating: number): string {
+  if (rating >= 6.5) return '#059669';
+  if (rating >= 5.5) return '#16a34a';
+  if (rating > 4.5)  return '#6b7280';
+  if (rating > 3.5)  return '#f97316';
+  return '#dc2626';
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,6 +40,7 @@ type PlayerStats = {
   plusMinusGoals: number;
   plusMinusShots: number;
   totalTimeSeconds: number;
+  avgRating: number | null; // Volet B : note data moyenne sur les matchs filtrés
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -301,6 +312,7 @@ const COLS = [
   { key: 'assist',           label: 'Pdec',   flex: 0.6  },
   { key: 'yellow_cards',     label: '🟡',     flex: 0.55 },
   { key: 'red_cards',        label: '🔴',     flex: 0.55 },
+  { key: 'avgRating',        label: 'Note',   flex: 0.7  },
 ] as const;
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -316,6 +328,7 @@ export function AnalyticsView() {
   const [eventsByMatch, setEventsByMatch] = useState<Record<string, MatchEvent[]>>({});
   const [allPlayers,    setAllPlayers]    = useState<Player[]>([]);
   const [clubPlayerIds, setClubPlayerIds] = useState<Set<string>>(new Set());
+  const [ratingRows,    setRatingRows]    = useState<MatchPlayerRatingRow[]>([]);
   const [sortCol,       setSortCol]       = useState('playerName');
   const [sortDir,       setSortDir]       = useState<'asc' | 'desc'>('asc');
   const [filterLoc,     setFilterLoc]     = useState('all');
@@ -326,7 +339,7 @@ export function AnalyticsView() {
 
   const load = useCallback(async () => {
     if (!activeTeamId || !activeTeam?.club_id) {
-      setMatches([]); setEventsByMatch({}); setAllPlayers([]); setClubPlayerIds(new Set());
+      setMatches([]); setEventsByMatch({}); setAllPlayers([]); setClubPlayerIds(new Set()); setRatingRows([]);
       setLoading(false); setRefreshing(false);
       return;
     }
@@ -342,6 +355,12 @@ export function AnalyticsView() {
       const evMap: Record<string, MatchEvent[]> = {};
       await Promise.all(matchData.map(async m => { evMap[m.id] = await getEventsByMatchId(m.id); }));
       setEventsByMatch(evMap);
+      // Notes data par (match, joueur) — calculées en RPC, agrégées côté client.
+      try {
+        setRatingRows(await getMatchPlayerRatingsBulk(matchData.map(m => m.id)));
+      } catch {
+        setRatingRows([]);
+      }
     } catch { /* silent */ }
     finally { setLoading(false); setRefreshing(false); }
   }, [activeTeamId, activeTeam?.club_id, activeSeason]);
@@ -390,6 +409,21 @@ export function AnalyticsView() {
     return { played, wins, draws, losses, goalsFor, goalsAgainst, cleanSheets, winRate, form };
   }, [filteredMatches]);
 
+  // ── Note data moyenne par joueur (Volet B) ───────────────────────────────
+  const avgRatingByPlayer = useMemo(() => {
+    const acc = new Map<string, { sum: number; n: number }>();
+    ratingRows.forEach(r => {
+      if (!filteredMatchIds.has(r.match_id)) return;
+      const cur = acc.get(r.player_id) ?? { sum: 0, n: 0 };
+      cur.sum += r.rating;
+      cur.n += 1;
+      acc.set(r.player_id, cur);
+    });
+    const out = new Map<string, number>();
+    acc.forEach((v, k) => out.set(k, v.sum / v.n));
+    return out;
+  }, [ratingRows, filteredMatchIds]);
+
   // ── Player stats ────────────────────────────────────────────────────────
 
   const playerStatsList = useMemo(() => {
@@ -406,6 +440,7 @@ export function AnalyticsView() {
           ball_loss: 0, recovery: 0, assist: 0,
           yellow_cards: 0, red_cards: 0,
           plusMinusGoals: 0, plusMinusShots: 0, totalTimeSeconds: 0,
+          avgRating: null,
         });
       }
       return map.get(id)!;
@@ -460,8 +495,10 @@ export function AnalyticsView() {
       });
     });
 
-    return Array.from(map.values()).filter(s => clubPlayerIds.has(s.playerId));
-  }, [eventsByMatch, matches, allPlayers, clubPlayerIds, filteredMatchIds]);
+    return Array.from(map.values())
+      .filter(s => clubPlayerIds.has(s.playerId))
+      .map(s => ({ ...s, avgRating: avgRatingByPlayer.get(s.playerId) ?? null }));
+  }, [eventsByMatch, matches, allPlayers, clubPlayerIds, filteredMatchIds, avgRatingByPlayer]);
 
   // ── Sorting ─────────────────────────────────────────────────────────────
 
@@ -507,12 +544,17 @@ export function AnalyticsView() {
       .filter(p => p.totalShotsAll >= 3)   // au moins 3 tirs pour être pertinent
       .sort((a, b) => b.shotEff - a.shotEff)
       .slice(0, 3);
+    const ratings = [...playerStatsList]
+      .filter(p => p.avgRating != null)
+      .sort((a, b) => (b.avgRating as number) - (a.avgRating as number))
+      .slice(0, 3);
     return {
       scorers:    topN('goals'),
       assists:    topN('assist'),
       recoveries: topN('recovery'),
       plusMinus:  topN('plusMinusGoals'),
       shooterEff,
+      ratings,
     };
   }, [playerStatsList]);
 
@@ -776,6 +818,16 @@ export function AnalyticsView() {
                   <>
                     <SectionHeader label="MEILLEURS JOUEURS" />
                     <View style={[s.topsRow, isTablet && s.topsRowTablet]}>
+                      {tops.ratings.length > 0 && (
+                        <TopList
+                          title="Meilleures notes" icon="star" color="#059669"
+                          items={tops.ratings.map(p => ({
+                            name: abbrevName(p.playerName),
+                            value: (p.avgRating as number).toFixed(1),
+                            valueColor: ratingColor(p.avgRating as number),
+                          }))}
+                        />
+                      )}
                       <TopList
                         title="Buteurs" icon="football" color="#16a34a"
                         items={tops.scorers.map(p => ({ name: abbrevName(p.playerName), value: String(p.goals) }))}
@@ -1214,6 +1266,10 @@ function StatsTable({
                 case 'red_cards':
                   content   = String(row.red_cards);
                   cellColor = row.red_cards > 0 ? '#dc2626' : undefined;
+                  break;
+                case 'avgRating':
+                  content   = row.avgRating != null ? row.avgRating.toFixed(1) : '—';
+                  cellColor = row.avgRating != null ? ratingColor(row.avgRating) : undefined;
                   break;
                 default:
                   content   = String((row as any)[col.key] ?? 0);

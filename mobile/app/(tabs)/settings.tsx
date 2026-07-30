@@ -12,6 +12,7 @@ import {
   setCoachTeams, ClubMemberWithUser,
 } from '../../lib/services/clubs';
 import { getTeamsByClubId } from '../../lib/services/teams';
+import { RatingScaleEditor } from '../../components/RatingScaleEditor';
 import type { Team } from '../../types';
 
 type ClubInfo = { id: string; name: string; description: string | null };
@@ -425,6 +426,9 @@ export default function SettingsScreen() {
       </View>
 
       {/* ── Account ── */}
+      {/* ── Échelle de notation ── */}
+      <RatingScaleEditor />
+
       <View style={s.card}>
         <View style={s.cardHeader}>
           <View style={[s.accent, { backgroundColor: '#0891b2' }]} />

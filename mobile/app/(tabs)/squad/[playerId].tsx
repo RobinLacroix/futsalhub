@@ -28,6 +28,8 @@ import {
   type PlayerRadarResult,
 } from '../../../lib/services/players';
 import { getTrainingsByTeam } from '../../../lib/services/trainings';
+import { getMatchesByTeam } from '../../../lib/services/matches';
+import { getMatchPlayerRatingsBulk } from '../../../lib/services/matchRatings';
 import { getPlayerFeedbackHistory, type PlayerFeedbackRow } from '../../../lib/services/feedback';
 import { supabase } from '../../../lib/supabase';
 import type { Player, Team, PlayerEvent } from '../../../types';
@@ -53,6 +55,7 @@ export default function PlayerDetailScreen() {
   const [radarLoading, setRadarLoading] = useState(false);
   const [feedbackRows, setFeedbackRows]       = useState<PlayerFeedbackRow[]>([]);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [ratingSeries, setRatingSeries]       = useState<{ date: string; rating: number }[]>([]);
 
   // ── Modal édition joueur ──────────────────────────────────────────────────
   const [showEditModal, setShowEditModal] = useState(false);
@@ -107,6 +110,28 @@ export default function PlayerDetailScreen() {
       .then(setRadarData)
       .catch(() => setRadarData(null))
       .finally(() => setRadarLoading(false));
+  }, [playerId, activeTeamId, matchFilter, activeSeason]);
+
+  // Courbe note data (Volet B) : notes de match du joueur sur la saison/filtre.
+  useEffect(() => {
+    if (!playerId || !activeTeamId) { setRatingSeries([]); return; }
+    (async () => {
+      try {
+        const teamMatches = await getMatchesByTeam(activeTeamId, activeSeason);
+        const scoped = matchFilter === 'all'
+          ? teamMatches
+          : teamMatches.filter(m => m.competition === matchFilter);
+        const rows = await getMatchPlayerRatingsBulk(scoped.map(m => m.id));
+        setRatingSeries(
+          rows
+            .filter(r => r.player_id === playerId)
+            .sort((a, b) => new Date(a.match_date).getTime() - new Date(b.match_date).getTime())
+            .map(r => ({ date: r.match_date, rating: r.rating }))
+        );
+      } catch {
+        setRatingSeries([]);
+      }
+    })();
   }, [playerId, activeTeamId, matchFilter, activeSeason]);
 
   useEffect(() => {
@@ -221,6 +246,7 @@ export default function PlayerDetailScreen() {
         radarLoading={radarLoading}
         feedbackRows={feedbackRows}
         feedbackLoading={feedbackLoading}
+        ratingSeries={ratingSeries}
         allSessions={allSessions}
         initialEvents={initialEvents}
         matchFilter={matchFilter}
