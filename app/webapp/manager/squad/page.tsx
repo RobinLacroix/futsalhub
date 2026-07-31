@@ -18,9 +18,11 @@ import {
   LayoutGrid,
   List,
   Lock,
+  Upload,
 } from 'lucide-react';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
 import { useActiveSeasonContext } from '../../contexts/ActiveSeasonContext';
+import ImportPlayersModal from './ImportPlayersModal';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const T = {
@@ -284,6 +286,7 @@ export default function SquadPage() {
 
   // Modal state
   const [isModalOpen, setIsModalOpen]   = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const [isEditing, setIsEditing]       = useState(false);
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
   const [formData, setFormData]         = useState<PlayerFormData>(initialFormData);
@@ -688,21 +691,36 @@ export default function SquadPage() {
           </button>
         </div>
 
-        {/* New player — masqué en lecture seule (équipe non rattachée) */}
+        {/* New player + import Excel — masqués en lecture seule (équipe non rattachée) */}
         {canEditActiveTeam ? (
-          <button
-            onClick={() => handleOpenModal()}
-            disabled={!activeTeam}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50"
-            style={{
-              backgroundColor: activeTeam ? T.accentAmber : '#CBD5E1',
-              color: activeTeam ? '#1A0A00' : '#94A3B8',
-              border: 'none',
-              cursor: activeTeam ? 'pointer' : 'not-allowed',
-            }}
-          >
-            <Plus size={15} /> Nouveau joueur
-          </button>
+          <>
+            <button
+              onClick={() => setIsImportOpen(true)}
+              disabled={!activeTeam}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50"
+              style={{
+                backgroundColor: T.cardBg,
+                color: activeTeam ? T.text : '#94A3B8',
+                border: `1px solid ${T.border}`,
+                cursor: activeTeam ? 'pointer' : 'not-allowed',
+              }}
+            >
+              <Upload size={15} /> Importer un effectif
+            </button>
+            <button
+              onClick={() => handleOpenModal()}
+              disabled={!activeTeam}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50"
+              style={{
+                backgroundColor: activeTeam ? T.accentAmber : '#CBD5E1',
+                color: activeTeam ? '#1A0A00' : '#94A3B8',
+                border: 'none',
+                cursor: activeTeam ? 'pointer' : 'not-allowed',
+              }}
+            >
+              <Plus size={15} /> Nouveau joueur
+            </button>
+          </>
         ) : (
           <span
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold"
@@ -994,6 +1012,16 @@ export default function SquadPage() {
             </form>
           </div>
         </div>
+      )}
+
+      {isImportOpen && activeTeam && (
+        <ImportPlayersModal
+          teamId={activeTeam.id}
+          teamName={activeTeam.name}
+          existingPlayers={players.map(p => ({ first_name: p.first_name, last_name: p.last_name }))}
+          onClose={() => setIsImportOpen(false)}
+          onImported={fetchPlayers}
+        />
       )}
     </div>
   );

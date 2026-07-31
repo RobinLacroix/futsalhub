@@ -206,6 +206,47 @@ export const playersService = {
   },
 
   /**
+   * Crée plusieurs joueurs en une fois (import Excel) dans une équipe unique.
+   * Un insert multi-lignes sur `players` puis un insert multi-lignes sur
+   * `player_teams`, plutôt que boucler sur createPlayer() — même écriture,
+   * une seule aller-retour réseau par table.
+   */
+  async createPlayersBulk(
+    teamId: string,
+    rows: Array<Pick<PlayerFormData, 'first_name' | 'last_name' | 'birth_date' | 'position' | 'strong_foot' | 'number'>>
+  ): Promise<Player[]> {
+    if (rows.length === 0) return [];
+
+    const { data: players, error: playersError } = await supabase
+      .from('players')
+      .insert(
+        rows.map((r) => ({
+          first_name: r.first_name,
+          last_name: r.last_name,
+          birth_date: r.birth_date || null,
+          position: r.position,
+          strong_foot: r.strong_foot,
+          status: 'Non-muté',
+          number: r.number ? parseInt(r.number) : null,
+          sequence_time_limit: 180,
+          team_id: teamId,
+        }))
+      )
+      .select();
+
+    if (playersError) throw playersError;
+    const created = (players || []) as Player[];
+
+    const { error: relationError } = await supabase
+      .from('player_teams')
+      .insert(created.map((p) => ({ player_id: p.id, team_id: teamId })));
+
+    if (relationError) throw relationError;
+
+    return created;
+  },
+
+  /**
    * Met à jour un joueur
    */
   async updatePlayer(playerId: string, playerData: PlayerFormData): Promise<Player> {

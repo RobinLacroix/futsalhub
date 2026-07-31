@@ -95,6 +95,43 @@ export async function createPlayer(teamId: string, input: CreatePlayerInput): Pr
   return player;
 }
 
+/**
+ * Crée plusieurs joueurs en une fois (import Excel) dans une équipe unique.
+ * Insert multi-lignes sur `players` puis sur `player_teams`, miroir de
+ * playersService.createPlayersBulk côté web (statut 'active', convention mobile).
+ */
+export async function createPlayersBulk(
+  teamId: string,
+  rows: CreatePlayerInput[],
+): Promise<Player[]> {
+  if (rows.length === 0) return [];
+
+  const { data: players, error: playersError } = await supabase
+    .from('players')
+    .insert(
+      rows.map((r) => ({
+        first_name: r.first_name.trim(),
+        last_name: r.last_name.trim(),
+        birth_date: r.birth_date || null,
+        position: r.position,
+        strong_foot: r.strong_foot,
+        status: 'active',
+        number: r.number ?? null,
+        sequence_time_limit: 180,
+      }))
+    )
+    .select();
+  if (playersError) throw playersError;
+  const created = (players ?? []) as Player[];
+
+  const { error: relationError } = await supabase
+    .from('player_teams')
+    .insert(created.map((p) => ({ player_id: p.id, team_id: teamId })));
+  if (relationError) throw relationError;
+
+  return created;
+}
+
 /** Soft delete : marque le joueur comme "left" au lieu de supprimer.
  * Le joueur reste en base pour préserver les stats des matchs (Analytics).
  * Il est masqué de l'Effectif et du Dashboard. */

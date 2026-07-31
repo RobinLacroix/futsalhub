@@ -215,6 +215,11 @@ export default function SquadScreen() {
             <Text style={styles.tabletBtnText}>Planification</Text>
           </TouchableOpacity>
           {canEditActiveTeam && (
+            <TouchableOpacity style={styles.tabletBtn} onPress={() => router.push('/(tabs)/squad/import-players')} activeOpacity={0.8}>
+              <Text style={styles.tabletBtnText}>Importer un effectif</Text>
+            </TouchableOpacity>
+          )}
+          {canEditActiveTeam && (
             <TouchableOpacity style={styles.tabletBtnPrimary} onPress={() => router.push('/(tabs)/squad/new-player')} activeOpacity={0.8}>
               <Text style={styles.tabletBtnPrimaryText}>+ Joueur</Text>
             </TouchableOpacity>

@@ -50,7 +50,9 @@
             "newArchEnabled": false
           }
         }
-      ]
+      ],
+      "expo-sharing",
+      "expo-asset"
     ],
     "extra": {
       "router": {},

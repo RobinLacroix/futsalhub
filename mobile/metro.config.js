@@ -7,6 +7,7 @@ const config = getDefaultConfig(__dirname);
 // Workaround pour "Cannot call a class as a function" (Expo 53+/Metro package exports)
 config.resolver ??= {};
 config.resolver.unstable_enablePackageExports = false;
+config.resolver.assetExts = [...config.resolver.assetExts, 'xlsx'];
 
 const originalResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
