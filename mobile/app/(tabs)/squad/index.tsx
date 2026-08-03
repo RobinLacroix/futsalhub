@@ -268,12 +268,10 @@ export default function SquadScreen() {
           <Text variant="title" style={styles.flex}>
             Effectif
           </Text>
-          <Button
-            label="Planification"
-            variant="ghost"
-            size="sm"
-            onPress={() => router.push('/(tabs)/squad/season-planning')}
-          />
+          {/* La planification de saison est une fonction des équipes, pas de
+              l'effectif (arbitré le 2026-08-03). Son accès vit dans l'écran
+              Équipes, et uniquement là : le raccourci qui existait ici était
+              le seul point où iPhone et iPad divergeaient. */}
           {canEditActiveTeam && (
             <>
               <Button
