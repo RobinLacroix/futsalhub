@@ -1,28 +1,28 @@
 /**
  * Grille de saisie des actions joueur (P1-3)
  *
- * ## Le problème d'ergonomie que ça corrige
+ * ## Le compromis sur l'annulation
  *
- * L'ancienne grille était en 4 colonnes de boutons carrés pleine couleur, avec
- * le libellé en 10 px blanc sur fond saturé. Deux conséquences :
+ * L'annulation revient sur l'appui long, sans bouton dédié : c'est le choix de
+ * Robin, et il est défendable ici parce que la contrepartie est payée
+ * autrement. Le risque de l'appui long, c'est qu'un appui long raté devient un
+ * ajout — l'inverse de ce qu'on voulait. Deux garde-fous :
  *
- * - **L'annulation était sur l'appui long du même bouton**, annoncée par une
- *   ligne de 10 px en italique. Un appui long qui rate devient un ajout : sur
- *   la seule action correctrice, c'est le pire geste possible. L'annulation a
- *   maintenant son propre bouton, séparé, avec le compteur de ce qui est
- *   annulable.
- * - **Le compte courant n'apparaissait nulle part.** Le coach appuyait sans
- *   savoir s'il avait déjà saisi. Chaque bouton porte son compteur pour le
- *   joueur sélectionné.
+ * - **Chaque bouton porte son compteur pour le joueur sélectionné.** Le geste
+ *   est donc vérifiable d'un coup d'œil : le chiffre descend, ou il monte. Sans
+ *   ce compteur, l'appui long était un geste aveugle, et c'était ça le vrai
+ *   défaut de la version d'origine.
+ * - **Le retour haptique diffère** entre saisie et annulation, donc le doigt
+ *   sait avant l'œil.
  *
  * Le mode `requiresPlayer` (but, cartons) désactive visiblement le bouton tant
  * qu'aucun joueur n'est choisi, au lieu d'ouvrir une alerte après coup.
  */
 
-import { View, Pressable, type DimensionValue } from 'react-native';
+import { View, Pressable } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme, makeStyles } from '../../contexts/ThemeContext';
-import { HIT_SLOP_MIN } from '../../lib/design/tokens';
+import { haptics } from '../../lib/design/haptics';
 import { Text } from '../ui';
 import { PLAYER_ACTIONS, type PlayerState, type RecorderAction } from './recorderModel';
 
@@ -33,8 +33,6 @@ export interface ActionPadProps {
   state?: PlayerState;
   onRecord: (action: RecorderAction) => void;
   onUndo: (action: RecorderAction) => void;
-  /** Nombre de colonnes. 2 sur téléphone, 4 sur tablette. */
-  columns?: number;
 }
 
 function countFor(action: RecorderAction, state?: PlayerState): number {
@@ -50,12 +48,10 @@ export function ActionPad({
   state,
   onRecord,
   onUndo,
-  columns = 2,
 }: ActionPadProps) {
   const s = useStyles();
   const { theme } = useTheme();
   const c = theme.colors;
-  const basis: DimensionValue = `${100 / columns}%`;
 
   return (
     <View style={s.grid}>
@@ -64,59 +60,48 @@ export function ActionPad({
         const count = countFor(a, state);
         const tone = a.tone(c);
         return (
-          <View key={a.eventType} style={[s.cell, { flexBasis: basis }]}>
-            <Pressable
-              onPress={() => onRecord(a)}
-              disabled={blocked}
-              style={({ pressed }) => [
-                s.action,
-                { borderColor: tone },
-                blocked && s.blocked,
-                pressed && s.pressed,
-              ]}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: blocked }}
-              accessibilityLabel={
-                blocked
-                  ? `${a.label}, indisponible : sélectionnez d'abord un joueur`
-                  : selectedPlayerName
-                    ? `${a.label} pour ${selectedPlayerName}. ${count} enregistré${count > 1 ? 's' : ''}`
-                    : `${a.label}. ${count} enregistré${count > 1 ? 's' : ''}`
+          <Pressable
+            key={a.eventType}
+            onPress={() => onRecord(a)}
+            onLongPress={() => {
+              if (count > 0) {
+                haptics.tapMedium();
+                onUndo(a);
               }
-            >
-              <View style={[s.iconWrap, { backgroundColor: tone }]}>
-                <Ionicons name={a.icon} size={20} color={c.bg.canvas} />
-              </View>
-              <Text variant="caption" weight="600" numberOfLines={2} style={s.actionLabel}>
-                {a.label}
+            }}
+            delayLongPress={350}
+            disabled={blocked}
+            style={({ pressed }) => [
+              s.action,
+              { borderColor: tone },
+              count > 0 && { backgroundColor: c.bg.surface },
+              blocked && s.blocked,
+              pressed && s.pressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: blocked }}
+            accessibilityLabel={
+              blocked
+                ? `${a.label}, indisponible : sélectionnez d'abord un joueur`
+                : `${a.label}${selectedPlayerName ? ` pour ${selectedPlayerName}` : ''}. ${count} enregistré${count > 1 ? 's' : ''}`
+            }
+            accessibilityHint="Appui long pour annuler la dernière"
+          >
+            <Ionicons name={a.icon} size={19} color={tone} />
+            <Text variant="caption" weight="600" numberOfLines={1} style={s.label}>
+              {a.short}
+            </Text>
+            <View style={[s.count, count > 0 && { backgroundColor: tone }]}>
+              <Text
+                variant="caption"
+                weight="700"
+                numeric
+                color={count > 0 ? c.bg.canvas : c.text.tertiary}
+              >
+                {count}
               </Text>
-              {count > 0 && (
-                <View style={[s.count, { backgroundColor: tone }]}>
-                  <Text variant="caption" weight="700" color={c.bg.canvas} numeric>
-                    {count}
-                  </Text>
-                </View>
-              )}
-            </Pressable>
-
-            <Pressable
-              onPress={() => onUndo(a)}
-              disabled={blocked || count === 0}
-              hitSlop={6}
-              style={({ pressed }) => [
-                s.undo,
-                (blocked || count === 0) && s.blocked,
-                pressed && s.pressed,
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel={`Annuler la dernière action : ${a.label}`}
-            >
-              <Ionicons name="arrow-undo" size={13} color={c.text.secondary} />
-              <Text variant="caption" tone="secondary">
-                Annuler
-              </Text>
-            </Pressable>
-          </View>
+            </View>
+          </Pressable>
         );
       })}
     </View>
@@ -124,43 +109,37 @@ export function ActionPad({
 }
 
 const useStyles = makeStyles((t) => ({
-  grid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -t.space.xs / 2 },
-  cell: { paddingHorizontal: t.space.xs / 2, paddingBottom: t.space.sm },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.sm },
 
+  /**
+   * Quatre par ligne sur un iPhone standard : `flexBasis: 22%` laisse jouer les
+   * `gap`, et `flexGrow` absorbe le reliquat. Une cible de ~80 × 58 pt, bien
+   * au-delà des 44 pt de la HIG.
+   */
   action: {
-    minHeight: 72,
-    gap: t.space.xs,
+    flexGrow: 1,
+    flexBasis: '22%',
+    minHeight: 58,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: t.space.md,
-    paddingHorizontal: t.space.sm,
-    borderRadius: t.radius.md,
-    borderWidth: 2,
-    backgroundColor: t.colors.bg.surface,
-  },
-  actionLabel: { textAlign: 'center' },
-  iconWrap: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  count: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    minWidth: 22,
-    height: 22,
-    borderRadius: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 5,
-  },
-
-  undo: {
-    minHeight: HIT_SLOP_MIN - 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: t.space.xs,
+    gap: 1,
     paddingVertical: t.space.xs,
+    paddingHorizontal: 2,
+    borderRadius: t.radius.md,
+    borderWidth: 1.5,
+    backgroundColor: t.colors.bg.canvas,
+  },
+  label: { textAlign: 'center', maxWidth: '100%' },
+  count: {
+    minWidth: 20,
+    height: 17,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: t.colors.bg.sunken,
   },
 
-  blocked: { opacity: 0.35 },
-  pressed: { opacity: 0.7 },
+  blocked: { opacity: 0.32 },
+  pressed: { opacity: 0.65 },
 }));

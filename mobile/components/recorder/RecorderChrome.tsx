@@ -107,67 +107,109 @@ export function ClockBar({
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface FoulCounterProps {
-  label: string;
-  value: number;
-  onIncrement: () => void;
-  onDecrement: () => void;
-  tone: 'us' | 'opponent';
+export interface FoulRowProps {
+  foulsUs: number;
+  foulsOpponent: number;
+  onChangeUs: (n: number) => void;
+  onChangeOpponent: (n: number) => void;
 }
 
 /**
- * Le seuil des 5 fautes est l'information tactique la plus chère du match : au
- * delà, chaque faute donne un jet franc de 10 m sans mur. Il était signalé par
- * un `Alert` bloquant au moment du franchissement, puis plus rien. Le compteur
- * porte maintenant son état en permanence.
+ * Les deux compteurs de fautes sur une seule ligne.
+ *
+ * Ils occupaient deux blocs empilés d'une soixantaine de points de haut, pour
+ * deux chiffres qui bougent une poignée de fois par mi-temps. La place libérée
+ * accueille les actions adverses, qui étaient reléguées dans un onglet.
+ *
+ * Le seuil des 5 fautes reste l'information tactique la plus chère du match —
+ * au-delà, chaque faute donne un jet franc de 10 m sans mur. Il était signalé
+ * par un `Alert` bloquant au franchissement, puis plus rien. Ici l'état est
+ * permanent : le compteur vire au plein dès la 5e, avec sa mention.
  */
-export function FoulCounter({ label, value, onIncrement, onDecrement, tone }: FoulCounterProps) {
+export function FoulRow({ foulsUs, foulsOpponent, onChangeUs, onChangeOpponent }: FoulRowProps) {
+  const s = useStyles();
+  return (
+    <View style={s.foulRow}>
+      <Text variant="caption" style={s.onBrandMuted}>
+        Fautes
+      </Text>
+      <FoulStepper label="équipe" short="Éq" value={foulsUs} onChange={onChangeUs} tone="us" />
+      <FoulStepper
+        label="adverses"
+        short="Adv"
+        value={foulsOpponent}
+        onChange={onChangeOpponent}
+        tone="opponent"
+      />
+    </View>
+  );
+}
+
+function FoulStepper({
+  label,
+  short,
+  value,
+  onChange,
+  tone,
+}: {
+  label: string;
+  short: string;
+  value: number;
+  onChange: (n: number) => void;
+  tone: 'us' | 'opponent';
+}) {
   const s = useStyles();
   const critical = value >= FOUL_LIMIT;
-  const warning = value === FOUL_LIMIT - 1;
 
   return (
     <View
-      style={[s.foulBox, critical && (tone === 'us' ? s.foulBoxCriticalUs : s.foulBoxCriticalOpp)]}
+      style={[
+        s.foulBox,
+        critical && (tone === 'us' ? s.foulBoxCriticalUs : s.foulBoxCriticalOpp),
+      ]}
     >
-      <Text variant="caption" style={s.onBrandMuted} numberOfLines={1}>
-        {label}
+      <Text variant="caption" weight="600" style={s.onBrandMuted}>
+        {short}
       </Text>
-      <View style={s.foulControls}>
-        <Pressable
-          onPress={() => {
-            haptics.tapLight();
-            onDecrement();
-          }}
-          disabled={value === 0}
-          hitSlop={6}
-          style={({ pressed }) => [s.foulStep, value === 0 && s.foulStepOff, pressed && s.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel={`Retirer une faute ${label}`}
-        >
-          <Ionicons name="remove" size={18} color="#FFFFFF" />
-        </Pressable>
+      <Pressable
+        onPress={() => {
+          haptics.tapLight();
+          onChange(Math.max(0, value - 1));
+        }}
+        disabled={value === 0}
+        hitSlop={8}
+        style={({ pressed }) => [s.foulStep, value === 0 && s.foulStepOff, pressed && s.pressed]}
+        accessibilityRole="button"
+        accessibilityLabel={`Retirer une faute ${label}`}
+      >
+        <Ionicons name="remove" size={16} color="#FFFFFF" />
+      </Pressable>
 
-        <Text variant="title" numeric style={s.foulValue} accessibilityLabel={`${value} fautes`}>
-          {value}
-        </Text>
+      <Text
+        variant="headline"
+        numeric
+        style={s.foulValue}
+        accessibilityLabel={`${value} fautes ${label}${critical ? ', jet franc de 10 mètres' : ''}`}
+      >
+        {value}
+      </Text>
 
-        <Pressable
-          onPress={() => {
-            haptics.tapMedium();
-            onIncrement();
-          }}
-          hitSlop={6}
-          style={({ pressed }) => [s.foulStep, pressed && s.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel={`Ajouter une faute ${label}`}
-        >
-          <Ionicons name="add" size={18} color="#FFFFFF" />
-        </Pressable>
-      </View>
-      {(critical || warning) && (
-        <Text variant="caption" style={s.onBrand} numberOfLines={1}>
-          {critical ? 'Jet franc 10 m' : 'Prochaine = 5e'}
+      <Pressable
+        onPress={() => {
+          haptics.tapMedium();
+          onChange(value + 1);
+        }}
+        hitSlop={8}
+        style={({ pressed }) => [s.foulStep, pressed && s.pressed]}
+        accessibilityRole="button"
+        accessibilityLabel={`Ajouter une faute ${label}`}
+      >
+        <Ionicons name="add" size={16} color="#FFFFFF" />
+      </Pressable>
+
+      {critical && (
+        <Text variant="caption" weight="700" style={s.onBrand}>
+          10 m
         </Text>
       )}
     </View>
@@ -182,6 +224,14 @@ export interface OpponentBarProps {
   counts: { goals: number; onTarget: number; total: number };
 }
 
+/**
+ * L'annulation est sur l'appui long, pas sur un bouton séparé.
+ *
+ * C'est le choix de Robin, et il tient sur le bandeau : la place y est comptée,
+ * un second bouton par action doublerait la rangée. Le compteur affiché sur
+ * chaque bouton rend le geste vérifiable — on voit tout de suite si l'annulation
+ * a pris, ce qui est le vrai besoin derrière le bouton explicite.
+ */
 export function OpponentBar({ onRecord, onUndo, counts }: OpponentBarProps) {
   const s = useStyles();
   const available: Record<string, number> = {
@@ -192,35 +242,36 @@ export function OpponentBar({ onRecord, onUndo, counts }: OpponentBarProps) {
 
   return (
     <View style={s.oppRow}>
-      {OPPONENT_ACTIONS.map((a) => (
-        <View key={a.eventType} style={s.oppCell}>
+      <Text variant="caption" style={s.onBrandMuted}>
+        Adv.
+      </Text>
+      {OPPONENT_ACTIONS.map((a) => {
+        const count = available[a.eventType] ?? 0;
+        return (
           <Pressable
+            key={a.eventType}
             onPress={() => onRecord(a.eventType)}
+            onLongPress={() => count > 0 && onUndo(a.eventType)}
+            delayLongPress={350}
             style={({ pressed }) => [s.oppBtn, pressed && s.pressed]}
             accessibilityRole="button"
-            accessibilityLabel={a.label}
+            accessibilityLabel={`${a.label}. ${count} enregistré${count > 1 ? 's' : ''}`}
+            accessibilityHint="Appui long pour annuler le dernier"
           >
-            <Ionicons name={a.icon} size={16} color="#FFFFFF" />
-            <Text variant="caption" style={s.onBrand} numberOfLines={1}>
+            <Ionicons name={a.icon} size={15} color="#FFFFFF" />
+            <Text variant="caption" weight="600" style={s.onBrand} numberOfLines={1}>
               {a.short}
             </Text>
+            {count > 0 && (
+              <View style={s.oppCount}>
+                <Text variant="caption" weight="700" style={s.onBrand} numeric>
+                  {count}
+                </Text>
+              </View>
+            )}
           </Pressable>
-          <Pressable
-            onPress={() => onUndo(a.eventType)}
-            disabled={(available[a.eventType] ?? 0) === 0}
-            hitSlop={8}
-            style={({ pressed }) => [
-              s.oppUndo,
-              (available[a.eventType] ?? 0) === 0 && s.foulStepOff,
-              pressed && s.pressed,
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel={`Annuler : ${a.label}`}
-          >
-            <Ionicons name="arrow-undo" size={13} color="rgba(255,255,255,0.85)" />
-          </Pressable>
-        </View>
-      ))}
+        );
+      })}
     </View>
   );
 }
@@ -322,52 +373,55 @@ const useStyles = makeStyles((t) => ({
   scoreBox: { flex: 1, alignItems: 'flex-end', minHeight: HIT_SLOP_MIN, justifyContent: 'center' },
   scoreEditHint: { flexDirection: 'row', alignItems: 'center', gap: 4 },
 
+  foulRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm },
   foulBox: {
     flex: 1,
-    gap: 2,
-    paddingVertical: t.space.xs,
-    paddingHorizontal: t.space.sm,
-    borderRadius: t.radius.md,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    alignItems: 'center',
-  },
-  foulBoxCriticalUs: { backgroundColor: t.colors.negative.fill, borderColor: '#FFFFFF' },
-  foulBoxCriticalOpp: { backgroundColor: t.colors.positive.fill, borderColor: '#FFFFFF' },
-  foulControls: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm },
-  foulStep: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  foulStepOff: { opacity: 0.3 },
-  foulValue: { color: '#FFFFFF', minWidth: 24, textAlign: 'center' },
-
-  oppRow: { flexDirection: 'row', gap: t.space.sm },
-  oppCell: { flex: 1, flexDirection: 'row', alignItems: 'stretch', gap: 2 },
-  oppBtn: {
-    flex: 1,
-    minHeight: HIT_SLOP_MIN,
+    height: 36,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: t.space.xs,
     paddingHorizontal: t.space.sm,
-    borderRadius: t.radius.md,
+    borderRadius: t.radius.sm,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  foulBoxCriticalUs: { backgroundColor: t.colors.negative.fill, borderColor: '#FFFFFF' },
+  foulBoxCriticalOpp: { backgroundColor: t.colors.positive.fill, borderColor: '#FFFFFF' },
+  foulStep: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  foulStepOff: { opacity: 0.3 },
+  foulValue: { color: '#FFFFFF', minWidth: 18, textAlign: 'center' },
+
+  oppRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm },
+  oppBtn: {
+    flex: 1,
+    height: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: t.space.xs,
+    paddingHorizontal: t.space.xs,
+    borderRadius: t.radius.sm,
     backgroundColor: 'rgba(255,255,255,0.16)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.24)',
   },
-  oppUndo: {
-    width: 32,
-    borderRadius: t.radius.sm,
+  oppCount: {
+    minWidth: 19,
+    height: 17,
+    borderRadius: 9,
+    paddingHorizontal: 4,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.18)',
+    backgroundColor: 'rgba(0,0,0,0.3)',
   },
 
   voiceBtn: {

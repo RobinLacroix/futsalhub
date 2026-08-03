@@ -42,7 +42,7 @@ import {
   useMatchRecorder,
   MatchPicker,
   ClockBar,
-  FoulCounter,
+  FoulRow,
   OpponentBar,
   VoiceButton,
   SyncBadge,
@@ -268,12 +268,44 @@ export default function PhoneMatchRecorder({
 
   return (
     <SafeAreaView style={s.root}>
-      {/* Bandeau permanent */}
+      {/* Bandeau permanent. Il porte aussi la navigation : le header natif de la
+          route est masqué, il faisait doublon avec le titre du match. */}
       <View style={s.header}>
-        <Text variant="caption" style={s.headerTitle} numberOfLines={1}>
-          {r.match.title || r.match.opponent_team || 'Match'}
-        </Text>
+        <View style={s.headerTop}>
+          <Pressable
+            onPress={handleQuit}
+            hitSlop={8}
+            style={({ pressed }) => [s.backBtn, pressed && s.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Quitter le suivi de match"
+          >
+            <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
+          </Pressable>
+
+          <Text variant="caption" weight="600" style={s.headerTitle} numberOfLines={1}>
+            {r.match.title || r.match.opponent_team || 'Match'}
+          </Text>
+
+          <Pressable
+            onPress={handleSave}
+            disabled={r.saving}
+            style={({ pressed }) => [s.savePill, r.saving && s.pressed, pressed && s.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Enregistrer le match"
+          >
+            <Ionicons
+              name={r.saving ? 'hourglass-outline' : 'checkmark-circle'}
+              size={17}
+              color="#FFFFFF"
+            />
+            <Text variant="caption" weight="700" style={s.onBrand}>
+              Enregistrer
+            </Text>
+          </Pressable>
+        </View>
+
         <SyncBadge pending={r.outboxLength} />
+
         <ClockBar
           seconds={r.seconds}
           half={r.half}
@@ -284,22 +316,25 @@ export default function PhoneMatchRecorder({
           onEditScore={() => setScoreSheet(true)}
           compact
         />
-        <View style={s.foulsRow}>
-          <FoulCounter
-            label="Fautes équipe"
-            value={r.foulsUs}
-            onIncrement={() => r.setFoulsUs((n) => n + 1)}
-            onDecrement={() => r.setFoulsUs((n) => Math.max(0, n - 1))}
-            tone="us"
-          />
-          <FoulCounter
-            label="Fautes adverses"
-            value={r.foulsOpponent}
-            onIncrement={() => r.setFoulsOpponent((n) => n + 1)}
-            onDecrement={() => r.setFoulsOpponent((n) => Math.max(0, n - 1))}
-            tone="opponent"
-          />
-        </View>
+
+        {/* Fautes et actions adverses partagent la place que les seules fautes
+            occupaient : deux blocs empilés de 60 pt pour deux chiffres qui
+            bougent cinq fois par mi-temps. */}
+        <FoulRow
+          foulsUs={r.foulsUs}
+          foulsOpponent={r.foulsOpponent}
+          onChangeUs={r.setFoulsUs}
+          onChangeOpponent={r.setFoulsOpponent}
+        />
+        <OpponentBar
+          onRecord={handleOpponentAction}
+          onUndo={(e) => r.undoEvent(e, '', null)}
+          counts={{
+            goals: r.scoreOpponent,
+            onTarget: r.opponentShotsOnTarget,
+            total: r.opponentShotsTotal,
+          }}
+        />
       </View>
 
       {/* Onglets */}
@@ -408,7 +443,9 @@ export default function PhoneMatchRecorder({
             )}
 
             <Text variant="caption" tone="secondary">
-              Joueur concerné — la sélection reste active pour enchaîner plusieurs actions
+              {selectedPlayer
+                ? `${selectedPlayer.first_name} ${selectedPlayer.last_name} — la sélection reste active pour enchaîner`
+                : 'Choisissez un joueur, puis une action'}
             </Text>
             <PlayerPicker
               players={r.fieldPlayers}
@@ -423,23 +460,11 @@ export default function PhoneMatchRecorder({
               state={selectedPlayerId ? r.playerStates[selectedPlayerId] : undefined}
               onRecord={handleAction}
               onUndo={handleUndo}
-              columns={2}
             />
 
-            <Text variant="caption" tone="secondary" style={s.blockLabel}>
-              Actions adverses
+            <Text variant="caption" tone="tertiary" style={s.hint}>
+              Appui long sur une action pour annuler la dernière
             </Text>
-            <View style={s.oppWrap}>
-              <OpponentBar
-                onRecord={handleOpponentAction}
-                onUndo={(e) => r.undoEvent(e, '', null)}
-                counts={{
-                  goals: r.scoreOpponent,
-                  onTarget: r.opponentShotsOnTarget,
-                  total: r.opponentShotsTotal,
-                }}
-              />
-            </View>
           </View>
         )}
 
@@ -489,18 +514,6 @@ export default function PhoneMatchRecorder({
           </View>
         )}
       </ScrollView>
-
-      {/* Pied */}
-      <View style={s.footer}>
-        <Button
-          label="Enregistrer le match"
-          onPress={handleSave}
-          loading={r.saving}
-          icon="checkmark-circle"
-          block
-        />
-        <Button label="Quitter sans enregistrer" onPress={handleQuit} variant="ghost" block />
-      </View>
 
       <SubstitutionSheet
         outgoing={substituting}
@@ -596,13 +609,33 @@ const useStyles = makeStyles((t) => ({
 
   header: {
     backgroundColor: t.colors.accent.fill,
-    paddingHorizontal: t.space.lg,
-    paddingTop: t.space.sm,
-    paddingBottom: t.space.md,
-    gap: t.space.sm,
+    paddingHorizontal: t.space.md,
+    paddingTop: t.space.xs,
+    paddingBottom: t.space.sm,
+    gap: t.space.xs,
   },
-  headerTitle: { color: 'rgba(255,255,255,0.85)', textAlign: 'center' },
-  foulsRow: { flexDirection: 'row', gap: t.space.sm },
+  headerTop: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm },
+  headerTitle: { color: 'rgba(255,255,255,0.88)', flex: 1 },
+  onBrand: { color: '#FFFFFF' },
+  backBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.16)',
+  },
+  savePill: {
+    height: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: t.space.xs,
+    paddingHorizontal: t.space.md,
+    borderRadius: t.radius.pill,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.4)',
+  },
 
   tabBar: {
     flexDirection: 'row',
@@ -646,24 +679,8 @@ const useStyles = makeStyles((t) => ({
   },
   timeoutUsed: { borderColor: t.colors.accent.default, backgroundColor: t.colors.accent.subtle },
 
-  // Les actions adverses gardent le fond de marque : ce sont les mêmes boutons
-  // que sur tablette, dessinés en blanc sur teinte pleine.
-  oppWrap: {
-    padding: t.space.sm,
-    borderRadius: t.radius.md,
-    backgroundColor: t.colors.accent.fill,
-  },
+  hint: { textAlign: 'center', marginTop: t.space.xs },
 
   statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.sm },
   statCard: { flexGrow: 1, flexBasis: '45%' },
-
-  footer: {
-    paddingHorizontal: t.space.lg,
-    paddingTop: t.space.sm,
-    paddingBottom: t.space.sm,
-    gap: t.space.xs,
-    backgroundColor: t.colors.bg.surface,
-    borderTopWidth: 1,
-    borderTopColor: t.colors.border.subtle,
-  },
 }));

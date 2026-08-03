@@ -44,7 +44,7 @@ import {
   useMatchRecorder,
   MatchPicker,
   ClockBar,
-  FoulCounter,
+  FoulRow,
   OpponentBar,
   VoiceButton,
   SyncBadge,
@@ -383,19 +383,11 @@ export default function TabletMatchRecorder({
           </View>
 
           <View style={s.foulsCell}>
-            <FoulCounter
-              label="Fautes équipe"
-              value={r.foulsUs}
-              onIncrement={() => r.setFoulsUs((n) => n + 1)}
-              onDecrement={() => r.setFoulsUs((n) => Math.max(0, n - 1))}
-              tone="us"
-            />
-            <FoulCounter
-              label="Fautes adverses"
-              value={r.foulsOpponent}
-              onIncrement={() => r.setFoulsOpponent((n) => n + 1)}
-              onDecrement={() => r.setFoulsOpponent((n) => Math.max(0, n - 1))}
-              tone="opponent"
+            <FoulRow
+              foulsUs={r.foulsUs}
+              foulsOpponent={r.foulsOpponent}
+              onChangeUs={r.setFoulsUs}
+              onChangeOpponent={r.setFoulsOpponent}
             />
           </View>
 
@@ -714,7 +706,7 @@ const useStyles = makeStyles((t) => ({
   controls: { gap: t.space.md },
   controlsWide: { flexDirection: 'row', alignItems: 'flex-start' },
   clockCell: { flex: 1.4 },
-  foulsCell: { flex: 1.2, flexDirection: 'row', gap: t.space.sm },
+  foulsCell: { flex: 1.2, justifyContent: 'center' },
   oppCell: { flex: 1.6, gap: t.space.xs },
   sideCell: { flex: 1, gap: t.space.sm },
 

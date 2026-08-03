@@ -31,7 +31,7 @@ export type {
   IoniconName,
 } from './recorderModel';
 
-export { ClockBar, FoulCounter, OpponentBar, VoiceButton, SyncBadge, VoiceOverlay } from './RecorderChrome';
+export { ClockBar, FoulRow, OpponentBar, VoiceButton, SyncBadge, VoiceOverlay } from './RecorderChrome';
 export { PlayerFieldCard } from './PlayerFieldCard';
 export { PlayerActionCard, BenchCard } from './PlayerActionCard';
 export { ActionPad } from './ActionPad';

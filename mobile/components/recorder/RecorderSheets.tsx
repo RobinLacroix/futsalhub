@@ -249,9 +249,20 @@ export interface PlayerPickerProps {
 }
 
 /**
- * La sélection reste active après une action : le coach saisit souvent
- * plusieurs actions du même joueur d'affilée. Un bouton explicite désélectionne,
- * ce qui manquait — l'ancienne version obligeait à retoucher le même joueur.
+ * Cinq joueurs sur une seule ligne, toujours.
+ *
+ * La version précédente donnait `minWidth: 78` à chaque pastille : sur un
+ * iPhone standard, cinq ne tenaient pas, le gardien passait à la ligne suivante
+ * et s'y étalait sur toute la largeur. Le cinq de départ se lisait comme
+ * quatre joueurs plus un intrus.
+ *
+ * `flexBasis: 0` + `flexGrow: 1` sans largeur minimale : les cinq se partagent
+ * la ligne à parts égales, quelle que soit la largeur d'écran. Le nom est
+ * tronqué plutôt que de casser la rangée — le coach connaît son effectif, le
+ * repère utile est la position dans la rangée et l'état de sélection.
+ *
+ * La sélection reste active après une action : on saisit souvent plusieurs
+ * actions du même joueur d'affilée. Retoucher la pastille désélectionne.
  */
 export function PlayerPicker({ players, selectedId, onSelect, playerStates }: PlayerPickerProps) {
   const s = useStyles();
@@ -280,17 +291,25 @@ export function PlayerPicker({ players, selectedId, onSelect, playerStates }: Pl
             accessibilityState={{ selected: active }}
             accessibilityLabel={`${p.first_name} ${p.last_name}${gk ? ', gardien' : ''}`}
           >
-            {active && (
-              <Ionicons name="checkmark-circle" size={14} color={theme.colors.accent.default} />
-            )}
-            <Text
-              variant="caption"
-              weight={active ? '700' : '600'}
-              numberOfLines={1}
-              style={s.chipText}
-            >
-              {p.last_name}
-            </Text>
+            <View style={s.chipHead}>
+              {active ? (
+                <Ionicons
+                  name="checkmark-circle"
+                  size={12}
+                  color={theme.colors.accent.default}
+                />
+              ) : gk ? (
+                <Ionicons name="hand-left" size={12} color={theme.colors.warning.default} />
+              ) : null}
+              <Text
+                variant="caption"
+                weight={active ? '700' : '600'}
+                numberOfLines={1}
+                style={s.chipText}
+              >
+                {p.last_name}
+              </Text>
+            </View>
             <Text variant="caption" tone="tertiary" numeric>
               {formatSeconds(st?.currentSequenceTime ?? 0)}
             </Text>
@@ -342,17 +361,18 @@ const useStyles = makeStyles((t) => ({
     borderColor: t.colors.border.strong,
   },
 
-  pickerRow: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.sm },
+  // Pas de `flexWrap` ni de `minWidth` : la rangée ne doit jamais casser.
+  pickerRow: { flexDirection: 'row', gap: t.space.xs },
   chip: {
     flexGrow: 1,
     flexBasis: 0,
-    minWidth: 78,
+    minWidth: 0,
     minHeight: HIT_SLOP_MIN,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 1,
     paddingVertical: t.space.xs,
-    paddingHorizontal: t.space.sm,
+    paddingHorizontal: t.space.xs,
     borderRadius: t.radius.md,
     backgroundColor: t.colors.bg.surface,
     borderWidth: 2,
@@ -360,5 +380,6 @@ const useStyles = makeStyles((t) => ({
   },
   chipGk: { borderColor: t.colors.warning.default },
   chipActive: { borderColor: t.colors.accent.default, backgroundColor: t.colors.accent.subtle },
-  chipText: { textAlign: 'center', maxWidth: '100%' },
+  chipHead: { flexDirection: 'row', alignItems: 'center', gap: 2, maxWidth: '100%' },
+  chipText: { textAlign: 'center', flexShrink: 1 },
 }));
