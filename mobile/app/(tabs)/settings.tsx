@@ -611,6 +611,18 @@ export default function SettingsScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Accès à la galerie du design system pendant la refonte UI.
+          `__DEV__` est faux dans tout build de production : cette entrée ne
+          peut pas partir en App Store. À retirer une fois la refonte finie. */}
+      {__DEV__ && (
+        <TouchableOpacity
+          style={s.modalClose}
+          onPress={() => router.push('/design-gallery' as any)}
+        >
+          <Text style={s.modalCloseText}>Design system (dev)</Text>
+        </TouchableOpacity>
+      )}
     </ScrollView>
   );
 }

@@ -127,6 +127,17 @@ export default function SignInScreen() {
           )}
         </TouchableOpacity>
 
+        {/* Accès à la galerie du design system. `__DEV__` est faux dans tout
+            build de production : cette entrée ne peut pas partir en App Store. */}
+        {__DEV__ && (
+          <TouchableOpacity
+            style={styles.signUpLink}
+            onPress={() => router.push('/design-gallery' as any)}
+          >
+            <Text style={styles.signUpLinkText}>Design system (dev)</Text>
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity
           style={styles.signUpLink}
           onPress={() => router.push('/sign-up' as any)}
