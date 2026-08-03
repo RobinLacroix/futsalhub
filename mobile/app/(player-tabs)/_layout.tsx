@@ -1,6 +1,19 @@
+/**
+ * Navigation de l'espace joueur (P1-7)
+ *
+ * L'espace joueur était vert (`#16a34a`) et l'espace coach bleu : la
+ * distinction est utile — le même appareil sert aux deux, et Robin bascule de
+ * l'un à l'autre. Elle est conservée, mais elle passe par la rampe : l'espace
+ * joueur prend `positive` (teal), l'espace coach garde `accent` (violet).
+ *
+ * Le vert d'origine était à 3,30:1, l'un des trois contrastes nommés par
+ * l'audit. Le teal est validé à 4,5:1 dans les deux thèmes.
+ */
+
 import { Tabs } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { View } from 'react-native';
+import { useTheme } from '../../contexts/ThemeContext';
 import { SwitchToCoachButton, SignOutIconButton } from '../../components/SwitchSpaceButton';
 import { SeasonHeaderButton } from '../../components/SeasonHeaderButton';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
@@ -9,17 +22,23 @@ import { useNotifications } from '../../contexts/NotificationContext';
 export default function PlayerTabsLayout() {
   usePushNotifications();
   const { counts, markRead } = useNotifications();
+  const { theme } = useTheme();
+  const c = theme.colors;
 
   return (
     <Tabs
       screenOptions={{
-        headerStyle: { backgroundColor: '#16a34a' },
-        headerTintColor: '#fff',
-        tabBarActiveTintColor: '#16a34a',
+        headerStyle: { backgroundColor: c.bg.surface },
+        headerTintColor: c.positive.default,
+        headerTitleStyle: { color: c.text.primary },
+        headerShadowVisible: false,
+        tabBarActiveTintColor: c.positive.default,
+        tabBarInactiveTintColor: c.text.tertiary,
+        tabBarStyle: { backgroundColor: c.bg.surface, borderTopColor: c.border.subtle },
         headerRight: () => (
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            {/* Header vert non migré : ton `onColor` obligatoire ici. */}
-            <SeasonHeaderButton tone="onColor" style={{ marginRight: 8 }} />
+            {/* Le header suit maintenant la surface du thème : ton `surface`. */}
+            <SeasonHeaderButton tone="surface" style={{ marginRight: 8 }} />
             <SwitchToCoachButton />
             <SignOutIconButton />
           </View>

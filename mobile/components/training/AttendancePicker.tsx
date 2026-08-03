@@ -10,7 +10,7 @@
  */
 
 import React from 'react';
-import { View, Pressable, StyleSheet, ViewStyle } from 'react-native';
+import { View, Pressable, StyleSheet, ActivityIndicator, ViewStyle } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../../contexts/ThemeContext';
 import { haptics } from '../../lib/design/haptics';
@@ -19,12 +19,17 @@ import { ATTENDANCE_STATUSES } from './attendance';
 import type { PlayerStatus } from '../../types';
 
 export interface AttendancePickerProps {
-  value: PlayerStatus;
+  /** `null` = le joueur n'a pas encore répondu, aucune puce n'est active. */
+  value: PlayerStatus | null;
   onChange: (status: PlayerStatus) => void;
   /** Nom du joueur, pour composer l'annonce VoiceOver. */
   playerName: string;
   /** Masque le libellé texte pour tenir dans une ligne étroite. */
   iconOnly?: boolean;
+  /** Envoi en cours : les puces sont figées, l'active porte l'indicateur. */
+  loading?: boolean;
+  /** Libellés complets plutôt qu'abrégés. Le joueur choisit une fois, pas vingt. */
+  fullLabels?: boolean;
   style?: ViewStyle;
 }
 
@@ -33,6 +38,8 @@ export function AttendancePicker({
   onChange,
   playerName,
   iconOnly = false,
+  loading = false,
+  fullLabels = false,
   style,
 }: AttendancePickerProps) {
   const { theme } = useTheme();
@@ -53,8 +60,9 @@ export function AttendancePicker({
               haptics.select();
               onChange(s.value);
             }}
+            disabled={loading}
             accessibilityRole="radio"
-            accessibilityState={{ selected: active, checked: active }}
+            accessibilityState={{ selected: active, checked: active, disabled: loading }}
             accessibilityLabel={`${playerName} : ${s.label}`}
             style={({ pressed }) => [
               styles.chip,
@@ -64,22 +72,26 @@ export function AttendancePicker({
                 gap: theme.space.xs,
                 backgroundColor: active ? palette.subtle : c.bg.sunken,
                 borderColor: active ? palette.default : 'transparent',
-                opacity: pressed ? 0.7 : 1,
+                opacity: pressed ? 0.7 : loading && !active ? 0.4 : 1,
               },
             ]}
           >
-            <Ionicons
-              name={active ? s.icon : (`${s.icon}-outline` as typeof s.icon)}
-              size={16}
-              color={active ? palette.default : c.text.tertiary}
-            />
+            {loading && active ? (
+              <ActivityIndicator size="small" color={palette.default} />
+            ) : (
+              <Ionicons
+                name={active ? s.icon : (`${s.icon}-outline` as typeof s.icon)}
+                size={16}
+                color={active ? palette.default : c.text.tertiary}
+              />
+            )}
             {!iconOnly && (
               <Text
                 variant="caption"
                 color={active ? palette.default : c.text.tertiary}
                 weight={active ? '700' : '500'}
               >
-                {s.short}
+                {fullLabels ? s.label : s.short}
               </Text>
             )}
           </Pressable>
@@ -94,7 +106,7 @@ const styles = StyleSheet.create({
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 40,
+    minHeight: 44,
     borderWidth: 1.5,
   },
 });
