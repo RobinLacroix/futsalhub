@@ -50,6 +50,11 @@ export interface MonthGridProps {
   /** Retour au mois courant, filtre remis à zéro. */
   onToday: () => void;
   compact?: boolean;
+  /**
+   * Action posée à droite de la navigation de mois. Sert sur iPad, où le Stack
+   * ne rend pas de header et où le bouton d'ajout doit donc vivre ici.
+   */
+  headerAction?: React.ReactNode;
 }
 
 const WEEK_LABELS = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
@@ -75,6 +80,7 @@ export function MonthGrid({
   onChangeMonth,
   onToday,
   compact = false,
+  headerAction,
 }: MonthGridProps) {
   const { theme } = useTheme();
   const c = theme.colors;
@@ -118,6 +124,7 @@ export function MonthGrid({
           <Text variant="title">{monthLabel}</Text>
         </Pressable>
         <IconButton icon="chevron-forward" label="Mois suivant" onPress={() => shift(1)} size="sm" />
+        {headerAction}
       </View>
 
       <View style={styles.weekRow}>
@@ -210,7 +217,7 @@ export function MonthGrid({
 
 const styles = StyleSheet.create({
   panel: {},
-  monthNav: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6 },
+  monthNav: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
   monthLabelBtn: { flex: 1, alignItems: 'center' },
   weekRow: { flexDirection: 'row', marginBottom: 2 },
   weekLabel: { flex: 1, textAlign: 'center', paddingBottom: 4 },

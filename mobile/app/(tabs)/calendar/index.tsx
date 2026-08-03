@@ -15,6 +15,7 @@ import { haptics } from '../../../lib/design/haptics';
 import { Text, EmptyState, SkeletonList, Badge } from '../../../components/ui';
 import { MonthGrid, type DayEvents } from '../../../components/calendar/MonthGrid';
 import { EventCard, type CalendarEvent } from '../../../components/calendar/EventCard';
+import { AddEventButton } from '../../../components/calendar/AddEventButton';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -221,6 +222,9 @@ export default function CalendarScreen() {
         onChangeMonth={setCurrentMonth}
         onToday={goToToday}
         compact={isTablet}
+        // Sur iPad le Stack ne rend pas de header : le bouton d'ajout doit
+        // vivre ici, sinon la création d'événement est inaccessible.
+        headerAction={isTablet ? <AddEventButton variant="labelled" /> : undefined}
       />
 
       {selectedDay && (
@@ -276,7 +280,9 @@ export default function CalendarScreen() {
               description={
                 selectedDay
                   ? undefined
-                  : 'Ajoutez un entraînement ou un match avec le bouton + du bandeau.'
+                  : `Ajoutez un entraînement ou un match avec le bouton ${
+                      isTablet ? '« Ajouter »' : '+'
+                    } en haut de l'écran.`
               }
               action={
                 selectedDay ? { label: 'Tout afficher', onPress: clearFilter } : undefined
