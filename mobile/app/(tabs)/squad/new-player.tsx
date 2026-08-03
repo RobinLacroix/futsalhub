@@ -8,20 +8,19 @@ import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 import { createPlayer } from '../../../lib/services/players';
 import { haptics } from '../../../lib/design/haptics';
 import { Card, Button, Field, Input, ChipGroup, EmptyState, type ChipOption } from '../../../components/ui';
-import { POSITIONS } from '../../../components/players/positions';
-
-type StrongFoot = 'Droit' | 'Gauche' | 'Droit et gauche';
+import { POSITIONS, STRONG_FOOT_OPTIONS } from '../../../components/players/positions';
 
 const POSITION_OPTIONS: readonly ChipOption<string>[] = POSITIONS.map((p) => ({
   value: p.key,
   label: p.label,
 }));
 
-const FOOT_OPTIONS: readonly ChipOption<StrongFoot>[] = [
-  { value: 'Droit', label: 'Droit' },
-  { value: 'Gauche', label: 'Gauche' },
-  { value: 'Droit et gauche', label: 'Les deux' },
-];
+// Vocabulaire partagé : `positions.ts` est la seule source des valeurs écrites
+// en base, pour que création et édition ne divergent plus.
+const FOOT_OPTIONS: readonly ChipOption<string>[] = STRONG_FOOT_OPTIONS.map(o => ({
+  value: o.value,
+  label: o.label,
+}));
 
 /**
  * La date de naissance était saisie au format ISO `AAAA-MM-JJ`, imposé à
@@ -50,7 +49,7 @@ export default function NewPlayerScreen() {
   const [lastName, setLastName] = useState('');
   const [birthDate, setBirthDate] = useState('');
   const [position, setPosition] = useState<string>('Ailier');
-  const [strongFoot, setStrongFoot] = useState<StrongFoot>('Droit');
+  const [strongFoot, setStrongFoot] = useState<string>('Droit');
   const [numberStr, setNumberStr] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
 

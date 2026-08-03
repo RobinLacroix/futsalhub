@@ -1,19 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ActivityIndicator,
-  TouchableOpacity,
-  Alert,
-  Modal,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-} from 'react-native';
-import Ionicons from '@expo/vector-icons/Ionicons';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { View, StyleSheet, Alert } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { format, isValid, parse } from 'date-fns';
+import { fr } from 'date-fns/locale';
+import { useTheme } from '../../../contexts/ThemeContext';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 import { useActiveSeason } from '../../../contexts/ActiveSeasonContext';
 import {
@@ -34,7 +24,45 @@ import { getPlayerFeedbackHistory, type PlayerFeedbackRow } from '../../../lib/s
 import { supabase } from '../../../lib/supabase';
 import type { Player, Team, PlayerEvent } from '../../../types';
 import { PlayerDetailView, type TrainingSession, type PlayerStats } from '../../../components/PlayerDetailView';
-import { Button } from '../../../components/ui';
+import {
+  Button,
+  Field,
+  Input,
+  ChipGroup,
+  Sheet,
+  EmptyState,
+  SkeletonDetail,
+  type ChipOption,
+} from '../../../components/ui';
+import {
+  POSITIONS,
+  STRONG_FOOT_OPTIONS,
+  PLAYER_STATUS_OPTIONS,
+} from '../../../components/players/positions';
+
+const POSITION_CHIPS: readonly ChipOption<string>[] = POSITIONS.map(p => ({ value: p.key, label: p.label }));
+const FOOT_CHIPS: readonly ChipOption<string>[] = STRONG_FOOT_OPTIONS.map(o => ({ value: o.value, label: o.label }));
+const STATUS_CHIPS: readonly ChipOption<string>[] = PLAYER_STATUS_OPTIONS.map(o => ({ value: o.value, label: o.label }));
+
+/**
+ * La date de naissance était saisie et affichée en ISO `AAAA-MM-JJ`, comme sur
+ * l'écran de création. Elle passe en JJ/MM/AAAA à la saisie, la conversion vers
+ * l'ISO attendu par le service se fait ici.
+ */
+function isoToDisplay(iso?: string | null): string {
+  if (!iso) return '';
+  const d = parse(iso.slice(0, 10), 'yyyy-MM-dd', new Date());
+  return isValid(d) ? format(d, 'dd/MM/yyyy', { locale: fr }) : '';
+}
+
+function displayToIso(input: string): { iso?: string; error?: string } {
+  const raw = input.trim();
+  if (!raw) return {};
+  const d = parse(raw, 'dd/MM/yyyy', new Date(), { locale: fr });
+  if (!isValid(d)) return { error: 'Format attendu : JJ/MM/AAAA.' };
+  if (d.getFullYear() < 1900 || d > new Date()) return { error: 'Cette date est impossible.' };
+  return { iso: format(d, 'yyyy-MM-dd') };
+}
 
 /** Action d'édition, posée dans le header natif du Stack. */
 function HeaderEditButton({ onPress }: { onPress: () => void }) {
@@ -43,6 +71,8 @@ function HeaderEditButton({ onPress }: { onPress: () => void }) {
 
 export default function PlayerDetailScreen() {
   const { playerId } = useLocalSearchParams<{ playerId: string }>();
+  const { theme } = useTheme();
+  const c = theme.colors;
   const router = useRouter();
   const { activeTeamId, teams: allTeams } = useActiveTeam();
   const { activeSeason } = useActiveSeason();
@@ -189,7 +219,7 @@ export default function PlayerDetailScreen() {
     setEditForm({
       first_name:          player.first_name,
       last_name:           player.last_name,
-      birth_date:          player.birth_date ?? '',
+      birth_date:          isoToDisplay(player.birth_date),
       position:            player.position ?? '',
       strong_foot:         player.strong_foot ?? '',
       status:              player.status ?? 'Actif',
@@ -206,7 +236,7 @@ export default function PlayerDetailScreen() {
       const updated = await updatePlayer(playerId, {
         first_name:          editForm.first_name.trim(),
         last_name:           editForm.last_name.trim(),
-        birth_date:          editForm.birth_date || undefined,
+        birth_date:          displayToIso(editForm.birth_date).iso,
         position:            editForm.position || undefined,
         strong_foot:         editForm.strong_foot || undefined,
         status:              editForm.status || undefined,
@@ -222,22 +252,31 @@ export default function PlayerDetailScreen() {
     }
   };
 
-  // ── États ─────────────────────────────────────────────────────────────────
+  // ── États non nominaux ────────────────────────────────────────────────────
 
-  if (loading) return (
-    <View style={styles.centered}>
-      <ActivityIndicator size="large" color="#2563eb" />
-    </View>
-  );
+  if (loading) {
+    return (
+      <View style={[styles.root, { backgroundColor: c.bg.canvas }]}>
+        <SkeletonDetail />
+      </View>
+    );
+  }
 
-  if (error || !player) return (
-    <View style={styles.centered}>
-      <Text style={styles.errorText}>{error || 'Joueur introuvable'}</Text>
-      <TouchableOpacity onPress={() => router.back()} style={styles.backBtnFallback}>
-        <Text style={styles.backBtnFallbackText}>Retour</Text>
-      </TouchableOpacity>
-    </View>
-  );
+  if (error || !player) {
+    return (
+      <View style={[styles.root, { backgroundColor: c.bg.canvas }]}>
+        <EmptyState
+          icon="alert-circle-outline"
+          tone="negative"
+          title="Joueur introuvable"
+          description={error ?? "Cette fiche n'existe plus."}
+          action={{ label: 'Retour', onPress: () => router.back() }}
+        />
+      </View>
+    );
+  }
+
+  const birthError = displayToIso(editForm.birth_date).error;
 
   const availableTeams = allTeams.filter(t => !playerTeams.some(pt => pt.id === t.id));
 
@@ -249,9 +288,7 @@ export default function PlayerDetailScreen() {
       <Stack.Screen
         options={{
           title: `${player.first_name} ${player.last_name}`,
-          headerRight: () => (
-            <HeaderEditButton onPress={openEditModal} />
-          ),
+          headerRight: () => <HeaderEditButton onPress={openEditModal} />,
         }}
       />
       <PlayerDetailView
@@ -274,107 +311,113 @@ export default function PlayerDetailScreen() {
         onRemoveFromTeam={handleRemoveFromTeam}
       />
 
-      {/* ── Modal édition joueur (coach seulement) ── */}
-      <Modal visible={showEditModal} transparent animationType="slide" onRequestClose={() => setShowEditModal(false)}>
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowEditModal(false)}>
-            <View style={styles.editModalBox} onStartShouldSetResponder={() => true}>
-              <View style={styles.editModalHeader}>
-                <Text style={styles.editModalTitle}>Modifier le joueur</Text>
-                <TouchableOpacity onPress={() => setShowEditModal(false)} hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}>
-                  <Ionicons name="close" size={20} color="#64748b" />
-                </TouchableOpacity>
-              </View>
-              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                <View style={styles.editRow}>
-                  <View style={styles.editField}>
-                    <Text style={styles.editLabel}>Prénom</Text>
-                    <TextInput style={styles.editInput} value={editForm.first_name} onChangeText={v => setEditForm(f => ({ ...f, first_name: v }))} placeholder="Prénom" placeholderTextColor="#94a3b8" />
-                  </View>
-                  <View style={styles.editField}>
-                    <Text style={styles.editLabel}>Nom</Text>
-                    <TextInput style={styles.editInput} value={editForm.last_name} onChangeText={v => setEditForm(f => ({ ...f, last_name: v }))} placeholder="Nom" placeholderTextColor="#94a3b8" />
-                  </View>
-                </View>
-                <View style={styles.editRow}>
-                  <View style={styles.editField}>
-                    <Text style={styles.editLabel}>Date de naissance (AAAA-MM-JJ)</Text>
-                    <TextInput style={styles.editInput} value={editForm.birth_date} onChangeText={v => setEditForm(f => ({ ...f, birth_date: v }))} keyboardType="numbers-and-punctuation" placeholder="2000-05-15" placeholderTextColor="#94a3b8" />
-                  </View>
-                  <View style={styles.editField}>
-                    <Text style={styles.editLabel}>Numéro</Text>
-                    <TextInput style={styles.editInput} value={editForm.number} onChangeText={v => setEditForm(f => ({ ...f, number: v.replace(/\D/g, '') }))} keyboardType="numeric" placeholder="10" placeholderTextColor="#94a3b8" />
-                  </View>
-                </View>
-                <Text style={styles.editLabel}>Position</Text>
-                <View style={styles.editChipRow}>
-                  {['Gardien', 'Ailier', 'Meneur', 'Pivot'].map(p => (
-                    <TouchableOpacity key={p} style={[styles.editChip, editForm.position === p && styles.editChipActive]} onPress={() => setEditForm(f => ({ ...f, position: p }))} activeOpacity={0.7}>
-                      <Text style={[styles.editChipText, editForm.position === p && styles.editChipTextActive]}>{p}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <Text style={styles.editLabel}>Pied fort</Text>
-                <View style={styles.editChipRow}>
-                  {['Droit', 'Gauche', 'Les deux'].map(f => (
-                    <TouchableOpacity key={f} style={[styles.editChip, editForm.strong_foot === f && styles.editChipActive]} onPress={() => setEditForm(ef => ({ ...ef, strong_foot: f }))} activeOpacity={0.7}>
-                      <Text style={[styles.editChipText, editForm.strong_foot === f && styles.editChipTextActive]}>{f}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <Text style={styles.editLabel}>Statut</Text>
-                <View style={styles.editChipRow}>
-                  {[
-                    { value: 'Actif', label: 'Actif' },
-                    { value: 'Blessé', label: 'Blessé' },
-                    { value: 'Suspendu', label: 'Suspendu' },
-                    { value: 'left', label: 'Parti' },
-                  ].map(({ value, label }) => (
-                    <TouchableOpacity key={value} style={[styles.editChip, editForm.status === value && styles.editChipActive]} onPress={() => setEditForm(f => ({ ...f, status: value }))} activeOpacity={0.7}>
-                      <Text style={[styles.editChipText, editForm.status === value && styles.editChipTextActive]}>{label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <Text style={styles.editLabel}>Limite séquence (min)</Text>
-                <TextInput
-                  style={[styles.editInput, { marginBottom: 20 }]}
-                  value={editForm.sequence_time_limit}
-                  onChangeText={v => setEditForm(f => ({ ...f, sequence_time_limit: v.replace(/\D/g, '') }))}
-                  keyboardType="numeric"
-                  placeholder="ex : 10"
-                  placeholderTextColor="#94a3b8"
-                />
-                <TouchableOpacity style={[styles.saveBtn, savingPlayer && { opacity: 0.6 }]} onPress={handleSavePlayer} disabled={savingPlayer} activeOpacity={0.8}>
-                  {savingPlayer ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Enregistrer</Text>}
-                </TouchableOpacity>
-              </ScrollView>
-            </View>
-          </TouchableOpacity>
-        </KeyboardAvoidingView>
-      </Modal>
+      <Sheet
+        visible={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        title="Modifier le joueur"
+        maxHeight="88%"
+      >
+        <View style={styles.form}>
+          <View style={styles.row}>
+            <Input
+              label="Prénom"
+              value={editForm.first_name}
+              onChangeText={v => setEditForm(f => ({ ...f, first_name: v }))}
+              placeholder="Prénom"
+              autoCapitalize="words"
+              containerStyle={styles.flex}
+            />
+            <Input
+              label="Nom"
+              value={editForm.last_name}
+              onChangeText={v => setEditForm(f => ({ ...f, last_name: v }))}
+              placeholder="Nom"
+              autoCapitalize="words"
+              containerStyle={styles.flex}
+            />
+          </View>
+
+          <View style={styles.row}>
+            <Input
+              label="Date de naissance"
+              optional
+              value={editForm.birth_date}
+              onChangeText={v => setEditForm(f => ({ ...f, birth_date: v }))}
+              error={birthError}
+              hint="JJ/MM/AAAA"
+              placeholder="15/05/2000"
+              keyboardType="numbers-and-punctuation"
+              containerStyle={styles.flex}
+            />
+            <Input
+              label="Numéro"
+              optional
+              value={editForm.number}
+              onChangeText={v => setEditForm(f => ({ ...f, number: v.replace(/\D/g, '') }))}
+              keyboardType="number-pad"
+              placeholder="10"
+              numeric
+              containerStyle={styles.numberField}
+            />
+          </View>
+
+          <Field label="Poste">
+            <ChipGroup
+              label="Poste du joueur"
+              options={POSITION_CHIPS}
+              value={editForm.position}
+              onChange={v => setEditForm(f => ({ ...f, position: v }))}
+            />
+          </Field>
+
+          <Field label="Pied fort">
+            <ChipGroup
+              label="Pied fort du joueur"
+              options={FOOT_CHIPS}
+              value={editForm.strong_foot}
+              onChange={v => setEditForm(f => ({ ...f, strong_foot: v }))}
+            />
+          </Field>
+
+          <Field label="Statut">
+            <ChipGroup
+              label="Statut du joueur"
+              options={STATUS_CHIPS}
+              value={editForm.status}
+              onChange={v => setEditForm(f => ({ ...f, status: v }))}
+            />
+          </Field>
+
+          <Input
+            label="Limite de séquence"
+            optional
+            value={editForm.sequence_time_limit}
+            onChangeText={v => setEditForm(f => ({ ...f, sequence_time_limit: v.replace(/\D/g, '') }))}
+            keyboardType="number-pad"
+            placeholder="10"
+            hint="Durée maximale d'une séquence sur le terrain, en minutes."
+            numeric
+            containerStyle={styles.numberField}
+          />
+
+          <Button
+            label={savingPlayer ? 'Enregistrement…' : 'Enregistrer'}
+            onPress={handleSavePlayer}
+            loading={savingPlayer}
+            disabled={savingPlayer || !!birthError}
+            size="lg"
+            block
+          />
+        </View>
+      </Sheet>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  centered:            { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  errorText:           { fontSize: 14, color: '#dc2626', marginBottom: 12 },
-  backBtnFallback:     { marginTop: 12, paddingVertical: 8, paddingHorizontal: 20, borderRadius: 8, backgroundColor: '#2563eb' },
-  backBtnFallbackText: { color: '#fff', fontWeight: '600' },
-
-  modalOverlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  editModalBox:    { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '88%' },
-  editModalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
-  editModalTitle:  { fontSize: 17, fontWeight: '700', color: '#0f172a' },
-  editRow:         { flexDirection: 'row', gap: 10, marginBottom: 14 },
-  editField:       { flex: 1 },
-  editLabel:       { fontSize: 11, fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 },
-  editInput:       { backgroundColor: '#f8fafc', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: '#0f172a', borderWidth: 1, borderColor: '#e2e8f0', marginBottom: 14 },
-  editChipRow:     { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
-  editChip:        { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1.5, borderColor: '#e2e8f0', backgroundColor: '#f8fafc' },
-  editChipActive:  { borderColor: '#2563eb', backgroundColor: '#eff6ff' },
-  editChipText:    { fontSize: 13, fontWeight: '600', color: '#64748b' },
-  editChipTextActive: { color: '#2563eb' },
-  saveBtn:     { backgroundColor: '#2563eb', borderRadius: 8, paddingVertical: 12, alignItems: 'center', marginTop: 4 },
-  saveBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  root: { flex: 1 },
+  flex: { flex: 1 },
+  form: { gap: 16 },
+  row: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  numberField: { width: 118 },
 });

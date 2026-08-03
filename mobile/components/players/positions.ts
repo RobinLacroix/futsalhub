@@ -50,6 +50,31 @@ export function positionMeta(position?: string | null): PositionMeta | null {
   return POSITIONS.find((p) => position.toLowerCase().startsWith(p.key.toLowerCase())) ?? null;
 }
 
+/**
+ * Pied fort — vocabulaire unique.
+ *
+ * `new-player` écrivait « Droit et gauche » et la modale d'édition « Les deux »
+ * pour la même chose : le même joueur changeait de valeur en base selon l'écran
+ * par lequel on passait, et aucun regroupement n'était fiable. La valeur
+ * stockée est celle de `new-player`, qui est la plus ancienne et donc la plus
+ * représentée dans les données existantes ; seul le libellé est raccourci.
+ */
+export const STRONG_FOOT_OPTIONS = [
+  { value: 'Droit', label: 'Droit' },
+  { value: 'Gauche', label: 'Gauche' },
+  { value: 'Droit et gauche', label: 'Les deux' },
+] as const;
+
+export type StrongFoot = (typeof STRONG_FOOT_OPTIONS)[number]['value'];
+
+/** Statuts d'un joueur dans l'effectif. `left` sort de l'effectif actif. */
+export const PLAYER_STATUS_OPTIONS = [
+  { value: 'Actif', label: 'Actif' },
+  { value: 'Blessé', label: 'Blessé' },
+  { value: 'Suspendu', label: 'Suspendu' },
+  { value: 'left', label: 'Parti' },
+] as const;
+
 export interface PositionStyle {
   abbr: string;
   label: string;
