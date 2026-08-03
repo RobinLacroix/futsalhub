@@ -8,6 +8,18 @@
  *
  * Le vert d'origine était à 3,30:1, l'un des trois contrastes nommés par
  * l'audit. Le teal est validé à 4,5:1 dans les deux thèmes.
+ *
+ * ## Saison → thème
+ *
+ * Le sélecteur de saison quitte le header joueur. Un joueur ne consulte que la
+ * saison en cours : le bouton n'était utile qu'au staff, et il occupait la
+ * seule place disponible. `activeSeason` continue de valoir la saison active du
+ * club (défaut d'`ActiveSeasonContext`), les écrans qui la lisent ne changent
+ * pas de comportement.
+ *
+ * À sa place, la bascule clair / sombre. L'espace joueur n'a aucun écran de
+ * réglages : sans ça, un joueur qui n'est pas coach n'a aucun moyen de choisir
+ * son thème.
  */
 
 import { Tabs } from 'expo-router';
@@ -15,7 +27,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { View } from 'react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { SwitchToCoachButton, SignOutIconButton } from '../../components/SwitchSpaceButton';
-import { SeasonHeaderButton } from '../../components/SeasonHeaderButton';
+import { ThemeToggleButton } from '../../components/ThemeToggleButton';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 import { useNotifications } from '../../contexts/NotificationContext';
 
@@ -36,9 +48,8 @@ export default function PlayerTabsLayout() {
         tabBarInactiveTintColor: c.text.tertiary,
         tabBarStyle: { backgroundColor: c.bg.surface, borderTopColor: c.border.subtle },
         headerRight: () => (
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            {/* Le header suit maintenant la surface du thème : ton `surface`. */}
-            <SeasonHeaderButton tone="surface" style={{ marginRight: 8 }} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingRight: 8 }}>
+            <ThemeToggleButton />
             <SwitchToCoachButton />
             <SignOutIconButton />
           </View>

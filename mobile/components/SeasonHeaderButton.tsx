@@ -2,18 +2,16 @@
  * SeasonHeaderButton — sélecteur de saison des barres de navigation (P0-7)
  *
  * Avant la refonte, ce composant supposait toujours un header à aplat coloré :
- * texte `#fff` sur `rgba(255,255,255,0.15)`. Depuis que `(tabs)/_layout` rend un
- * header natif sur `bg.canvas`, cette combinaison est invisible en thème clair
- * (rapport de contraste ~1.05:1). D'où deux tons explicites, plutôt qu'un ton
- * implicite qui casse dès que son hôte change :
+ * texte `#fff` sur `rgba(255,255,255,0.15)`. Depuis que les headers suivent le
+ * thème, cette combinaison serait invisible en thème clair (~1.05:1). Un ton
+ * `onColor` a couvert la transition, réservé aux headers à aplat non encore
+ * migrés.
  *
- *   - `surface`  : par défaut. Lit le thème, tient sur canvas comme sur surface.
- *   - `onColor`  : réservé aux headers encore à aplat coloré, non migrés.
- *                  Il n'en reste que deux : `(player-tabs)/_layout` (vert `#16a34a`)
- *                  et l'en-tête navy de `PlayerDetailView`. `calendar` et `squad`
- *                  sont passés sur les tokens le 2026-08-03. Quand ces deux
- *                  derniers suivront, ce ton disparaît : c'est le critère de fin
- *                  de migration du chrome.
+ * **Il n'a plus d'appelant** : `calendar` et `squad` sont passés sur les tokens
+ * le 2026-08-03, `(player-tabs)/_layout` a suivi, et la pastille a quitté le
+ * bandeau de `PlayerDetailView` — un joueur ne change pas de saison. Le ton est
+ * supprimé avec ses trois valeurs figées. Le composant est désormais un
+ * contrôle du staff seul, et il lit toujours le thème.
  *
  * Corrections d'usage apportées au passage :
  *   - une seule saison disponible => rendu non tactile, sans chevron. Avant, le
@@ -34,11 +32,7 @@ import { HIT_SLOP_MIN } from '../lib/design/tokens';
 import { haptics } from '../lib/design/haptics';
 import { Text, Sheet, Badge } from './ui';
 
-export type SeasonHeaderButtonTone = 'surface' | 'onColor';
-
 export interface SeasonHeaderButtonProps {
-  /** Fond sur lequel le bouton est posé. Voir l'en-tête de fichier. */
-  tone?: SeasonHeaderButtonTone;
   style?: ViewStyle;
 }
 
@@ -46,7 +40,7 @@ export interface SeasonHeaderButtonProps {
 const PILL_HEIGHT = 30;
 const SLOP = Math.max(0, Math.round((HIT_SLOP_MIN - PILL_HEIGHT) / 2));
 
-export function SeasonHeaderButton({ tone = 'surface', style }: SeasonHeaderButtonProps) {
+export function SeasonHeaderButton({ style }: SeasonHeaderButtonProps) {
   const { activeSeason, clubSeason, availableSeasons, changeActiveSeason } = useActiveSeason();
   const { theme } = useTheme();
   const [open, setOpen] = useState(false);
@@ -55,20 +49,11 @@ export function SeasonHeaderButton({ tone = 'surface', style }: SeasonHeaderButt
   const isPast = activeSeason !== clubSeason;
   const canSwitch = availableSeasons.length > 1;
 
-  // Le ton `onColor` ne peut pas lire le thème : son hôte est un aplat opaque
-  // qui ne suit pas le mode clair/sombre. Valeurs figées, assumées, temporaires.
-  const palette =
-    tone === 'onColor'
-      ? {
-          bg: isPast ? 'rgba(251,191,36,0.28)' : 'rgba(255,255,255,0.18)',
-          border: isPast ? 'rgba(251,191,36,0.55)' : 'rgba(255,255,255,0.28)',
-          fg: isPast ? '#FDE68A' : '#FFFFFF',
-        }
-      : {
-          bg: isPast ? c.warning.subtle : c.accent.subtle,
-          border: isPast ? c.warning.default : c.accent.border,
-          fg: isPast ? c.warning.default : c.accent.default,
-        };
+  const palette = {
+    bg: isPast ? c.warning.subtle : c.accent.subtle,
+    border: isPast ? c.warning.default : c.accent.border,
+    fg: isPast ? c.warning.default : c.accent.default,
+  };
 
   const openPicker = () => {
     haptics.tapLight();

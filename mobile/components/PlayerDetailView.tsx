@@ -13,7 +13,10 @@
  *
  * - **Le bandeau était le dernier consommateur du ton `onColor`** de
  *   `SeasonHeaderButton`. Il reste une surface de marque, mais définie par le
- *   thème et non plus par un `#1a2744` en dur.
+ *   thème et non plus par un `#1a2744` en dur. La pastille de saison a depuis
+ *   quitté le bandeau : elle ne s'affichait que pour le joueur (`!isManager`),
+ *   à qui elle ne servait pas — il ne consulte que la saison en cours. Le ton
+ *   `onColor` n'a plus d'appelant et a été supprimé du composant.
  * - Le statut « blessé » était violet ici et bleu sur la feuille de présence.
  *   Une seule teinte désormais, via `sessionColor`.
  * - Les libellés de KPI faisaient **8 px**, ceux du calendrier de séances aussi.
@@ -42,7 +45,6 @@ import { Swipeable } from 'react-native-gesture-handler';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SeasonHeaderButton } from './SeasonHeaderButton';
 import { useTheme } from '../contexts/ThemeContext';
 import { haptics } from '../lib/design/haptics';
 import { supabase } from '../lib/supabase';
@@ -308,8 +310,12 @@ export function PlayerDetailView({
         {/* Cette ligne ne s'affiche que si elle a quelque chose à porter. Dans
             l'espace coach, l'écran vit sous un header natif qui assure déjà le
             retour et l'édition : la rendre vide empilait deux barres de
-            navigation et mangeait 36 pt de haut d'écran pour rien. */}
-        {(onBack || (isManager && onEdit) || !isManager) && (
+            navigation et mangeait 36 pt de haut d'écran pour rien.
+
+            Le `|| !isManager` a disparu de cette condition en même temps que la
+            pastille de saison : c'était son seul motif. Sans lui, la fiche du
+            joueur rendait de nouveau une barre vide. */}
+        {(onBack || (isManager && onEdit)) && (
         <View style={styles.headerNav}>
           {onBack ? (
             <Pressable
@@ -341,9 +347,6 @@ export function PlayerDetailView({
               </Text>
             </Pressable>
           )}
-          {/* Le bandeau reste une surface de marque : le ton `onColor` est ici
-              légitime et non plus une dette. */}
-          {!isManager && <SeasonHeaderButton tone="onColor" />}
         </View>
         )}
 
