@@ -103,6 +103,14 @@ export interface RecordedAction {
 /** Profondeur de la pile d'annulation. Au-delà, le coach passe par le bilan. */
 const UNDO_DEPTH = 12;
 
+/**
+ * Délai avant de signaler un chrono à l'arrêt, hors saisie d'action.
+ * 25 s : plus long qu'une pause volontaire pour souffler, bien plus court que
+ * la minute d'un temps mort — dont la reprise oubliée est justement le cas
+ * qu'on veut rattraper.
+ */
+const IDLE_GRACE_MS = 25_000;
+
 export interface UseMatchRecorderOptions {
   initialMatchId?: string | null;
   onMatchFinished?: () => void;
@@ -421,6 +429,49 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
     haptics.tapMedium();
     setIsRunning((r) => !r);
   }, []);
+
+  const startClock = useCallback(() => {
+    haptics.tapMedium();
+    setIsRunning(true);
+  }, []);
+
+  // ── Détection du chrono oublié ────────────────────────────────────────────
+
+  /**
+   * Deux oublis coûtent la même chose : le coup d'envoi non lancé, et la reprise
+   * après temps mort. Dans les deux cas les temps de jeu de la séquence sont
+   * perdus — la donnée que ce recorder existe pour produire.
+   *
+   * Deux déclencheurs, de sensibilité différente :
+   *
+   * - **Immédiat** si une action est saisie alors que le chrono est arrêté.
+   *   C'est le signal le plus net qu'il y a du jeu : personne ne note un tir
+   *   pendant un temps mort.
+   * - **Après {@link IDLE_GRACE_MS}** sinon. Assez long pour ne pas harceler
+   *   pendant une pause volontaire, assez court pour rattraper un coup d'envoi.
+   */
+  const [stoppedSince, setStoppedSince] = useState<number>(() => Date.now());
+  const [idleTick, setIdleTick] = useState(0);
+
+  useEffect(() => {
+    if (!isRunning) setStoppedSince(Date.now());
+  }, [isRunning]);
+
+  const matchIsLive = seconds > 0 || history.length > 0;
+
+  useEffect(() => {
+    if (isRunning || !matchIsLive || step !== 'record') return;
+    const id = setInterval(() => setIdleTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [isRunning, matchIsLive, step]);
+
+  const clockForgotten = useMemo(() => {
+    void idleTick; // relance l'évaluation à chaque seconde d'arrêt
+    if (isRunning || !matchIsLive || step !== 'record') return false;
+    const last = history[0];
+    if (last && last.at > stoppedSince) return true;
+    return Date.now() - stoppedSince > IDLE_GRACE_MS;
+  }, [idleTick, isRunning, matchIsLive, step, history, stoppedSince]);
 
   // ── Persistance locale ────────────────────────────────────────────────────
 
@@ -796,6 +847,9 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
     seconds,
     isRunning,
     toggleClock,
+    startClock,
+    clockForgotten,
+    clockNeverStarted: seconds === 0,
     nextHalf,
     resetSequences,
     // score et fautes

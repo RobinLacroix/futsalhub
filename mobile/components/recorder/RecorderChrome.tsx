@@ -20,7 +20,15 @@
  *   surtout aveuglant dans un gymnase le soir.
  */
 
-import { View, Pressable } from 'react-native';
+import { useEffect, useState } from 'react';
+import { View, Pressable, AccessibilityInfo } from 'react-native';
+import Animated, {
+  cancelAnimation,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme, makeStyles } from '../../contexts/ThemeContext';
 import { HIT_SLOP_MIN } from '../../lib/design/tokens';
@@ -41,6 +49,15 @@ export interface ClockBarProps {
   scoreOpponent: number;
   onEditScore: () => void;
   compact?: boolean;
+  /**
+   * Micro de dictée, posé à côté du play/pause.
+   *
+   * Il vivait dans l'onglet Saisie : pour dicter une action il fallait donc
+   * d'abord changer d'onglet, ce qui annule l'intérêt de la dictée — parler
+   * sans regarder l'écran. Ici il suit le chrono, donc il est sur tous les
+   * onglets. Absent si le module natif n'est pas dans le binaire.
+   */
+  voice?: { isListening: boolean; onPress: () => void; available: boolean };
 }
 
 export function ClockBar({
@@ -52,6 +69,7 @@ export function ClockBar({
   scoreOpponent,
   onEditScore,
   compact,
+  voice,
 }: ClockBarProps) {
   const s = useStyles();
   const { theme } = useTheme();
@@ -70,6 +88,24 @@ export function ClockBar({
           mi-temps
         </Text>
       </View>
+
+      {voice?.available && (
+        <Pressable
+          onPress={voice.onPress}
+          style={({ pressed }) => [
+            s.micBtn,
+            voice.isListening && s.micBtnOn,
+            pressed && s.pressed,
+          ]}
+          accessibilityRole="button"
+          accessibilityState={{ selected: voice.isListening }}
+          accessibilityLabel={
+            voice.isListening ? "Arrêter l'écoute vocale" : 'Dicter une action'
+          }
+        >
+          <Ionicons name={voice.isListening ? 'mic' : 'mic-outline'} size={22} color="#FFFFFF" />
+        </Pressable>
+      )}
 
       <Pressable
         onPress={onToggle}
@@ -102,6 +138,95 @@ export function ClockBar({
         </View>
       </Pressable>
     </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ClockAlertProps {
+  /** Le bandeau ne s'affiche que si le match est réellement en cours. */
+  visible: boolean;
+  onStart: () => void;
+  /** Le chrono n'a jamais tourné : le message change. */
+  neverStarted: boolean;
+}
+
+/**
+ * Rappel « chrono à l'arrêt ».
+ *
+ * Le scénario est banal et coûteux : coup de sifflet, le coach note une action,
+ * et le chrono n'a jamais démarré. Ou temps mort, reprise, et personne ne l'a
+ * relancé. Les temps de jeu de la séquence sont perdus, et c'est la donnée que
+ * ce recorder existe pour produire.
+ *
+ * Trois précautions pour que ce ne soit pas du harcèlement visuel :
+ *
+ * - **Il n'apparaît qu'après un délai de grâce** et seulement si le match est
+ *   déjà vivant (chrono entamé ou action saisie). Une pause volontaire de
+ *   quelques secondes ne déclenche rien.
+ * - **Le clignotement n'est jamais le seul signal** : le texte le dit, et
+ *   `accessibilityRole="alert"` le fait annoncer par VoiceOver.
+ * - **Il est actionnable.** Toucher le bandeau relance le chrono : le rappel et
+ *   sa correction sont le même geste, sinon il ne fait que culpabiliser.
+ */
+export function ClockAlert({ visible, onStart, neverStarted }: ClockAlertProps) {
+  const s = useStyles();
+  const pulse = useSharedValue(1);
+  const [reduceMotion, setReduceMotion] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((v) => alive && setReduceMotion(v))
+      .catch(() => {});
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
+    return () => {
+      alive = false;
+      sub.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!visible || reduceMotion) {
+      cancelAnimation(pulse);
+      pulse.value = 1;
+      return;
+    }
+    pulse.value = withRepeat(withTiming(0.35, { duration: 620 }), -1, true);
+    return () => cancelAnimation(pulse);
+  }, [visible, reduceMotion, pulse]);
+
+  const animated = useAnimatedStyle(() => ({ opacity: pulse.value }));
+
+  if (!visible) return null;
+
+  return (
+    <Pressable
+      onPress={() => {
+        haptics.tapMedium();
+        onStart();
+      }}
+      accessibilityRole="alert"
+      accessibilityLabel={
+        neverStarted
+          ? "Le chronomètre n'a pas démarré. Toucher pour le lancer."
+          : 'Le chronomètre est à l’arrêt. Toucher pour le relancer.'
+      }
+      style={({ pressed }) => [s.clockAlert, pressed && s.pressed]}
+    >
+      <Animated.View style={animated}>
+        <Ionicons name="alert-circle" size={17} color="#FFFFFF" />
+      </Animated.View>
+      <Text variant="caption" weight="700" style={s.onBrand}>
+        {neverStarted ? 'Chrono non démarré' : 'Chrono à l’arrêt'}
+      </Text>
+      <View style={s.clockAlertCta}>
+        <Ionicons name="play" size={13} color="#FFFFFF" />
+        <Text variant="caption" weight="700" style={s.onBrand}>
+          {neverStarted ? 'Lancer' : 'Relancer'}
+        </Text>
+      </View>
+    </Pressable>
   );
 }
 
@@ -278,31 +403,6 @@ export function OpponentBar({ onRecord, onUndo, counts }: OpponentBarProps) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface VoiceButtonProps {
-  isListening: boolean;
-  onPress: () => void;
-}
-
-export function VoiceButton({ isListening, onPress }: VoiceButtonProps) {
-  const s = useStyles();
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [s.voiceBtn, isListening && s.voiceBtnOn, pressed && s.pressed]}
-      accessibilityRole="button"
-      accessibilityLabel={isListening ? "Arrêter l'écoute vocale" : 'Activer la commande vocale'}
-      accessibilityState={{ selected: isListening }}
-    >
-      <Ionicons name={isListening ? 'mic' : 'mic-outline'} size={18} color="#FFFFFF" />
-      <Text variant="caption" style={s.onBrand} weight="600">
-        {isListening ? 'Écoute en cours…' : 'Commande vocale'}
-      </Text>
-    </Pressable>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
 export interface SyncBadgeProps {
   pending: number;
 }
@@ -370,6 +470,37 @@ const useStyles = makeStyles((t) => ({
   },
   playBtnRunning: { backgroundColor: '#FFFFFF', borderColor: '#FFFFFF' },
 
+  micBtn: {
+    width: HIT_SLOP_MIN,
+    height: HIT_SLOP_MIN,
+    borderRadius: HIT_SLOP_MIN / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  micBtnOn: { backgroundColor: t.colors.negative.fill, borderColor: '#FFFFFF' },
+
+  clockAlert: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: t.space.sm,
+    height: 30,
+    paddingHorizontal: t.space.md,
+    borderRadius: t.radius.sm,
+    backgroundColor: t.colors.warning.fill,
+  },
+  clockAlertCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: t.space.sm,
+    paddingVertical: 2,
+    borderRadius: t.radius.pill,
+    backgroundColor: 'rgba(0,0,0,0.28)',
+  },
+
   scoreBox: { flex: 1, alignItems: 'flex-end', minHeight: HIT_SLOP_MIN, justifyContent: 'center' },
   scoreEditHint: { flexDirection: 'row', alignItems: 'center', gap: 4 },
 
@@ -423,18 +554,6 @@ const useStyles = makeStyles((t) => ({
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.3)',
   },
-
-  voiceBtn: {
-    minHeight: HIT_SLOP_MIN,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: t.space.sm,
-    borderRadius: t.radius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
-  },
-  voiceBtnOn: { backgroundColor: t.colors.negative.fill, borderColor: '#FFFFFF' },
 
   syncBadge: {
     flexDirection: 'row',

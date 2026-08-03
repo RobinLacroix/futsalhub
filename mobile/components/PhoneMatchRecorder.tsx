@@ -42,9 +42,9 @@ import {
   useMatchRecorder,
   MatchPicker,
   ClockBar,
+  ClockAlert,
   FoulRow,
   OpponentBar,
-  VoiceButton,
   SyncBadge,
   VoiceOverlay,
   PlayerFieldCard,
@@ -315,6 +315,17 @@ export default function PhoneMatchRecorder({
           scoreOpponent={r.scoreOpponent}
           onEditScore={() => setScoreSheet(true)}
           compact
+          voice={{
+            isListening,
+            available: voiceAvailable,
+            onPress: isListening ? stopListening : startListening,
+          }}
+        />
+
+        <ClockAlert
+          visible={r.clockForgotten}
+          neverStarted={r.clockNeverStarted}
+          onStart={r.startClock}
         />
 
         {/* Fautes et actions adverses partagent la place que les seules fautes
@@ -435,13 +446,6 @@ export default function PhoneMatchRecorder({
         {/* ── Saisie ── */}
         {tab === 'saisie' && (
           <View style={s.block}>
-            {voiceAvailable && (
-              <VoiceButton
-                isListening={isListening}
-                onPress={isListening ? stopListening : startListening}
-              />
-            )}
-
             <Text variant="caption" tone="secondary">
               {selectedPlayer
                 ? `${selectedPlayer.first_name} ${selectedPlayer.last_name} — la sélection reste active pour enchaîner`

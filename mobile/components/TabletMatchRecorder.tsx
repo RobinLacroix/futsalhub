@@ -44,9 +44,9 @@ import {
   useMatchRecorder,
   MatchPicker,
   ClockBar,
+  ClockAlert,
   FoulRow,
   OpponentBar,
-  VoiceButton,
   SyncBadge,
   VoiceOverlay,
   PlayerActionCard,
@@ -379,6 +379,16 @@ export default function TabletMatchRecorder({
               scoreUs={r.scoreUs}
               scoreOpponent={r.scoreOpponent}
               onEditScore={() => setScoreSheet(true)}
+              voice={{
+                isListening,
+                available: voiceAvailable,
+                onPress: isListening ? stopListening : startListening,
+              }}
+            />
+            <ClockAlert
+              visible={r.clockForgotten}
+              neverStarted={r.clockNeverStarted}
+              onStart={r.startClock}
             />
           </View>
 
@@ -407,12 +417,6 @@ export default function TabletMatchRecorder({
           </View>
 
           <View style={s.sideCell}>
-            {voiceAvailable && (
-              <VoiceButton
-                isListening={isListening}
-                onPress={isListening ? stopListening : startListening}
-              />
-            )}
             <View style={s.timeoutRow}>
               <TimeoutChip
                 label="TM équipe"
@@ -705,7 +709,7 @@ const useStyles = makeStyles((t) => ({
 
   controls: { gap: t.space.md },
   controlsWide: { flexDirection: 'row', alignItems: 'flex-start' },
-  clockCell: { flex: 1.4 },
+  clockCell: { flex: 1.4, gap: t.space.xs },
   foulsCell: { flex: 1.2, justifyContent: 'center' },
   oppCell: { flex: 1.6, gap: t.space.xs },
   sideCell: { flex: 1, gap: t.space.sm },
