@@ -1,49 +1,47 @@
 import { Stack, useRouter } from 'expo-router';
-import { TouchableOpacity, Text, StyleSheet, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { View, StyleSheet } from 'react-native';
 import { useIsTablet } from '../../../hooks/useIsTablet';
+import { useTheme } from '../../../contexts/ThemeContext';
 import { SeasonHeaderButton } from '../../../components/SeasonHeaderButton';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
+import { IconButton } from '../../../components/ui';
 
-function HeaderAddButton() {
+/** Équipe non rattachée = lecture seule : les deux actions disparaissent. */
+function HeaderActions() {
   const router = useRouter();
   const { canEditActiveTeam } = useActiveTeam();
-  if (!canEditActiveTeam) return null; // lecture seule : équipe non rattachée
+  if (!canEditActiveTeam) return null;
   return (
-    <TouchableOpacity
-      style={styles.addButton}
-      onPress={() => router.push('/(tabs)/squad/new-player')}
-      activeOpacity={0.8}
-    >
-      <Text style={styles.addButtonText}>+</Text>
-    </TouchableOpacity>
-  );
-}
-
-function HeaderImportButton() {
-  const router = useRouter();
-  const { canEditActiveTeam } = useActiveTeam();
-  if (!canEditActiveTeam) return null; // lecture seule : équipe non rattachée
-  return (
-    <TouchableOpacity
-      style={styles.importButton}
-      onPress={() => router.push('/(tabs)/squad/import-players')}
-      activeOpacity={0.8}
-    >
-      <Ionicons name="cloud-upload-outline" size={19} color="#fff" />
-    </TouchableOpacity>
+    <>
+      <IconButton
+        icon="cloud-upload-outline"
+        label="Importer un effectif"
+        onPress={() => router.push('/(tabs)/squad/import-players')}
+      />
+      <IconButton
+        icon="add"
+        label="Ajouter un joueur"
+        onPress={() => router.push('/(tabs)/squad/new-player')}
+        variant="accent"
+      />
+    </>
   );
 }
 
 export default function SquadLayout() {
   const isTablet = useIsTablet();
+  const { theme } = useTheme();
+  const c = theme.colors;
+
   return (
     <Stack
       screenOptions={{
         headerShown: !isTablet,
-        headerStyle: { backgroundColor: '#3b82f6' },
-        headerTintColor: '#fff',
-        headerTitleStyle: { fontWeight: '600', fontSize: 18 },
+        headerStyle: { backgroundColor: c.bg.canvas },
+        headerShadowVisible: false,
+        headerTintColor: c.text.primary,
+        headerTitleStyle: { color: c.text.primary, fontWeight: '600', fontSize: 18 },
+        contentStyle: { backgroundColor: c.bg.canvas },
       }}
     >
       <Stack.Screen
@@ -51,11 +49,9 @@ export default function SquadLayout() {
         options={{
           title: 'Équipe',
           headerRight: () => (
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              {/* Header bleu non migré : ton `onColor` obligatoire ici. */}
-              <SeasonHeaderButton tone="onColor" style={{ marginRight: 8 }} />
-              <HeaderImportButton />
-              <HeaderAddButton />
+            <View style={styles.headerRight}>
+              <SeasonHeaderButton />
+              <HeaderActions />
             </View>
           ),
         }}
@@ -69,23 +65,5 @@ export default function SquadLayout() {
 }
 
 const styles = StyleSheet.create({
-  addButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  addButtonText: { color: '#fff', fontSize: 22, fontWeight: '600', lineHeight: 24 },
-  importButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 6,
-  },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 6, marginRight: 4 },
 });

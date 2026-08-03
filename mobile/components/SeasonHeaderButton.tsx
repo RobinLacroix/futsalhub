@@ -8,9 +8,12 @@
  * implicite qui casse dès que son hôte change :
  *
  *   - `surface`  : par défaut. Lit le thème, tient sur canvas comme sur surface.
- *   - `onColor`  : réservé aux headers encore à aplat coloré, non migrés
- *                  (calendar, squad, player-tabs, en-tête navy de PlayerDetailView).
- *                  À supprimer quand ces quatre écrans passeront sur les tokens.
+ *   - `onColor`  : réservé aux headers encore à aplat coloré, non migrés.
+ *                  Il n'en reste que deux : `(player-tabs)/_layout` (vert `#16a34a`)
+ *                  et l'en-tête navy de `PlayerDetailView`. `calendar` et `squad`
+ *                  sont passés sur les tokens le 2026-08-03. Quand ces deux
+ *                  derniers suivront, ce ton disparaît : c'est le critère de fin
+ *                  de migration du chrome.
  *
  * Corrections d'usage apportées au passage :
  *   - une seule saison disponible => rendu non tactile, sans chevron. Avant, le
