@@ -27,6 +27,9 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Text } from '../ui';
 import { fmPalette, type FMPalette } from './fmPalette';
+// Tracé et étiquetage partagés avec `components/charts/LineChart` : ces deux
+// aides étaient dupliquées, une troisième copie serait née avec le graphique suivant.
+import { smoothPath, labelledIndexes } from '../charts/LineChart';
 import type { PlayerRadarResult, RadarPerMatchStats } from '../../lib/services/players';
 import type { PlayerFeedbackRow } from '../../lib/services/feedback';
 
@@ -104,36 +107,6 @@ function radarGridTotal(data: PlayerRadarResult, rawKey: keyof RadarPerMatchStat
     default:
       return String(Math.round((raw[rawKey] as number) * raw.matchCount));
   }
-}
-
-/** Courbe lissée par tangentes de Catmull-Rom converties en Bézier cubiques. */
-function smoothPath(pts: { x: number; y: number }[]): string {
-  if (pts.length < 2) return '';
-  const d: string[] = [`M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`];
-  for (let i = 1; i < pts.length; i++) {
-    const p0 = pts[i - 2] ?? pts[i - 1];
-    const p1 = pts[i - 1];
-    const p2 = pts[i];
-    const p3 = pts[i + 1] ?? p2;
-    const cp1x = p1.x + (p2.x - p0.x) / 6;
-    const cp1y = p1.y + (p2.y - p0.y) / 6;
-    const cp2x = p2.x - (p3.x - p1.x) / 6;
-    const cp2y = p2.y - (p3.y - p1.y) / 6;
-    d.push(
-      `C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
-    );
-  }
-  return d.join(' ');
-}
-
-/** Indices de dates à étiqueter, pour ne pas superposer les libellés. */
-function labelledIndexes(n: number): number[] {
-  if (n <= 5) return Array.from({ length: n }, (_, i) => i);
-  const step = Math.floor((n - 1) / 4);
-  const out = [0];
-  for (let k = 1; k <= 3; k++) out.push(step * k);
-  out.push(n - 1);
-  return [...new Set(out)];
 }
 
 const shortDate = (iso: string) =>
