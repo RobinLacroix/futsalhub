@@ -1,40 +1,59 @@
-import { useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  ActivityIndicator,
-  Alert,
-} from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { View, StyleSheet, ScrollView, Alert, Pressable, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { Asset } from 'expo-asset';
+import { format, isValid, parse } from 'date-fns';
+import { useTheme } from '../../../contexts/ThemeContext';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 import { getPlayersByTeam, createPlayersBulk } from '../../../lib/services/players';
-import { parsePlayersWorkbook, markExistingDuplicates, ImportTemplateError, type ParsedPlayerRow } from '../../../lib/importPlayers';
-
-const POSITION_COLORS: Record<string, { color: string; bg: string; abbr: string }> = {
-  Gardien: { color: '#d97706', bg: 'rgba(217,119,6,0.12)', abbr: 'GB' },
-  Meneur:  { color: '#059669', bg: 'rgba(5,150,105,0.10)', abbr: 'MEN' },
-  Ailier:  { color: '#2563eb', bg: 'rgba(37,99,235,0.10)', abbr: 'AIL' },
-  Pivot:   { color: '#ea580c', bg: 'rgba(234,88,12,0.10)', abbr: 'PIV' },
-};
+import {
+  parsePlayersWorkbook,
+  markExistingDuplicates,
+  ImportTemplateError,
+  type ParsedPlayerRow,
+} from '../../../lib/importPlayers';
+import { haptics } from '../../../lib/design/haptics';
+import { Text, Card, Button, Badge, EmptyState } from '../../../components/ui';
+import { positionStyle } from '../../../components/players/positions';
 
 const REQUIRED_FIELDS = ['Prénom', 'Nom', 'Date de naissance', 'Poste', 'Pied fort'];
 
+/**
+ * Vert et blanc d'Excel. Seules couleurs figées de l'écran, et volontairement :
+ * elles identifient le FORMAT de fichier, pas l'application. Les faire suivre le
+ * thème rendrait l'icône méconnaissable, ce qui est exactement l'inverse du but.
+ */
+const XLSX_BRAND = { bg: '#1D6F42', fg: '#FFFFFF' } as const;
+
 type Step = 1 | 2 | 3 | 4;
+
+const STEPS: { value: Step; label: string }[] = [
+  { value: 1, label: 'Modèle' },
+  { value: 2, label: 'Fichier' },
+  { value: 3, label: 'Vérification' },
+  { value: 4, label: 'Terminé' },
+];
+
+/** Le parseur renvoie de l'ISO ; on l'affiche au format français. */
+function fmtBirthDate(iso: string): string {
+  const d = parse(iso, 'yyyy-MM-dd', new Date());
+  return isValid(d) ? format(d, 'dd/MM/yyyy') : iso;
+}
 
 export default function ImportPlayersScreen() {
   const router = useRouter();
+  const { theme } = useTheme();
+  const c = theme.colors;
   const { activeTeamId, activeTeam } = useActiveTeam();
 
   const [step, setStep] = useState<Step>(1);
-  const [existingPlayers, setExistingPlayers] = useState<Array<{ first_name: string; last_name: string }>>([]);
+  const [existingPlayers, setExistingPlayers] = useState<
+    Array<{ first_name: string; last_name: string }>
+  >([]);
 
   const [fileName, setFileName] = useState<string | null>(null);
   const [rows, setRows] = useState<ParsedPlayerRow[]>([]);
@@ -47,9 +66,23 @@ export default function ImportPlayersScreen() {
   useEffect(() => {
     if (!activeTeamId) return;
     getPlayersByTeam(activeTeamId)
-      .then(players => setExistingPlayers(players.map(p => ({ first_name: p.first_name, last_name: p.last_name }))))
+      .then((players) =>
+        setExistingPlayers(players.map((p) => ({ first_name: p.first_name, last_name: p.last_name })))
+      )
       .catch(() => setExistingPlayers([]));
   }, [activeTeamId]);
+
+  const counts = useMemo(
+    () => ({
+      ok: rows.filter((r) => r.status === 'ok').length,
+      dup: rows.filter((r) => r.status === 'duplicate').length,
+      err: rows.filter((r) => r.status === 'error').length,
+    }),
+    [rows]
+  );
+  const selectedCount = included.size;
+
+  // ── Actions ───────────────────────────────────────────────────────────────
 
   const reset = () => {
     setFileName(null);
@@ -59,7 +92,13 @@ export default function ImportPlayersScreen() {
     setStep(1);
   };
 
-  const handleShareTemplate = async () => {
+  const clearFile = () => {
+    setFileName(null);
+    setRows([]);
+    setIncluded(new Set());
+  };
+
+  const shareTemplate = async () => {
     try {
       const asset = Asset.fromModule(require('../../../assets/templates/modele_import_effectif.xlsx'));
       await asset.downloadAsync();
@@ -73,11 +112,12 @@ export default function ImportPlayersScreen() {
         Alert.alert('Partage indisponible', "Le partage de fichiers n'est pas disponible sur cet appareil.");
       }
     } catch {
+      haptics.error();
       Alert.alert('Erreur', "Impossible d'ouvrir le modèle.");
     }
   };
 
-  const handlePickFile = async () => {
+  const pickFile = async () => {
     setParseError(null);
     const result = await DocumentPicker.getDocumentAsync({
       type: [
@@ -95,18 +135,24 @@ export default function ImportPlayersScreen() {
       const parsed = markExistingDuplicates(parsePlayersWorkbook(base64), existingPlayers);
       setFileName(file.name);
       setRows(parsed);
-      setIncluded(new Set(parsed.filter(r => r.status === 'ok').map(r => r.rowNumber)));
+      setIncluded(new Set(parsed.filter((r) => r.status === 'ok').map((r) => r.rowNumber)));
+      haptics.success();
     } catch (err) {
-      setFileName(null);
-      setRows([]);
-      setParseError(err instanceof ImportTemplateError ? err.message : "Impossible de lire ce fichier. Vérifiez qu'il s'agit bien d'un .xlsx basé sur le modèle.");
+      haptics.error();
+      clearFile();
+      setParseError(
+        err instanceof ImportTemplateError
+          ? err.message
+          : "Impossible de lire ce fichier. Vérifiez qu'il s'agit bien d'un .xlsx basé sur le modèle."
+      );
     } finally {
       setIsParsing(false);
     }
   };
 
   const toggleRow = (rowNumber: number) => {
-    setIncluded(prev => {
+    haptics.select();
+    setIncluded((prev) => {
       const next = new Set(prev);
       if (next.has(rowNumber)) next.delete(rowNumber);
       else next.add(rowNumber);
@@ -114,227 +160,403 @@ export default function ImportPlayersScreen() {
     });
   };
 
-  const okCount = rows.filter(r => r.status === 'ok').length;
-  const dupCount = rows.filter(r => r.status === 'duplicate').length;
-  const errCount = rows.filter(r => r.status === 'error').length;
-  const selectedCount = included.size;
+  const toggleAllSelectable = () => {
+    const selectable = rows.filter((r) => r.status !== 'error').map((r) => r.rowNumber);
+    haptics.tapMedium();
+    setIncluded((prev) => (prev.size === selectable.length ? new Set() : new Set(selectable)));
+  };
 
-  const handleConfirmImport = async () => {
+  const confirmImport = async () => {
     if (!activeTeamId) return;
     setIsImporting(true);
     try {
-      const toCreate = rows
-        .filter(r => included.has(r.rowNumber) && r.data)
-        .map(r => r.data!);
+      const toCreate = rows.filter((r) => included.has(r.rowNumber) && r.data).map((r) => r.data!);
       const created = await createPlayersBulk(activeTeamId, toCreate);
       setImportedCount(created.length);
+      haptics.success();
       setStep(4);
     } catch (err) {
+      haptics.error();
       Alert.alert('Erreur', err instanceof Error ? err.message : "Erreur lors de l'import.");
     } finally {
       setIsImporting(false);
     }
   };
 
+  // ── État non nominal ──────────────────────────────────────────────────────
+
   if (!activeTeamId) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.emptyText}>Choisissez une équipe dans l&apos;onglet Accueil</Text>
+      <View style={[styles.root, { backgroundColor: c.bg.canvas }]}>
+        <EmptyState
+          icon="people-outline"
+          title="Aucune équipe sélectionnée"
+          description="Choisissez une équipe depuis l'accueil avant d'importer un effectif."
+          action={{ label: "Aller à l'accueil", onPress: () => router.replace('/(tabs)') }}
+        />
       </View>
     );
   }
 
+  // ── Rendu ─────────────────────────────────────────────────────────────────
+
   return (
-    <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
-
-        {/* ── Étape 1 : modèle ────────────────────────────────────────── */}
-        {step === 1 && (
-          <View>
-            <Text style={styles.title}>1. Téléchargez le modèle</Text>
-            <Text style={styles.subtitle}>
-              Partagez-vous le modèle (Fichiers, e-mail…), remplissez une ligne par joueur, puis réimportez-le à l&apos;étape suivante.
-            </Text>
-            <View style={styles.chipRow}>
-              {REQUIRED_FIELDS.map(f => (
-                <View key={f} style={styles.fieldChip}>
-                  <Text style={styles.fieldChipText}>{f} <Text style={styles.req}>*</Text></Text>
-                </View>
-              ))}
-              <View style={styles.fieldChip}>
-                <Text style={[styles.fieldChipText, { color: '#94a3b8' }]}>Numéro (optionnel)</Text>
+    <View style={[styles.root, { backgroundColor: c.bg.canvas }]}>
+      {/* Le parcours annonçait ses étapes dans le titre (« 1. », « 2. »…) sans
+          jamais montrer où l'on en était ni combien il en restait. */}
+      <View style={[styles.stepper, { backgroundColor: c.bg.surface, borderBottomColor: c.border.subtle }]}>
+        {STEPS.map((s, i) => {
+          const done = step > s.value;
+          const current = step === s.value;
+          return (
+            <View key={s.value} style={styles.stepItem}>
+              {i > 0 && (
+                <View
+                  style={[
+                    styles.stepLine,
+                    { backgroundColor: done || current ? c.accent.default : c.border.subtle },
+                  ]}
+                />
+              )}
+              <View
+                style={[
+                  styles.stepDot,
+                  {
+                    backgroundColor: done ? c.accent.fill : current ? c.accent.subtle : c.bg.sunken,
+                    borderColor: done || current ? c.accent.default : c.border.subtle,
+                  },
+                ]}
+              >
+                {done ? (
+                  <Ionicons name="checkmark" size={13} color={c.text.onFill} />
+                ) : (
+                  <Text variant="caption" tone={current ? 'accent' : 'tertiary'} weight="700" numeric>
+                    {s.value}
+                  </Text>
+                )}
               </View>
+              <Text
+                variant="caption"
+                tone={current ? 'accent' : done ? 'secondary' : 'tertiary'}
+                weight={current ? '700' : '500'}
+                numberOfLines={1}
+              >
+                {s.label}
+              </Text>
             </View>
-            <Text style={styles.hint}><Text style={styles.req}>*</Text> obligatoire — une ligne incomplète sera signalée en erreur.</Text>
+          );
+        })}
+      </View>
 
-            <TouchableOpacity style={styles.templateRow} onPress={handleShareTemplate} activeOpacity={0.8}>
-              <View style={styles.xlsIcon}>
-                <Ionicons name="document-text-outline" size={20} color="#fff" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.templateName}>modele_import_effectif.xlsx</Text>
-                <Text style={styles.templateMeta}>Toucher pour partager / enregistrer</Text>
-              </View>
-              <Ionicons name="share-outline" size={20} color="#3b82f6" />
-            </TouchableOpacity>
+      <ScrollView contentContainerStyle={[styles.content, { gap: theme.space.lg }]}>
+        {/* ── 1. Modèle ─────────────────────────────────────────────────── */}
+        {step === 1 && (
+          <>
+            <View style={styles.intro}>
+              <Text variant="title">Téléchargez le modèle</Text>
+              <Text variant="body" tone="secondary">
+                Envoyez-vous le fichier (Fichiers, e-mail…), remplissez une ligne par joueur, puis
+                réimportez-le à l'étape suivante.
+              </Text>
+            </View>
 
-            <TouchableOpacity style={styles.primaryBtn} onPress={() => setStep(2)} activeOpacity={0.85}>
-              <Text style={styles.primaryBtnText}>J&apos;ai rempli mon fichier</Text>
-              <Ionicons name="arrow-forward" size={16} color="#fff" />
-            </TouchableOpacity>
-          </View>
+            <Card variant="flat" padding="lg" style={{ gap: theme.space.md }}>
+              <Text variant="callout" tone="secondary" weight="700">
+                Colonnes attendues
+              </Text>
+              <View style={styles.chipRow}>
+                {REQUIRED_FIELDS.map((f) => (
+                  <Badge key={f} label={f} tone="accent" size="sm" />
+                ))}
+                <Badge label="Numéro (optionnel)" size="sm" />
+              </View>
+              <Text variant="caption" tone="tertiary">
+                Une ligne à laquelle il manque une colonne obligatoire sera signalée en erreur et
+                ne sera pas importée.
+              </Text>
+            </Card>
+
+            <Pressable
+              onPress={shareTemplate}
+              accessibilityRole="button"
+              accessibilityLabel="Partager le modèle modele_import_effectif.xlsx"
+              style={({ pressed }) => [
+                styles.fileRow,
+                {
+                  backgroundColor: pressed ? c.bg.sunken : c.bg.surface,
+                  borderColor: c.border.strong,
+                  borderRadius: theme.radius.md,
+                },
+              ]}
+            >
+              <View style={[styles.fileIcon, { backgroundColor: XLSX_BRAND.bg, borderRadius: theme.radius.sm }]}>
+                <Ionicons name="document-text-outline" size={20} color={XLSX_BRAND.fg} />
+              </View>
+              <View style={styles.fileText}>
+                <Text variant="body" weight="700" numberOfLines={1}>
+                  modele_import_effectif.xlsx
+                </Text>
+                <Text variant="caption" tone="tertiary">
+                  Toucher pour partager ou enregistrer
+                </Text>
+              </View>
+              <Ionicons name="share-outline" size={20} color={c.accent.default} />
+            </Pressable>
+
+            <Button
+              label="J'ai rempli mon fichier"
+              icon="arrow-forward"
+              iconAfter
+              size="lg"
+              block
+              onPress={() => setStep(2)}
+            />
+          </>
         )}
 
-        {/* ── Étape 2 : upload ────────────────────────────────────────── */}
+        {/* ── 2. Fichier ────────────────────────────────────────────────── */}
         {step === 2 && (
-          <View>
-            <Text style={styles.title}>2. Importez votre fichier rempli</Text>
+          <>
+            <Text variant="title">Importez votre fichier rempli</Text>
 
             {!fileName && (
-              <TouchableOpacity style={styles.dropzone} onPress={handlePickFile} activeOpacity={0.85} disabled={isParsing}>
+              <Pressable
+                onPress={pickFile}
+                disabled={isParsing}
+                accessibilityRole="button"
+                accessibilityLabel="Choisir un fichier Excel à importer"
+                style={({ pressed }) => [
+                  styles.dropzone,
+                  {
+                    backgroundColor: pressed ? c.bg.sunken : c.bg.surface,
+                    borderColor: c.border.strong,
+                    borderRadius: theme.radius.lg,
+                  },
+                ]}
+              >
                 {isParsing ? (
-                  <ActivityIndicator color="#3b82f6" />
+                  <>
+                    <ActivityIndicator color={c.accent.default} />
+                    <Text variant="callout" tone="secondary">
+                      Lecture du fichier…
+                    </Text>
+                  </>
                 ) : (
                   <>
-                    <Ionicons name="cloud-upload-outline" size={30} color="#3b82f6" />
-                    <Text style={styles.dropzoneTitle}>Choisir votre fichier rempli</Text>
-                    <Text style={styles.dropzoneHint}>Format accepté : .xlsx — basé sur le modèle</Text>
+                    <Ionicons name="cloud-upload-outline" size={32} color={c.accent.default} />
+                    <Text variant="headline">Choisir votre fichier</Text>
+                    <Text variant="callout" tone="tertiary">
+                      Format accepté : .xlsx, basé sur le modèle
+                    </Text>
                   </>
                 )}
-              </TouchableOpacity>
+              </Pressable>
             )}
 
             {parseError && (
-              <View style={styles.errorBox}>
-                <Ionicons name="alert-circle-outline" size={16} color="#dc2626" />
-                <Text style={styles.errorBoxText}>{parseError}</Text>
-              </View>
+              <Card variant="flat" padding="sm" style={[styles.errorBox, { backgroundColor: c.negative.subtle }]}>
+                <Ionicons name="alert-circle" size={18} color={c.negative.default} />
+                <Text variant="callout" tone="negative" style={styles.flex}>
+                  {parseError}
+                </Text>
+              </Card>
             )}
 
             {fileName && (
-              <View style={styles.templateRow}>
-                <View style={styles.xlsIcon}>
-                  <Ionicons name="document-text-outline" size={17} color="#fff" />
+              <View
+                style={[
+                  styles.fileRow,
+                  { backgroundColor: c.bg.surface, borderColor: c.border.subtle, borderRadius: theme.radius.md },
+                ]}
+              >
+                <View style={[styles.fileIcon, { backgroundColor: XLSX_BRAND.bg, borderRadius: theme.radius.sm }]}>
+                  <Ionicons name="document-text-outline" size={18} color={XLSX_BRAND.fg} />
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.templateName}>{fileName}</Text>
-                  <Text style={styles.templateMeta}>{rows.length} ligne{rows.length !== 1 ? 's' : ''} détectée{rows.length !== 1 ? 's' : ''}</Text>
+                <View style={styles.fileText}>
+                  <Text variant="body" weight="700" numberOfLines={1}>
+                    {fileName}
+                  </Text>
+                  <Text variant="caption" tone="tertiary">
+                    {rows.length} ligne{rows.length !== 1 ? 's' : ''} détectée
+                    {rows.length !== 1 ? 's' : ''}
+                  </Text>
                 </View>
-                <TouchableOpacity onPress={() => { setFileName(null); setRows([]); setIncluded(new Set()); }}>
-                  <Ionicons name="close-circle" size={22} color="#94a3b8" />
-                </TouchableOpacity>
+                <Pressable
+                  onPress={clearFile}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retirer ce fichier"
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                >
+                  <Ionicons name="close-circle" size={22} color={c.text.tertiary} />
+                </Pressable>
               </View>
             )}
 
-            <View style={styles.footerRow}>
-              <TouchableOpacity style={styles.textBtn} onPress={() => setStep(1)}>
-                <Ionicons name="arrow-back" size={15} color="#64748b" />
-                <Text style={styles.textBtnText}>Retour</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.primaryBtn, !fileName && styles.primaryBtnDisabled]}
-                onPress={() => fileName && setStep(3)}
+            <View style={[styles.footerRow, { gap: theme.space.md }]}>
+              <Button label="Retour" icon="arrow-back" variant="ghost" onPress={() => setStep(1)} />
+              <Button
+                label="Analyser le fichier"
+                icon="arrow-forward"
+                iconAfter
                 disabled={!fileName}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.primaryBtnText}>Analyser le fichier</Text>
-                <Ionicons name="arrow-forward" size={16} color="#fff" />
-              </TouchableOpacity>
+                onPress={() => setStep(3)}
+                style={styles.flex}
+              />
             </View>
-          </View>
+          </>
         )}
 
-        {/* ── Étape 3 : vérification ──────────────────────────────────── */}
+        {/* ── 3. Vérification ───────────────────────────────────────────── */}
         {step === 3 && (
-          <View>
-            <Text style={styles.title}>3. Vérifiez avant d&apos;importer</Text>
-            <View style={styles.statRow}>
-              <StatPill label="lignes" value={rows.length} tone="neutral" />
-              <StatPill label="OK" value={okCount} tone="ok" />
-              <StatPill label="doublons" value={dupCount} tone="warn" />
-              <StatPill label="erreurs" value={errCount} tone="err" />
+          <>
+            <Text variant="title">Vérifiez avant d'importer</Text>
+
+            <View style={styles.chipRow}>
+              <Badge label={`${rows.length} lignes`} size="sm" />
+              <Badge label={`${counts.ok} prêtes`} tone="positive" size="sm" />
+              {counts.dup > 0 && <Badge label={`${counts.dup} doublons`} tone="warning" size="sm" />}
+              {counts.err > 0 && <Badge label={`${counts.err} erreurs`} tone="negative" size="sm" />}
             </View>
 
-            {rows.map(r => {
-              const posInfo = r.data ? POSITION_COLORS[r.data.position] : null;
+            {rows.some((r) => r.status !== 'error') && (
+              <Button
+                label={
+                  selectedCount === rows.filter((r) => r.status !== 'error').length
+                    ? 'Tout décocher'
+                    : 'Tout cocher'
+                }
+                variant="ghost"
+                size="sm"
+                onPress={toggleAllSelectable}
+                style={styles.selfStart}
+              />
+            )}
+
+            {rows.map((r) => {
               const isErr = r.status === 'error';
+              const checked = included.has(r.rowNumber);
+              const pos = r.data ? positionStyle(r.data.position, c) : null;
+              const name = `${r.input.first_name || '—'} ${r.input.last_name || '—'}`;
+
+              const statusText =
+                r.status === 'ok'
+                  ? 'Prêt à importer'
+                  : r.status === 'duplicate'
+                    ? r.duplicateOf === 'file'
+                      ? 'Doublon dans le fichier'
+                      : "Déjà dans l'effectif"
+                    : r.errorMessage;
+
               return (
-                <TouchableOpacity
+                <Pressable
                   key={r.rowNumber}
-                  style={[styles.rowCard, r.status === 'duplicate' && styles.rowCardDup, isErr && styles.rowCardErr]}
                   onPress={() => !isErr && toggleRow(r.rowNumber)}
                   disabled={isErr}
-                  activeOpacity={0.7}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked, disabled: isErr }}
+                  accessibilityLabel={`${name}. ${statusText}`}
+                  style={({ pressed }) => [
+                    styles.rowCard,
+                    {
+                      borderRadius: theme.radius.md,
+                      gap: theme.space.md,
+                      backgroundColor: pressed ? c.bg.sunken : c.bg.surface,
+                      borderColor:
+                        r.status === 'duplicate'
+                          ? c.warning.default
+                          : isErr
+                            ? c.negative.default
+                            : checked
+                              ? c.accent.default
+                              : c.border.subtle,
+                    },
+                  ]}
                 >
                   <Ionicons
-                    name={included.has(r.rowNumber) ? 'checkbox' : isErr ? 'close-circle-outline' : 'square-outline'}
-                    size={22}
-                    color={isErr ? '#cbd5e1' : included.has(r.rowNumber) ? '#3b82f6' : '#94a3b8'}
+                    name={isErr ? 'close-circle' : checked ? 'checkbox' : 'square-outline'}
+                    size={23}
+                    color={isErr ? c.negative.default : checked ? c.accent.default : c.text.tertiary}
                   />
-                  <View style={{ flex: 1, marginLeft: 10 }}>
-                    <Text style={[styles.rowName, isErr && styles.rowNameErr]}>
-                      {r.input.first_name || '—'} {r.input.last_name || '—'}
+                  <View style={styles.rowBody}>
+                    <Text variant="body" weight="700" tone={isErr ? 'tertiary' : 'primary'} numberOfLines={1}>
+                      {name}
                     </Text>
-                    <View style={styles.rowMetaLine}>
-                      {posInfo && (
-                        <View style={[styles.posBadge, { backgroundColor: posInfo.bg }]}>
-                          <Text style={[styles.posBadgeText, { color: posInfo.color }]}>{posInfo.abbr}</Text>
+                    <View style={styles.rowMeta}>
+                      {pos && (
+                        <View style={[styles.posBadge, { borderColor: pos.color }]}>
+                          <Text variant="caption" color={pos.color} weight="700">
+                            {pos.abbr}
+                          </Text>
                         </View>
                       )}
-                      <Text style={styles.rowMeta}>
-                        {r.data ? `${r.data.birth_date} · ${r.data.strong_foot}${r.data.number ? ` · #${r.data.number}` : ''}` : r.input.birth_date || '—'}
+                      <Text variant="caption" tone="tertiary" numberOfLines={1} style={styles.flex}>
+                        {r.data
+                          ? `${fmtBirthDate(r.data.birth_date)} · ${r.data.strong_foot}${
+                              r.data.number ? ` · n° ${r.data.number}` : ''
+                            }`
+                          : r.input.birth_date || '—'}
                       </Text>
                     </View>
-                    {r.status === 'ok' && <Text style={styles.statusOk}>Prêt</Text>}
-                    {r.status === 'duplicate' && (
-                      <Text style={styles.statusWarn}>{r.duplicateOf === 'file' ? 'Doublon dans le fichier' : "Déjà dans l'effectif"}</Text>
-                    )}
-                    {r.status === 'error' && <Text style={styles.statusErr}>{r.errorMessage}</Text>}
+                    <Text
+                      variant="caption"
+                      tone={
+                        r.status === 'ok' ? 'positive' : r.status === 'duplicate' ? 'warning' : 'negative'
+                      }
+                      weight="700"
+                    >
+                      {statusText}
+                    </Text>
                   </View>
-                </TouchableOpacity>
+                </Pressable>
               );
             })}
 
-            <View style={styles.footerRow}>
-              <Text style={styles.footerMsg}>
-                <Text style={{ fontWeight: '700', color: '#0f172a' }}>{selectedCount}</Text> joueur{selectedCount !== 1 ? 's' : ''} seront ajoutés à {activeTeam?.name}
+            <Card variant="flat" padding="sm">
+              <Text variant="callout" tone="secondary">
+                <Text variant="callout" weight="700" numeric>
+                  {selectedCount}
+                </Text>{' '}
+                joueur{selectedCount !== 1 ? 's' : ''} {selectedCount !== 1 ? 'seront' : 'sera'}{' '}
+                ajouté{selectedCount !== 1 ? 's' : ''} à {activeTeam?.name}.
               </Text>
-            </View>
-            <View style={styles.footerRow}>
-              <TouchableOpacity style={styles.textBtn} onPress={() => router.back()}>
-                <Text style={styles.textBtnText}>Annuler</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.primaryBtn, (selectedCount === 0 || isImporting) && styles.primaryBtnDisabled]}
-                onPress={handleConfirmImport}
+            </Card>
+
+            <View style={[styles.footerRow, { gap: theme.space.md }]}>
+              <Button label="Annuler" variant="ghost" onPress={() => router.back()} />
+              <Button
+                label={`Importer ${selectedCount} joueur${selectedCount !== 1 ? 's' : ''}`}
+                icon="people-outline"
                 disabled={selectedCount === 0 || isImporting}
-                activeOpacity={0.85}
-              >
-                {isImporting ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="people-outline" size={16} color="#fff" />}
-                <Text style={styles.primaryBtnText}>Importer {selectedCount} joueur{selectedCount !== 1 ? 's' : ''}</Text>
-              </TouchableOpacity>
+                loading={isImporting}
+                onPress={confirmImport}
+                style={styles.flex}
+              />
             </View>
-          </View>
+          </>
         )}
 
-        {/* ── Étape 4 : confirmation ──────────────────────────────────── */}
+        {/* ── 4. Terminé ────────────────────────────────────────────────── */}
         {step === 4 && (
-          <View style={styles.successWrap}>
-            <View style={styles.checkRing}>
-              <Ionicons name="checkmark" size={34} color="#16a34a" />
+          <View style={styles.success}>
+            <View style={[styles.checkRing, { backgroundColor: c.positive.subtle }]}>
+              <Ionicons name="checkmark" size={36} color={c.positive.default} />
             </View>
-            <Text style={styles.successTitle}>
-              {importedCount} joueur{importedCount !== 1 ? 's' : ''} ajouté{importedCount !== 1 ? 's' : ''} à l&apos;effectif
+            <Text variant="title" style={styles.center}>
+              {importedCount} joueur{importedCount !== 1 ? 's' : ''} ajouté
+              {importedCount !== 1 ? 's' : ''}
             </Text>
-            <Text style={styles.successSubtitle}>
-              Ils apparaissent dans {activeTeam?.name}. Complétez les fiches quand vous aurez un moment.
+            <Text variant="body" tone="secondary" style={styles.center}>
+              Ils apparaissent dans {activeTeam?.name}. Complétez leurs fiches quand vous aurez un
+              moment.
             </Text>
-            <TouchableOpacity style={[styles.primaryBtn, { marginTop: 20 }]} onPress={() => router.replace('/(tabs)/squad')} activeOpacity={0.85}>
-              <Text style={styles.primaryBtnText}>Voir l&apos;effectif</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.textBtn} onPress={reset}>
-              <Text style={styles.textBtnText}>Importer un autre fichier</Text>
-            </TouchableOpacity>
+            <Button
+              label="Voir l'effectif"
+              size="lg"
+              block
+              onPress={() => router.replace('/(tabs)/squad')}
+              style={styles.successBtn}
+            />
+            <Button label="Importer un autre fichier" variant="ghost" block onPress={reset} />
           </View>
         )}
       </ScrollView>
@@ -342,68 +564,69 @@ export default function ImportPlayersScreen() {
   );
 }
 
-function StatPill({ label, value, tone }: { label: string; value: number; tone: 'neutral' | 'ok' | 'warn' | 'err' }) {
-  const styles2: Record<string, { bg: string; color: string }> = {
-    neutral: { bg: '#f8fafc', color: '#64748b' },
-    ok: { bg: 'rgba(22,163,74,0.10)', color: '#16a34a' },
-    warn: { bg: 'rgba(217,119,6,0.10)', color: '#d97706' },
-    err: { bg: 'rgba(220,38,38,0.10)', color: '#dc2626' },
-  };
-  const s = styles2[tone];
-  return (
-    <View style={[styles.statPill, { backgroundColor: s.bg }]}>
-      <Text style={[styles.statPillValue, { color: s.color }]}>{value}</Text>
-      <Text style={[styles.statPillLabel, { color: s.color }]}>{label}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f3f4f6' },
+  root: { flex: 1 },
+  flex: { flex: 1 },
+  center: { textAlign: 'center' },
+  selfStart: { alignSelf: 'flex-start' },
   content: { padding: 16, paddingBottom: 40 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  emptyText: { fontSize: 16, color: '#6b7280' },
-  title: { fontSize: 17, fontWeight: '700', color: '#0f172a', marginBottom: 6 },
-  subtitle: { fontSize: 13.5, color: '#64748b', lineHeight: 19, marginBottom: 16 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
-  fieldChip: { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 100, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0' },
-  fieldChipText: { fontSize: 11.5, fontWeight: '700', color: '#0f172a' },
-  req: { color: '#dc2626', fontWeight: '800' },
-  hint: { fontSize: 11.5, color: '#94a3b8', marginBottom: 18 },
-  templateRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', borderStyle: 'dashed', borderRadius: 12, padding: 14, marginBottom: 20 },
-  xlsIcon: { width: 38, height: 38, borderRadius: 9, backgroundColor: '#1D6F42', justifyContent: 'center', alignItems: 'center' },
-  templateName: { fontSize: 13, fontWeight: '700', color: '#0f172a' },
-  templateMeta: { fontSize: 11.5, color: '#64748b', marginTop: 2 },
-  primaryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#3b82f6', borderRadius: 12, paddingVertical: 14, paddingHorizontal: 18 },
-  primaryBtnDisabled: { opacity: 0.5 },
-  primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 14.5 },
-  dropzone: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff', borderWidth: 1.5, borderColor: '#cbd5e1', borderStyle: 'dashed', borderRadius: 14, paddingVertical: 40, marginBottom: 16, gap: 8 },
-  dropzoneTitle: { fontSize: 14.5, fontWeight: '700', color: '#0f172a' },
-  dropzoneHint: { fontSize: 12, color: '#64748b' },
-  errorBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: 'rgba(220,38,38,0.08)', borderWidth: 1, borderColor: 'rgba(220,38,38,0.25)', borderRadius: 10, padding: 12, marginBottom: 16 },
-  errorBoxText: { flex: 1, fontSize: 12.5, color: '#991b1b' },
-  footerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, gap: 12 },
-  textBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 6 },
-  textBtnText: { fontSize: 13.5, fontWeight: '600', color: '#64748b' },
-  footerMsg: { fontSize: 13, color: '#64748b' },
-  statRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
-  statPill: { flexDirection: 'row', alignItems: 'baseline', gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10 },
-  statPillValue: { fontSize: 15, fontWeight: '800' },
-  statPillLabel: { fontSize: 11.5, fontWeight: '700' },
-  rowCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, padding: 12, marginBottom: 8 },
-  rowCardDup: { backgroundColor: 'rgba(217,119,6,0.04)', borderColor: 'rgba(217,119,6,0.25)' },
-  rowCardErr: { backgroundColor: '#f8fafc', opacity: 0.75 },
-  rowName: { fontSize: 14, fontWeight: '700', color: '#0f172a' },
-  rowNameErr: { color: '#94a3b8' },
-  rowMetaLine: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 },
-  posBadge: { paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: 4 },
-  posBadgeText: { fontSize: 9.5, fontWeight: '800' },
-  rowMeta: { fontSize: 12, color: '#64748b' },
-  statusOk: { fontSize: 11.5, fontWeight: '700', color: '#16a34a', marginTop: 4 },
-  statusWarn: { fontSize: 11.5, fontWeight: '700', color: '#d97706', marginTop: 4 },
-  statusErr: { fontSize: 11.5, fontWeight: '700', color: '#dc2626', marginTop: 4 },
-  successWrap: { alignItems: 'center', paddingTop: 40, paddingHorizontal: 12 },
-  checkRing: { width: 68, height: 68, borderRadius: 34, backgroundColor: 'rgba(22,163,74,0.10)', justifyContent: 'center', alignItems: 'center', marginBottom: 18 },
-  successTitle: { fontSize: 17, fontWeight: '800', color: '#0f172a', textAlign: 'center', marginBottom: 6 },
-  successSubtitle: { fontSize: 13, color: '#64748b', textAlign: 'center', lineHeight: 19 },
+  intro: { gap: 6 },
+
+  stepper: {
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  stepItem: { flex: 1, alignItems: 'center', gap: 4 },
+  stepLine: { position: 'absolute', top: 12, right: '50%', left: -50, height: 2 },
+  stepDot: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 1.5,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+
+  fileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  fileIcon: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  fileText: { flex: 1, gap: 2 },
+
+  dropzone: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 44,
+    gap: 8,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+  },
+  errorBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+
+  rowCard: { flexDirection: 'row', alignItems: 'flex-start', padding: 12, borderWidth: 1 },
+  rowBody: { flex: 1, gap: 3 },
+  rowMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  posBadge: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, borderWidth: 1 },
+
+  footerRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+
+  success: { alignItems: 'center', paddingTop: 32, gap: 10 },
+  checkRing: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  successBtn: { marginTop: 16 },
 });
