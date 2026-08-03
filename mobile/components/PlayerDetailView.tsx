@@ -326,7 +326,8 @@ export function PlayerDetailView({
               <Text style={styles.editBtnText}>Modifier</Text>
             </TouchableOpacity>
           )}
-          {!isManager && <SeasonHeaderButton />}
+          {/* En-tête navy non migré : ton `onColor` obligatoire ici. */}
+          {!isManager && <SeasonHeaderButton tone="onColor" />}
         </View>
 
         <View style={styles.playerCard}>

@@ -52,7 +52,8 @@ export default function SquadLayout() {
           title: 'Équipe',
           headerRight: () => (
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <SeasonHeaderButton />
+              {/* Header bleu non migré : ton `onColor` obligatoire ici. */}
+              <SeasonHeaderButton tone="onColor" style={{ marginRight: 8 }} />
               <HeaderImportButton />
               <HeaderAddButton />
             </View>

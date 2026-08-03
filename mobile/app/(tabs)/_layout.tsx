@@ -86,7 +86,9 @@ function TabsLayoutContent() {
         headerTintColor: c.text.primary,
         headerTitleStyle: { color: c.text.primary },
         // Une seule action contextuelle à droite, conformément aux HIG.
-        headerRight: isTablet ? undefined : () => <SeasonHeaderButton />,
+        headerRight: isTablet
+          ? undefined
+          : () => <SeasonHeaderButton style={{ marginRight: 12 }} />,
         sceneStyle: { backgroundColor: c.bg.canvas },
         tabBarActiveTintColor: c.accent.default,
         tabBarInactiveTintColor: c.text.tertiary,

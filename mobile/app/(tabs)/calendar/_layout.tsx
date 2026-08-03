@@ -74,7 +74,8 @@ export default function CalendarLayout() {
           title: 'Calendrier',
           headerRight: () => (
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <SeasonHeaderButton />
+              {/* Header bleu non migré : ton `onColor` obligatoire ici. */}
+              <SeasonHeaderButton tone="onColor" style={{ marginRight: 8 }} />
               <HeaderAddButton />
             </View>
           ),

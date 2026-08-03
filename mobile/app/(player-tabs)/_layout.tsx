@@ -18,7 +18,8 @@ export default function PlayerTabsLayout() {
         tabBarActiveTintColor: '#16a34a',
         headerRight: () => (
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <SeasonHeaderButton />
+            {/* Header vert non migré : ton `onColor` obligatoire ici. */}
+            <SeasonHeaderButton tone="onColor" style={{ marginRight: 8 }} />
             <SwitchToCoachButton />
             <SignOutIconButton />
           </View>

@@ -134,7 +134,7 @@ export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {
       <View style={[styles.footer, !isExpanded && styles.footerCollapsed]}>
         {isExpanded && (
           <>
-            <SeasonHeaderButton variant="light" />
+            <SeasonHeaderButton style={{ alignSelf: 'flex-start', marginBottom: 4 }} />
             {isPlayer && (
               <TouchableOpacity onPress={handleSwitchToPlayer} style={styles.footerBtn}>
                 <Text style={styles.footerBtnText}>Espace joueur</Text>
