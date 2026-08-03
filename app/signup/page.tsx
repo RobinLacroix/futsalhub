@@ -61,16 +61,30 @@ function SignUpForm() {
     if (formData.password.length < 6) { setError('Mot de passe : 6 caractères minimum'); return; }
     setIsLoading(true);
     try {
-      const { data: authData, error: authError } = await supabase.auth.signUp({ email: formData.email, password: formData.password });
+      // Le profil public.users est créé côté serveur par le trigger on_auth_user_created
+      // (migration 20260803160000) à partir de ces métadonnées. La confirmation d'email
+      // étant obligatoire, signUp() ne renvoie pas de session : un insert client serait
+      // rejeté par la RLS de `users`.
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: formData.email,
+        password: formData.password,
+        options: {
+          data: {
+            first_name: formData.firstName,
+            last_name: formData.lastName,
+            phone: formData.phone,
+            country: formData.country,
+          },
+        },
+      });
       if (authError) throw authError;
       if (authData.user) {
-        const { error: profileError } = await supabase.from('users').insert([{
-          id: authData.user.id, first_name: formData.firstName, last_name: formData.lastName,
-          email: formData.email, phone: formData.phone, country: formData.country, created_at: new Date().toISOString(),
-        }]);
-        if (profileError) throw profileError;
-        setSuccess('Inscription réussie ! Redirection…');
-        setTimeout(() => router.push(redirect.startsWith('/') ? redirect : `/${redirect}`), 2000);
+        if (authData.session) {
+          setSuccess('Inscription réussie ! Redirection…');
+          setTimeout(() => router.push(redirect.startsWith('/') ? redirect : `/${redirect}`), 2000);
+        } else {
+          setSuccess('Compte créé. Vérifiez votre boîte mail et cliquez sur le lien de confirmation, puis connectez-vous.');
+        }
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Erreur lors de l\'inscription');
