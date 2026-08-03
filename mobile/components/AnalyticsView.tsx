@@ -11,6 +11,8 @@ import { getEventsByMatchId } from '../lib/services/matchEvents';
 import { getPlayersByTeam, getPlayersByClubWithTeams } from '../lib/services/players';
 import { getMatchPlayerRatingsBulk } from '../lib/services/matchRatings';
 import { MatchMomentsView } from './MatchMomentsView';
+import { PlayerStatsPanel } from './analytics/PlayerStatsPanel';
+import { abbrevName, fmtTime, type PlayerStats } from './analytics/playerStats';
 import { useIsTablet } from '../hooks/useIsTablet';
 import type { Match, MatchEvent, Player, MatchPlayerRatingRow } from '../types';
 
@@ -25,23 +27,6 @@ function ratingColor(rating: number): string {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type PlayerStats = {
-  playerId: string;
-  playerName: string;
-  matchesPlayed: number;
-  goals: number;
-  shot_on_target: number;
-  shot: number;
-  ball_loss: number;
-  recovery: number;
-  assist: number;
-  yellow_cards: number;
-  red_cards: number;
-  plusMinusGoals: number;
-  plusMinusShots: number;
-  totalTimeSeconds: number;
-  avgRating: number | null; // Volet B : note data moyenne sur les matchs filtrés
-};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -66,17 +51,7 @@ function computePlayingTime(events: MatchEvent[]): Map<string, number> {
   return byPlayer;
 }
 
-function fmtTime(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
 
-function abbrevName(full: string): string {
-  const parts = full.trim().split(' ');
-  if (parts.length < 2) return full;
-  return `${parts[0][0]}. ${parts.slice(1).join(' ')}`;
-}
 
 const norm = (s: string) =>
   s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
@@ -298,22 +273,6 @@ function generateComboInsightCards(
 const LOCATION_FILTERS    = ['all', 'Domicile', 'Extérieur'] as const;
 const COMPETITION_FILTERS = ['all', 'Championnat', 'Coupe', 'Amical']  as const;
 
-// Table columns — flex-based, no horizontal scroll
-const COLS = [
-  { key: 'playerName',       label: 'Joueur', flex: 2.2  },
-  { key: 'matchesPlayed',    label: 'M',      flex: 0.6  },
-  { key: 'totalTimeSeconds', label: 'Tps',    flex: 0.85 },
-  { key: 'goals',            label: 'B',      flex: 0.55 },
-  { key: 'plusMinusGoals',   label: '+/-B',   flex: 0.7  },
-  { key: 'shot_on_target',   label: 'TC',     flex: 0.55 },
-  { key: 'totalShots',       label: 'TT',     flex: 0.55 },
-  { key: 'recovery',         label: 'R',      flex: 0.6  },
-  { key: 'ball_loss',        label: 'PdB',    flex: 0.6  },
-  { key: 'assist',           label: 'Pdec',   flex: 0.6  },
-  { key: 'yellow_cards',     label: '🟡',     flex: 0.55 },
-  { key: 'red_cards',        label: '🔴',     flex: 0.55 },
-  { key: 'avgRating',        label: 'Note',   flex: 0.7  },
-] as const;
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -329,8 +288,6 @@ export function AnalyticsView() {
   const [allPlayers,    setAllPlayers]    = useState<Player[]>([]);
   const [clubPlayerIds, setClubPlayerIds] = useState<Set<string>>(new Set());
   const [ratingRows,    setRatingRows]    = useState<MatchPlayerRatingRow[]>([]);
-  const [sortCol,       setSortCol]       = useState('playerName');
-  const [sortDir,       setSortDir]       = useState<'asc' | 'desc'>('asc');
   const [filterLoc,     setFilterLoc]     = useState('all');
   const [filterComp,    setFilterComp]    = useState('all');
   const [activeTab,     setActiveTab]     = useState<'overview' | 'stats' | 'coach'>('overview');
@@ -502,22 +459,8 @@ export function AnalyticsView() {
 
   // ── Sorting ─────────────────────────────────────────────────────────────
 
-  const sortedStats = useMemo(() => {
-    const dir = sortDir === 'asc' ? 1 : -1;
-    return [...playerStatsList].sort((a, b) => {
-      if (sortCol === 'playerName') return dir * a.playerName.localeCompare(b.playerName);
-      const va = sortCol === 'totalShots' ? a.shot + a.shot_on_target : (a as any)[sortCol] ?? 0;
-      const vb = sortCol === 'totalShots' ? b.shot + b.shot_on_target : (b as any)[sortCol] ?? 0;
-      return dir * (va - vb);
-    });
-  }, [playerStatsList, sortCol, sortDir]);
-
-  const handleSort = useCallback((key: string) => {
-    setSortCol(prev => {
-      setSortDir(d => prev === key ? (d === 'asc' ? 'desc' : 'asc') : 'desc');
-      return key;
-    });
-  }, []);
+  // Le tri et la normalisation du classement joueurs vivent désormais dans
+  // `PlayerStatsPanel`, qui est seul responsable de cet affichage.
 
   // ── Top performers ──────────────────────────────────────────────────────
 
@@ -877,27 +820,14 @@ export function AnalyticsView() {
             {activeTab === 'stats' && (
               <>
                 <SectionHeader label="STATISTIQUES JOUEURS" />
-                {playerStatsList.length > 0 ? (
-                  <>
-                    <StatsTable
-                      rows={sortedStats}
-                      sortCol={sortCol}
-                      sortDir={sortDir}
-                      onSort={handleSort}
-                    />
-                    <Text style={s.legend}>
-                      M = Matchs · Tps = Temps de jeu · B = Buts · +/-B = +/- buts · TC = Tirs cadrés · TT = Tirs totaux · R = Récup. · PdB = Pertes · Pdec = Passes déc.
-                    </Text>
-                  </>
-                ) : (
-                  <View style={s.emptyBlock}>
-                    <Text style={s.emptyText}>
-                      {filteredMatchIds.size === 0
-                        ? 'Aucun match ne correspond aux filtres.'
-                        : 'Aucun match enregistré avec le Tracker.'}
-                    </Text>
-                  </View>
-                )}
+                <PlayerStatsPanel
+                  rows={playerStatsList}
+                  emptyDescription={
+                    filteredMatchIds.size === 0
+                      ? 'Aucun match ne correspond aux filtres.'
+                      : 'Aucun match enregistré avec le Tracker.'
+                  }
+                />
                 <ComboRankingTable allStats={allComboStats} playerById={playerByIdForRanking} />
               </>
             )}
@@ -1185,116 +1115,6 @@ function ComboRankingTable({
   );
 }
 
-function StatsTable({
-  rows, sortCol, sortDir, onSort,
-}: {
-  rows: PlayerStats[];
-  sortCol: string;
-  sortDir: 'asc' | 'desc';
-  onSort: (k: string) => void;
-}) {
-  return (
-    <View style={ss.tableWrap}>
-      {/* Header */}
-      <View style={ss.tableHeader}>
-        {COLS.map(col => {
-          const active = sortCol === col.key;
-          const isName = col.key === 'playerName';
-          return (
-            <TouchableOpacity
-              key={col.key}
-              style={[ss.thCell, { flex: col.flex }]}
-              onPress={() => onSort(col.key)}
-              activeOpacity={0.7}
-            >
-              <Text style={[ss.thText, !isName && ss.thTextCenter, active && ss.thTextActive]}>
-                {col.label}
-              </Text>
-              {active && (
-                <Ionicons
-                  name={sortDir === 'asc' ? 'chevron-up' : 'chevron-down'}
-                  size={9}
-                  color="#2563eb"
-                />
-              )}
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {/* Rows */}
-      {rows.map((row, i) => {
-        const totalShots = row.shot + row.shot_on_target;
-        const isEven     = i % 2 === 0;
-        return (
-          <View key={row.playerId} style={[ss.tRow, isEven && ss.tRowAlt]}>
-            {COLS.map(col => {
-              const isName = col.key === 'playerName';
-              let content: string;
-              let cellColor: string | undefined;
-
-              switch (col.key) {
-                case 'playerName':
-                  content   = abbrevName(row.playerName);
-                  break;
-                case 'totalTimeSeconds':
-                  content   = fmtTime(row.totalTimeSeconds);
-                  break;
-                case 'totalShots':
-                  content   = String(totalShots);
-                  break;
-                case 'plusMinusGoals':
-                  content   = row.plusMinusGoals > 0 ? `+${row.plusMinusGoals}` : String(row.plusMinusGoals);
-                  cellColor = row.plusMinusGoals > 0 ? '#16a34a' : row.plusMinusGoals < 0 ? '#dc2626' : undefined;
-                  break;
-                case 'goals':
-                  content   = String(row.goals);
-                  cellColor = row.goals > 0 ? '#16a34a' : undefined;
-                  break;
-                case 'recovery':
-                  content   = String(row.recovery);
-                  cellColor = row.recovery > 0 ? '#2563eb' : undefined;
-                  break;
-                case 'ball_loss':
-                  content   = String(row.ball_loss);
-                  cellColor = row.ball_loss > 0 ? '#dc2626' : undefined;
-                  break;
-                case 'yellow_cards':
-                  content   = String(row.yellow_cards);
-                  cellColor = row.yellow_cards > 0 ? '#f59e0b' : undefined;
-                  break;
-                case 'red_cards':
-                  content   = String(row.red_cards);
-                  cellColor = row.red_cards > 0 ? '#dc2626' : undefined;
-                  break;
-                case 'avgRating':
-                  content   = row.avgRating != null ? row.avgRating.toFixed(1) : '—';
-                  cellColor = row.avgRating != null ? ratingColor(row.avgRating) : undefined;
-                  break;
-                default:
-                  content   = String((row as any)[col.key] ?? 0);
-              }
-
-              return (
-                <Text
-                  key={col.key}
-                  numberOfLines={1}
-                  style={[
-                    isName ? ss.tdName : ss.td,
-                    { flex: col.flex },
-                    cellColor ? { color: cellColor, fontWeight: '700' } : undefined,
-                  ]}
-                >
-                  {content}
-                </Text>
-              );
-            })}
-          </View>
-        );
-      })}
-    </View>
-  );
-}
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
