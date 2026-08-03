@@ -180,7 +180,7 @@ export default function PhoneMatchRecorder({
 
   // ── Commandes vocales ─────────────────────────────────────────────────────
 
-  const { isListening, startListening, stopListening } = useVoiceCommand({
+  const { isListening, startListening, stopListening, isAvailable: voiceAvailable } = useVoiceCommand({
     players: r.convoquedPlayers,
     playersOnField: r.playersOnField,
     onEvent: (eventType, player, statKey) => {
@@ -400,10 +400,12 @@ export default function PhoneMatchRecorder({
         {/* ── Saisie ── */}
         {tab === 'saisie' && (
           <View style={s.block}>
-            <VoiceButton
-              isListening={isListening}
-              onPress={isListening ? stopListening : startListening}
-            />
+            {voiceAvailable && (
+              <VoiceButton
+                isListening={isListening}
+                onPress={isListening ? stopListening : startListening}
+              />
+            )}
 
             <Text variant="caption" tone="secondary">
               Joueur concerné — la sélection reste active pour enchaîner plusieurs actions

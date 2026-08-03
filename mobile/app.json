@@ -51,6 +51,13 @@
       "expo-asset",
       "expo-document-picker",
       [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "FutsalHub utilise le micro pour saisir les actions du match à la voix, sans quitter le terrain des yeux.",
+          "speechRecognitionPermission": "FutsalHub reconnaît vos commandes vocales pour enregistrer buts, tirs et changements pendant le match."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/splash-icon.png",

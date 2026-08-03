@@ -265,7 +265,7 @@ export default function TabletMatchRecorder({
 
   // ── Commandes vocales ─────────────────────────────────────────────────────
 
-  const { isListening, startListening, stopListening } = useVoiceCommand({
+  const { isListening, startListening, stopListening, isAvailable: voiceAvailable } = useVoiceCommand({
     players: r.convoquedPlayers,
     playersOnField: r.playersOnField,
     onEvent: (eventType, player, statKey) => {
@@ -415,10 +415,12 @@ export default function TabletMatchRecorder({
           </View>
 
           <View style={s.sideCell}>
-            <VoiceButton
-              isListening={isListening}
-              onPress={isListening ? stopListening : startListening}
-            />
+            {voiceAvailable && (
+              <VoiceButton
+                isListening={isListening}
+                onPress={isListening ? stopListening : startListening}
+              />
+            )}
             <View style={s.timeoutRow}>
               <TimeoutChip
                 label="TM équipe"
