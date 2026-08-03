@@ -29,6 +29,7 @@ import type { MatchEventType } from '../types';
 import { useVoiceCommand } from '../hooks/useVoiceCommand';
 import { getOutboxLength } from '../lib/offline/matchRecorderOutbox';
 import { parseMatchPlayers, formatSeconds } from '../utils/matchUtils';
+import { haptics } from '../lib/design/haptics';
 
 const GOAL_TYPES: { value: GoalType; label: string }[] = [
   { value: 'offensive', label: 'Phase offensive' },
@@ -363,6 +364,13 @@ export default function TabletMatchRecorder({ initialMatchId, onMatchFinished, o
       goalType?: GoalType | null
     ) => {
       if (!matchId) return;
+      // Retour haptique immédiat, avant tout aller-retour réseau (P0-8).
+      // Le coach regarde le terrain, pas son écran : sans cette confirmation il
+      // doit détourner le regard pour vérifier sa saisie, et rate l'action
+      // suivante. Un but est plus marquant qu'une récupération, d'où deux
+      // intensités.
+      if (eventType === 'goal' || eventType === 'opponent_goal') haptics.tapMedium();
+      else haptics.tapLight();
       try {
         const basePayload = {
           match_id: matchId,

@@ -21,6 +21,7 @@ import type { Match, MatchPlayer } from '../types';
 import type { Player } from '../types';
 import { parseMatchPlayers, formatSeconds } from '../utils/matchUtils';
 import type { MatchEventType } from '../types';
+import { haptics } from '../lib/design/haptics';
 
 // ─── Constantes ─────────────────────────────────────────────────────────────
 
@@ -395,6 +396,13 @@ export default function PhoneMatchRecorder({ initialMatchId, onMatchFinished, on
     eventType: MatchEventType, playerId?: string | null, statKey?: string, goalType?: GoalType | null,
   ) => {
     if (!matchId) return;
+    // Retour haptique immédiat, avant tout aller-retour réseau (P0-8).
+    // Le coach regarde le terrain, pas son écran : sans cette confirmation il
+    // doit détourner le regard pour vérifier sa saisie, et rate l'action
+    // suivante. Un but est plus marquant qu'une récupération, d'où deux
+    // intensités.
+    if (eventType === 'goal' || eventType === 'opponent_goal') haptics.tapMedium();
+    else haptics.tapLight();
     try {
       const base = { match_id: matchId, match_time_seconds: seconds, half, players_on_field: playersOnField };
       await createMatchEvent({ ...base, event_type: eventType, player_id: playerId ?? null,
