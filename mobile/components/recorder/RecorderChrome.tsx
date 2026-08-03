@@ -55,7 +55,12 @@ export interface ClockBarProps {
    * Il vivait dans l'onglet Saisie : pour dicter une action il fallait donc
    * d'abord changer d'onglet, ce qui annule l'intérêt de la dictée — parler
    * sans regarder l'écran. Ici il suit le chrono, donc il est sur tous les
-   * onglets. Absent si le module natif n'est pas dans le binaire.
+   * onglets.
+   *
+   * **Le bouton reste visible même quand le module natif manque**, en barré et
+   * atténué. Le masquer était pire que la panne : rien ne distinguait « la
+   * dictée n'existe pas » de « la dictée a disparu ». L'appui explique alors
+   * au lieu d'appeler le natif.
    */
   voice?: { isListening: boolean; onPress: () => void; available: boolean };
 }
@@ -89,21 +94,32 @@ export function ClockBar({
         </Text>
       </View>
 
-      {voice?.available && (
+      {voice && (
         <Pressable
           onPress={voice.onPress}
           style={({ pressed }) => [
             s.micBtn,
             voice.isListening && s.micBtnOn,
+            !voice.available && s.micBtnOff,
             pressed && s.pressed,
           ]}
           accessibilityRole="button"
-          accessibilityState={{ selected: voice.isListening }}
+          accessibilityState={{ selected: voice.isListening, disabled: !voice.available }}
           accessibilityLabel={
-            voice.isListening ? "Arrêter l'écoute vocale" : 'Dicter une action'
+            !voice.available
+              ? 'Dictée indisponible sur cette version de l’application'
+              : voice.isListening
+                ? "Arrêter l'écoute vocale"
+                : 'Dicter une action'
           }
         >
-          <Ionicons name={voice.isListening ? 'mic' : 'mic-outline'} size={22} color="#FFFFFF" />
+          <Ionicons
+            name={
+              !voice.available ? 'mic-off-outline' : voice.isListening ? 'mic' : 'mic-outline'
+            }
+            size={22}
+            color="#FFFFFF"
+          />
         </Pressable>
       )}
 
@@ -480,6 +496,7 @@ const useStyles = makeStyles((t) => ({
     borderColor: 'rgba(255,255,255,0.3)',
   },
   micBtnOn: { backgroundColor: t.colors.negative.fill, borderColor: '#FFFFFF' },
+  micBtnOff: { opacity: 0.45, borderStyle: 'dashed' },
 
   clockAlert: {
     flexDirection: 'row',

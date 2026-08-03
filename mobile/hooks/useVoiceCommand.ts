@@ -113,8 +113,12 @@ export function useVoiceCommand({
   });
 
   const startListening = useCallback(async () => {
+    // Sortie AVANT tout appel natif. Ce n'est pas qu'une politesse : iOS
+    // termine le processus (SIGABRT, non rattrapable en JS) si on demande le
+    // micro sans `NSMicrophoneUsageDescription` dans l'Info.plist. Un binaire
+    // sans le module n'a pas non plus les clés du plugin.
     if (!speech) {
-      onUnknown('Dictée indisponible sur cette version de l’application');
+      onUnknown('Dictée indisponible — reconstruisez l’app (expo prebuild + run:ios)');
       return;
     }
     const { granted } = await speech.requestPermissionsAsync();
