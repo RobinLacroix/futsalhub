@@ -1,54 +1,60 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   ScrollView,
-  ActivityIndicator,
   RefreshControl,
-  TouchableOpacity,
   TextInput,
   Switch,
   Alert,
   KeyboardAvoidingView,
   Platform,
-  Modal,
   Pressable,
 } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import { useIsTablet } from '../../../../hooks/useIsTablet';
 import { format, parse, parseISO, isValid } from 'date-fns';
 import { fr } from 'date-fns/locale';
-
-let DateTimePicker: import('react').ComponentType<any> | null = null;
-try {
-  DateTimePicker = require('@react-native-community/datetimepicker').default;
-} catch {
-  /* module optionnel */
-}
-const useNativePicker = DateTimePicker != null;
-import { getMatchById, updateMatch } from '../../../../lib/services/matches';
-import { getPlayersByTeam, getPlayersByClubWithTeams, type PlayerWithTeams } from '../../../../lib/services/players';
-import { getMatchEventsAggregate, hasMatchEvents } from '../../../../lib/services/matchEvents';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { useIsTablet } from '../../../../hooks/useIsTablet';
+import { useTheme } from '../../../../contexts/ThemeContext';
 import { useActiveTeam } from '../../../../contexts/ActiveTeamContext';
-import type { Match, MatchPlayer } from '../../../../types';
-import type { Player } from '../../../../types';
-import type { GoalsByTypeRecord } from '../../../../types';
+import { getMatchById, updateMatch } from '../../../../lib/services/matches';
+import {
+  getPlayersByTeam,
+  getPlayersByClubWithTeams,
+  type PlayerWithTeams,
+} from '../../../../lib/services/players';
+import { getMatchEventsAggregate, hasMatchEvents } from '../../../../lib/services/matchEvents';
+import { haptics } from '../../../../lib/design/haptics';
+import {
+  Text,
+  Card,
+  Button,
+  Badge,
+  Section,
+  EmptyState,
+  SkeletonDetail,
+} from '../../../../components/ui';
+import { Stepper } from '../../../../components/match/Stepper';
+import {
+  GoalTypesEditor,
+  GoalTypesSummary,
+  emptyGoalsByType,
+  type GoalTypeKey,
+} from '../../../../components/match/GoalTypes';
+import { InvitePlayersSheet } from '../../../../components/match/InvitePlayersSheet';
+import { DateTimeField, hasNativePicker } from '../../../../components/match/DateTimeField';
+import type { Match, MatchPlayer, Player, GoalsByTypeRecord } from '../../../../types';
 
-const GOAL_TYPE_KEYS = ['offensive', 'transition', 'cpa', 'superiority'] as const;
-const GOAL_TYPE_LABELS: Record<(typeof GOAL_TYPE_KEYS)[number], string> = {
-  offensive: 'Phase offensive',
-  transition: 'Transition',
-  cpa: 'CPA',
-  superiority: 'Supériorité',
-};
+// ─── Modèle local ─────────────────────────────────────────────────────────────
 
-const emptyGoalsByType = (): GoalsByTypeRecord => ({
-  offensive: 0,
-  transition: 0,
-  cpa: 0,
-  superiority: 0,
-});
+interface PlayerLine {
+  goals: number;
+  yellow_cards: number;
+  red_cards: number;
+}
+
+const emptyLine = (): PlayerLine => ({ goals: 0, yellow_cards: 0, red_cards: 0 });
 
 function parseMatchPlayers(m: Match): MatchPlayer[] {
   if (!m.players) return [];
@@ -62,12 +68,15 @@ function parseMatchPlayers(m: Match): MatchPlayer[] {
   }
 }
 
-const defaultPlayerStats = () => ({ goals: 0, yellow_cards: 0, red_cards: 0 });
+// ─── Écran ────────────────────────────────────────────────────────────────────
 
 export default function MatchDetailScreen() {
   const { matchId } = useLocalSearchParams<{ matchId: string }>();
   const isTablet = useIsTablet();
+  const { theme } = useTheme();
+  const c = theme.colors;
   const { activeTeamId, activeTeam, teams } = useActiveTeam();
+
   const [match, setMatch] = useState<Match | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,38 +84,23 @@ export default function MatchDetailScreen() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+
   const [convoqued, setConvoqued] = useState<Record<string, boolean>>({});
+  const [playerStats, setPlayerStats] = useState<Record<string, PlayerLine>>({});
   const [scoreTeam, setScoreTeam] = useState('');
   const [scoreOpponent, setScoreOpponent] = useState('');
-  const [playerStats, setPlayerStats] = useState<Record<string, { goals: number; yellow_cards: number; red_cards: number }>>({});
   const [hasEvents, setHasEvents] = useState(false);
   const [goalsByType, setGoalsByType] = useState<GoalsByTypeRecord>(emptyGoalsByType);
   const [concededByType, setConcededByType] = useState<GoalsByTypeRecord>(emptyGoalsByType);
 
   const [clubPlayersWithTeams, setClubPlayersWithTeams] = useState<PlayerWithTeams[]>([]);
-  const [inviteFilterTeamId, setInviteFilterTeamId] = useState<string>('all');
-  const [inviteModalOpen, setInviteModalOpen] = useState(false);
-  const [inviteModalSelectedIds, setInviteModalSelectedIds] = useState<Record<string, boolean>>({});
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [editTitle, setEditTitle] = useState('');
-  const [matchEditDateTime, setMatchEditDateTime] = useState(() => new Date());
+  const [editDateTime, setEditDateTime] = useState(() => new Date());
   const [editDateStr, setEditDateStr] = useState('');
   const [editTimeStr, setEditTimeStr] = useState('');
-  const [showMatchDatePicker, setShowMatchDatePicker] = useState(false);
-  const [showMatchTimePicker, setShowMatchTimePicker] = useState(false);
 
-  const beginEditing = useCallback(() => {
-    if (!match) return;
-    setEditTitle(match.title);
-    const ds = typeof match.date === 'string' ? match.date : (match.date as Date).toISOString?.() ?? '';
-    const d = ds ? parseISO(ds) : new Date();
-    const normalized = new Date(d.getTime());
-    setMatchEditDateTime(normalized);
-    setEditDateStr(format(normalized, 'dd/MM/yyyy', { locale: fr }));
-    setEditTimeStr(format(normalized, 'HH:mm'));
-    setShowMatchDatePicker(false);
-    setShowMatchTimePicker(false);
-    setEditing(true);
-  }, [match]);
+  // ── Chargement ────────────────────────────────────────────────────────────
 
   const load = useCallback(async () => {
     if (!matchId) {
@@ -125,10 +119,9 @@ export default function MatchDetailScreen() {
       setHasEvents(eventsExist);
 
       if (m) {
-        const list = parseMatchPlayers(m);
         const conv: Record<string, boolean> = {};
-        const stats: Record<string, { goals: number; yellow_cards: number; red_cards: number }> = {};
-        list.forEach((p) => {
+        const stats: Record<string, PlayerLine> = {};
+        parseMatchPlayers(m).forEach((p) => {
           conv[p.id] = true;
           stats[p.id] = {
             goals: p.goals ?? 0,
@@ -138,24 +131,14 @@ export default function MatchDetailScreen() {
         });
         pl.forEach((p) => {
           if (conv[p.id] === undefined) conv[p.id] = false;
-          if (!stats[p.id]) stats[p.id] = { goals: 0, yellow_cards: 0, red_cards: 0 };
+          if (!stats[p.id]) stats[p.id] = emptyLine();
         });
         setConvoqued(conv);
         setPlayerStats(stats);
         setScoreTeam(String(m.score_team ?? 0));
         setScoreOpponent(String(m.score_opponent ?? 0));
-        setGoalsByType({
-          offensive: (m as any).goals_by_type?.offensive ?? 0,
-          transition: (m as any).goals_by_type?.transition ?? 0,
-          cpa: (m as any).goals_by_type?.cpa ?? 0,
-          superiority: (m as any).goals_by_type?.superiority ?? 0,
-        });
-        setConcededByType({
-          offensive: (m as any).conceded_by_type?.offensive ?? 0,
-          transition: (m as any).conceded_by_type?.transition ?? 0,
-          cpa: (m as any).conceded_by_type?.cpa ?? 0,
-          superiority: (m as any).conceded_by_type?.superiority ?? 0,
-        });
+        setGoalsByType({ ...emptyGoalsByType(), ...(m.goals_by_type ?? {}) });
+        setConcededByType({ ...emptyGoalsByType(), ...(m.conceded_by_type ?? {}) });
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');
@@ -165,6 +148,11 @@ export default function MatchDetailScreen() {
       setRefreshing(false);
     }
   }, [matchId, activeTeamId]);
+
+  useEffect(() => {
+    setLoading(true);
+    load();
+  }, [load]);
 
   const clubId = activeTeam?.club_id;
   useEffect(() => {
@@ -176,40 +164,120 @@ export default function MatchDetailScreen() {
     getPlayersByClubWithTeams(clubId)
       .then((data) => mounted && setClubPlayersWithTeams(data))
       .catch(() => mounted && setClubPlayersWithTeams([]));
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [clubId]);
 
+  // ── Dérivés ───────────────────────────────────────────────────────────────
+
   const squadIds = useMemo(() => new Set(players.map((p) => p.id)), [players]);
-  const otherTeamPlayersForForm = useMemo(
+
+  const inviteCandidates = useMemo(
     () => clubPlayersWithTeams.filter(({ player }) => !squadIds.has(player.id)),
     [clubPlayersWithTeams, squadIds]
   );
-  const otherTeamPlayersFiltered = useMemo(() => {
-    if (inviteFilterTeamId === 'all') return otherTeamPlayersForForm;
-    return otherTeamPlayersForForm.filter(({ teamIds }) => teamIds.includes(inviteFilterTeamId));
-  }, [otherTeamPlayersForForm, inviteFilterTeamId]);
+
   const invitedPlayerIds = useMemo(
-    () => Object.entries(convoqued).filter(([, v]) => v).map(([id]) => id).filter((id) => !squadIds.has(id)),
+    () =>
+      Object.entries(convoqued)
+        .filter(([, v]) => v)
+        .map(([id]) => id)
+        .filter((id) => !squadIds.has(id)),
     [convoqued, squadIds]
   );
 
-  const getPlayerDisplayName = (playerId: string) => {
-    const found = clubPlayersWithTeams.find(({ player }) => player.id === playerId);
-    if (found) return `${found.player.first_name} ${found.player.last_name}`;
-    const p = players.find((x) => x.id === playerId);
-    if (p) return `${p.first_name} ${p.last_name}`;
-    return `Joueur ${playerId.slice(0, 8)}`;
-  };
+  const invitedSet = useMemo(() => new Set(invitedPlayerIds), [invitedPlayerIds]);
 
-  useEffect(() => {
-    setLoading(true);
-    load();
-  }, [load]);
+  const displayName = useCallback(
+    (playerId: string) => {
+      const found = clubPlayersWithTeams.find(({ player }) => player.id === playerId);
+      if (found) return `${found.player.first_name} ${found.player.last_name}`;
+      const p = players.find((x) => x.id === playerId);
+      if (p) return `${p.first_name} ${p.last_name}`;
+      return `Joueur ${playerId.slice(0, 8)}`;
+    },
+    [clubPlayersWithTeams, players]
+  );
+
+  const sortedForEdit = useMemo(
+    () =>
+      [...players].sort((a, b) => {
+        const aConv = !!convoqued[a.id];
+        const bConv = !!convoqued[b.id];
+        if (aConv !== bConv) return aConv ? -1 : 1;
+        return (a.last_name || '').localeCompare(b.last_name || '', 'fr');
+      }),
+    [players, convoqued]
+  );
+
+  const convoquedPlayers = useMemo(
+    () =>
+      players
+        .filter((p) => convoqued[p.id])
+        .sort((a, b) => (a.last_name || '').localeCompare(b.last_name || '', 'fr')),
+    [players, convoqued]
+  );
+
+  const scoreTeamNum = parseInt(scoreTeam.trim(), 10) || 0;
+  const totalGoals = useMemo(
+    () =>
+      [...convoquedPlayers.map((p) => p.id), ...invitedPlayerIds].reduce(
+        (acc, id) => acc + (playerStats[id]?.goals ?? 0),
+        0
+      ),
+    [convoquedPlayers, invitedPlayerIds, playerStats]
+  );
+  const goalsOverflow = totalGoals > scoreTeamNum;
+
+  // ── Actions ───────────────────────────────────────────────────────────────
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     load();
   }, [load]);
+
+  const beginEditing = useCallback(() => {
+    if (!match) return;
+    setEditTitle(match.title);
+    const ds = typeof match.date === 'string' ? match.date : (match.date as Date).toISOString?.() ?? '';
+    const d = ds ? parseISO(ds) : new Date();
+    setEditDateTime(d);
+    setEditDateStr(format(d, 'dd/MM/yyyy', { locale: fr }));
+    setEditTimeStr(format(d, 'HH:mm'));
+    setEditing(true);
+  }, [match]);
+
+  const setStat = useCallback((playerId: string, key: keyof PlayerLine, delta: number) => {
+    setPlayerStats((prev) => {
+      const cur = prev[playerId] ?? emptyLine();
+      return { ...prev, [playerId]: { ...cur, [key]: Math.max(0, cur[key] + delta) } };
+    });
+  }, []);
+
+  const setGoalTypeStat = useCallback(
+    (which: 'scored' | 'conceded', key: GoalTypeKey, delta: number) => {
+      const setter = which === 'scored' ? setGoalsByType : setConcededByType;
+      setter((prev) => ({ ...prev, [key]: Math.max(0, (prev[key] ?? 0) + delta) }));
+    },
+    []
+  );
+
+  const toggleConvoqued = useCallback((playerId: string) => {
+    haptics.select();
+    setConvoqued((prev) => ({ ...prev, [playerId]: !prev[playerId] }));
+  }, []);
+
+  const convokeAll = useCallback(() => {
+    haptics.success();
+    setConvoqued((prev) => {
+      const next = { ...prev };
+      players.forEach((p) => {
+        next[p.id] = true;
+      });
+      return next;
+    });
+  }, [players]);
 
   const loadFromMatchRecorder = useCallback(async () => {
     if (!matchId) return;
@@ -218,7 +286,7 @@ export default function MatchDetailScreen() {
       setPlayerStats((prev) => {
         const next = { ...prev };
         agg.forEach((a) => {
-          const cur = next[a.player_id] ?? { goals: 0, yellow_cards: 0, red_cards: 0 };
+          const cur = next[a.player_id] ?? emptyLine();
           next[a.player_id] = {
             goals: cur.goals + a.goals,
             yellow_cards: cur.yellow_cards + a.yellow_cards,
@@ -227,42 +295,13 @@ export default function MatchDetailScreen() {
         });
         return next;
       });
+      haptics.success();
       Alert.alert('Récupéré', 'Les buts et cartons du match recorder ont été ajoutés.');
     } catch (e) {
+      haptics.error();
       Alert.alert('Erreur', e instanceof Error ? e.message : 'Impossible de récupérer les événements');
     }
   }, [matchId]);
-
-  const toggleConvoqued = (playerId: string) => {
-    setConvoqued((prev) => ({ ...prev, [playerId]: !prev[playerId] }));
-  };
-
-  const convokeAllMatch = () => {
-    const next: Record<string, boolean> = { ...convoqued };
-    players.forEach((p) => { next[p.id] = true; });
-    setConvoqued(next);
-  };
-
-  const setGoalTypeStat = (
-    which: 'scored' | 'conceded',
-    key: keyof GoalsByTypeRecord,
-    delta: number
-  ) => {
-    const setter = which === 'scored' ? setGoalsByType : setConcededByType;
-    setter((prev) => {
-      const v = Math.max(0, (prev[key] ?? 0) + delta);
-      return { ...prev, [key]: v };
-    });
-  };
-
-  const setStat = (playerId: string, key: 'goals' | 'yellow_cards' | 'red_cards', delta: number) => {
-    setPlayerStats((prev) => {
-      const cur = prev[playerId] ?? { goals: 0, yellow_cards: 0, red_cards: 0 };
-      let v = cur[key] + delta;
-      if (v < 0) v = 0;
-      return { ...prev, [playerId]: { ...cur, [key]: v } };
-    });
-  };
 
   const save = useCallback(async () => {
     if (!matchId) return;
@@ -270,43 +309,47 @@ export default function MatchDetailScreen() {
       Alert.alert('Champ requis', 'Veuillez renseigner le titre du match.');
       return;
     }
-    let submitDate: Date | null = null;
-    if (useNativePicker) {
-      submitDate = matchEditDateTime;
+
+    let submitDate: Date;
+    if (hasNativePicker) {
+      submitDate = editDateTime;
     } else {
       const dParsed = parse(editDateStr.trim(), 'dd/MM/yyyy', new Date(), { locale: fr });
-      if (!isValid(dParsed)) {
-        Alert.alert('Date ou heure invalide', 'Date : JJ/MM/AAAA. Heure : HH:MM (ex. 18:30).');
-        return;
-      }
-      const [h, m] = editTimeStr.trim().split(':').map(Number);
-      if (Number.isNaN(h) || Number.isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+      const [h, mn] = editTimeStr.trim().split(':').map(Number);
+      if (!isValid(dParsed) || Number.isNaN(h) || Number.isNaN(mn) || h < 0 || h > 23 || mn < 0 || mn > 59) {
         Alert.alert('Date ou heure invalide', 'Date : JJ/MM/AAAA. Heure : HH:MM (ex. 18:30).');
         return;
       }
       submitDate = new Date(dParsed);
-      submitDate.setHours(h, m, 0, 0);
+      submitDate.setHours(h, mn, 0, 0);
     }
+
     const st = parseInt(scoreTeam.trim(), 10);
     const so = parseInt(scoreOpponent.trim(), 10);
     if (Number.isNaN(st) || Number.isNaN(so) || st < 0 || so < 0) {
       Alert.alert('Score invalide', 'Indiquez des nombres entiers positifs.');
       return;
     }
+
     const convoquedIds = Object.entries(convoqued)
       .filter(([, v]) => v)
       .map(([id]) => id)
-      .sort((a, b) => getPlayerDisplayName(a).localeCompare(getPlayerDisplayName(b), 'fr'));
-    const stats: Record<string, { goals: number; yellow_cards: number; red_cards: number }> = {};
+      .sort((a, b) => displayName(a).localeCompare(displayName(b), 'fr'));
+
+    const stats: Record<string, PlayerLine> = {};
     convoquedIds.forEach((id) => {
-      stats[id] = playerStats[id] ?? { goals: 0, yellow_cards: 0, red_cards: 0 };
+      stats[id] = playerStats[id] ?? emptyLine();
     });
-    const totalGoals = convoquedIds.reduce((acc, id) => acc + (stats[id]?.goals ?? 0), 0);
-    if (totalGoals > st) {
-      Alert.alert('Incohérence', `Total des buteurs (${totalGoals}) ne peut pas dépasser le score de l'équipe (${st}).`);
+
+    const sumGoals = convoquedIds.reduce((acc, id) => acc + (stats[id]?.goals ?? 0), 0);
+    if (sumGoals > st) {
+      Alert.alert(
+        'Incohérence',
+        `Le total des buteurs (${sumGoals}) dépasse le score de l'équipe (${st}).`
+      );
       return;
     }
-    if (!submitDate) return;
+
     setSaving(true);
     try {
       const updated = await updateMatch(matchId, {
@@ -321,17 +364,17 @@ export default function MatchDetailScreen() {
       });
       setMatch(updated);
       setEditing(false);
-      Alert.alert('Enregistré', 'Les modifications du match ont été enregistrées.');
+      haptics.success();
     } catch (e) {
-      Alert.alert('Erreur', e instanceof Error ? e.message : 'Impossible d\'enregistrer');
+      haptics.error();
+      Alert.alert('Erreur', e instanceof Error ? e.message : "Impossible d'enregistrer");
     } finally {
       setSaving(false);
     }
   }, [
     matchId,
     editTitle,
-    useNativePicker,
-    matchEditDateTime,
+    editDateTime,
     editDateStr,
     editTimeStr,
     convoqued,
@@ -340,875 +383,491 @@ export default function MatchDetailScreen() {
     playerStats,
     goalsByType,
     concededByType,
-    players,
-    clubPlayersWithTeams,
+    displayName,
   ]);
 
-  const sortedPlayersForMatch = useMemo(
-    () =>
-      [...players].sort((a, b) => {
-        const aConv = !!convoqued[a.id];
-        const bConv = !!convoqued[b.id];
-        if (aConv !== bConv) return aConv ? -1 : 1;
-        return (a.last_name || '').localeCompare(b.last_name || '', 'fr');
-      }),
-    [players, convoqued]
-  );
-  const convoquedPlayers = useMemo(
-    () =>
-      players
-        .filter((p) => convoqued[p.id])
-        .sort((a, b) => (a.last_name || '').localeCompare(b.last_name || '', 'fr')),
-    [players, convoqued]
-  );
-
-  const stepperStyles = useMemo(
-    () => ({
-      btn: [styles.stepperBtn, !isTablet && styles.stepperBtnPhone] as const,
-      text: [styles.stepperText, !isTablet && styles.stepperTextPhone] as const,
-      value: [styles.stepperValue, !isTablet && styles.stepperValuePhone] as const,
-      stepper: [styles.goalTypesStepper, !isTablet && styles.goalTypesStepperPhone] as const,
-    }),
-    [isTablet]
-  );
+  // ── États non nominaux ────────────────────────────────────────────────────
 
   if (loading && !match) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#dc2626" />
+      <View style={[styles.root, { backgroundColor: c.bg.canvas }]}>
+        <SkeletonDetail />
       </View>
     );
   }
 
   if (error || !match) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.errorText}>{error ?? 'Match introuvable'}</Text>
+      <View style={[styles.root, { backgroundColor: c.bg.canvas }]}>
+        <EmptyState
+          icon="alert-circle-outline"
+          tone="negative"
+          title="Match indisponible"
+          description={error ?? 'Ce match est introuvable.'}
+          action={{ label: 'Réessayer', onPress: onRefresh }}
+        />
       </View>
     );
   }
 
+  // ── Rendu ─────────────────────────────────────────────────────────────────
+
   const dateStr = typeof match.date === 'string' ? match.date : (match.date as Date).toISOString?.() ?? '';
   const date = dateStr ? parseISO(dateStr) : new Date();
-  const convoquedIds = Object.entries(convoqued).filter(([, v]) => v).map(([id]) => id);
-  const totalGoals = convoquedPlayers.reduce((acc, p) => acc + (playerStats[p.id]?.goals ?? 0), 0);
-  const scoreTeamNum = parseInt(scoreTeam.trim(), 10) || 0;
+  const diff = (match.score_team ?? 0) - (match.score_opponent ?? 0);
+  const resultTone = diff > 0 ? 'positive' : diff < 0 ? 'negative' : 'secondary';
+
+  const inputStyle = {
+    backgroundColor: c.bg.sunken,
+    borderRadius: theme.radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: c.border.subtle,
+    color: c.text.primary,
+    paddingHorizontal: theme.space.md,
+    minHeight: 48,
+    fontSize: 16,
+  };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView
+      style={[styles.root, { backgroundColor: c.bg.canvas }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#dc2626']} />
-        }
+        contentContainerStyle={[styles.content, { gap: theme.space.xl }]}
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={c.accent.default}
+            colors={[c.accent.default]}
+          />
+        }
       >
-        <View style={styles.card}>
+        {/* ── En-tête : identité et score ─────────────────────────────────── */}
+        <Card variant="raised" padding="lg" style={{ gap: theme.space.md }}>
           {editing ? (
             <>
-              <Text style={styles.label}>Titre</Text>
-              <TextInput
-                style={styles.editInput}
-                value={editTitle}
-                onChangeText={setEditTitle}
-                placeholder="ex: Match 1 - Équipe adverse"
-                placeholderTextColor="#9ca3af"
+              <View style={styles.field}>
+                <Text variant="callout" tone="secondary" weight="600">
+                  Titre
+                </Text>
+                <TextInput
+                  style={inputStyle}
+                  value={editTitle}
+                  onChangeText={setEditTitle}
+                  placeholder="ex : J12 — Sporting Paris"
+                  placeholderTextColor={c.text.tertiary}
+                  accessibilityLabel="Titre du match"
+                />
+              </View>
+              <DateTimeField
+                value={editDateTime}
+                onChange={setEditDateTime}
+                dateText={editDateStr}
+                timeText={editTimeStr}
+                onDateTextChange={setEditDateStr}
+                onTimeTextChange={setEditTimeStr}
               />
-              <Text style={[styles.label, styles.labelSpaced]}>Date</Text>
-              {useNativePicker && DateTimePicker ? (
-                <TouchableOpacity style={styles.pickerTouch} onPress={() => setShowMatchDatePicker(true)}>
-                  <Text style={styles.pickerText}>{format(matchEditDateTime, 'EEEE d MMMM yyyy', { locale: fr })}</Text>
-                  <Text style={styles.pickerHint}>Appuyer pour ouvrir le sélecteur</Text>
-                </TouchableOpacity>
-              ) : (
-                <>
-                  <TextInput
-                    style={styles.editInput}
-                    value={editDateStr}
-                    onChangeText={setEditDateStr}
-                    placeholder="JJ/MM/AAAA"
-                    placeholderTextColor="#9ca3af"
-                  />
-                  <Text style={styles.pickerHint}>Format : jour/mois/année</Text>
-                </>
-              )}
-              <Text style={[styles.label, styles.labelSpaced]}>Heure</Text>
-              {useNativePicker && DateTimePicker ? (
-                <TouchableOpacity style={styles.pickerTouch} onPress={() => setShowMatchTimePicker(true)}>
-                  <Text style={styles.pickerText}>{format(matchEditDateTime, 'HH:mm')}</Text>
-                  <Text style={styles.pickerHint}>Appuyer pour ouvrir le sélecteur</Text>
-                </TouchableOpacity>
-              ) : (
-                <>
-                  <TextInput
-                    style={styles.editInput}
-                    value={editTimeStr}
-                    onChangeText={setEditTimeStr}
-                    placeholder="HH:MM"
-                    placeholderTextColor="#9ca3af"
-                    keyboardType="numbers-and-punctuation"
-                  />
-                  <Text style={styles.pickerHint}>Format : heures:minutes</Text>
-                </>
-              )}
             </>
           ) : (
-            <>
-              <Text style={styles.title}>{match.title}</Text>
-              <Text style={styles.date}>{format(date, "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr })}</Text>
-            </>
+            <View style={styles.identity}>
+              <Text variant="title">{match.title}</Text>
+              <Text variant="callout" tone="secondary">
+                {format(date, "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr })}
+              </Text>
+              <View style={styles.metaRow}>
+                {match.location ? (
+                  <View style={styles.metaItem}>
+                    <Ionicons name="location-outline" size={13} color={c.text.tertiary} />
+                    <Text variant="caption" tone="tertiary">
+                      {match.location}
+                    </Text>
+                  </View>
+                ) : null}
+                {match.competition ? <Badge label={match.competition} size="sm" /> : null}
+              </View>
+            </View>
           )}
-          <View style={styles.metaRow}>
-            <Text style={styles.meta}>{match.location}</Text>
-            <Text style={styles.metaDot}> · </Text>
-            <Text style={styles.meta}>{match.competition}</Text>
-          </View>
 
-          <View style={styles.scoreSection}>
-            <Text style={styles.scoreLabel}>Score</Text>
+          {/* Le score est le chiffre héros de l'écran : une seule fois, en grand. */}
+          <View style={[styles.scoreBlock, { borderTopColor: c.border.subtle }]}>
             {editing ? (
-              <View style={styles.scoreRow}>
+              <View style={[styles.scoreRow, { gap: theme.space.md }]}>
                 <TextInput
-                  style={styles.scoreInput}
+                  style={[inputStyle, styles.scoreInput]}
                   value={scoreTeam}
                   onChangeText={setScoreTeam}
                   keyboardType="number-pad"
                   placeholder="0"
+                  placeholderTextColor={c.text.tertiary}
+                  accessibilityLabel="Buts marqués par l'équipe"
                 />
-                <Text style={styles.scoreSeparator}>–</Text>
+                <Text variant="title" tone="tertiary">
+                  –
+                </Text>
                 <TextInput
-                  style={styles.scoreInput}
+                  style={[inputStyle, styles.scoreInput]}
                   value={scoreOpponent}
                   onChangeText={setScoreOpponent}
                   keyboardType="number-pad"
                   placeholder="0"
+                  placeholderTextColor={c.text.tertiary}
+                  accessibilityLabel="Buts encaissés"
                 />
               </View>
             ) : (
-              <Text style={styles.scoreText}>
-                {match.score_team} – {match.score_opponent}
+              <Text
+                variant="hero"
+                tone={resultTone}
+                accessibilityLabel={`Score ${match.score_team ?? 0} à ${match.score_opponent ?? 0}`}
+              >
+                {match.score_team ?? 0} – {match.score_opponent ?? 0}
               </Text>
             )}
           </View>
-        </View>
+        </Card>
 
-        {editing && (
+        {/* ── Édition ─────────────────────────────────────────────────────── */}
+        {editing ? (
           <>
             {hasEvents && (
-              <TouchableOpacity style={styles.fetchEventsBtn} onPress={loadFromMatchRecorder}>
-                <Text style={styles.fetchEventsText}>Récupérer buts et cartons depuis le match recorder</Text>
-              </TouchableOpacity>
+              <Button
+                label="Récupérer buts et cartons du recorder"
+                icon="download-outline"
+                variant="secondary"
+                block
+                onPress={loadFromMatchRecorder}
+              />
             )}
 
-            <Text style={styles.sectionTitle}>Types de buts marqués et encaissés</Text>
-            <Text style={styles.sectionHint}>
-              Répartition des buts par type (Phase offensive, Transition, CPA, Supériorité)
-            </Text>
-            <View style={styles.goalTypesTable}>
-              <View style={styles.goalTypesHeader}>
-                <Text style={styles.goalTypesColType}>Type</Text>
-                <Text style={styles.goalTypesColLabel}>Marqués</Text>
-                <Text style={styles.goalTypesColLabel}>Encaissés</Text>
-              </View>
-              {GOAL_TYPE_KEYS.map((key) => (
-                <View key={key} style={styles.goalTypesRow}>
-                  <Text style={styles.goalTypesTypeLabel}>{GOAL_TYPE_LABELS[key]}</Text>
-                  <View style={stepperStyles.stepper}>
-                    <TouchableOpacity style={stepperStyles.btn} onPress={() => setGoalTypeStat('scored', key, -1)}>
-                      <Text style={stepperStyles.text}>−</Text>
-                    </TouchableOpacity>
-                    <Text style={stepperStyles.value}>{goalsByType[key] ?? 0}</Text>
-                    <TouchableOpacity style={stepperStyles.btn} onPress={() => setGoalTypeStat('scored', key, 1)}>
-                      <Text style={stepperStyles.text}>+</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <View style={stepperStyles.stepper}>
-                    <TouchableOpacity style={stepperStyles.btn} onPress={() => setGoalTypeStat('conceded', key, -1)}>
-                      <Text style={stepperStyles.text}>−</Text>
-                    </TouchableOpacity>
-                    <Text style={stepperStyles.value}>{concededByType[key] ?? 0}</Text>
-                    <TouchableOpacity style={stepperStyles.btn} onPress={() => setGoalTypeStat('conceded', key, 1)}>
-                      <Text style={stepperStyles.text}>+</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))}
-            </View>
+            <Section
+              title="Types de buts"
+              subtitle="Répartition des buts marqués et encaissés."
+            >
+              <GoalTypesEditor
+                scored={goalsByType}
+                conceded={concededByType}
+                onChange={setGoalTypeStat}
+                compact={!isTablet}
+              />
+            </Section>
 
-            <Text style={styles.sectionTitle}>Joueurs convoqués et buts</Text>
-            <Text style={styles.sectionHint}>
-              Convoqué ou non, puis buts pour chaque convoqué. {totalGoals > scoreTeamNum ? '(Total buts > score)' : ''}
-            </Text>
-            {players.length > 0 && (
-              <TouchableOpacity style={styles.convokeAllMatchBtn} onPress={convokeAllMatch} activeOpacity={0.8}>
-                <Text style={styles.convokeAllMatchBtnText}>Convoquer tous les joueurs</Text>
-              </TouchableOpacity>
-            )}
-            {sortedPlayersForMatch.length === 0 ? (
-              <Text style={styles.emptyText}>Aucun joueur convoqué. Enregistrez d’abord les convoqués.</Text>
-            ) : (
-              <View style={styles.playerList}>
-                {sortedPlayersForMatch.map((p) => {
+            <Section
+              title="Convocations et buts"
+              subtitle={`${convoquedPlayers.length + invitedPlayerIds.length} joueur(s) convoqué(s).`}
+            >
+              {/* Une incohérence de saisie doit se voir, pas se deviner dans un
+                  texte gris entre parenthèses. */}
+              {goalsOverflow && (
+                <Card variant="flat" padding="sm" style={[styles.warnRow, { backgroundColor: c.warning.subtle }]}>
+                  <Ionicons name="alert-circle" size={17} color={c.warning.default} />
+                  <Text variant="callout" tone="warning" style={styles.flex}>
+                    Total des buteurs ({totalGoals}) supérieur au score ({scoreTeamNum}).
+                  </Text>
+                </Card>
+              )}
+
+              {players.length > 0 && (
+                <Button
+                  label="Convoquer tout l'effectif"
+                  variant="secondary"
+                  size="sm"
+                  icon="checkmark-done-outline"
+                  onPress={convokeAll}
+                  style={styles.selfStart}
+                />
+              )}
+
+              {sortedForEdit.length === 0 ? (
+                <EmptyState
+                  icon="people-outline"
+                  title="Effectif vide"
+                  description="Ajoutez des joueurs à l'équipe pour pouvoir les convoquer."
+                  compact
+                />
+              ) : (
+                sortedForEdit.map((p) => {
                   const isConv = !!convoqued[p.id];
-                  const s = playerStats[p.id] ?? { goals: 0, yellow_cards: 0, red_cards: 0 };
+                  const line = playerStats[p.id] ?? emptyLine();
+                  const name = `${p.first_name} ${p.last_name}`;
                   return (
-                    <View key={p.id} style={styles.playerRow}>
-                      <View style={styles.playerMain}>
-                        <View style={styles.playerInfo}>
+                    <Card key={p.id} variant="flat" padding="sm" style={styles.playerCard}>
+                      <View style={styles.playerHeader}>
+                        <View style={styles.playerIdentity}>
                           {p.number != null && (
-                            <View style={[styles.numberBadge, !isConv && styles.numberBadgeInactive]}>
-                              <Text style={styles.numberText}>{p.number}</Text>
+                            <View
+                              style={[
+                                styles.numberBadge,
+                                { backgroundColor: isConv ? c.accent.fill : c.bg.sunken },
+                              ]}
+                            >
+                              <Text
+                                variant="caption"
+                                tone={isConv ? 'onFill' : 'tertiary'}
+                                weight="700"
+                                numeric
+                              >
+                                {p.number}
+                              </Text>
                             </View>
                           )}
-                          <Text style={[styles.playerName, !isConv && styles.playerNameInactive]}>
-                            {p.first_name} {p.last_name}
+                          <Text
+                            variant="body"
+                            tone={isConv ? 'primary' : 'tertiary'}
+                            weight="600"
+                            numberOfLines={1}
+                            style={styles.flex}
+                          >
+                            {name}
                           </Text>
                         </View>
-                        {isConv && (
-                          <View style={styles.inlineStats}>
-                            <View style={styles.inlineStat}>
-                              <Text style={styles.inlineLabel}>Buts</Text>
-                              <View style={styles.stepperRow}>
-                                <TouchableOpacity style={stepperStyles.btn} onPress={() => setStat(p.id, 'goals', -1)}>
-                                  <Text style={stepperStyles.text}>−</Text>
-                                </TouchableOpacity>
-                                <Text style={stepperStyles.value}>{s.goals}</Text>
-                                <TouchableOpacity style={stepperStyles.btn} onPress={() => setStat(p.id, 'goals', 1)}>
-                                  <Text style={stepperStyles.text}>+</Text>
-                                </TouchableOpacity>
-                              </View>
-                            </View>
-                          </View>
-                        )}
+                        <Switch
+                          value={isConv}
+                          onValueChange={() => toggleConvoqued(p.id)}
+                          trackColor={{ false: c.bg.sunken, true: c.accent.fill }}
+                          thumbColor={c.text.onFill}
+                          accessibilityLabel={`Convoquer ${name}`}
+                        />
                       </View>
-                      <Switch
-                        value={isConv}
-                        onValueChange={() => toggleConvoqued(p.id)}
-                        trackColor={{ false: '#e5e7eb', true: '#dc2626' }}
-                        thumbColor="#fff"
-                      />
-                    </View>
+                      {isConv && (
+                        <View style={[styles.statRow, { gap: theme.space.xl }]}>
+                          <Stepper
+                            value={line.goals}
+                            onChange={(d) => setStat(p.id, 'goals', d)}
+                            label={`buts de ${name}`}
+                            caption="Buts"
+                            compact
+                          />
+                        </View>
+                      )}
+                    </Card>
                   );
-                })}
-              </View>
-            )}
+                })
+              )}
 
-            {otherTeamPlayersForForm.length > 0 && (
-              <TouchableOpacity
-                style={styles.addOtherTeamsBtn}
-                onPress={() => setInviteModalOpen(true)}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.addOtherTeamsBtnText}>+ Ajouter joueurs autres équipes</Text>
-              </TouchableOpacity>
-            )}
+              {inviteCandidates.length > 0 && (
+                <Button
+                  label="Ajouter un joueur d'une autre équipe"
+                  variant="ghost"
+                  icon="person-add-outline"
+                  block
+                  onPress={() => setInviteOpen(true)}
+                />
+              )}
+            </Section>
 
             {invitedPlayerIds.length > 0 && (
-              <View style={styles.invitedSection}>
-                <Text style={styles.invitedSectionTitle}>Joueurs d&apos;autres équipes convoqués</Text>
+              <Section title="Joueurs d'autres équipes">
                 {invitedPlayerIds.map((playerId) => {
-                  const s = playerStats[playerId] ?? defaultPlayerStats();
+                  const line = playerStats[playerId] ?? emptyLine();
+                  const name = displayName(playerId);
                   return (
-                    <View key={playerId} style={styles.invitedMatchRow}>
-                      <Text style={styles.invitedPlayerName}>{getPlayerDisplayName(playerId)}</Text>
-                      <View style={styles.statsRowInvited}>
-                        <View style={styles.inlineStat}>
-                          <Text style={styles.inlineLabel}>Buts</Text>
-                          <View style={styles.stepperRow}>
-                            <TouchableOpacity style={stepperStyles.btn} onPress={() => setStat(playerId, 'goals', -1)}>
-                              <Text style={stepperStyles.text}>−</Text>
-                            </TouchableOpacity>
-                            <Text style={stepperStyles.value}>{s.goals}</Text>
-                            <TouchableOpacity style={stepperStyles.btn} onPress={() => setStat(playerId, 'goals', 1)}>
-                              <Text style={stepperStyles.text}>+</Text>
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                        <View style={styles.inlineStat}>
-                          <Text style={styles.inlineLabel}>Jaunes</Text>
-                          <View style={styles.stepperRow}>
-                            <TouchableOpacity style={stepperStyles.btn} onPress={() => setStat(playerId, 'yellow_cards', -1)}>
-                              <Text style={stepperStyles.text}>−</Text>
-                            </TouchableOpacity>
-                            <Text style={stepperStyles.value}>{s.yellow_cards}</Text>
-                            <TouchableOpacity style={stepperStyles.btn} onPress={() => setStat(playerId, 'yellow_cards', 1)}>
-                              <Text style={stepperStyles.text}>+</Text>
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                        <View style={styles.inlineStat}>
-                          <Text style={styles.inlineLabel}>Rouges</Text>
-                          <View style={styles.stepperRow}>
-                            <TouchableOpacity style={stepperStyles.btn} onPress={() => setStat(playerId, 'red_cards', -1)}>
-                              <Text style={stepperStyles.text}>−</Text>
-                            </TouchableOpacity>
-                            <Text style={stepperStyles.value}>{s.red_cards}</Text>
-                            <TouchableOpacity style={stepperStyles.btn} onPress={() => setStat(playerId, 'red_cards', 1)}>
-                              <Text style={stepperStyles.text}>+</Text>
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                      </View>
-                      <TouchableOpacity
-                        onPress={() => {
-                          setConvoqued((prev) => ({ ...prev, [playerId]: false }));
-                          setPlayerStats((prev) => {
-                            const next = { ...prev };
-                            delete next[playerId];
-                            return next;
-                          });
-                        }}
-                        style={styles.removeInvitedBtn}
-                      >
-                        <Text style={styles.removeInvitedText}>Retirer</Text>
-                      </TouchableOpacity>
-                    </View>
-                  );
-                })}
-              </View>
-            )}
-          </>
-        )}
-
-        {!editing && (
-          <>
-            {(Object.values(goalsByType).some((v) => v > 0) || Object.values(concededByType).some((v) => v > 0)) && (
-              <View style={styles.goalTypesSummary}>
-                <Text style={styles.sectionTitle}>Types de buts</Text>
-                <View style={styles.goalTypesSummaryRow}>
-                  <Text style={styles.goalTypesSummaryLabel}>Marqués :</Text>
-                  <Text style={styles.goalTypesSummaryText}>
-                    {GOAL_TYPE_KEYS.filter((k) => (goalsByType[k] ?? 0) > 0)
-                      .map((k) => `${GOAL_TYPE_LABELS[k]} ${goalsByType[k]}`)
-                      .join(' · ') || '—'}
-                  </Text>
-                </View>
-                <View style={styles.goalTypesSummaryRow}>
-                  <Text style={styles.goalTypesSummaryLabel}>Encaissés :</Text>
-                  <Text style={styles.goalTypesSummaryText}>
-                    {GOAL_TYPE_KEYS.filter((k) => (concededByType[k] ?? 0) > 0)
-                      .map((k) => `${GOAL_TYPE_LABELS[k]} ${concededByType[k]}`)
-                      .join(' · ') || '—'}
-                  </Text>
-                </View>
-              </View>
-            )}
-            <Text style={styles.sectionTitle}>Joueurs convoqués</Text>
-            {convoquedPlayers.length === 0 && invitedPlayerIds.length === 0 ? (
-              <Text style={styles.emptyText}>Aucun joueur convoqué</Text>
-            ) : (
-              <View style={styles.playerList}>
-                {convoquedPlayers.map((p) => {
-                  const s = playerStats[p.id];
-                  const hasStats = s && s.goals > 0;
-                  return (
-                    <View key={p.id} style={styles.playerRow}>
-                      <View style={styles.playerInfo}>
-                        {p.number != null && (
-                          <View style={styles.numberBadge}>
-                            <Text style={styles.numberText}>{p.number}</Text>
-                          </View>
-                        )}
-                        <Text style={styles.playerName}>
-                          {p.first_name} {p.last_name}
+                    <Card key={playerId} variant="flat" padding="sm" style={styles.playerCard}>
+                      <View style={styles.playerHeader}>
+                        <Text variant="body" weight="600" numberOfLines={1} style={styles.flex}>
+                          {name}
                         </Text>
-                        {hasStats && (
-                          <Text style={styles.playerStatsInline}>
-                            ⚽ {s!.goals}
-                          </Text>
-                        )}
+                        <Button
+                          label="Retirer"
+                          variant="ghost"
+                          size="sm"
+                          onPress={() => {
+                            haptics.tapLight();
+                            setConvoqued((prev) => ({ ...prev, [playerId]: false }));
+                            setPlayerStats((prev) => {
+                              const next = { ...prev };
+                              delete next[playerId];
+                              return next;
+                            });
+                          }}
+                        />
                       </View>
-                    </View>
+                      <View style={[styles.statRow, { gap: theme.space.xl }]}>
+                        <Stepper
+                          value={line.goals}
+                          onChange={(d) => setStat(playerId, 'goals', d)}
+                          label={`buts de ${name}`}
+                          caption="Buts"
+                          compact
+                        />
+                        <Stepper
+                          value={line.yellow_cards}
+                          onChange={(d) => setStat(playerId, 'yellow_cards', d)}
+                          label={`cartons jaunes de ${name}`}
+                          caption="Jaunes"
+                          compact
+                        />
+                        <Stepper
+                          value={line.red_cards}
+                          onChange={(d) => setStat(playerId, 'red_cards', d)}
+                          label={`cartons rouges de ${name}`}
+                          caption="Rouges"
+                          compact
+                        />
+                      </View>
+                    </Card>
                   );
                 })}
-                {invitedPlayerIds.map((playerId) => {
-                  const s = playerStats[playerId];
-                  const hasStats = s && s.goals > 0;
-                  return (
-                    <View key={playerId} style={styles.playerRow}>
-                      <View style={styles.playerInfo}>
-                        <Text style={styles.playerName}>{getPlayerDisplayName(playerId)}</Text>
-                        {hasStats && (
-                          <Text style={styles.playerStatsInline}>⚽ {s!.goals}</Text>
-                        )}
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
+              </Section>
             )}
+          </>
+        ) : (
+          /* ── Lecture ───────────────────────────────────────────────────── */
+          <>
+            <Section title="Types de buts">
+              <GoalTypesSummary scored={goalsByType} conceded={concededByType} />
+            </Section>
+
+            <Section
+              title="Joueurs convoqués"
+              subtitle={`${convoquedPlayers.length + invitedPlayerIds.length} joueur(s).`}
+            >
+              {convoquedPlayers.length === 0 && invitedPlayerIds.length === 0 ? (
+                <EmptyState
+                  icon="people-outline"
+                  title="Aucun joueur convoqué"
+                  description="Passez en modification pour composer le groupe."
+                  action={{ label: 'Modifier le match', onPress: beginEditing }}
+                  compact
+                />
+              ) : (
+                <Card variant="flat" padding="none">
+                  {[...convoquedPlayers.map((p) => p.id), ...invitedPlayerIds].map((id, i) => {
+                    const p = players.find((x) => x.id === id);
+                    const goals = playerStats[id]?.goals ?? 0;
+                    const name = p ? `${p.first_name} ${p.last_name}` : displayName(id);
+                    return (
+                      <View
+                        key={id}
+                        style={[
+                          styles.readRow,
+                          i > 0 && {
+                            borderTopWidth: StyleSheet.hairlineWidth,
+                            borderTopColor: c.border.subtle,
+                          },
+                        ]}
+                        accessibilityLabel={
+                          goals > 0 ? `${name}, ${goals} but${goals > 1 ? 's' : ''}` : name
+                        }
+                      >
+                        {p?.number != null ? (
+                          <View style={[styles.numberBadge, { backgroundColor: c.bg.sunken }]}>
+                            <Text variant="caption" tone="secondary" weight="700" numeric>
+                              {p.number}
+                            </Text>
+                          </View>
+                        ) : (
+                          <View style={[styles.numberBadge, styles.numberPlaceholder]} />
+                        )}
+                        <Text variant="body" numberOfLines={1} style={styles.flex}>
+                          {name}
+                        </Text>
+                        {invitedSet.has(id) && <Badge label="Invité" size="sm" />}
+                        {goals > 0 && (
+                          <View style={styles.goalTag}>
+                            <Ionicons name="football" size={13} color={c.text.secondary} />
+                            <Text variant="callout" tone="secondary" weight="600" numeric>
+                              {goals}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+                </Card>
+              )}
+            </Section>
           </>
         )}
 
-        <View style={styles.footer}>
+        {/* ── Actions ─────────────────────────────────────────────────────── */}
+        <View style={[styles.footer, { gap: theme.space.md }]}>
           {editing ? (
             <>
-              <TouchableOpacity
-                style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+              <Button
+                label={saving ? 'Enregistrement…' : 'Enregistrer'}
                 onPress={save}
+                loading={saving}
                 disabled={saving}
-              >
-                <Text style={styles.saveBtnText}>{saving ? 'Enregistrement…' : 'Enregistrer'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.cancelBtn}
-                onPress={() => {
-                  setShowMatchDatePicker(false);
-                  setShowMatchTimePicker(false);
-                  setEditing(false);
-                }}
+                size="lg"
+                block
+              />
+              <Button
+                label="Annuler"
+                variant="ghost"
+                onPress={() => setEditing(false)}
                 disabled={saving}
-              >
-                <Text style={styles.cancelBtnText}>Annuler</Text>
-              </TouchableOpacity>
+                block
+              />
             </>
           ) : (
-            <TouchableOpacity style={styles.editBtn} onPress={beginEditing}>
-              <Text style={styles.editBtnText}>Modifier le match</Text>
-            </TouchableOpacity>
+            <Button
+              label="Modifier le match"
+              icon="create-outline"
+              onPress={beginEditing}
+              size="lg"
+              block
+            />
           )}
         </View>
       </ScrollView>
 
-      {useNativePicker && DateTimePicker && (
-        <>
-          <Modal visible={showMatchDatePicker} transparent animationType="slide">
-            <Pressable style={styles.sheetOverlay} onPress={() => setShowMatchDatePicker(false)}>
-              <View style={styles.sheetContent} onStartShouldSetResponder={() => true}>
-                <View style={styles.sheetHeader}>
-                  <Pressable onPress={() => setShowMatchDatePicker(false)}>
-                    <Text style={styles.modalDone}>OK</Text>
-                  </Pressable>
-                </View>
-                <View style={styles.sheetPickerWrap}>
-                  <DateTimePicker
-                    value={matchEditDateTime}
-                    mode="date"
-                    display={Platform.OS === 'ios' ? 'inline' : 'default'}
-                    onChange={(_e: unknown, v?: Date) => {
-                      if (v) {
-                        const next = new Date(matchEditDateTime);
-                        next.setFullYear(v.getFullYear(), v.getMonth(), v.getDate());
-                        setMatchEditDateTime(next);
-                      }
-                      if (Platform.OS !== 'ios') setShowMatchDatePicker(false);
-                    }}
-                    locale="fr-FR"
-                    textColor="#111111"
-                    themeVariant="light"
-                  />
-                </View>
-              </View>
-            </Pressable>
-          </Modal>
-          <Modal visible={showMatchTimePicker} transparent animationType="slide">
-            <Pressable style={styles.sheetOverlay} onPress={() => setShowMatchTimePicker(false)}>
-              <View style={styles.sheetContent} onStartShouldSetResponder={() => true}>
-                <View style={styles.sheetHeader}>
-                  <Pressable onPress={() => setShowMatchTimePicker(false)}>
-                    <Text style={styles.modalDone}>OK</Text>
-                  </Pressable>
-                </View>
-                <View style={styles.sheetPickerWrap}>
-                  <DateTimePicker
-                    value={matchEditDateTime}
-                    mode="time"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={(_e: unknown, v?: Date) => {
-                      if (v) {
-                        const next = new Date(matchEditDateTime);
-                        next.setHours(v.getHours(), v.getMinutes(), 0, 0);
-                        setMatchEditDateTime(next);
-                      }
-                      if (Platform.OS !== 'ios') setShowMatchTimePicker(false);
-                    }}
-                    locale="fr-FR"
-                    is24Hour
-                    textColor="#111111"
-                    themeVariant="light"
-                  />
-                </View>
-              </View>
-            </Pressable>
-          </Modal>
-        </>
-      )}
-
-      <Modal visible={inviteModalOpen} transparent animationType="slide">
-        <Pressable style={styles.modalOverlay} onPress={() => setInviteModalOpen(false)}>
-          <View style={styles.inviteModalContent} onStartShouldSetResponder={() => true}>
-            <View style={styles.inviteModalHeader}>
-              <Text style={styles.inviteModalTitle}>Ajouter des joueurs d&apos;autres équipes</Text>
-              <Pressable onPress={() => { setInviteModalOpen(false); setInviteModalSelectedIds({}); }}>
-                <Text style={styles.modalDone}>Fermer</Text>
-              </Pressable>
-            </View>
-            <Text style={styles.label}>Filtrer par équipe</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
-              <TouchableOpacity
-                style={[styles.filterChip, inviteFilterTeamId === 'all' && styles.filterChipActive]}
-                onPress={() => setInviteFilterTeamId('all')}
-              >
-                <Text style={[styles.filterChipText, inviteFilterTeamId === 'all' && styles.filterChipTextActive]}>
-                  Toutes
-                </Text>
-              </TouchableOpacity>
-              {teams.filter((t) => t.id !== activeTeamId).map((t) => (
-                <TouchableOpacity
-                  key={t.id}
-                  style={[styles.filterChip, inviteFilterTeamId === t.id && styles.filterChipActive]}
-                  onPress={() => setInviteFilterTeamId(t.id)}
-                >
-                  <Text style={[styles.filterChipText, inviteFilterTeamId === t.id && styles.filterChipTextActive]}>
-                    {t.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <ScrollView style={styles.inviteModalList}>
-              {otherTeamPlayersFiltered.map(({ player, teamNames }) => (
-                <TouchableOpacity
-                  key={player.id}
-                  style={styles.inviteModalPlayerRow}
-                  onPress={() =>
-                    setInviteModalSelectedIds((prev) => ({ ...prev, [player.id]: !prev[player.id] }))
-                  }
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.inviteModalPlayerName}>
-                    {player.first_name} {player.last_name}
-                    {teamNames.length > 0 ? ` (${teamNames.join(', ')})` : ''}
-                  </Text>
-                  <View style={[styles.checkbox, inviteModalSelectedIds[player.id] && styles.checkboxChecked]}>
-                    {inviteModalSelectedIds[player.id] ? <Text style={styles.checkboxText}>✓</Text> : null}
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <View style={styles.inviteModalFooter}>
-              <TouchableOpacity style={styles.inviteModalCancelBtn} onPress={() => { setInviteModalOpen(false); setInviteModalSelectedIds({}); }}>
-                <Text style={styles.inviteModalCancelText}>Annuler</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.inviteModalAddBtn}
-                onPress={() => {
-                  const toAdd = Object.entries(inviteModalSelectedIds)
-                    .filter(([, v]) => v)
-                    .map(([id]) => id)
-                    .filter((id) => !convoqued[id]);
-                  toAdd.forEach((id) => {
-                    setConvoqued((prev) => ({ ...prev, [id]: true }));
-                    setPlayerStats((prev) => ({ ...prev, [id]: defaultPlayerStats() }));
-                  });
-                  setInviteModalOpen(false);
-                  setInviteModalSelectedIds({});
-                }}
-              >
-                <Text style={styles.inviteModalAddText}>Ajouter la sélection</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Pressable>
-      </Modal>
+      <InvitePlayersSheet
+        visible={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        candidates={inviteCandidates}
+        teams={teams.filter((t) => t.id !== activeTeamId)}
+        alreadyInvited={invitedSet}
+        onConfirm={(ids) => {
+          setConvoqued((prev) => {
+            const next = { ...prev };
+            ids.forEach((id) => {
+              next[id] = true;
+            });
+            return next;
+          });
+          setPlayerStats((prev) => {
+            const next = { ...prev };
+            ids.forEach((id) => {
+              if (!next[id]) next[id] = emptyLine();
+            });
+            return next;
+          });
+          haptics.success();
+          setInviteOpen(false);
+        }}
+      />
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f3f4f6' },
-  scroll: { flex: 1 },
-  content: { padding: 16, paddingBottom: 32 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  errorText: { fontSize: 16, color: '#dc2626', textAlign: 'center' },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 20,
-    borderLeftWidth: 4,
-    borderLeftColor: '#dc2626',
-  },
-  title: { fontSize: 20, fontWeight: '700', color: '#111', marginBottom: 8 },
-  date: { fontSize: 16, color: '#374151', marginBottom: 4 },
-  labelSpaced: { marginTop: 14 },
-  editInput: {
-    backgroundColor: '#f9fafb',
-    borderRadius: 10,
-    padding: 12,
-    fontSize: 16,
-    color: '#111',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  pickerTouch: {
-    backgroundColor: '#f9fafb',
-    borderRadius: 10,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  pickerText: { fontSize: 16, color: '#111', fontWeight: '500' },
-  pickerHint: { fontSize: 12, color: '#9ca3af', marginTop: 4 },
-  sheetOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
-  sheetContent: {
-    backgroundColor: '#ffffff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingBottom: 24,
-  },
-  sheetHeader: { flexDirection: 'row', justifyContent: 'flex-end', padding: 16 },
-  sheetPickerWrap: {
-    backgroundColor: '#ffffff',
+  root: { flex: 1 },
+  flex: { flex: 1 },
+  selfStart: { alignSelf: 'flex-start' },
+  content: { padding: 16, paddingBottom: 40 },
+  field: { gap: 6 },
+  identity: { gap: 4 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginTop: 4 },
+  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  scoreBlock: {
     alignItems: 'center',
-    minHeight: 220,
-    width: '100%',
-  },
-  metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 },
-  meta: { fontSize: 14, color: '#6b7280' },
-  metaDot: { fontSize: 14, color: '#9ca3af' },
-  scoreSection: { marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#e5e7eb', alignItems: 'center' },
-  scoreLabel: { fontSize: 12, color: '#6b7280', marginBottom: 4 },
-  scoreRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  scoreInput: {
-    backgroundColor: '#f9fafb',
-    borderRadius: 10,
-    padding: 12,
-    fontSize: 24,
-    fontWeight: '700',
-    minWidth: 56,
-    textAlign: 'center',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  scoreSeparator: { fontSize: 20, fontWeight: '600', color: '#6b7280' },
-  scoreText: { fontSize: 28, fontWeight: '700', color: '#111' },
-  fetchEventsBtn: {
-    backgroundColor: '#fef3c7',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#f59e0b',
-  },
-  fetchEventsText: { fontSize: 14, color: '#92400e', fontWeight: '500' },
-  sectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 4, color: '#111' },
-  sectionHint: { fontSize: 12, color: '#6b7280', marginBottom: 12 },
-  goalTypesTable: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 20,
-  },
-  goalTypesHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingBottom: 10,
-    marginBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  goalTypesColType: { flex: 1.5, fontSize: 13, fontWeight: '600', color: '#6b7280' },
-  goalTypesColLabel: { flex: 1, fontSize: 12, fontWeight: '600', color: '#6b7280', textAlign: 'center' },
-  goalTypesRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#f3f4f6',
-  },
-  goalTypesTypeLabel: { flex: 1.5, fontSize: 14, color: '#374151' },
-  goalTypesStepper: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  goalTypesStepperPhone: { gap: 4 },
-  goalTypesSummary: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-  },
-  goalTypesSummaryRow: { flexDirection: 'row', marginBottom: 6 },
-  goalTypesSummaryLabel: { fontSize: 13, fontWeight: '600', color: '#6b7280', width: 90 },
-  goalTypesSummaryText: { flex: 1, fontSize: 13, color: '#374151' },
-  emptyText: { fontSize: 14, color: '#6b7280', marginBottom: 16 },
-  playerList: { marginBottom: 16 },
-  playerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 8,
-  },
-  playerMain: { flex: 1, marginRight: 12 },
-  playerInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  inlineStats: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 6 },
-  inlineStat: { alignItems: 'center', minWidth: 48 },
-  inlineLabel: { fontSize: 11, color: '#6b7280', marginBottom: 4 },
-  numberBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#dc2626',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 10,
-  },
-  numberBadgeInactive: { backgroundColor: '#9ca3af', opacity: 0.7 },
-  numberBadgeSmall: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#dc2626',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  numberText: { color: '#fff', fontWeight: '700', fontSize: 12 },
-  playerName: { fontSize: 15, fontWeight: '600', color: '#111' },
-  playerNameInactive: { color: '#9ca3af' },
-  playerStatsInline: { fontSize: 13, color: '#6b7280', marginLeft: 8 },
-  statsList: { marginBottom: 16 },
-  statsRow: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 10,
-  },
-  statsPlayer: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  statsName: { fontSize: 15, fontWeight: '600', color: '#111', flex: 1 },
-  statControls: { flexDirection: 'row', gap: 16 },
-  statControl: { alignItems: 'center', minWidth: 64 },
-  statLabel: { fontSize: 11, color: '#6b7280', marginBottom: 4 },
-  stepperRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  stepperBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: '#e5e7eb',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  stepperBtnPhone: {
-    width: 26,
-    height: 26,
-    borderRadius: 6,
-  },
-  stepperText: { fontSize: 18, fontWeight: '600', color: '#374151' },
-  stepperTextPhone: { fontSize: 14 },
-  stepperValue: { fontSize: 16, fontWeight: '700', color: '#111', minWidth: 24, textAlign: 'center' },
-  stepperValuePhone: { fontSize: 14, minWidth: 20 },
-  footer: { marginTop: 24, gap: 12 },
-  editBtn: {
-    backgroundColor: '#dc2626',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-  },
-  editBtnText: { color: '#fff', fontWeight: '600', fontSize: 16 },
-  saveBtn: {
-    backgroundColor: '#16a34a',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-  },
-  saveBtnDisabled: { opacity: 0.6 },
-  saveBtnText: { color: '#fff', fontWeight: '600', fontSize: 16 },
-  cancelBtn: { padding: 16, alignItems: 'center' },
-  cancelBtnText: { fontSize: 16, color: '#6b7280' },
-  addOtherTeamsBtn: {
-    marginTop: 12,
-    marginBottom: 16,
-    padding: 14,
-    backgroundColor: '#16a34a',
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  addOtherTeamsBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
-  convokeAllMatchBtn: {
+    paddingTop: 16,
     marginTop: 4,
-    marginBottom: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    backgroundColor: '#16a34a',
-    borderRadius: 10,
-    alignSelf: 'flex-start',
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
-  convokeAllMatchBtnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
-  invitedSection: { marginBottom: 16 },
-  invitedSectionTitle: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 10 },
-  invitedMatchRow: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  invitedPlayerName: { fontSize: 15, fontWeight: '600', color: '#111', marginBottom: 8 },
-  statsRowInvited: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 8 },
-  removeInvitedBtn: { alignSelf: 'flex-start', paddingVertical: 4 },
-  removeInvitedText: { fontSize: 13, color: '#dc2626', fontWeight: '500' },
-  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
-  inviteModalContent: {
-    backgroundColor: '#fff',
-    marginTop: 80,
-    marginHorizontal: 16,
-    borderRadius: 16,
-    maxHeight: '80%',
-    padding: 16,
-  },
-  inviteModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  inviteModalTitle: { fontSize: 18, fontWeight: '700', color: '#111', flex: 1 },
-  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 6 },
-  filterRow: { marginBottom: 12, maxHeight: 44 },
-  filterChip: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    backgroundColor: '#e5e7eb',
-    marginRight: 8,
-  },
-  filterChipActive: { backgroundColor: '#16a34a' },
-  filterChipText: { fontSize: 14, fontWeight: '500', color: '#374151' },
-  filterChipTextActive: { color: '#fff' },
-  inviteModalList: { maxHeight: 280, marginBottom: 16 },
-  inviteModalPlayerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
-  },
-  inviteModalPlayerName: { fontSize: 15, color: '#111', flex: 1 },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#d1d5db',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkboxChecked: { backgroundColor: '#16a34a', borderColor: '#16a34a' },
-  checkboxText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  inviteModalFooter: { flexDirection: 'row', gap: 12, justifyContent: 'flex-end' },
-  inviteModalCancelBtn: { paddingVertical: 12, paddingHorizontal: 20 },
-  inviteModalCancelText: { fontSize: 16, color: '#6b7280', fontWeight: '500' },
-  inviteModalAddBtn: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    backgroundColor: '#16a34a',
-    borderRadius: 10,
-  },
-  inviteModalAddText: { fontSize: 16, color: '#fff', fontWeight: '600' },
-  modalDone: { fontSize: 17, fontWeight: '600', color: '#dc2626' },
+  scoreRow: { flexDirection: 'row', alignItems: 'center' },
+  scoreInput: { minWidth: 76, textAlign: 'center', fontSize: 24, fontWeight: '700' },
+  warnRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  playerCard: { gap: 10 },
+  playerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  playerIdentity: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  numberBadge: { width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
+  numberPlaceholder: { backgroundColor: 'transparent' },
+  statRow: { flexDirection: 'row', alignItems: 'flex-start', flexWrap: 'wrap' },
+  readRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 11, paddingHorizontal: 14 },
+  goalTag: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  footer: { marginTop: 8 },
 });
