@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Stack, useRouter } from 'expo-router';
 import { useIsTablet } from '../../../hooks/useIsTablet';
-import { PhoneNavMenu } from '../../../components/PhoneNavMenu';
 import { SeasonHeaderButton } from '../../../components/SeasonHeaderButton';
 import {
   TouchableOpacity,
@@ -73,7 +72,6 @@ export default function CalendarLayout() {
         name="index"
         options={{
           title: 'Calendrier',
-          headerLeft: isTablet ? undefined : () => <PhoneNavMenu />,
           headerRight: () => (
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <SeasonHeaderButton />
@@ -86,14 +84,12 @@ export default function CalendarLayout() {
         name="new"
         options={{
           title: 'Nouvel entraînement',
-          headerLeft: isTablet ? undefined : () => <PhoneNavMenu />,
         }}
       />
       <Stack.Screen
         name="new-match"
         options={{
           title: 'Nouveau match',
-          headerLeft: isTablet ? undefined : () => <PhoneNavMenu />,
         }}
       />
       <Stack.Screen name="training/[trainingId]" options={{ title: 'Entraînement' }} />

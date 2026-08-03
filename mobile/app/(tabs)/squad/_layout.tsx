@@ -2,7 +2,6 @@ import { Stack, useRouter } from 'expo-router';
 import { TouchableOpacity, Text, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useIsTablet } from '../../../hooks/useIsTablet';
-import { PhoneNavMenu } from '../../../components/PhoneNavMenu';
 import { SeasonHeaderButton } from '../../../components/SeasonHeaderButton';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 
@@ -51,7 +50,6 @@ export default function SquadLayout() {
         name="index"
         options={{
           title: 'Équipe',
-          headerLeft: isTablet ? undefined : () => <PhoneNavMenu />,
           headerRight: () => (
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <SeasonHeaderButton />

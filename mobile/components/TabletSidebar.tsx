@@ -6,6 +6,7 @@ import { useIsTablet, LAYOUT } from '../hooks/useIsTablet';
 import { useAppRole } from '../contexts/AppRoleContext';
 import { useNotifications } from '../contexts/NotificationContext';
 import { SeasonHeaderButton } from './SeasonHeaderButton';
+import { PRIMARY_DESTINATIONS, SECONDARY_DESTINATIONS } from '../lib/navigation';
 import { supabase } from '../lib/supabase';
 import { useMatchRecorderExitGuard, confirmLeaveMatchRecorder } from '../contexts/MatchRecorderExitGuardContext';
 
@@ -19,31 +20,35 @@ type NavItem = {
   path: string;
   icon: keyof typeof Ionicons.glyphMap;
   iconFocused: keyof typeof Ionicons.glyphMap;
+  /** Segment de route correspondant, pour l'état actif. */
+  segment: string | null;
 };
 
+/**
+ * Dérivé de la source unique `lib/navigation.ts` (P0-5). La sidebar n'entretient
+ * plus sa propre liste : c'est ce qui l'avait fait diverger de la tab bar et de
+ * l'accueil. « Plus » n'a pas lieu d'être sur tablette, où la place ne manque
+ * pas : ses destinations sont listées directement.
+ */
 const NAV_ITEMS: NavItem[] = [
-  { name: 'Accueil', path: '/(tabs)', icon: 'home-outline', iconFocused: 'home' },
-  { name: 'Calendrier', path: '/(tabs)/calendar', icon: 'calendar-outline', iconFocused: 'calendar' },
-  { name: 'Effectif', path: '/(tabs)/squad', icon: 'people-outline', iconFocused: 'people' },
-  { name: 'Équipes', path: '/(tabs)/teams', icon: 'flag-outline', iconFocused: 'flag' },
-  { name: 'Dashboard', path: '/(tabs)/dashboard', icon: 'bar-chart-outline', iconFocused: 'bar-chart' },
-  { name: 'Tracker', path: '/(tabs)/tracker', icon: 'stats-chart-outline', iconFocused: 'stats-chart' },
-  { name: 'Analytics', path: '/(tabs)/analytics', icon: 'analytics-outline', iconFocused: 'analytics' },
-  { name: 'Partages', path: '/(tabs)/share', icon: 'share-social-outline', iconFocused: 'share-social' },
-  { name: 'Paramètres', path: '/(tabs)/settings', icon: 'settings-outline', iconFocused: 'settings' },
-];
+  ...PRIMARY_DESTINATIONS.filter((d) => d.key !== 'more'),
+  ...SECONDARY_DESTINATIONS,
+].map((d) => ({
+  name: d.label,
+  path: d.route,
+  icon: d.icon,
+  iconFocused: d.iconActive,
+  segment: d.route === '/(tabs)' ? null : d.route.replace('/(tabs)/', ''),
+}));
 
 function isActive(segments: string[], item: NavItem): boolean {
   const first = segments[1];
-  if (item.path === '/(tabs)') return first === undefined || first === 'index';
-  if (item.path === '/(tabs)/calendar') return first === 'calendar';
-  if (item.path === '/(tabs)/squad') return first === 'squad';
-  if (item.path === '/(tabs)/dashboard') return first === 'dashboard';
-  if (item.path === '/(tabs)/tracker') return first === 'tracker';
-  if (item.path === '/(tabs)/analytics') return first === 'analytics';
-  if (item.path === '/(tabs)/teams') return first === 'teams';
-  if (item.path === '/(tabs)/settings') return first === 'settings';
-  return false;
+  if (item.segment === null) return first === undefined || first === 'index';
+  if (item.segment === 'analyse') {
+    // Les anciennes routes restent atteignables : elles allument le même onglet.
+    return first === 'analyse' || first === 'dashboard' || first === 'analytics' || first === 'tracker';
+  }
+  return first === item.segment;
 }
 
 export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {

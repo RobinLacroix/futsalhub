@@ -1,6 +1,5 @@
 import { Stack } from 'expo-router';
 import { useIsTablet } from '../../../hooks/useIsTablet';
-import { PhoneNavMenu } from '../../../components/PhoneNavMenu';
 
 export default function TrackerLayout() {
   const isTablet = useIsTablet();
@@ -16,7 +15,6 @@ export default function TrackerLayout() {
         name="index"
         options={{
           title: 'Tracker',
-          headerLeft: isTablet ? undefined : () => <PhoneNavMenu />,
         }}
       />
       <Stack.Screen
