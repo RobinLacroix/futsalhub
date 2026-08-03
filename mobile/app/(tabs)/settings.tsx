@@ -1,22 +1,42 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import {
-  View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity,
-  Alert, ActivityIndicator, Modal, Share, Pressable,
-} from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, Share, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { supabase } from '../../lib/supabase';
+import { useTheme } from '../../contexts/ThemeContext';
+import { haptics } from '../../lib/design/haptics';
 import {
-  getUserClubId, getClubInfo, updateClubInfo, deleteClub,
-  getClubMembersWithProfiles, removeClubMember, createClubInvitation,
-  setCoachTeams, ClubMemberWithUser,
+  getUserClubId,
+  getClubInfo,
+  updateClubInfo,
+  deleteClub,
+  getClubMembersWithProfiles,
+  removeClubMember,
+  createClubInvitation,
+  setCoachTeams,
+  ClubMemberWithUser,
 } from '../../lib/services/clubs';
 import { getTeamsByClubId } from '../../lib/services/teams';
 import { RatingScaleEditor } from '../../components/RatingScaleEditor';
 import { NotificationPreferencesEditor } from '../../components/NotificationPreferencesEditor';
+import {
+  Text,
+  Card,
+  Button,
+  Badge,
+  Input,
+  Field,
+  ChipGroup,
+  Sheet,
+  EmptyState,
+  SkeletonDetail,
+  type ChipOption,
+  type BadgeTone,
+} from '../../components/ui';
 import type { Team } from '../../types';
 
 type ClubInfo = { id: string; name: string; description: string | null };
+type Role = 'admin' | 'coach' | 'viewer';
 
 /** Un coach consolidé : une entrée par utilisateur, avec toutes ses équipes. */
 type CoachGroup = {
@@ -26,46 +46,73 @@ type CoachGroup = {
   teamIds: string[];
   memberIds: string[];
 };
+
 type DisplayMember =
   | { kind: 'single'; member: ClubMemberWithUser }
   | { kind: 'coach'; group: CoachGroup };
 
-const ROLE_LABELS: Record<string, string> = {
-  admin: 'Admin',
-  coach: 'Coach',
-  viewer: 'Observateur',
+/**
+ * Le rôle porte un niveau de droits, pas une identité visuelle : la teinte
+ * suit la rampe sémantique. Avant, les trois rôles avaient trois couleurs
+ * décoratives (bleu, vert, ardoise) sans rapport avec ce qu'elles signifiaient,
+ * et le vert d'« Observateur » suggérait à tort une validation.
+ */
+const ROLE_META: Record<Role, { label: string; tone: BadgeTone; hint: string }> = {
+  admin: {
+    label: 'Admin',
+    tone: 'accent',
+    hint: 'Accès complet : gestion du club, des équipes et des membres.',
+  },
+  coach: {
+    label: 'Coach',
+    tone: 'neutral',
+    hint: 'Accès aux entraînements, matchs et effectif de ses équipes.',
+  },
+  viewer: {
+    label: 'Observateur',
+    tone: 'neutral',
+    hint: 'Accès en lecture seule aux données du club.',
+  },
 };
-const ROLE_COLORS: Record<string, { bg: string; text: string }> = {
-  admin:  { bg: '#eff6ff', text: '#2563eb' },
-  coach:  { bg: '#f0fdf4', text: '#16a34a' },
-  viewer: { bg: '#f8fafc', text: '#64748b' },
-};
-const ROLE_HINTS: Record<string, string> = {
-  admin:  'Acces complet : gestion du club, des equipes et des membres.',
-  coach:  'Acces aux entrainements, matchs et effectif de ses equipes.',
-  viewer: 'Acces en lecture seule aux donnees du club.',
-};
+
+const ROLE_OPTIONS: readonly ChipOption<Role>[] = [
+  { value: 'admin', label: 'Admin' },
+  { value: 'coach', label: 'Coach' },
+  { value: 'viewer', label: 'Observateur' },
+];
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const { theme } = useTheme();
+  const c = theme.colors;
+
   const [loading, setLoading] = useState(true);
   const [clubId, setClubId] = useState<string | null>(null);
   const [club, setClub] = useState<ClubInfo | null>(null);
   const [members, setMembers] = useState<ClubMemberWithUser[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
+
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [saving, setSaving] = useState(false);
+
   const [inviteVisible, setInviteVisible] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<'admin' | 'coach' | 'viewer'>('coach');
+  const [inviteRole, setInviteRole] = useState<Role>('coach');
   const [inviteTeamId, setInviteTeamId] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
   const [generatedToken, setGeneratedToken] = useState<string | null>(null);
+
   const [reassignCoach, setReassignCoach] = useState<CoachGroup | null>(null);
   const [reassignSelected, setReassignSelected] = useState<string[]>([]);
   const [reassignSaving, setReassignSaving] = useState(false);
+
+  const [deleteVisible, setDeleteVisible] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
+  // ── Chargement ────────────────────────────────────────────────────────────
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -83,11 +130,10 @@ export default function SettingsScreen() {
       setEditDesc(clubData?.description ?? '');
       setMembers(membersData);
       setTeams(teamsData);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const me = membersData.find((m) => m.user_id === user.id);
-        setIsAdmin(me?.role === 'admin');
-      }
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) setIsAdmin(membersData.find((m) => m.user_id === user.id)?.role === 'admin');
     } catch (e) {
       console.error('settings load error:', e);
     } finally {
@@ -95,32 +141,78 @@ export default function SettingsScreen() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const handleSaveClub = async () => {
+  // Consolide les membres : une seule entrée par coach, regroupant ses équipes.
+  const displayMembers = useMemo<DisplayMember[]>(() => {
+    const list: DisplayMember[] = [];
+    const coachIndex = new Map<string, number>();
+    for (const m of members) {
+      if (m.role !== 'coach') {
+        list.push({ kind: 'single', member: m });
+        continue;
+      }
+      const idx = coachIndex.get(m.user_id);
+      if (idx == null) {
+        const name = m.first_name
+          ? `${m.first_name} ${m.last_name ?? ''}`.trim()
+          : m.email ?? 'Inconnu';
+        list.push({
+          kind: 'coach',
+          group: {
+            userId: m.user_id,
+            name,
+            email: m.email ?? null,
+            teamIds: m.team_id ? [m.team_id] : [],
+            memberIds: [m.id],
+          },
+        });
+        coachIndex.set(m.user_id, list.length - 1);
+      } else {
+        const g = (list[idx] as { kind: 'coach'; group: CoachGroup }).group;
+        if (m.team_id && !g.teamIds.includes(m.team_id)) g.teamIds.push(m.team_id);
+        g.memberIds.push(m.id);
+      }
+    }
+    return list;
+  }, [members]);
+
+  const teamById = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+
+  const saveClub = async () => {
     if (!clubId || !editName.trim()) {
       Alert.alert('Champ requis', 'Le nom du club est obligatoire.');
       return;
     }
     setSaving(true);
     try {
-      await updateClubInfo(clubId, { name: editName.trim(), description: editDesc.trim() || null });
-      setClub((prev) => prev ? { ...prev, name: editName.trim(), description: editDesc.trim() || null } : prev);
-      Alert.alert('Enregistre', 'Les informations du club ont ete mises a jour.');
+      await updateClubInfo(clubId, {
+        name: editName.trim(),
+        description: editDesc.trim() || null,
+      });
+      setClub((prev) =>
+        prev ? { ...prev, name: editName.trim(), description: editDesc.trim() || null } : prev
+      );
+      haptics.success();
     } catch (e) {
+      haptics.error();
       Alert.alert('Erreur', e instanceof Error ? e.message : 'Impossible de sauvegarder.');
     } finally {
       setSaving(false);
     }
   };
 
-  const handleInvite = async () => {
+  const invite = async () => {
     if (!clubId || !inviteEmail.trim()) {
       Alert.alert('Champ requis', 'Veuillez saisir un email.');
       return;
     }
     if (inviteRole === 'coach' && !inviteTeamId) {
-      Alert.alert('Équipe requise', 'Choisissez l\'équipe que ce coach va gérer.');
+      Alert.alert('Équipe requise', "Choisissez l'équipe que ce coach va gérer.");
       return;
     }
     setInviting(true);
@@ -129,27 +221,31 @@ export default function SettingsScreen() {
         clubId,
         inviteEmail.trim().toLowerCase(),
         inviteRole,
-        inviteRole === 'coach' ? inviteTeamId : null,
+        inviteRole === 'coach' ? inviteTeamId : null
       );
       setGeneratedToken(token);
       setInviteEmail('');
+      haptics.success();
     } catch (e) {
-      Alert.alert('Erreur', e instanceof Error ? e.message : 'Impossible de creer l\'invitation.');
+      haptics.error();
+      Alert.alert('Erreur', e instanceof Error ? e.message : "Impossible de créer l'invitation.");
     } finally {
       setInviting(false);
     }
   };
 
-  const handleShareToken = async (token: string) => {
+  const shareToken = async (token: string) => {
     try {
       await Share.share({
-        message: `Tu es invite a rejoindre le club ${club?.name ?? ''} sur FutsalHub.\nCode d\'invitation : ${token}`,
+        message: `Tu es invité à rejoindre le club ${club?.name ?? ''} sur FutsalHub.\nCode d'invitation : ${token}`,
         title: 'Invitation FutsalHub',
       });
-    } catch {}
+    } catch {
+      /* partage annulé */
+    }
   };
 
-  const handleRemoveMember = (label: string, memberIds: string[]) => {
+  const removeMember = (label: string, memberIds: string[]) => {
     Alert.alert('Retirer ce membre', `Retirer ${label} du club ?`, [
       { text: 'Annuler', style: 'cancel' },
       {
@@ -159,7 +255,9 @@ export default function SettingsScreen() {
           try {
             for (const id of memberIds) await removeClubMember(id);
             setMembers((prev) => prev.filter((m) => !memberIds.includes(m.id)));
+            haptics.success();
           } catch (e) {
+            haptics.error();
             Alert.alert('Erreur', e instanceof Error ? e.message : 'Impossible de retirer ce membre.');
           }
         },
@@ -167,70 +265,56 @@ export default function SettingsScreen() {
     ]);
   };
 
-  // Consolide les membres : une seule entrée par coach, regroupant toutes ses équipes.
-  const displayMembers = useMemo<DisplayMember[]>(() => {
-    const list: DisplayMember[] = [];
-    const coachIndex = new Map<string, number>();
-    for (const m of members) {
-      if (m.role === 'coach') {
-        const idx = coachIndex.get(m.user_id);
-        if (idx == null) {
-          const name = m.first_name
-            ? `${m.first_name} ${m.last_name ?? ''}`.trim()
-            : (m.email ?? 'Inconnu');
-          list.push({
-            kind: 'coach',
-            group: {
-              userId: m.user_id,
-              name,
-              email: m.email ?? null,
-              teamIds: m.team_id ? [m.team_id] : [],
-              memberIds: [m.id],
-            },
-          });
-          coachIndex.set(m.user_id, list.length - 1);
-        } else {
-          const g = (list[idx] as { kind: 'coach'; group: CoachGroup }).group;
-          if (m.team_id && !g.teamIds.includes(m.team_id)) g.teamIds.push(m.team_id);
-          g.memberIds.push(m.id);
-        }
-      } else {
-        list.push({ kind: 'single', member: m });
-      }
-    }
-    return list;
-  }, [members]);
-
-  const handleDeleteClub = () => {
-    Alert.alert(
-      'Supprimer le club',
-      `Cette action est irreversible. Toutes les donnees du club "${club?.name ?? ''}" seront supprimees.`,
-      [
-        { text: 'Annuler', style: 'cancel' },
-        {
-          text: 'Supprimer definitivement',
-          style: 'destructive',
-          onPress: async () => {
-            if (!clubId) return;
-            try {
-              await deleteClub(clubId);
-              Alert.alert('Club supprime', 'Votre club a ete supprime.', [
-                { text: 'OK', onPress: () => router.replace('/(tabs)') },
-              ]);
-            } catch (e) {
-              Alert.alert('Erreur', e instanceof Error ? e.message : 'Impossible de supprimer le club.');
-            }
-          },
-        },
-      ],
-    );
+  const closeInvite = () => {
+    setInviteVisible(false);
+    setGeneratedToken(null);
+    setInviteEmail('');
+    setInviteRole('coach');
+    setInviteTeamId(null);
   };
 
-  const handleSignOut = () => {
-    Alert.alert('Deconnexion', 'Voulez-vous vous deconnecter ?', [
+  const saveCoachTeams = async () => {
+    if (!reassignCoach || !clubId) return;
+    setReassignSaving(true);
+    try {
+      await setCoachTeams(clubId, reassignCoach.userId, reassignSelected);
+      setReassignCoach(null);
+      haptics.success();
+      await load();
+    } catch (e) {
+      haptics.error();
+      Alert.alert('Erreur', e instanceof Error ? e.message : 'Impossible de mettre à jour les équipes.');
+    } finally {
+      setReassignSaving(false);
+    }
+  };
+
+  /**
+   * Supprimer le club efface équipes, joueurs, matchs et entraînements, sans
+   * retour possible. Une simple `Alert` se validait en deux taps depuis
+   * n'importe quel geste accidentel. La saisie du nom force à lire ce qu'on
+   * détruit et rend l'erreur de manipulation quasi impossible.
+   */
+  const confirmDelete = async () => {
+    if (!clubId || deleteConfirm.trim() !== (club?.name ?? '')) return;
+    setDeleting(true);
+    try {
+      await deleteClub(clubId);
+      setDeleteVisible(false);
+      router.replace('/(tabs)');
+    } catch (e) {
+      haptics.error();
+      Alert.alert('Erreur', e instanceof Error ? e.message : 'Impossible de supprimer le club.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const signOut = () => {
+    Alert.alert('Déconnexion', 'Voulez-vous vous déconnecter ?', [
       { text: 'Annuler', style: 'cancel' },
       {
-        text: 'Deconnexion',
+        text: 'Déconnexion',
         style: 'destructive',
         onPress: async () => {
           await supabase.auth.signOut();
@@ -240,573 +324,525 @@ export default function SettingsScreen() {
     ]);
   };
 
-  const closeInviteModal = () => {
-    setInviteVisible(false);
-    setGeneratedToken(null);
-    setInviteEmail('');
-    setInviteRole('coach');
-    setInviteTeamId(null);
-  };
-
-  const openReassign = (group: CoachGroup) => {
-    setReassignSelected(group.teamIds);
-    setReassignCoach(group);
-  };
-
-  const toggleReassignTeam = (teamId: string) => {
-    setReassignSelected((prev) =>
-      prev.includes(teamId) ? prev.filter((t) => t !== teamId) : [...prev, teamId]
-    );
-  };
-
-  const handleSaveCoachTeams = async () => {
-    if (!reassignCoach || !clubId) return;
-    setReassignSaving(true);
-    try {
-      await setCoachTeams(clubId, reassignCoach.userId, reassignSelected);
-      setReassignCoach(null);
-      await load();
-    } catch (e) {
-      Alert.alert('Erreur', e instanceof Error ? e.message : 'Impossible de mettre à jour les équipes.');
-    } finally {
-      setReassignSaving(false);
-    }
-  };
+  // ── États non nominaux ────────────────────────────────────────────────────
 
   if (loading) {
     return (
-      <View style={s.centered}>
-        <ActivityIndicator size="large" color="#1e3a5f" />
+      <View style={[styles.root, { backgroundColor: c.bg.canvas }]}>
+        <SkeletonDetail />
       </View>
     );
   }
 
   if (!clubId) {
     return (
-      <View style={s.centered}>
-        <Ionicons name="business-outline" size={52} color="#cbd5e1" />
-        <Text style={s.noClubTitle}>Aucun club associe</Text>
-        <Text style={s.noClubSub}>Creez ou rejoignez un club depuis l'accueil.</Text>
+      <View style={[styles.root, { backgroundColor: c.bg.canvas }]}>
+        <EmptyState
+          icon="business-outline"
+          title="Aucun club associé"
+          description="Créez ou rejoignez un club depuis l'accueil."
+          action={{ label: "Aller à l'accueil", onPress: () => router.replace('/(tabs)') }}
+        />
       </View>
     );
   }
 
-  const teamById = new Map(teams.map((t) => [t.id, t]));
+  const canDelete = deleteConfirm.trim() === (club?.name ?? '') && !deleting;
+
+  // ── Rendu ─────────────────────────────────────────────────────────────────
 
   return (
-    <ScrollView style={s.root} contentContainerStyle={s.scroll}>
+    <View style={[styles.root, { backgroundColor: c.bg.canvas }]}>
+      <ScrollView contentContainerStyle={[styles.content, { gap: theme.space.lg }]}>
+        {/* ── Club ─────────────────────────────────────────────────────── */}
+        <Card variant="raised" padding="lg" style={{ gap: theme.space.lg }}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="business-outline" size={18} color={c.text.secondary} />
+            <Text variant="headline" style={styles.flex}>
+              Informations du club
+            </Text>
+            {!isAdmin && <Badge label="Lecture seule" size="sm" />}
+          </View>
 
-      {/* ── Club info ── */}
-      <View style={s.card}>
-        <View style={s.cardHeader}>
-          <View style={[s.accent, { backgroundColor: '#1e3a5f' }]} />
-          <Ionicons name="business-outline" size={18} color="#1e3a5f" />
-          <Text style={s.cardTitle}>Informations du club</Text>
-        </View>
-        <View style={s.cardBody}>
-          <Text style={s.label}>Nom du club</Text>
-          <TextInput
-            style={[s.input, !isAdmin && s.inputDisabled]}
+          <Input
+            label="Nom du club"
             value={editName}
             onChangeText={setEditName}
             placeholder="Nom du club"
-            placeholderTextColor="#9ca3af"
             editable={isAdmin}
           />
-          <Text style={[s.label, { marginTop: 14 }]}>Description</Text>
-          <TextInput
-            style={[s.input, { minHeight: 72, textAlignVertical: 'top' }, !isAdmin && s.inputDisabled]}
+          <Input
+            label="Description"
+            optional
             value={editDesc}
             onChangeText={setEditDesc}
-            placeholder="Description du club (optionnel)"
-            placeholderTextColor="#9ca3af"
-            multiline
+            placeholder="Description du club"
             editable={isAdmin}
+            multiline
+            inputStyle={styles.multiline}
           />
           {isAdmin && (
-            <TouchableOpacity
-              style={[s.btn, s.btnPrimary, saving && { opacity: 0.6 }, { marginTop: 14 }]}
-              onPress={handleSaveClub}
+            <Button
+              label={saving ? 'Enregistrement…' : 'Enregistrer'}
+              onPress={saveClub}
+              loading={saving}
               disabled={saving}
-            >
-              <Text style={s.btnPrimaryText}>{saving ? 'Enregistrement...' : 'Enregistrer'}</Text>
-            </TouchableOpacity>
+              block
+            />
           )}
-        </View>
-      </View>
+        </Card>
 
-      {/* ── Members ── */}
-      <View style={s.card}>
-        <View style={s.cardHeader}>
-          <View style={[s.accent, { backgroundColor: '#7c3aed' }]} />
-          <Ionicons name="people-outline" size={18} color="#7c3aed" />
-          <Text style={s.cardTitle}>Membres du club</Text>
-          {isAdmin && (
-            <TouchableOpacity
-              style={s.headerPill}
-              onPress={() => { setGeneratedToken(null); setInviteVisible(true); }}
-            >
-              <Ionicons name="person-add-outline" size={13} color="#7c3aed" />
-              <Text style={[s.headerPillText, { color: '#7c3aed' }]}>Inviter</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-        <View style={s.cardBody}>
+        {/* ── Membres ──────────────────────────────────────────────────── */}
+        <Card variant="raised" padding="lg" style={{ gap: theme.space.md }}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="people-outline" size={18} color={c.text.secondary} />
+            <Text variant="headline" style={styles.flex}>
+              Membres du club
+            </Text>
+            {isAdmin && (
+              <Button
+                label="Inviter"
+                icon="person-add-outline"
+                variant="secondary"
+                size="sm"
+                onPress={() => {
+                  setGeneratedToken(null);
+                  setInviteVisible(true);
+                }}
+              />
+            )}
+          </View>
+
           {displayMembers.length === 0 ? (
-            <Text style={s.emptyText}>Aucun membre trouve.</Text>
+            <EmptyState icon="people-outline" title="Aucun membre" compact />
           ) : (
-            displayMembers.map((entry) => {
-              if (entry.kind === 'coach') {
-                const g = entry.group;
-                const teamNames = g.teamIds.length > 0
-                  ? g.teamIds.map((id) => teamById.get(id)?.name ?? 'Équipe inconnue').join(', ')
-                  : 'Aucune équipe';
-                const colors = ROLE_COLORS.coach;
-                return (
-                  <View key={`coach-${g.userId}`} style={s.memberRow}>
-                    <View style={s.memberAvatar}>
-                      <Ionicons name="person" size={16} color="#94a3b8" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.memberName} numberOfLines={1}>{g.name}</Text>
-                      {g.email && (
-                        <Text style={s.memberEmail} numberOfLines={1}>{g.email}</Text>
-                      )}
-                      <TouchableOpacity
-                        disabled={!isAdmin}
-                        onPress={() => openReassign(g)}
-                        style={s.teamPill}
-                      >
-                        <Ionicons name="shield-outline" size={11} color="#16a34a" />
-                        <Text style={s.teamPillText} numberOfLines={1}>{teamNames}</Text>
-                        {isAdmin && <Ionicons name="chevron-down" size={11} color="#94a3b8" />}
-                      </TouchableOpacity>
-                    </View>
-                    <View style={[s.roleBadge, { backgroundColor: colors.bg }]}>
-                      <Text style={[s.roleBadgeText, { color: colors.text }]}>{ROLE_LABELS.coach}</Text>
-                    </View>
-                    {isAdmin && (
-                      <TouchableOpacity onPress={() => handleRemoveMember(g.name, g.memberIds)} style={s.removeBtn}>
-                        <Ionicons name="trash-outline" size={16} color="#dc2626" />
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                );
-              }
-              const member = entry.member;
-              const colors = ROLE_COLORS[member.role] ?? ROLE_COLORS.viewer;
-              const name = member.first_name
-                ? `${member.first_name} ${member.last_name ?? ''}`.trim()
-                : (member.email ?? 'Inconnu');
+            displayMembers.map((entry, i) => {
+              const isCoach = entry.kind === 'coach';
+              const role: Role = isCoach ? 'coach' : ((entry.member.role as Role) ?? 'viewer');
+              const meta = ROLE_META[role] ?? ROLE_META.viewer;
+              const name = isCoach
+                ? entry.group.name
+                : entry.member.first_name
+                  ? `${entry.member.first_name} ${entry.member.last_name ?? ''}`.trim()
+                  : entry.member.email ?? 'Inconnu';
+              const email = isCoach ? entry.group.email : entry.member.email;
+              const key = isCoach ? `coach-${entry.group.userId}` : entry.member.id;
+
+              const teamNames = isCoach
+                ? entry.group.teamIds.length > 0
+                  ? entry.group.teamIds
+                      .map((id) => teamById.get(id)?.name ?? 'Équipe inconnue')
+                      .join(' · ')
+                  : 'Aucune équipe'
+                : null;
+
               return (
-                <View key={member.id} style={s.memberRow}>
-                  <View style={s.memberAvatar}>
-                    <Ionicons name="person" size={16} color="#94a3b8" />
+                <View
+                  key={key}
+                  style={[
+                    styles.memberRow,
+                    { gap: theme.space.md },
+                    i > 0 && {
+                      borderTopWidth: StyleSheet.hairlineWidth,
+                      borderTopColor: c.border.subtle,
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.avatar,
+                      { backgroundColor: c.bg.sunken, borderRadius: theme.radius.sm },
+                    ]}
+                  >
+                    <Ionicons name="person" size={16} color={c.text.tertiary} />
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.memberName} numberOfLines={1}>{name}</Text>
-                    {member.email && member.first_name && (
-                      <Text style={s.memberEmail} numberOfLines={1}>{member.email}</Text>
+
+                  <View style={styles.memberText}>
+                    <Text variant="body" weight="600" numberOfLines={1}>
+                      {name}
+                    </Text>
+                    {email && (
+                      <Text variant="caption" tone="tertiary" numberOfLines={1}>
+                        {email}
+                      </Text>
+                    )}
+                    {isCoach && (
+                      <Pressable
+                        disabled={!isAdmin}
+                        onPress={() => {
+                          setReassignSelected(entry.group.teamIds);
+                          setReassignCoach(entry.group);
+                        }}
+                        accessibilityRole={isAdmin ? 'button' : undefined}
+                        accessibilityLabel={
+                          isAdmin ? `Équipes de ${name} : ${teamNames}. Modifier` : undefined
+                        }
+                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                        style={[
+                          styles.teamPill,
+                          {
+                            backgroundColor: c.bg.sunken,
+                            borderRadius: theme.radius.sm,
+                          },
+                        ]}
+                      >
+                        <Ionicons name="shield-outline" size={11} color={c.text.secondary} />
+                        <Text variant="caption" tone="secondary" numberOfLines={1} style={styles.flex}>
+                          {teamNames}
+                        </Text>
+                        {isAdmin && (
+                          <Ionicons name="chevron-down" size={11} color={c.text.tertiary} />
+                        )}
+                      </Pressable>
                     )}
                   </View>
-                  <View style={[s.roleBadge, { backgroundColor: colors.bg }]}>
-                    <Text style={[s.roleBadgeText, { color: colors.text }]}>
-                      {ROLE_LABELS[member.role] ?? member.role}
-                    </Text>
-                  </View>
+
+                  <Badge label={meta.label} tone={meta.tone} size="sm" />
+
                   {isAdmin && (
-                    <TouchableOpacity onPress={() => handleRemoveMember(name, [member.id])} style={s.removeBtn}>
-                      <Ionicons name="trash-outline" size={16} color="#dc2626" />
-                    </TouchableOpacity>
+                    <Pressable
+                      onPress={() =>
+                        removeMember(name, isCoach ? entry.group.memberIds : [entry.member.id])
+                      }
+                      accessibilityRole="button"
+                      accessibilityLabel={`Retirer ${name} du club`}
+                      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                      style={({ pressed }) => [styles.removeBtn, pressed && styles.pressed]}
+                    >
+                      <Ionicons name="trash-outline" size={17} color={c.negative.default} />
+                    </Pressable>
                   )}
                 </View>
               );
             })
           )}
-        </View>
-      </View>
+        </Card>
 
-      {/* ── Préférences de notification ── */}
-      <NotificationPreferencesEditor />
+        <NotificationPreferencesEditor />
+        <RatingScaleEditor />
 
-      {/* ── Échelle de notation ── */}
-      <RatingScaleEditor />
-
-      <View style={s.card}>
-        <View style={s.cardHeader}>
-          <View style={[s.accent, { backgroundColor: '#0891b2' }]} />
-          <Ionicons name="person-circle-outline" size={18} color="#0891b2" />
-          <Text style={s.cardTitle}>Compte</Text>
-        </View>
-        <View style={s.cardBody}>
-          <TouchableOpacity style={s.actionRow} onPress={handleSignOut}>
-            <Ionicons name="log-out-outline" size={20} color="#ef4444" />
-            <Text style={[s.actionRowText, { color: '#ef4444' }]}>Deconnexion</Text>
-            <Ionicons name="chevron-forward" size={16} color="#e2e8f0" style={{ marginLeft: 'auto' as any }} />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* ── Danger zone ── */}
-      {isAdmin && (
-        <View style={[s.card, { borderColor: '#fee2e2' }]}>
-          <View style={s.cardHeader}>
-            <View style={[s.accent, { backgroundColor: '#dc2626' }]} />
-            <Ionicons name="warning-outline" size={18} color="#dc2626" />
-            <Text style={[s.cardTitle, { color: '#dc2626' }]}>Zone de danger</Text>
+        {/* ── Compte ───────────────────────────────────────────────────── */}
+        <Card variant="raised" padding="lg" style={{ gap: theme.space.md }}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="person-circle-outline" size={18} color={c.text.secondary} />
+            <Text variant="headline">Compte</Text>
           </View>
-          <View style={s.cardBody}>
-            <Text style={s.dangerDesc}>
-              La suppression du club est irreversible et effacera toutes les donnees associees (equipes, joueurs, matchs, entrainements).
+          <Button
+            label="Déconnexion"
+            icon="log-out-outline"
+            variant="destructive"
+            block
+            onPress={signOut}
+          />
+        </Card>
+
+        {/* ── Zone de danger ───────────────────────────────────────────── */}
+        {isAdmin && (
+          <Card
+            variant="flat"
+            padding="lg"
+            style={[
+              styles.danger,
+              { borderColor: c.negative.default, gap: theme.space.md },
+            ]}
+          >
+            <View style={styles.cardHeader}>
+              <Ionicons name="warning-outline" size={18} color={c.negative.default} />
+              <Text variant="headline" tone="negative">
+                Zone de danger
+              </Text>
+            </View>
+            <Text variant="callout" tone="secondary">
+              La suppression du club est irréversible. Elle efface toutes les données associées :
+              équipes, joueurs, matchs et entraînements.
             </Text>
-            <TouchableOpacity style={s.dangerBtn} onPress={handleDeleteClub}>
-              <Ionicons name="trash" size={16} color="#dc2626" />
-              <Text style={s.dangerBtnText}>Supprimer le club</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
+            <Button
+              label="Supprimer le club"
+              icon="trash-outline"
+              variant="destructive"
+              block
+              onPress={() => {
+                setDeleteConfirm('');
+                setDeleteVisible(true);
+              }}
+            />
+          </Card>
+        )}
 
-      <View style={{ height: 40 }} />
+        {/* Accès à la galerie du design system pendant la refonte UI.
+            `__DEV__` est faux dans tout build de production : cette entrée ne
+            peut pas partir en App Store. À retirer une fois la refonte finie. */}
+        {__DEV__ && (
+          <Button
+            label="Design system (dev)"
+            variant="ghost"
+            onPress={() => router.push('/design-gallery' as never)}
+          />
+        )}
+      </ScrollView>
 
-      {/* ── Invite modal ── */}
-      <Modal visible={inviteVisible} transparent animationType="slide" onRequestClose={closeInviteModal}>
-        <Pressable style={s.modalOverlay} onPress={closeInviteModal}>
-          <Pressable style={s.modalSheet} onPress={() => {}}>
-            <View style={s.modalHandle} />
-            <Text style={s.modalTitle}>Inviter un membre</Text>
-
-            {generatedToken ? (
-              <>
-                <Text style={s.modalSub}>
-                  Code d'invitation genere. Partagez-le avec la personne invitee :
-                </Text>
-                <View style={s.tokenBox}>
-                  <Text style={s.tokenText} selectable>{generatedToken}</Text>
-                </View>
-                <TouchableOpacity
-                  style={[s.btn, s.btnPrimary, { marginBottom: 10 }]}
-                  onPress={() => handleShareToken(generatedToken)}
-                >
-                  <Ionicons name="share-social-outline" size={16} color="#fff" />
-                  <Text style={s.btnPrimaryText}>Partager le code</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[s.btn, s.btnSecondary]}
-                  onPress={() => { setGeneratedToken(null); setInviteEmail(''); }}
-                >
-                  <Text style={s.btnSecondaryText}>Nouvelle invitation</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <Text style={s.label}>Email</Text>
-                <TextInput
-                  style={[s.input, { marginBottom: 14 }]}
-                  value={inviteEmail}
-                  onChangeText={setInviteEmail}
-                  placeholder="email@exemple.com"
-                  placeholderTextColor="#9ca3af"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                />
-                <Text style={s.label}>Role</Text>
-                <View style={s.roleRow}>
-                  {(['admin', 'coach', 'viewer'] as const).map((r) => (
-                    <TouchableOpacity
-                      key={r}
-                      style={[s.roleOption, inviteRole === r && s.roleOptionActive]}
-                      onPress={() => setInviteRole(r)}
-                    >
-                      <Text style={[s.roleOptionText, inviteRole === r && s.roleOptionTextActive]}>
-                        {ROLE_LABELS[r]}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <Text style={s.roleHint}>{ROLE_HINTS[inviteRole]}</Text>
-                {inviteRole === 'coach' && (
-                  <>
-                    <Text style={[s.label, { marginTop: 14 }]}>Équipe gérée</Text>
-                    {teams.length === 0 ? (
-                      <Text style={s.roleHint}>Aucune équipe. Créez d'abord une équipe pour y affecter un coach.</Text>
-                    ) : (
-                      <View style={s.teamGrid}>
-                        {teams.map((t) => (
-                          <TouchableOpacity
-                            key={t.id}
-                            style={[s.teamOption, inviteTeamId === t.id && s.teamOptionActive]}
-                            onPress={() => setInviteTeamId(t.id)}
-                          >
-                            <View style={[s.teamDot, { backgroundColor: t.color || '#94a3b8' }]} />
-                            <Text style={[s.teamOptionText, inviteTeamId === t.id && s.teamOptionTextActive]} numberOfLines={1}>
-                              {t.name}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    )}
-                  </>
-                )}
-                <TouchableOpacity
-                  style={[s.btn, s.btnPrimary, inviting && { opacity: 0.6 }, { marginTop: 14 }]}
-                  onPress={handleInvite}
-                  disabled={inviting}
-                >
-                  {inviting
-                    ? <ActivityIndicator size="small" color="#fff" />
-                    : <Text style={s.btnPrimaryText}>Creer l'invitation</Text>}
-                </TouchableOpacity>
-              </>
-            )}
-
-            <TouchableOpacity style={s.modalClose} onPress={closeInviteModal}>
-              <Text style={s.modalCloseText}>Fermer</Text>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      {/* ── Reassign teams modal (multi-équipes) ── */}
-      <Modal visible={!!reassignCoach} transparent animationType="slide" onRequestClose={() => setReassignCoach(null)}>
-        <Pressable style={s.modalOverlay} onPress={() => setReassignCoach(null)}>
-          <Pressable style={s.modalSheet} onPress={() => {}}>
-            <View style={s.modalHandle} />
-            <Text style={s.modalTitle}>Équipes gérées</Text>
-            <Text style={s.modalSub}>
-              Sélectionnez toutes les équipes gérées par {reassignCoach?.name ?? 'ce coach'}. Un coach peut en gérer plusieurs.
-            </Text>
-            {teams.length === 0 ? (
-              <Text style={s.roleHint}>Aucune équipe dans ce club.</Text>
-            ) : (
-              teams.map((t) => {
-                const selected = reassignSelected.includes(t.id);
-                return (
-                  <TouchableOpacity
-                    key={t.id}
-                    style={[s.reassignRow, selected && s.reassignRowActive]}
-                    onPress={() => toggleReassignTeam(t.id)}
-                  >
-                    <View style={[s.teamDot, { backgroundColor: t.color || '#94a3b8' }]} />
-                    <Text style={s.reassignRowText}>{t.name}</Text>
-                    {selected && (
-                      <Ionicons name="checkmark" size={18} color="#16a34a" style={{ marginLeft: 'auto' as any }} />
-                    )}
-                  </TouchableOpacity>
-                );
-              })
-            )}
-            <TouchableOpacity
-              style={[s.btn, s.btnPrimary, reassignSaving && { opacity: 0.6 }, { marginTop: 8 }]}
-              onPress={handleSaveCoachTeams}
-              disabled={reassignSaving}
+      {/* ── Feuille : inviter un membre ────────────────────────────────── */}
+      <Sheet
+        visible={inviteVisible}
+        onClose={closeInvite}
+        title="Inviter un membre"
+        subtitle={
+          generatedToken
+            ? 'Partagez ce code avec la personne invitée.'
+            : 'Un code sera généré, à transmettre à la personne.'
+        }
+      >
+        {generatedToken ? (
+          <View style={{ gap: theme.space.md }}>
+            <View
+              style={[
+                styles.tokenBox,
+                {
+                  backgroundColor: c.bg.sunken,
+                  borderRadius: theme.radius.sm,
+                  borderColor: c.border.subtle,
+                },
+              ]}
             >
-              {reassignSaving
-                ? <ActivityIndicator size="small" color="#fff" />
-                : <Text style={s.btnPrimaryText}>Enregistrer les équipes</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity style={s.modalClose} onPress={() => setReassignCoach(null)}>
-              <Text style={s.modalCloseText}>Fermer</Text>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
+              <Text variant="title" numeric selectable accessibilityLabel={`Code : ${generatedToken}`}>
+                {generatedToken}
+              </Text>
+            </View>
+            <Button
+              label="Partager le code"
+              icon="share-social-outline"
+              block
+              onPress={() => shareToken(generatedToken)}
+            />
+            <Button
+              label="Nouvelle invitation"
+              variant="ghost"
+              block
+              onPress={() => {
+                setGeneratedToken(null);
+                setInviteEmail('');
+              }}
+            />
+          </View>
+        ) : (
+          <View style={{ gap: theme.space.lg }}>
+            <Input
+              label="Email"
+              value={inviteEmail}
+              onChangeText={setInviteEmail}
+              placeholder="email@exemple.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <Field label="Rôle" hint={ROLE_META[inviteRole].hint}>
+              <ChipGroup
+                label="Rôle du membre invité"
+                options={ROLE_OPTIONS}
+                value={inviteRole}
+                onChange={setInviteRole}
+              />
+            </Field>
+            {inviteRole === 'coach' &&
+              (teams.length === 0 ? (
+                <Field label="Équipe gérée">
+                  <Text variant="callout" tone="tertiary">
+                    Aucune équipe. Créez d'abord une équipe pour y affecter un coach.
+                  </Text>
+                </Field>
+              ) : (
+                <Field label="Équipe gérée">
+                  <View style={[styles.teamGrid, { gap: theme.space.sm }]}>
+                    {teams.map((t) => {
+                      const active = inviteTeamId === t.id;
+                      return (
+                        <Pressable
+                          key={t.id}
+                          onPress={() => setInviteTeamId(t.id)}
+                          accessibilityRole="radio"
+                          accessibilityState={{ selected: active, checked: active }}
+                          accessibilityLabel={t.name}
+                          style={[
+                            styles.teamOption,
+                            {
+                              borderRadius: theme.radius.pill,
+                              paddingHorizontal: theme.space.lg,
+                              gap: theme.space.sm,
+                              backgroundColor: active ? c.accent.fill : c.bg.sunken,
+                              borderColor: active ? c.accent.fill : c.border.subtle,
+                            },
+                          ]}
+                        >
+                          <View
+                            style={[styles.teamDot, { backgroundColor: t.color || c.text.tertiary }]}
+                          />
+                          <Text
+                            variant="callout"
+                            tone={active ? 'onFill' : 'secondary'}
+                            weight="600"
+                            numberOfLines={1}
+                          >
+                            {t.name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </Field>
+              ))}
+            <Button
+              label={inviting ? 'Création…' : "Créer l'invitation"}
+              onPress={invite}
+              loading={inviting}
+              disabled={inviting}
+              block
+            />
+          </View>
+        )}
+      </Sheet>
 
-      {/* Accès à la galerie du design system pendant la refonte UI.
-          `__DEV__` est faux dans tout build de production : cette entrée ne
-          peut pas partir en App Store. À retirer une fois la refonte finie. */}
-      {__DEV__ && (
-        <TouchableOpacity
-          style={s.modalClose}
-          onPress={() => router.push('/design-gallery' as any)}
-        >
-          <Text style={s.modalCloseText}>Design system (dev)</Text>
-        </TouchableOpacity>
-      )}
-    </ScrollView>
+      {/* ── Feuille : équipes d'un coach ───────────────────────────────── */}
+      <Sheet
+        visible={!!reassignCoach}
+        onClose={() => setReassignCoach(null)}
+        title="Équipes gérées"
+        subtitle={`Sélectionnez toutes les équipes gérées par ${reassignCoach?.name ?? 'ce coach'}. Un coach peut en gérer plusieurs.`}
+      >
+        {teams.length === 0 ? (
+          <EmptyState icon="shield-outline" title="Aucune équipe dans ce club" compact />
+        ) : (
+          <View style={{ gap: theme.space.sm }}>
+            {teams.map((t) => {
+              const selected = reassignSelected.includes(t.id);
+              return (
+                <Pressable
+                  key={t.id}
+                  onPress={() =>
+                    setReassignSelected((prev) =>
+                      prev.includes(t.id) ? prev.filter((x) => x !== t.id) : [...prev, t.id]
+                    )
+                  }
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: selected }}
+                  accessibilityLabel={t.name}
+                  style={[
+                    styles.reassignRow,
+                    {
+                      borderRadius: theme.radius.md,
+                      gap: theme.space.md,
+                      backgroundColor: selected ? c.accent.subtle : 'transparent',
+                      borderColor: selected ? c.accent.border : c.border.subtle,
+                    },
+                  ]}
+                >
+                  <View style={[styles.teamDot, { backgroundColor: t.color || c.text.tertiary }]} />
+                  <Text variant="body" weight="600" style={styles.flex}>
+                    {t.name}
+                  </Text>
+                  <Ionicons
+                    name={selected ? 'checkmark-circle' : 'ellipse-outline'}
+                    size={20}
+                    color={selected ? c.accent.default : c.text.tertiary}
+                  />
+                </Pressable>
+              );
+            })}
+            <Button
+              label={reassignSaving ? 'Enregistrement…' : 'Enregistrer les équipes'}
+              onPress={saveCoachTeams}
+              loading={reassignSaving}
+              disabled={reassignSaving}
+              block
+              style={styles.sheetAction}
+            />
+          </View>
+        )}
+      </Sheet>
+
+      {/* ── Feuille : suppression du club ──────────────────────────────── */}
+      <Sheet
+        visible={deleteVisible}
+        onClose={() => setDeleteVisible(false)}
+        title="Supprimer le club"
+        subtitle="Cette action est irréversible et efface toutes les données du club."
+      >
+        <View style={{ gap: theme.space.lg }}>
+          <Input
+            label={`Saisissez « ${club?.name ?? ''} » pour confirmer`}
+            value={deleteConfirm}
+            onChangeText={setDeleteConfirm}
+            placeholder={club?.name ?? ''}
+            autoCapitalize="none"
+            autoCorrect={false}
+            error={
+              deleteConfirm.length > 0 && !canDelete && !deleting
+                ? 'Le nom ne correspond pas.'
+                : undefined
+            }
+          />
+          <Button
+            label={deleting ? 'Suppression…' : 'Supprimer définitivement'}
+            variant="destructive"
+            block
+            onPress={confirmDelete}
+            loading={deleting}
+            disabled={!canDelete}
+          />
+          <Button
+            label="Annuler"
+            variant="ghost"
+            block
+            onPress={() => setDeleteVisible(false)}
+            disabled={deleting}
+          />
+        </View>
+      </Sheet>
+    </View>
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#f1f5f9' },
-  scroll: { padding: 16, paddingBottom: 40 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 32 },
-  noClubTitle: { fontSize: 17, fontWeight: '700', color: '#1e293b', textAlign: 'center' },
-  noClubSub: { fontSize: 14, color: '#94a3b8', textAlign: 'center' },
-
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
-    overflow: 'hidden',
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    backgroundColor: '#f8fafc',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
-  },
-  accent: { width: 4, height: 20, borderRadius: 3 },
-  cardTitle: { fontSize: 14, fontWeight: '700', color: '#1e293b' },
-  cardBody: { padding: 16 },
-  headerPill: {
-    marginLeft: 'auto' as any,
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+  flex: { flex: 1 },
+  content: { padding: 16, paddingBottom: 40 },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  multiline: { minHeight: 88, paddingTop: 12, textAlignVertical: 'top' },
+  memberRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
+  avatar: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  memberText: { flex: 1, gap: 2 },
+  teamPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#f5f3ff',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 99,
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+    marginTop: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
-  headerPillText: { fontSize: 12, fontWeight: '600' },
-
-  label: { fontSize: 11, fontWeight: '700', color: '#374151', textTransform: 'uppercase' as any, letterSpacing: 0.5, marginBottom: 6 },
-  input: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: '#d1d5db',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    color: '#0f172a',
-  },
-  inputDisabled: { backgroundColor: '#f3f4f6', color: '#9ca3af' },
-
-  btn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    paddingVertical: 11,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-  },
-  btnPrimary: { backgroundColor: '#1e3a5f' },
-  btnPrimaryText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  btnSecondary: { backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#e2e8f0' },
-  btnSecondaryText: { color: '#475569', fontWeight: '600', fontSize: 14 },
-
-  emptyText: { fontSize: 14, color: '#94a3b8', textAlign: 'center', paddingVertical: 12 },
-  memberRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#f1f5f9',
-  },
-  memberAvatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 9,
-    backgroundColor: '#f1f5f9',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  memberName: { fontSize: 14, fontWeight: '600', color: '#1e293b' },
-  memberEmail: { fontSize: 11, color: '#94a3b8', marginTop: 1 },
-  roleBadge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 99 },
-  roleBadgeText: { fontSize: 11, fontWeight: '700' },
   removeBtn: { padding: 6 },
-
-  actionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 10,
-  },
-  actionRowText: { fontSize: 15, fontWeight: '600' },
-
-  dangerDesc: { fontSize: 13, color: '#6b7280', lineHeight: 19, marginBottom: 14 },
-  dangerBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    paddingVertical: 11,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: '#fca5a5',
-    backgroundColor: '#fff5f5',
-  },
-  dangerBtnText: { color: '#dc2626', fontWeight: '700', fontSize: 14 },
-
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  modalSheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
-    paddingBottom: 40,
-  },
-  modalHandle: {
-    width: 36, height: 4, backgroundColor: '#e2e8f0', borderRadius: 99,
-    alignSelf: 'center', marginBottom: 20,
-  },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: '#0f172a', marginBottom: 16 },
-  modalSub: { fontSize: 13, color: '#64748b', marginBottom: 14, lineHeight: 19 },
+  pressed: { opacity: 0.5 },
+  danger: { borderWidth: 1 },
   tokenBox: {
-    backgroundColor: '#f8fafc',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    padding: 14,
-    marginBottom: 16,
+    alignItems: 'center',
+    paddingVertical: 18,
+    paddingHorizontal: 16,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  tokenText: { fontSize: 13, color: '#1e293b', fontFamily: 'monospace' as any, lineHeight: 20 },
-
-  roleRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
-  roleOption: {
-    flex: 1, paddingVertical: 9, borderRadius: 8,
-    borderWidth: 1.5, borderColor: '#e2e8f0', alignItems: 'center',
-  },
-  roleOptionActive: { borderColor: '#1e3a5f', backgroundColor: '#eff6ff' },
-  roleOptionText: { fontSize: 13, fontWeight: '600', color: '#64748b' },
-  roleOptionTextActive: { color: '#1e3a5f' },
-  roleHint: { fontSize: 12, color: '#94a3b8', lineHeight: 17 },
-
-  // Team pill on coach member rows
-  teamPill: {
-    flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4,
-    alignSelf: 'flex-start', backgroundColor: '#f0fdf4', borderRadius: 6,
-    paddingHorizontal: 8, paddingVertical: 3, maxWidth: '100%',
-  },
-  teamPillText: { fontSize: 11, fontWeight: '600', color: '#16a34a', flexShrink: 1 },
-
-  // Team selector (invite modal)
-  teamGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+  teamGrid: { flexDirection: 'row', flexWrap: 'wrap' },
   teamOption: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8,
-    borderWidth: 1.5, borderColor: '#e2e8f0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 44,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  teamOptionActive: { borderColor: '#16a34a', backgroundColor: '#f0fdf4' },
   teamDot: { width: 10, height: 10, borderRadius: 5 },
-  teamOptionText: { fontSize: 13, fontWeight: '600', color: '#64748b' },
-  teamOptionTextActive: { color: '#16a34a' },
-
-  // Reassign modal rows
   reassignRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingVertical: 13, paddingHorizontal: 12, borderRadius: 10,
-    borderWidth: 1, borderColor: '#e2e8f0', marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 52,
+    paddingHorizontal: 14,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  reassignRowActive: { borderColor: '#16a34a', backgroundColor: '#f0fdf4' },
-  reassignRowText: { fontSize: 14, fontWeight: '600', color: '#334155' },
-
-  modalClose: { marginTop: 12, paddingVertical: 12, alignItems: 'center' },
-  modalCloseText: { fontSize: 14, color: '#94a3b8', fontWeight: '500' },
+  sheetAction: { marginTop: 8 },
 });

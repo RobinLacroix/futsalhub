@@ -1,6 +1,28 @@
-import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
+/**
+ * RatingScaleEditor — poids du barème de note joueur (P0-7)
+ *
+ * BUG CORRIGÉ, et il touchait la donnée, pas l'affichage.
+ *
+ * Les poids étaient lus avec `parseFloat(m[k])` et repliés sur `0` en cas
+ * d'échec, silencieusement. Or `parseFloat("0,5")` vaut **0** : une application
+ * en français, avec un clavier qui propose la virgule, transformait donc
+ * « 0,5 » en « 0 » sans le dire. Le coach croyait pondérer un événement, la
+ * note ne bougeait pas, et rien ne le signalait.
+ *
+ * La saisie accepte maintenant la virgule comme séparateur décimal, et une
+ * valeur illisible est signalée sous le champ au lieu d'être remplacée par 0.
+ *
+ * Corrigé aussi : les champs faisaient 30 pt de haut (`paddingVertical: 6` +
+ * 13 px de texte), et le retour d'enregistrement était un texte gris de 12 px
+ * en bas de carte, à peu près invisible.
+ */
+
+import { useEffect, useMemo, useState } from 'react';
+import { View, StyleSheet, TextInput } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useTheme } from '../contexts/ThemeContext';
+import { haptics } from '../lib/design/haptics';
+import { Card, Text, Button, Badge, SkeletonList } from './ui';
 import { getRatingWeights, setRatingWeights, resetRatingWeights } from '../lib/services/matchRatings';
 import { DEFAULT_RATING_WEIGHTS, type RatingWeights } from '../types';
 
@@ -14,6 +36,7 @@ const INDIV_FIELDS: { key: keyof RatingWeights; label: string }[] = [
   { key: 'w_yellow_card', label: 'Carton jaune' },
   { key: 'w_red_card', label: 'Carton rouge' },
 ];
+
 const COLL_FIELDS: { key: keyof RatingWeights; label: string }[] = [
   { key: 'cw_goal', label: 'But marqué (équipe)' },
   { key: 'cw_shot', label: 'Tir équipe' },
@@ -23,55 +46,80 @@ const COLL_FIELDS: { key: keyof RatingWeights; label: string }[] = [
 
 type StrMap = Record<keyof RatingWeights, string>;
 
-function toStrMap(w: RatingWeights): StrMap {
+const toStrMap = (w: RatingWeights): StrMap => {
   const out = {} as StrMap;
-  (Object.keys(w) as (keyof RatingWeights)[]).forEach(k => { out[k] = String(w[k]); });
-  return out;
-}
-function toWeights(m: StrMap): RatingWeights {
-  const out = {} as RatingWeights;
-  (Object.keys(m) as (keyof RatingWeights)[]).forEach(k => {
-    const v = parseFloat(m[k]);
-    out[k] = Number.isFinite(v) ? v : 0;
+  (Object.keys(w) as (keyof RatingWeights)[]).forEach((k) => {
+    out[k] = String(w[k]).replace('.', ',');
   });
   return out;
+};
+
+/** Accepte la virgule décimale. `null` = saisie illisible, à signaler. */
+function parseWeight(raw: string): number | null {
+  const cleaned = raw.trim().replace(',', '.');
+  if (cleaned === '' || cleaned === '-') return null;
+  const v = Number(cleaned);
+  return Number.isFinite(v) ? v : null;
 }
 
 export function RatingScaleEditor() {
+  const { theme } = useTheme();
+  const c = theme.colors;
+
   const [values, setValues] = useState<StrMap>(toStrMap(DEFAULT_RATING_WEIGHTS));
   const [isCustom, setIsCustom] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ tone: 'positive' | 'negative'; text: string } | null>(
+    null
+  );
 
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await getRatingWeights();
+    getRatingWeights()
+      .then((res) => {
         setValues(toStrMap(res));
         setIsCustom(res.is_custom);
-      } catch {
-        setValues(toStrMap(DEFAULT_RATING_WEIGHTS));
-      } finally {
-        setLoading(false);
-      }
-    })();
+      })
+      .catch(() => setValues(toStrMap(DEFAULT_RATING_WEIGHTS)))
+      .finally(() => setLoading(false));
   }, []);
 
+  const invalidKeys = useMemo(
+    () =>
+      (Object.keys(values) as (keyof RatingWeights)[]).filter(
+        (k) => parseWeight(values[k]) === null
+      ),
+    [values]
+  );
+
   const setField = (key: keyof RatingWeights, raw: string) => {
-    setValues(prev => ({ ...prev, [key]: raw }));
+    setValues((prev) => ({ ...prev, [key]: raw }));
     setFeedback(null);
   };
 
   const save = async () => {
+    if (invalidKeys.length > 0) {
+      haptics.error();
+      setFeedback({
+        tone: 'negative',
+        text: `${invalidKeys.length} valeur(s) illisible(s). Corrigez-les avant d'enregistrer.`,
+      });
+      return;
+    }
     setSaving(true);
     setFeedback(null);
     try {
-      await setRatingWeights(toWeights(values));
+      const out = {} as RatingWeights;
+      (Object.keys(values) as (keyof RatingWeights)[]).forEach((k) => {
+        out[k] = parseWeight(values[k]) ?? 0;
+      });
+      await setRatingWeights(out);
       setIsCustom(true);
-      setFeedback('Échelle enregistrée.');
+      haptics.success();
+      setFeedback({ tone: 'positive', text: 'Échelle enregistrée.' });
     } catch {
-      setFeedback("Échec de l'enregistrement.");
+      haptics.error();
+      setFeedback({ tone: 'negative', text: "Échec de l'enregistrement." });
     } finally {
       setSaving(false);
     }
@@ -84,87 +132,127 @@ export function RatingScaleEditor() {
       await resetRatingWeights();
       setValues(toStrMap(DEFAULT_RATING_WEIGHTS));
       setIsCustom(false);
-      setFeedback('Réinitialisée aux valeurs par défaut.');
+      haptics.success();
+      setFeedback({ tone: 'positive', text: 'Réinitialisée aux valeurs par défaut.' });
     } catch {
-      setFeedback('Échec de la réinitialisation.');
+      haptics.error();
+      setFeedback({ tone: 'negative', text: 'Échec de la réinitialisation.' });
     } finally {
       setSaving(false);
     }
   };
 
-  const renderField = (f: { key: keyof RatingWeights; label: string }) => (
-    <View key={f.key} style={st.row}>
-      <Text style={st.rowLabel}>{f.label}</Text>
-      <TextInput
-        value={values[f.key]}
-        onChangeText={t => setField(f.key, t)}
-        keyboardType="numbers-and-punctuation"
-        style={st.input}
-      />
-    </View>
-  );
+  const field = (f: { key: keyof RatingWeights; label: string }) => {
+    const invalid = parseWeight(values[f.key]) === null;
+    return (
+      <View key={f.key} style={[styles.row, { gap: theme.space.md }]}>
+        <Text variant="body" style={styles.flex}>
+          {f.label}
+        </Text>
+        <TextInput
+          value={values[f.key]}
+          onChangeText={(t) => setField(f.key, t)}
+          keyboardType="numbers-and-punctuation"
+          accessibilityLabel={`Poids : ${f.label}`}
+          placeholderTextColor={c.text.tertiary}
+          style={[
+            styles.input,
+            {
+              backgroundColor: c.bg.sunken,
+              borderRadius: theme.radius.sm,
+              borderColor: invalid ? c.negative.default : c.border.subtle,
+              color: invalid ? c.negative.default : c.text.primary,
+            },
+          ]}
+        />
+      </View>
+    );
+  };
 
   return (
-    <View style={st.card}>
-      <View style={st.cardHeader}>
-        <View style={st.accent} />
-        <Ionicons name="options-outline" size={18} color="#1e3a5f" />
-        <Text style={st.cardTitle}>Échelle de notation</Text>
-      </View>
-      <View style={st.cardBody}>
-        <Text style={st.intro}>
-          Chaque joueur de champ part de 5,0. Ces poids ajustent sa note selon les événements du match
-          (individuel = joueur concerné, collectif = tous les présents). Gardiens non notés.
+    <Card variant="raised" padding="lg" style={{ gap: theme.space.md }}>
+      <View style={styles.header}>
+        <Ionicons name="options-outline" size={18} color={c.text.secondary} />
+        <Text variant="headline" style={styles.flex}>
+          Échelle de notation
         </Text>
-        <Text style={[st.status, { color: isCustom ? '#059669' : '#64748b' }]}>
-          {loading ? 'Chargement…' : isCustom ? 'Échelle personnalisée active' : 'Échelle par défaut'}
-        </Text>
-
-        {loading ? (
-          <ActivityIndicator color="#1e3a5f" style={{ marginVertical: 16 }} />
-        ) : (
-          <>
-            <Text style={st.groupLabel}>Individuel</Text>
-            {INDIV_FIELDS.map(renderField)}
-            <Text style={st.groupLabel}>Collectif (présents sur le terrain)</Text>
-            {COLL_FIELDS.map(renderField)}
-
-            <View style={st.actions}>
-              <TouchableOpacity style={[st.saveBtn, saving && { opacity: 0.6 }]} onPress={save} disabled={saving}>
-                <Text style={st.saveBtnText}>{saving ? 'Enregistrement…' : "Enregistrer l'échelle"}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[st.resetBtn, (!isCustom || saving) && { opacity: 0.4 }]}
-                onPress={reset}
-                disabled={!isCustom || saving}
-              >
-                <Text style={st.resetBtnText}>Réinitialiser</Text>
-              </TouchableOpacity>
-            </View>
-            {feedback ? <Text style={st.feedback}>{feedback}</Text> : null}
-          </>
+        {!loading && (
+          <Badge
+            label={isCustom ? 'Personnalisée' : 'Par défaut'}
+            tone={isCustom ? 'accent' : 'neutral'}
+            size="sm"
+          />
         )}
       </View>
-    </View>
+
+      <Text variant="callout" tone="secondary">
+        Chaque joueur de champ part de 5,0. Ces poids ajustent sa note selon les événements du
+        match : individuel pour le joueur concerné, collectif pour tous les présents. Les gardiens
+        ne sont pas notés.
+      </Text>
+
+      {loading ? (
+        <SkeletonList rows={6} />
+      ) : (
+        <>
+          <Text variant="callout" tone="tertiary" weight="600" style={styles.group}>
+            Individuel
+          </Text>
+          {INDIV_FIELDS.map(field)}
+
+          <Text variant="callout" tone="tertiary" weight="600" style={styles.group}>
+            Collectif, présents sur le terrain
+          </Text>
+          {COLL_FIELDS.map(field)}
+
+          {feedback && (
+            <View style={[styles.feedback, { gap: theme.space.sm }]}>
+              <Ionicons
+                name={feedback.tone === 'positive' ? 'checkmark-circle' : 'alert-circle'}
+                size={15}
+                color={feedback.tone === 'positive' ? c.positive.default : c.negative.default}
+              />
+              <Text variant="callout" tone={feedback.tone} style={styles.flex}>
+                {feedback.text}
+              </Text>
+            </View>
+          )}
+
+          <View style={[styles.actions, { gap: theme.space.md }]}>
+            <Button
+              label={saving ? 'Enregistrement…' : "Enregistrer l'échelle"}
+              onPress={save}
+              loading={saving}
+              disabled={saving}
+              style={styles.flex}
+            />
+            <Button
+              label="Réinitialiser"
+              variant="ghost"
+              onPress={reset}
+              disabled={!isCustom || saving}
+            />
+          </View>
+        </>
+      )}
+    </Card>
   );
 }
 
-const st = StyleSheet.create({
-  card: { backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#e2e8f0', marginBottom: 14, overflow: 'hidden' },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  accent: { width: 3, height: 16, borderRadius: 2, backgroundColor: '#1e3a5f' },
-  cardTitle: { fontSize: 14, fontWeight: '800', color: '#0f172a' },
-  cardBody: { padding: 14 },
-  intro: { fontSize: 12, color: '#64748b', lineHeight: 17, marginBottom: 6 },
-  status: { fontSize: 12, fontWeight: '700', marginBottom: 10 },
-  groupLabel: { fontSize: 10, fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 10, marginBottom: 2 },
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6 },
-  rowLabel: { fontSize: 13, color: '#334155', flex: 1 },
-  input: { width: 84, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', fontSize: 13, color: '#0f172a', textAlign: 'right' },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16 },
-  saveBtn: { backgroundColor: '#1e3a5f', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 },
-  saveBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  resetBtn: { borderWidth: 1, borderColor: '#e2e8f0', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 },
-  resetBtnText: { color: '#475569', fontWeight: '600', fontSize: 13 },
-  feedback: { fontSize: 12, color: '#64748b', marginTop: 10 },
+const styles = StyleSheet.create({
+  flex: { flex: 1 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  group: { marginTop: 8 },
+  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4 },
+  input: {
+    width: 96,
+    minHeight: 44,
+    paddingHorizontal: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    fontSize: 15,
+    fontWeight: '600',
+    textAlign: 'right',
+  },
+  feedback: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+  actions: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
 });

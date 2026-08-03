@@ -18,7 +18,16 @@
  */
 
 import React, { useId } from 'react';
-import { View, TextInput, TextInputProps, Pressable, ViewStyle, StyleSheet } from 'react-native';
+import {
+  View,
+  TextInput,
+  TextInputProps,
+  Pressable,
+  ViewStyle,
+  TextStyle,
+  StyleProp,
+  StyleSheet,
+} from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Text } from './Text';
@@ -78,6 +87,8 @@ export interface InputProps extends Omit<TextInputProps, 'style' | 'placeholderT
   /** Champ numérique court, centré, chiffres tabulaires (score, dossard). */
   numeric?: boolean;
   containerStyle?: ViewStyle;
+  /** Ajustements du champ lui-même (hauteur d'une zone multiligne, par ex.). */
+  inputStyle?: StyleProp<TextStyle>;
 }
 
 export function Input({
@@ -87,6 +98,7 @@ export function Input({
   optional,
   numeric = false,
   containerStyle,
+  inputStyle,
   ...rest
 }: InputProps) {
   const { theme } = useTheme();
@@ -110,6 +122,7 @@ export function Input({
             paddingHorizontal: theme.space.lg,
           },
           numeric && styles.inputNumeric,
+          inputStyle,
         ]}
       />
     </Field>
