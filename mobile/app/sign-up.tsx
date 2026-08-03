@@ -15,6 +15,8 @@ import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 
 export default function SignUpScreen() {
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -26,6 +28,12 @@ export default function SignUpScreen() {
   const handleSignUp = async () => {
     setError(null);
     const trimmedEmail = email.trim();
+    const trimmedFirstName = firstName.trim();
+    const trimmedLastName = lastName.trim();
+    if (!trimmedFirstName || !trimmedLastName) {
+      setError('Nom et prénom requis');
+      return;
+    }
     if (!trimmedEmail || !password) {
       setError('Email et mot de passe requis');
       return;
@@ -40,9 +48,20 @@ export default function SignUpScreen() {
     }
     setLoading(true);
     try {
+      // Le profil public.users est créé côté serveur par le trigger
+      // on_auth_user_created (migration 20260803160000) à partir de ces
+      // métadonnées. Ne jamais insérer dans `users` depuis le client : la RLS
+      // le refuse, et signUp() ne renvoie pas de session tant que l'email n'est
+      // pas confirmé.
       const { data, error: err } = await supabase.auth.signUp({
         email: trimmedEmail,
         password,
+        options: {
+          data: {
+            first_name: trimmedFirstName,
+            last_name: trimmedLastName,
+          },
+        },
       });
       if (err) throw err;
       if (data?.user?.identities?.length === 0) {
@@ -86,6 +105,26 @@ export default function SignUpScreen() {
             </View>
           ) : null}
 
+          <TextInput
+            style={styles.input}
+            placeholder="Prénom"
+            placeholderTextColor="#9ca3af"
+            value={firstName}
+            onChangeText={setFirstName}
+            autoCapitalize="words"
+            autoComplete="given-name"
+            editable={!loading}
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Nom"
+            placeholderTextColor="#9ca3af"
+            value={lastName}
+            onChangeText={setLastName}
+            autoCapitalize="words"
+            autoComplete="family-name"
+            editable={!loading}
+          />
           <TextInput
             style={styles.input}
             placeholder="votre@email.com"
