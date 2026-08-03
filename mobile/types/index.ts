@@ -20,6 +20,12 @@ export interface Player {
   number?: number;
   team_id?: string;
   sequence_time_limit?: number;
+  /**
+   * Compte utilisateur relié à la fiche, `null` tant que le joueur n'a pas
+   * saisi son code de liaison. La colonne revenait déjà des `select('*')`, elle
+   * n'était simplement pas déclarée ici.
+   */
+  user_id?: string | null;
 }
 
 export type PlayerEventType = 'interview' | 'injury' | 'suspension' | 'feedback';

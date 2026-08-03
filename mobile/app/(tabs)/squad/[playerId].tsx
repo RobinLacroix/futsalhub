@@ -4,6 +4,7 @@ import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { format, isValid, parse } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useTheme } from '../../../contexts/ThemeContext';
+import { useIsTablet } from '../../../hooks/useIsTablet';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 import { useActiveSeason } from '../../../contexts/ActiveSeasonContext';
 import {
@@ -74,6 +75,7 @@ export default function PlayerDetailScreen() {
   const { theme } = useTheme();
   const c = theme.colors;
   const router = useRouter();
+  const isTablet = useIsTablet();
   const { activeTeamId, teams: allTeams } = useActiveTeam();
   const { activeSeason } = useActiveSeason();
 
@@ -284,14 +286,23 @@ export default function PlayerDetailScreen() {
     <>
       {/* « Modifier » vit dans le header natif : le bandeau de la fiche portait
           sa propre ligne « ‹ Effectif / Modifier » juste sous le header système,
-          soit deux barres de navigation empilées pour la même chose. */}
+          soit deux barres de navigation empilées pour la même chose.
+
+          Sur iPad, `squad/_layout` pose `headerShown: !isTablet` — il n'y a donc
+          aucun header natif, et `headerRight` n'était rendu nulle part : le
+          bouton « Modifier » avait purement disparu de la tablette, et le retour
+          vers l'effectif avec lui. La ligne du bandeau reprend les deux, elle
+          existe exactement pour ça. Même arbitrage que la barre iPad de
+          `squad/index`. */}
       <Stack.Screen
         options={{
           title: `${player.first_name} ${player.last_name}`,
-          headerRight: () => <HeaderEditButton onPress={openEditModal} />,
+          headerRight: isTablet ? undefined : () => <HeaderEditButton onPress={openEditModal} />,
         }}
       />
       <PlayerDetailView
+        onBack={isTablet ? () => router.back() : undefined}
+        onEdit={isTablet ? openEditModal : undefined}
         player={player}
         playerTeams={playerTeams}
         availableTeams={availableTeams}

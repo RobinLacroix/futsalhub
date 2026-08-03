@@ -79,6 +79,36 @@ export async function setMyTrainingAttendance(
   return { ok: false, error: (result?.error as string) || 'Erreur inconnue' };
 }
 
+/**
+ * Génère le code de liaison qu'un coach transmet à un joueur (24 h, à usage
+ * unique côté `claim_player_link_code`).
+ *
+ * Le pendant joueur (`claimPlayerLinkCode`) existait déjà sur mobile, pas
+ * celui-ci : la génération n'était possible que depuis le web. Un coach qui
+ * n'utilise que l'app ne pouvait donc relier aucun joueur, sur iPhone comme sur
+ * iPad.
+ *
+ * La RPC est gardée par `has_team_write_access` sur une équipe du joueur depuis
+ * `20260803100000` §3 — un rôle `viewer` recevra `no_access`.
+ */
+export async function createPlayerLinkCode(playerId: string): Promise<{
+  ok: boolean;
+  code?: string;
+  expiresAt?: string;
+  error?: string;
+}> {
+  const { data, error } = await supabase.rpc('create_player_link_code', { p_player_id: playerId });
+  if (error) return { ok: false, error: error.message };
+  const result = data as { ok?: boolean; code?: string; expires_at?: string; error?: string } | null;
+  if (result?.ok && result.code) {
+    return { ok: true, code: result.code, expiresAt: result.expires_at };
+  }
+  if (result?.error === 'no_access') {
+    return { ok: false, error: "Tu n'as pas les droits d'écriture sur l'équipe de ce joueur." };
+  }
+  return { ok: false, error: result?.error ?? 'Erreur inconnue' };
+}
+
 /** Lie le compte au joueur via le code partagé par le coach (écran Rejoindre le club). */
 export async function claimPlayerLinkCode(code: string): Promise<{ ok: boolean; error?: string }> {
   const { data, error } = await supabase.rpc('claim_player_link_code', { p_code: code.trim().toUpperCase() });

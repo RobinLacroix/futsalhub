@@ -54,6 +54,7 @@ import { INTENSITY_COLORS, INTENSITY_LABELS, zoneLabel } from '../lib/painMap';
 import { Text, Button, Badge, EmptyState, SkeletonList } from './ui';
 import { positionStyle } from './players/positions';
 import { fmPalette, sessionColor, type FMPalette, type SessionStatus } from './players/fmPalette';
+import { PlayerAccountLink } from './players/PlayerAccountLink';
 import {
   RadarChart,
   FeedbackLineChart,
@@ -799,7 +800,7 @@ export function PlayerDetailView({
 
         {/* ── Équipes ────────────────────────────────────────────────────── */}
         {isManager && (
-          <FMSection title="Équipes" p={p} last>
+          <FMSection title="Équipes" p={p}>
             {playerTeams.length === 0 ? (
               <EmptyState icon="shield-outline" title="Aucune équipe" compact />
             ) : (
@@ -843,6 +844,18 @@ export function PlayerDetailView({
                 onPress={() => setAssignModal(true)}
               />
             )}
+          </FMSection>
+        )}
+
+        {/* ── Compte joueur ──────────────────────────────────────────────── */}
+        {isManager && (
+          <FMSection title="Compte joueur" p={p} last>
+            <PlayerAccountLink
+              playerId={player.id}
+              playerName={`${player.first_name} ${player.last_name}`}
+              linked={!!player.user_id}
+              p={p}
+            />
           </FMSection>
         )}
       </ScrollView>
