@@ -25,12 +25,12 @@
  * à droite : c'est de la place à coût vertical nul, et ce sont des commandes
  * de déroulé de match, donc à leur place près du terrain.
  *
- * Les largeurs sont **fixes, pas proportionnelles** : un `flex` fait varier la
- * taille du chrono selon le nombre de boutons voisins, ce qui est exactement
- * la cause du défaut précédent. Le chrono a la place dont il a besoin, point.
+ * Chaque panneau combine `flexGrow` et `minWidth` : la barre remplit toute la
+ * largeur disponible, et aucun panneau ne descend sous son seuil de lisibilité.
+ * C'est le `flex` **sans plancher** qui avait cassé la première version.
  */
 
-import { View, Pressable, ScrollView } from 'react-native';
+import { View, Pressable } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme, makeStyles } from '../../contexts/ThemeContext';
 import { HIT_SLOP_MIN } from '../../lib/design/tokens';
@@ -68,16 +68,9 @@ export function TabletControlBar(p: TabletControlBarProps) {
   const { theme } = useTheme();
 
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={s.row}
-      // Le défilement n'est qu'un filet de sécurité pour un iPad en Split View :
-      // à pleine largeur les cinq panneaux tiennent sans déborder.
-      bounces={false}
-    >
+    <View style={s.row}>
       {/* ── Chrono ── */}
-      <Panel label="Chronomètre" width={264}>
+      <Panel label="Chronomètre" grow={1.5} min={252}>
         <View style={s.chronoRow}>
           <View style={s.chronoText}>
             <Text variant="hero" numeric style={s.onBrand} numberOfLines={1} adjustsFontSizeToFit>
@@ -136,7 +129,7 @@ export function TabletControlBar(p: TabletControlBarProps) {
       </Panel>
 
       {/* ── Score ── */}
-      <Panel label="Score" width={138}>
+      <Panel label="Score" grow={0.8} min={126}>
         <Pressable
           onPress={p.onEditScore}
           style={({ pressed }) => [s.scoreBox, pressed && s.pressed]}
@@ -156,7 +149,7 @@ export function TabletControlBar(p: TabletControlBarProps) {
       </Panel>
 
       {/* ── Fautes ── */}
-      <Panel label="Fautes cumulées" width={192}>
+      <Panel label="Fautes cumulées" grow={1.1} min={190}>
         <View style={s.pairRow}>
           <FoulStepper short="Éq" label="équipe" value={p.foulsUs} onChange={p.onChangeFoulsUs} tone="us" />
           <FoulStepper
@@ -170,7 +163,7 @@ export function TabletControlBar(p: TabletControlBarProps) {
       </Panel>
 
       {/* ── Actions adverses ── */}
-      <Panel label="Actions adverses" width={240}>
+      <Panel label="Actions adverses" grow={1.4} min={236}>
         <View style={s.pairRow}>
           {OPPONENT_ACTIONS.map((a) => {
             const count =
@@ -203,24 +196,36 @@ export function TabletControlBar(p: TabletControlBarProps) {
         </View>
       </Panel>
 
-    </ScrollView>
+    </View>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * `flexGrow` pour occuper toute la largeur, `minWidth` pour ne jamais se
+ * comprimer sous le seuil de lisibilité.
+ *
+ * C'est le `flex` SANS plancher qui avait cassé la version précédente : le
+ * chrono tombait à ~180 pt et se coupait caractère par caractère. Des largeurs
+ * figées ont corrigé le débordement mais laissé un vide à droite. Les deux
+ * ensemble donnent le bon comportement : la barre remplit ce qu'elle a, et
+ * s'arrête de rétrécir quand ça devient illisible.
+ */
 function Panel({
   label,
-  width,
+  grow,
+  min,
   children,
 }: {
   label: string;
-  width: number;
+  grow: number;
+  min: number;
   children: React.ReactNode;
 }) {
   const s = useStyles();
   return (
-    <View style={[s.panel, { width }]}>
+    <View style={[s.panel, { flexGrow: grow, flexBasis: min, minWidth: min }]}>
       <Text variant="caption" style={s.panelLabel} numberOfLines={1}>
         {label}
       </Text>
@@ -337,7 +342,7 @@ const useStyles = makeStyles((t) => ({
   scoreBox: { justifyContent: 'center' },
   inlineHint: { flexDirection: 'row', alignItems: 'center', gap: 4 },
 
-  pairRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.xs },
+  pairRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm },
 
   foulBox: {
     flex: 1,

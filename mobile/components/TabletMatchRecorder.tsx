@@ -53,7 +53,7 @@ import {
   ScoreSheet,
   StatsTable,
   isGoalkeeper,
-  playerDisplayName,
+  playerShortName,
   PLAYER_ACTIONS,
   type RecorderAction,
 } from './recorder';
@@ -189,7 +189,9 @@ export default function TabletMatchRecorder({
       setSelectedForChange(null);
       const out = r.convoquedPlayers.find((p) => p.id === outId);
       const inn = r.convoquedPlayers.find((p) => p.id === inId);
-      showToast(`${out?.last_name ?? '?'} → ${inn?.last_name ?? '?'}`);
+      showToast(
+        `${out ? playerShortName(out) : '?'} → ${inn ? playerShortName(inn) : '?'}`
+      );
     },
     [r, showToast]
   );
@@ -334,7 +336,7 @@ export default function TabletMatchRecorder({
 
   const bench = r.benchPlayers;
   const dragged = dragging ? r.convoquedPlayers.find((p) => p.id === dragging) : null;
-  const draggedName = dragged ? playerDisplayName(dragged, r.convoquedPlayers) : null;
+  const draggedName = dragged ? playerShortName(dragged) : null;
 
   // Le gardien passe en tête : c'est la lecture naturelle d'un cinq de futsal.
   const field = [...r.fieldPlayers].sort((a, b) => {
@@ -464,7 +466,7 @@ export default function TabletMatchRecorder({
                 >
                   <PlayerActionCard
                     player={p}
-                    name={playerDisplayName(p, r.convoquedPlayers)}
+                    name={playerShortName(p)}
                     state={r.playerStates[p.id]}
                     onAction={(a) => handleAction(p.id, a)}
                     onUndo={(a) => handleCardUndo(p.id, a)}
@@ -503,7 +505,7 @@ export default function TabletMatchRecorder({
                   >
                     <BenchCard
                       player={p}
-                      name={playerDisplayName(p, r.convoquedPlayers)}
+                      name={playerShortName(p)}
                       state={r.playerStates[p.id]}
                       onPress={() => handleSelect(p.id, false)}
                       selected={selectedForChange === p.id}
@@ -694,7 +696,7 @@ const useStyles = makeStyles((t) => ({
 
   header: {
     backgroundColor: t.colors.accent.fill,
-    paddingHorizontal: t.space.lg,
+    paddingHorizontal: t.space.md,
     paddingTop: t.space.lg,
     paddingBottom: t.space.md,
     gap: t.space.sm,
@@ -717,7 +719,7 @@ const useStyles = makeStyles((t) => ({
 
 
 
-  body: { padding: t.space.lg, paddingBottom: t.space.giant, gap: t.space.sm },
+  body: { paddingHorizontal: t.space.sm, paddingTop: t.space.sm, paddingBottom: t.space.xxl, gap: t.space.sm },
   sectionRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm },
   timeout: {
     minHeight: 32,
@@ -743,10 +745,10 @@ const useStyles = makeStyles((t) => ({
     backgroundColor: t.colors.accent.subtle,
   },
 
-  fieldRow: { flexDirection: 'row', gap: t.space.sm, alignItems: 'stretch' },
+  fieldRow: { flexDirection: 'row', gap: t.space.xs, alignItems: 'stretch' },
   fieldCell: { flex: 1, minWidth: 0 },
   benchLabel: { marginTop: t.space.md },
-  benchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.sm },
+  benchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.xs },
   benchCell: { flexGrow: 1, flexBasis: 130, maxWidth: 200 },
 
   bilanRow: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.md },

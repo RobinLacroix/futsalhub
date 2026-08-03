@@ -24,12 +24,25 @@ import { useTheme, makeStyles } from '../../contexts/ThemeContext';
 import { HIT_SLOP_MIN } from '../../lib/design/tokens';
 import { Text } from '../ui';
 import { formatSeconds } from '../../utils/matchUtils';
-import { PLAYER_ACTIONS, isGoalkeeper, type PlayerState, type RecorderAction } from './recorderModel';
+import {
+  CARD_ACTION_ORDER,
+  PLAYER_ACTIONS,
+  isGoalkeeper,
+  type PlayerState,
+  type RecorderAction,
+} from './recorderModel';
 import type { Player } from '../../types';
 
-/** Les cartons sont à part : ils ne sont pas une statistique de performance. */
-const FIELD_ACTIONS = PLAYER_ACTIONS.filter(
-  (a) => a.eventType !== 'yellow_card' && a.eventType !== 'red_card'
+/**
+ * Les cartons sont à part : ils ne sont pas une statistique de performance, et
+ * ils suivent le joueur au-delà du match.
+ *
+ * Les six autres suivent `CARD_ACTION_ORDER` et non l'ordre du catalogue :
+ * chaque rangée doit opposer deux actions de même nature (issue, tentative,
+ * possession), pour que le geste se choisisse par la ligne puis par le côté.
+ */
+const FIELD_ACTIONS = CARD_ACTION_ORDER.map(
+  (t) => PLAYER_ACTIONS.find((a) => a.eventType === t)!
 );
 const CARD_ACTIONS = PLAYER_ACTIONS.filter(
   (a) => a.eventType === 'yellow_card' || a.eventType === 'red_card'
@@ -112,16 +125,26 @@ export function PlayerActionCard({
         tête. Les deux temps restants passent sur une ligne.
       */}
       <View style={s.times}>
-        <Text
-          variant="title"
-          numeric
-          color={over ? c.negative.default : near ? c.warning.default : c.text.primary}
-        >
-          {formatSeconds(seq)}
-        </Text>
-        <Text variant="caption" tone="tertiary" numberOfLines={1} style={s.flex}>
-          séq. · {formatSeconds(state?.totalTime ?? 0)} cum.
-        </Text>
+        <View style={s.timeCell}>
+          <Text
+            variant="title"
+            numeric
+            color={over ? c.negative.default : near ? c.warning.default : c.text.primary}
+          >
+            {formatSeconds(seq)}
+          </Text>
+          <Text variant="caption" tone="tertiary">
+            séquence
+          </Text>
+        </View>
+        <View style={[s.timeCell, s.timeCellRight]}>
+          <Text variant="title" numeric tone="secondary">
+            {formatSeconds(state?.totalTime ?? 0)}
+          </Text>
+          <Text variant="caption" tone="tertiary">
+            cumulé
+          </Text>
+        </View>
       </View>
 
       <View style={s.bar}>
@@ -176,7 +199,7 @@ export function PlayerActionCard({
         })}
       </View>
 
-      <View style={s.footer}>
+      <View style={s.cardsRow}>
         {CARD_ACTIONS.map((a) => {
           const count =
             a.eventType === 'yellow_card' ? (state?.yellowCards ?? 0) : (state?.redCards ?? 0);
@@ -198,18 +221,23 @@ export function PlayerActionCard({
               accessibilityHint="Appui long pour annuler"
             >
               <Ionicons name={a.icon} size={14} color={count > 0 ? c.bg.canvas : tone} />
+              <Text variant="caption" weight="600" color={count > 0 ? c.bg.canvas : c.text.secondary}>
+                {a.short}
+              </Text>
               <Text
-                variant="caption"
+                variant="tableCell"
                 weight="700"
                 numeric
-                color={count > 0 ? c.bg.canvas : c.text.secondary}
+                color={count > 0 ? c.bg.canvas : c.text.tertiary}
               >
                 {count}
               </Text>
             </Pressable>
           );
         })}
+      </View>
 
+      <View>
         <Pressable
           onPress={onToggleSelect}
           style={({ pressed }) => [s.subBtn, selected && s.subBtnOn, pressed && s.pressed]}
@@ -333,8 +361,9 @@ const useStyles = makeStyles((t) => ({
   card: {
     flex: 1,
     minWidth: 0,
-    gap: t.space.xs,
-    padding: t.space.sm,
+    gap: 5,
+    paddingHorizontal: 6,
+    paddingVertical: t.space.sm,
     borderRadius: t.radius.md,
     backgroundColor: t.colors.bg.surface,
     borderWidth: 2,
@@ -358,7 +387,9 @@ const useStyles = makeStyles((t) => ({
 
   head: { flexDirection: 'row', alignItems: 'center', gap: t.space.xs },
 
-  times: { flexDirection: 'row', alignItems: 'baseline', gap: t.space.xs, marginTop: 2 },
+  times: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
+  timeCell: { minWidth: 0 },
+  timeCellRight: { alignItems: 'flex-end' },
   bar: {
     height: 5,
     borderRadius: t.radius.pill,
@@ -391,20 +422,19 @@ const useStyles = makeStyles((t) => ({
   },
   dot: { width: 8, height: 8, borderRadius: 4 },
 
-  footer: { flexDirection: 'row', alignItems: 'stretch', gap: t.space.xs, marginTop: 2 },
+  cardsRow: { flexDirection: 'row', alignItems: 'stretch', gap: 4 },
   cardBtn: {
-    minWidth: 42,
-    minHeight: 34,
+    flex: 1,
+    minHeight: 36,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 3,
+    gap: t.space.xs,
     borderRadius: t.radius.sm,
     borderWidth: 1,
   },
   subBtn: {
-    flex: 1,
-    minHeight: 34,
+    minHeight: 36,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

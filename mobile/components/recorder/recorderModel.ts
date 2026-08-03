@@ -59,6 +59,24 @@ export interface RecorderAction {
   tone: (c: ThemeColors) => string;
 }
 
+/**
+ * Ordre d'affichage sur les cartes tablette, en trois paires : l'issue
+ * (but / passe décisive), la tentative (cadrée / non cadrée), la possession
+ * (récupération / perte). Chaque rangée oppose deux actions de même nature,
+ * donc le geste se choisit par la ligne puis par le côté.
+ *
+ * C'est l'ordre voulu par Robin, et il ne suit pas celui de `PLAYER_ACTIONS` :
+ * ce dernier sert au téléphone, où la grille est un flux de huit cases.
+ */
+export const CARD_ACTION_ORDER = [
+  'goal',
+  'assist',
+  'shot_on_target',
+  'shot',
+  'recovery',
+  'ball_loss',
+] as const;
+
 export const PLAYER_ACTIONS: RecorderAction[] = [
   {
     eventType: 'goal',
@@ -263,6 +281,10 @@ export const isGoalkeeper = (position: string | null | undefined) =>
  * bruit permanent pour un cas rare, et le bruit permanent finit par ne plus
  * être lu.
  */
+/** Initiale du prénom + nom. Toujours, sans condition. */
+export const playerShortName = (p: { first_name: string; last_name: string }) =>
+  `${p.first_name.charAt(0)}. ${p.last_name}`;
+
 export function playerDisplayName(
   player: { first_name: string; last_name: string },
   squad: { first_name: string; last_name: string }[]
