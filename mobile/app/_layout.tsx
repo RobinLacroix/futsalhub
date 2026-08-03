@@ -4,6 +4,7 @@ import { Stack, useRouter } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { View, ActivityIndicator, Text, StyleSheet, ScrollView, AppState } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import * as Network from 'expo-network';
 import * as Notifications from 'expo-notifications';
 import { ActiveTeamProvider } from '../contexts/ActiveTeamContext';
@@ -11,6 +12,8 @@ import { ActiveSeasonProvider } from '../contexts/ActiveSeasonContext';
 import { AppRoleProvider } from '../contexts/AppRoleContext';
 import { MatchRecorderExitGuardProvider } from '../contexts/MatchRecorderExitGuardContext';
 import { NotificationProvider } from '../contexts/NotificationContext';
+import { ThemeProvider, useTheme } from '../contexts/ThemeContext';
+import { useOrientationPolicy } from '../hooks/useOrientationPolicy';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { flushMatchRecorderOutbox } from '../lib/offline/matchRecorderOutbox';
 
@@ -103,6 +106,47 @@ class RootErrorBoundary extends React.Component<
   }
 }
 
+/**
+ * Applique le thème résolu au chrome de navigation et à la barre de statut,
+ * et retient le rendu tant que les polices ne sont pas prêtes (évite le flash
+ * de texte en police système puis re-rendu en Archivo).
+ */
+function ThemedRoot() {
+  const { theme, ready } = useTheme();
+  useOrientationPolicy();
+
+  if (!ready) {
+    return (
+      <View style={[styles.centered, { backgroundColor: theme.colors.bg.canvas }]}>
+        <ActivityIndicator color={theme.colors.accent.default} />
+      </View>
+    );
+  }
+
+  return (
+    <>
+      <StatusBar style={theme.statusBarStyle} />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: theme.colors.bg.canvas },
+        }}
+      >
+        <Stack.Screen name="index" />
+        <Stack.Screen name="sign-in" />
+        <Stack.Screen name="sign-up" options={{ title: 'Créer un compte' }} />
+        <Stack.Screen name="forgot-password" />
+        <Stack.Screen name="choose-role" />
+        <Stack.Screen name="join-club" options={{ title: 'Rejoindre le club' }} />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="(player-tabs)" />
+        {/* Vérification visuelle du design system. Non listée en navigation. */}
+        <Stack.Screen name="design-gallery" options={{ title: 'Design system' }} />
+      </Stack>
+    </>
+  );
+}
+
 export default function RootLayout() {
   if (!isSupabaseConfigured) {
     return (
@@ -118,32 +162,25 @@ export default function RootLayout() {
 
   return (
     <RootErrorBoundary>
-      <MatchRecorderExitGuardProvider>
-        <GestureHandlerRootView style={{ flex: 1 }}>
-          <SafeAreaProvider>
-            <MatchRecorderOutboxSync />
-            <AppRoleProvider>
-              <ActiveTeamProvider>
-                <ActiveSeasonProvider>
-                <NotificationProvider>
-                  <NotificationDeepLinkHandler />
-                  <Stack screenOptions={{ headerShown: false }}>
-                    <Stack.Screen name="index" />
-                    <Stack.Screen name="sign-in" />
-                    <Stack.Screen name="sign-up" options={{ title: 'Créer un compte' }} />
-                    <Stack.Screen name="forgot-password" />
-                    <Stack.Screen name="choose-role" />
-                    <Stack.Screen name="join-club" options={{ title: 'Rejoindre le club' }} />
-                    <Stack.Screen name="(tabs)" />
-                    <Stack.Screen name="(player-tabs)" />
-                  </Stack>
-                </NotificationProvider>
-                </ActiveSeasonProvider>
-              </ActiveTeamProvider>
-            </AppRoleProvider>
-          </SafeAreaProvider>
-        </GestureHandlerRootView>
-      </MatchRecorderExitGuardProvider>
+      <ThemeProvider>
+        <MatchRecorderExitGuardProvider>
+          <GestureHandlerRootView style={{ flex: 1 }}>
+            <SafeAreaProvider>
+              <MatchRecorderOutboxSync />
+              <AppRoleProvider>
+                <ActiveTeamProvider>
+                  <ActiveSeasonProvider>
+                    <NotificationProvider>
+                      <NotificationDeepLinkHandler />
+                      <ThemedRoot />
+                    </NotificationProvider>
+                  </ActiveSeasonProvider>
+                </ActiveTeamProvider>
+              </AppRoleProvider>
+            </SafeAreaProvider>
+          </GestureHandlerRootView>
+        </MatchRecorderExitGuardProvider>
+      </ThemeProvider>
     </RootErrorBoundary>
   );
 }
