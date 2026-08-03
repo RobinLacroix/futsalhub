@@ -14,9 +14,16 @@
  *
  * ## Le principe de mise en page
  *
- * Cinq panneaux de hauteur égale, chacun avec son intitulé en capitales
- * discrètes et ses commandes en dessous. Ça se lit comme un tableau de bord,
- * qui est la bonne métaphore pour une surface posée à plat sur un banc.
+ * Quatre panneaux de hauteur égale, chacun avec son intitulé et ses commandes
+ * en dessous. Ça se lit comme un tableau de bord, qui est la bonne métaphore
+ * pour une surface posée à plat sur un banc.
+ *
+ * **Les temps morts et le passage en seconde période n'y sont plus.** À cinq
+ * panneaux la barre réclamait 1 104 pt : elle débordait déjà sidebar repliée,
+ * et sidebar déployée il ne reste que ~940 pt — les temps morts sortaient de
+ * l'écran. Ils sont partis sur la ligne d'intitulé du terrain, qui était vide
+ * à droite : c'est de la place à coût vertical nul, et ce sont des commandes
+ * de déroulé de match, donc à leur place près du terrain.
  *
  * Les largeurs sont **fixes, pas proportionnelles** : un `flex` fait varier la
  * taille du chrono selon le nombre de boutons voisins, ce qui est exactement
@@ -38,7 +45,6 @@ export interface TabletControlBarProps {
   half: 1 | 2;
   isRunning: boolean;
   onToggleClock: () => void;
-  onNextHalf: () => void;
 
   scoreUs: number;
   scoreOpponent: number;
@@ -53,10 +59,6 @@ export interface TabletControlBarProps {
   onOpponentUndo: (e: MatchEventType) => void;
   opponentCounts: { goals: number; onTarget: number; total: number };
 
-  timeoutUs: boolean;
-  timeoutOpponent: boolean;
-  onToggleTimeoutUs: () => void;
-  onToggleTimeoutOpponent: () => void;
 
   voice: { isListening: boolean; available: boolean; onPress: () => void };
 }
@@ -75,7 +77,7 @@ export function TabletControlBar(p: TabletControlBarProps) {
       bounces={false}
     >
       {/* ── Chrono ── */}
-      <Panel label="Chronomètre" width={286}>
+      <Panel label="Chronomètre" width={264}>
         <View style={s.chronoRow}>
           <View style={s.chronoText}>
             <Text variant="hero" numeric style={s.onBrand} numberOfLines={1} adjustsFontSizeToFit>
@@ -134,7 +136,7 @@ export function TabletControlBar(p: TabletControlBarProps) {
       </Panel>
 
       {/* ── Score ── */}
-      <Panel label="Score" width={150}>
+      <Panel label="Score" width={138}>
         <Pressable
           onPress={p.onEditScore}
           style={({ pressed }) => [s.scoreBox, pressed && s.pressed]}
@@ -154,7 +156,7 @@ export function TabletControlBar(p: TabletControlBarProps) {
       </Panel>
 
       {/* ── Fautes ── */}
-      <Panel label="Fautes cumulées" width={206}>
+      <Panel label="Fautes cumulées" width={192}>
         <View style={s.pairRow}>
           <FoulStepper short="Éq" label="équipe" value={p.foulsUs} onChange={p.onChangeFoulsUs} tone="us" />
           <FoulStepper
@@ -168,7 +170,7 @@ export function TabletControlBar(p: TabletControlBarProps) {
       </Panel>
 
       {/* ── Actions adverses ── */}
-      <Panel label="Actions adverses" width={252}>
+      <Panel label="Actions adverses" width={240}>
         <View style={s.pairRow}>
           {OPPONENT_ACTIONS.map((a) => {
             const count =
@@ -201,36 +203,6 @@ export function TabletControlBar(p: TabletControlBarProps) {
         </View>
       </Panel>
 
-      {/* ── Temps morts et période ── */}
-      <Panel label="Temps morts" width={210}>
-        <View style={s.pairRow}>
-          <TimeoutChip
-            label="équipe"
-            short="Éq"
-            used={p.timeoutUs}
-            onToggle={p.onToggleTimeoutUs}
-          />
-          <TimeoutChip
-            label="adverse"
-            short="Adv"
-            used={p.timeoutOpponent}
-            onToggle={p.onToggleTimeoutOpponent}
-          />
-          {p.half === 1 && (
-            <Pressable
-              onPress={p.onNextHalf}
-              style={({ pressed }) => [s.halfBtn, pressed && s.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="Passer en seconde mi-temps"
-            >
-              <Ionicons name="play-forward" size={15} color="#FFFFFF" />
-              <Text variant="caption" weight="700" style={s.onBrand}>
-                2e MT
-              </Text>
-            </Pressable>
-          )}
-        </View>
-      </Panel>
     </ScrollView>
   );
 }
@@ -313,37 +285,6 @@ function FoulStepper({
         <Ionicons name="add" size={15} color="#FFFFFF" />
       </Pressable>
     </View>
-  );
-}
-
-function TimeoutChip({
-  short,
-  label,
-  used,
-  onToggle,
-}: {
-  short: string;
-  label: string;
-  used: boolean;
-  onToggle: () => void;
-}) {
-  const s = useStyles();
-  return (
-    <Pressable
-      onPress={() => {
-        haptics.select();
-        onToggle();
-      }}
-      style={({ pressed }) => [s.timeout, used && s.timeoutUsed, pressed && s.pressed]}
-      accessibilityRole="switch"
-      accessibilityState={{ checked: used }}
-      accessibilityLabel={`Temps mort ${label}, ${used ? 'utilisé' : 'disponible'}`}
-    >
-      <Ionicons name={used ? 'checkmark-circle' : 'time-outline'} size={14} color="#FFFFFF" />
-      <Text variant="caption" weight="600" style={s.onBrand}>
-        {short}
-      </Text>
-    </Pressable>
   );
 }
 
@@ -433,27 +374,4 @@ const useStyles = makeStyles((t) => ({
   },
   badge: { color: 'rgba(255,255,255,0.85)' },
 
-  timeout: {
-    flex: 1,
-    height: 40,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: t.space.xs,
-    borderRadius: t.radius.sm,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
-  },
-  timeoutUsed: { backgroundColor: 'rgba(255,255,255,0.32)', borderColor: '#FFFFFF' },
-
-  halfBtn: {
-    flex: 1.1,
-    height: 40,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: t.space.xs,
-    borderRadius: t.radius.sm,
-    backgroundColor: 'rgba(0,0,0,0.26)',
-  },
 }));

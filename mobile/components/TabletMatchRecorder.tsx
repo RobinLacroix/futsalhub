@@ -386,7 +386,6 @@ export default function TabletMatchRecorder({
           half={r.half}
           isRunning={r.isRunning}
           onToggleClock={r.toggleClock}
-          onNextHalf={confirmNextHalf}
           scoreUs={r.scoreUs}
           scoreOpponent={r.scoreOpponent}
           onEditScore={() => setScoreSheet(true)}
@@ -401,10 +400,6 @@ export default function TabletMatchRecorder({
             onTarget: r.opponentShotsOnTarget,
             total: r.opponentShotsTotal,
           }}
-          timeoutUs={r.timeoutUs}
-          timeoutOpponent={r.timeoutOpponent}
-          onToggleTimeoutUs={() => r.setTimeoutUs((v) => !v)}
-          onToggleTimeoutOpponent={() => r.setTimeoutOpponent((v) => !v)}
           voice={{
             isListening,
             available: voiceAvailable,
@@ -423,9 +418,39 @@ export default function TabletMatchRecorder({
 
       {view === 'saisie' ? (
         <ScrollView style={s.flex} contentContainerStyle={s.body}>
-          <Text variant="caption" tone="secondary" weight="700">
-            Sur le terrain — touchez une action, appui long pour l'annuler
-          </Text>
+          {/* La ligne d'intitulé était vide à droite : les commandes de déroulé
+              de match s'y installent, à coût vertical nul. Elles ne tenaient
+              plus dans le bandeau sidebar déployée. */}
+          <View style={s.sectionRow}>
+            <Text variant="caption" tone="secondary" weight="700" style={s.flex}>
+              Sur le terrain — touchez une action, appui long pour l'annuler
+            </Text>
+            <TimeoutChip
+              label="équipe"
+              short="TM Éq"
+              used={r.timeoutUs}
+              onToggle={() => r.setTimeoutUs((v) => !v)}
+            />
+            <TimeoutChip
+              label="adverse"
+              short="TM Adv"
+              used={r.timeoutOpponent}
+              onToggle={() => r.setTimeoutOpponent((v) => !v)}
+            />
+            {r.half === 1 && (
+              <Pressable
+                onPress={confirmNextHalf}
+                style={({ pressed }) => [s.halfBtn, pressed && s.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Passer en seconde mi-temps"
+              >
+                <Ionicons name="play-forward" size={15} color={c.accent.default} />
+                <Text variant="caption" weight="700" tone="accent">
+                  2e mi-temps
+                </Text>
+              </Pressable>
+            )}
+          </View>
           <View style={s.fieldRow}>
             {field.map((p) => (
               <GestureDetector key={p.id} gesture={makeDragGesture(p.id, true)}>
@@ -609,6 +634,47 @@ function HeaderButton({
   );
 }
 
+/**
+ * Le temps mort est un état binaire, pas une action : d'où
+ * `accessibilityRole="switch"`. Posé sur le fond de l'écran et non sur la
+ * teinte de marque, il prend les couleurs du thème.
+ */
+function TimeoutChip({
+  short,
+  label,
+  used,
+  onToggle,
+}: {
+  short: string;
+  label: string;
+  used: boolean;
+  onToggle: () => void;
+}) {
+  const s = useStyles();
+  const { theme } = useTheme();
+  return (
+    <Pressable
+      onPress={() => {
+        haptics.select();
+        onToggle();
+      }}
+      style={({ pressed }) => [s.timeout, used && s.timeoutUsed, pressed && s.pressed]}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: used }}
+      accessibilityLabel={`Temps mort ${label}, ${used ? 'utilisé' : 'disponible'}`}
+    >
+      <Ionicons
+        name={used ? 'checkmark-circle' : 'time-outline'}
+        size={14}
+        color={used ? theme.colors.accent.default : theme.colors.text.secondary}
+      />
+      <Text variant="caption" weight="600" tone={used ? 'accent' : 'secondary'}>
+        {short}
+      </Text>
+    </Pressable>
+  );
+}
+
 const useStyles = makeStyles((t) => ({
   flex: { flex: 1 },
   root: { flex: 1, backgroundColor: t.colors.bg.canvas },
@@ -652,6 +718,31 @@ const useStyles = makeStyles((t) => ({
 
 
   body: { padding: t.space.lg, paddingBottom: t.space.giant, gap: t.space.sm },
+  sectionRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm },
+  timeout: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: t.space.xs,
+    paddingHorizontal: t.space.md,
+    borderRadius: t.radius.sm,
+    borderWidth: 1,
+    borderColor: t.colors.border.subtle,
+    backgroundColor: t.colors.bg.surface,
+  },
+  timeoutUsed: { borderColor: t.colors.accent.default, backgroundColor: t.colors.accent.subtle },
+  halfBtn: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: t.space.xs,
+    paddingHorizontal: t.space.md,
+    borderRadius: t.radius.sm,
+    borderWidth: 1,
+    borderColor: t.colors.accent.default,
+    backgroundColor: t.colors.accent.subtle,
+  },
+
   fieldRow: { flexDirection: 'row', gap: t.space.sm, alignItems: 'stretch' },
   fieldCell: { flex: 1, minWidth: 0 },
   benchLabel: { marginTop: t.space.md },

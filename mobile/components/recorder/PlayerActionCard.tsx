@@ -369,12 +369,21 @@ const useStyles = makeStyles((t) => ({
 
   alert: { flexDirection: 'row', alignItems: 'center', gap: t.space.xs },
 
-  grid: { gap: 3 },
+  /**
+   * Deux colonnes de trois. Six lignes empilées portaient la carte à plus de
+   * 200 pt de haut pour des cibles de 34 pt : beaucoup de hauteur perdue et un
+   * balayage vertical long. En deux colonnes, les six actions tiennent dans un
+   * carré que l'œil embrasse d'un coup, et la cible gagne en hauteur.
+   */
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   action: {
-    minHeight: 34,
+    flexGrow: 1,
+    flexBasis: '46%',
+    minWidth: 0,
+    minHeight: 40,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: t.space.sm,
+    gap: t.space.xs,
     paddingHorizontal: t.space.sm,
     borderRadius: t.radius.sm,
     borderWidth: 1,
