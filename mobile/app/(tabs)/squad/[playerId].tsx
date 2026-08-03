@@ -13,7 +13,7 @@ import {
   ScrollView,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 import { useActiveSeason } from '../../../contexts/ActiveSeasonContext';
 import {
@@ -34,6 +34,12 @@ import { getPlayerFeedbackHistory, type PlayerFeedbackRow } from '../../../lib/s
 import { supabase } from '../../../lib/supabase';
 import type { Player, Team, PlayerEvent } from '../../../types';
 import { PlayerDetailView, type TrainingSession, type PlayerStats } from '../../../components/PlayerDetailView';
+import { Button } from '../../../components/ui';
+
+/** Action d'édition, posée dans le header natif du Stack. */
+function HeaderEditButton({ onPress }: { onPress: () => void }) {
+  return <Button label="Modifier" icon="create-outline" variant="ghost" size="sm" onPress={onPress} />;
+}
 
 export default function PlayerDetailScreen() {
   const { playerId } = useLocalSearchParams<{ playerId: string }>();
@@ -237,6 +243,17 @@ export default function PlayerDetailScreen() {
 
   return (
     <>
+      {/* « Modifier » vit dans le header natif : le bandeau de la fiche portait
+          sa propre ligne « ‹ Effectif / Modifier » juste sous le header système,
+          soit deux barres de navigation empilées pour la même chose. */}
+      <Stack.Screen
+        options={{
+          title: `${player.first_name} ${player.last_name}`,
+          headerRight: () => (
+            <HeaderEditButton onPress={openEditModal} />
+          ),
+        }}
+      />
       <PlayerDetailView
         player={player}
         playerTeams={playerTeams}
@@ -253,8 +270,6 @@ export default function PlayerDetailScreen() {
         updatingTeamId={updatingTeamId}
         isManager={true}
         onMatchFilterChange={setMatchFilter}
-        onBack={() => router.back()}
-        onEdit={openEditModal}
         onAddToTeam={handleAddToTeam}
         onRemoveFromTeam={handleRemoveFromTeam}
       />

@@ -305,6 +305,11 @@ export function PlayerDetailView({
     >
       {/* ── Bandeau de marque ────────────────────────────────────────────── */}
       <View style={[styles.header, { paddingTop: insets.top }]}>
+        {/* Cette ligne ne s'affiche que si elle a quelque chose à porter. Dans
+            l'espace coach, l'écran vit sous un header natif qui assure déjà le
+            retour et l'édition : la rendre vide empilait deux barres de
+            navigation et mangeait 36 pt de haut d'écran pour rien. */}
+        {(onBack || (isManager && onEdit) || !isManager) && (
         <View style={styles.headerNav}>
           {onBack ? (
             <Pressable
@@ -340,6 +345,7 @@ export function PlayerDetailView({
               légitime et non plus une dette. */}
           {!isManager && <SeasonHeaderButton tone="onColor" />}
         </View>
+        )}
 
         <View style={styles.playerCard}>
           <View style={[styles.numberRing, { borderColor: p.onBrandBorder, backgroundColor: p.onBrandFill }]}>

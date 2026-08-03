@@ -148,12 +148,18 @@ export function RadarChart({ data, axes }: { data: PlayerRadarResult; axes: read
 
   const screenW = Dimensions.get('window').width;
   const isTablet = screenW >= 768;
-  const svgW = (screenW - 56) * (isTablet ? 0.4 : 0.8);
+
+  // Le radar occupait 80 % de la largeur utile, dont 76 pt de marge de libellé
+  // de chaque côté : la toile réelle tombait à ~73 pt de rayon, soit un
+  // graphique minuscule au milieu d'une carte pleine largeur. On reprend la
+  // quasi-totalité de la largeur et on resserre la marge à ce dont les
+  // libellés ont réellement besoin.
+  const svgW = (screenW - 44) * (isTablet ? 0.5 : 0.95);
   const cx = svgW / 2;
   const cy = svgW / 2;
-  const maxR = cx - 76;
-  const lblR = maxR + 28;
-  const svgH = svgW + 24;
+  const maxR = cx - 70;
+  const lblR = maxR + 24;
+  const svgH = svgW + 16;
   const step = (2 * Math.PI) / axes.length;
   const start = -Math.PI / 2;
 
