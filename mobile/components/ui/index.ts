@@ -32,6 +32,9 @@ export type { BadgeProps, BadgeTone, BadgeSize } from './Badge';
 export { Section } from './Section';
 export type { SectionProps } from './Section';
 
+export { Field, Input, ChipGroup } from './Field';
+export type { FieldProps, InputProps, ChipGroupProps, ChipOption } from './Field';
+
 export { EmptyState } from './EmptyState';
 export type { EmptyStateProps } from './EmptyState';
 
