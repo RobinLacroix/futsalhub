@@ -30,7 +30,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { View, ScrollView, Pressable, Alert } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useRouter, useNavigation } from 'expo-router';
+import { useRouter, useNavigation, useIsFocused } from 'expo-router';
 import { useTheme, makeStyles } from '../contexts/ThemeContext';
 import {
   useMatchRecorderExitGuard,
@@ -107,12 +107,27 @@ export default function TabletMatchRecorder({
 
   // ── Garde de sortie ───────────────────────────────────────────────────────
 
+  /**
+   * Le garde n'est armé que tant que le recorder est RÉELLEMENT à l'écran.
+   *
+   * Il l'était sur la seule condition « un match est chargé », relâchée au
+   * démontage. Or la barre latérale iPad et le menu du téléphone naviguent par
+   * `router.push` : l'écran de suivi reste monté derrière, donc le garde
+   * restait armé pour toujours. Résultat, après avoir quitté un match une
+   * fois, CHAQUE changement de page redemandait la confirmation.
+   *
+   * `useIsFocused` règle le cas : la barre latérale interroge le garde avant de
+   * naviguer, donc pendant que le recorder a encore le focus, et le garde
+   * retombe dès qu'il l'a perdu. Revenir sur l'onglet le réarme.
+   */
+  const isFocused = useIsFocused();
+
   useEffect(() => {
-    const active = r.step === 'record' && !!r.match;
+    const active = isFocused && r.step === 'record' && !!r.match;
     setIsRecordingActive(active);
     if (active) setSuppressExitGuard(false);
     return () => setIsRecordingActive(false);
-  }, [r.step, r.match, setIsRecordingActive, setSuppressExitGuard]);
+  }, [isFocused, r.step, r.match, setIsRecordingActive, setSuppressExitGuard]);
 
   useEffect(
     () =>
