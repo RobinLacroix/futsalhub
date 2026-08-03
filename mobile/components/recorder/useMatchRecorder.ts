@@ -66,15 +66,42 @@ import {
   DEFAULT_SEQUENCE_LIMIT,
   EVENT_TO_STAT,
   FIELD_SIZE,
+  OPPONENT_ACTIONS,
   PAIRED_EVENT,
+  PLAYER_ACTIONS,
   emptyPlayerState,
   type PlayerState,
   type StatRow,
 } from './recorderModel';
 
+const labelOf = (e: MatchEventType) =>
+  PLAYER_ACTIONS.find((a) => a.eventType === e)?.label ??
+  OPPONENT_ACTIONS.find((a) => a.eventType === e)?.label ??
+  'Action';
+
 export type GoalTypeTally = Record<string, number>;
 
 const EMPTY_TALLY: GoalTypeTally = { offensive: 0, transition: 0, cpa: 0, superiority: 0 };
+
+/**
+ * Dernière saisie, pour l'annulation globale.
+ *
+ * Aucune des deux versions n'offrait « annuler ce que je viens de faire » :
+ * il fallait retrouver le bouton exact de l'action et faire un appui long
+ * dessus. Or la faute de frappe en direct, c'est toujours la dernière — le
+ * coach a appuyé sur le mauvais joueur ou la mauvaise action une seconde plus
+ * tôt, et ne sait déjà plus laquelle.
+ */
+export interface RecordedAction {
+  eventType: MatchEventType;
+  statKey: string;
+  playerId: string | null;
+  label: string;
+  at: number;
+}
+
+/** Profondeur de la pile d'annulation. Au-delà, le coach passe par le bilan. */
+const UNDO_DEPTH = 12;
 
 export interface UseMatchRecorderOptions {
   initialMatchId?: string | null;
@@ -118,6 +145,7 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
   const [timeoutUs, setTimeoutUs] = useState(false);
   const [timeoutOpponent, setTimeoutOpponent] = useState(false);
   const [outboxLength, setOutboxLength] = useState(0);
+  const [history, setHistory] = useState<RecordedAction[]>([]);
 
   // ── Dérivées ──────────────────────────────────────────────────────────────
 
@@ -535,6 +563,18 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
             };
           });
         }
+        setHistory((h) =>
+          [
+            {
+              eventType,
+              statKey: statKey ?? '',
+              playerId: pid,
+              label: labelOf(eventType),
+              at: Date.now(),
+            },
+            ...h,
+          ].slice(0, UNDO_DEPTH)
+        );
       } catch (e) {
         Alert.alert('Erreur', e instanceof Error ? e.message : "Impossible d'enregistrer l'action");
       }
@@ -613,6 +653,15 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
     },
     [matchId, playersOnField]
   );
+
+  /** Annule la dernière saisie, quelle qu'elle soit. */
+  const undoLast = useCallback(async () => {
+    const last = history[0];
+    if (!last) return null;
+    setHistory((h) => h.slice(1));
+    await undoEvent(last.eventType, last.statKey, last.playerId);
+    return last;
+  }, [history, undoEvent]);
 
   // ── Substitution ──────────────────────────────────────────────────────────
 
@@ -768,6 +817,8 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
     playersOnField,
     recordEvent,
     undoEvent,
+    undoLast,
+    lastAction: history[0] ?? null,
     substitute,
     saveMatch,
   };

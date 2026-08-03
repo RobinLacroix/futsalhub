@@ -7,7 +7,7 @@
  */
 
 export { useMatchRecorder } from './useMatchRecorder';
-export type { MatchRecorder, GoalTypeTally } from './useMatchRecorder';
+export type { MatchRecorder, GoalTypeTally, RecordedAction } from './useMatchRecorder';
 
 export {
   HALF_DURATION_SEC,
@@ -33,6 +33,7 @@ export type {
 
 export { ClockBar, FoulCounter, OpponentBar, VoiceButton, SyncBadge, VoiceOverlay } from './RecorderChrome';
 export { PlayerFieldCard } from './PlayerFieldCard';
+export { PlayerActionCard, BenchCard } from './PlayerActionCard';
 export { ActionPad } from './ActionPad';
 export { SubstitutionSheet, GoalTypeSheet, ScoreSheet, PlayerPicker } from './RecorderSheets';
 export { StatsTable, ScrollableStatsTable } from './StatsTable';
