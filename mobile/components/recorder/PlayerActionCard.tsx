@@ -37,6 +37,8 @@ const CARD_ACTIONS = PLAYER_ACTIONS.filter(
 
 export interface PlayerActionCardProps {
   player: Player;
+  /** Nom court, désambiguïsé par `playerDisplayName` en cas d'homonyme. */
+  name: string;
   state?: PlayerState;
   onAction: (action: RecorderAction) => void;
   onUndo: (action: RecorderAction) => void;
@@ -51,6 +53,7 @@ export interface PlayerActionCardProps {
 
 export function PlayerActionCard({
   player,
+  name,
   state,
   onAction,
   onUndo,
@@ -92,7 +95,7 @@ export function PlayerActionCard({
       <View style={s.head}>
         {gk && <Ionicons name="hand-left" size={15} color={c.warning.default} />}
         <Text variant="headline" numberOfLines={1} style={s.flex}>
-          {player.last_name}
+          {name}
         </Text>
         {player.number != null && (
           <Text variant="caption" tone="tertiary" numeric>
@@ -100,46 +103,48 @@ export function PlayerActionCard({
           </Text>
         )}
       </View>
-      <Text variant="caption" tone="secondary" numberOfLines={1}>
-        {player.first_name} · {player.position || 'Poste non renseigné'}
-      </Text>
 
+      {/*
+        Trois colonnes de temps (séquence, cumulé, limite) ne tiennent pas dans
+        une carte de ~180 pt : les intitulés se coupaient en « Séquen / ce » et
+        les valeurs passaient à la ligne. La limite disparaît — elle ne sert
+        qu'à déclencher l'alerte, qui la dit mieux qu'un chiffre à comparer de
+        tête. Les deux temps restants passent sur une ligne.
+      */}
       <View style={s.times}>
-        <View style={s.timeCell}>
-          <Text variant="caption" tone="tertiary">
-            Séquence
-          </Text>
-          <Text
-            variant="headline"
-            numeric
-            color={over ? c.negative.default : near ? c.warning.default : c.text.primary}
-          >
-            {formatSeconds(seq)}
-          </Text>
-        </View>
-        <View style={s.timeCell}>
-          <Text variant="caption" tone="tertiary">
-            Cumulé
-          </Text>
-          <Text variant="headline" numeric tone="secondary">
-            {formatSeconds(state?.totalTime ?? 0)}
-          </Text>
-        </View>
-        <View style={s.timeCell}>
-          <Text variant="caption" tone="tertiary">
-            Limite
-          </Text>
-          <Text variant="headline" numeric tone="tertiary">
-            {formatSeconds(limit)}
-          </Text>
-        </View>
+        <Text
+          variant="title"
+          numeric
+          color={over ? c.negative.default : near ? c.warning.default : c.text.primary}
+        >
+          {formatSeconds(seq)}
+        </Text>
+        <Text variant="caption" tone="tertiary" numberOfLines={1} style={s.flex}>
+          séq. · {formatSeconds(state?.totalTime ?? 0)} cum.
+        </Text>
+      </View>
+
+      <View style={s.bar}>
+        <View
+          style={[
+            s.barFill,
+            {
+              width: `${Math.round(Math.min(1, seq / limit) * 100)}%`,
+              backgroundColor: over
+                ? c.negative.default
+                : near
+                  ? c.warning.default
+                  : c.positive.default,
+            },
+          ]}
+        />
       </View>
 
       {over && (
         <View style={s.alert}>
           <Ionicons name="alert-circle" size={14} color={c.negative.default} />
-          <Text variant="caption" weight="700" color={c.negative.default}>
-            Limite de séquence dépassée
+          <Text variant="caption" weight="700" color={c.negative.default} numberOfLines={1}>
+            À sortir · limite {formatSeconds(limit)}
           </Text>
         </View>
       )}
@@ -156,7 +161,7 @@ export function PlayerActionCard({
               delayLongPress={350}
               style={({ pressed }) => [s.action, { borderColor: tone }, pressed && s.pressed]}
               accessibilityRole="button"
-              accessibilityLabel={`${a.label}, ${player.last_name}. ${count} enregistré${count > 1 ? 's' : ''}`}
+              accessibilityLabel={`${a.label}, ${name}. ${count} enregistré${count > 1 ? 's' : ''}`}
               accessibilityHint="Appui long pour annuler la dernière"
             >
               <View style={[s.dot, { backgroundColor: tone }]} />
@@ -189,7 +194,7 @@ export function PlayerActionCard({
                 pressed && s.pressed,
               ]}
               accessibilityRole="button"
-              accessibilityLabel={`${a.label}, ${player.last_name}. ${count}`}
+              accessibilityLabel={`${a.label}, ${name}. ${count}`}
               accessibilityHint="Appui long pour annuler"
             >
               <Ionicons name={a.icon} size={14} color={count > 0 ? c.bg.canvas : tone} />
@@ -212,8 +217,8 @@ export function PlayerActionCard({
           accessibilityState={{ selected: !!selected }}
           accessibilityLabel={
             selected
-              ? `${player.last_name} sélectionné, touchez un remplaçant`
-              : `Sélectionner ${player.last_name} pour un changement`
+              ? `${name} sélectionné, touchez un remplaçant`
+              : `Sélectionner ${name} pour un changement`
           }
         >
           <Ionicons
@@ -234,6 +239,8 @@ export function PlayerActionCard({
 
 export interface BenchCardProps {
   player: Player;
+  /** Nom court, désambiguïsé par `playerDisplayName` en cas d'homonyme. */
+  name: string;
   state?: PlayerState;
   onPress: () => void;
   selected?: boolean;
@@ -245,6 +252,7 @@ export interface BenchCardProps {
 
 export function BenchCard({
   player,
+  name,
   state,
   onPress,
   selected,
@@ -287,7 +295,7 @@ export function BenchCard({
       <View style={s.head}>
         {gk && <Ionicons name="hand-left" size={13} color={c.warning.default} />}
         <Text variant="caption" weight="700" numberOfLines={1} style={s.flex}>
-          {player.last_name}
+          {name}
         </Text>
       </View>
       <Text variant="tableCell" numeric tone="secondary">
@@ -350,8 +358,14 @@ const useStyles = makeStyles((t) => ({
 
   head: { flexDirection: 'row', alignItems: 'center', gap: t.space.xs },
 
-  times: { flexDirection: 'row', gap: t.space.xs, marginTop: 2 },
-  timeCell: { flex: 1 },
+  times: { flexDirection: 'row', alignItems: 'baseline', gap: t.space.xs, marginTop: 2 },
+  bar: {
+    height: 5,
+    borderRadius: t.radius.pill,
+    backgroundColor: t.colors.border.subtle,
+    overflow: 'hidden',
+  },
+  barFill: { height: 5, borderRadius: t.radius.pill },
 
   alert: { flexDirection: 'row', alignItems: 'center', gap: t.space.xs },
 

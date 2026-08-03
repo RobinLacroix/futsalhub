@@ -250,3 +250,26 @@ export function emptyPlayerState(id: string, limit: number, totalTime: number): 
 
 export const isGoalkeeper = (position: string | null | undefined) =>
   (position ?? '').toLowerCase().startsWith('gardien');
+
+/**
+ * Nom court d'un joueur, désambiguïsé seulement quand il le faut.
+ *
+ * Les cartes n'affichent que le nom de famille : c'est ce qui tient dans la
+ * largeur, et c'est ce qu'un coach emploie. Sauf que l'effectif de Paris XIV a
+ * deux Guerinot — le banc affichait donc deux cartes identiques, impossibles à
+ * distinguer avant de faire entrer la mauvaise.
+ *
+ * L'initiale n'est ajoutée que sur les homonymes. La mettre partout serait du
+ * bruit permanent pour un cas rare, et le bruit permanent finit par ne plus
+ * être lu.
+ */
+export function playerDisplayName(
+  player: { first_name: string; last_name: string },
+  squad: { first_name: string; last_name: string }[]
+): string {
+  const key = player.last_name.toLowerCase();
+  const homonym = squad.some(
+    (p) => p.last_name.toLowerCase() === key && p.first_name !== player.first_name
+  );
+  return homonym ? `${player.first_name.charAt(0)}. ${player.last_name}` : player.last_name;
+}

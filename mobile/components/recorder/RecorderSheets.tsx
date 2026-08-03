@@ -17,7 +17,7 @@ import { HIT_SLOP_MIN } from '../../lib/design/tokens';
 import { haptics } from '../../lib/design/haptics';
 import { Text, Sheet, EmptyState, Button } from '../ui';
 import { formatSeconds } from '../../utils/matchUtils';
-import { GOAL_TYPES, isGoalkeeper, type PlayerState } from './recorderModel';
+import { GOAL_TYPES, isGoalkeeper, playerDisplayName, type PlayerState } from './recorderModel';
 import type { GoalType } from '../../lib/services/matchEvents';
 import type { Player } from '../../types';
 
@@ -243,6 +243,8 @@ function ScoreStepper({
 
 export interface PlayerPickerProps {
   players: Player[];
+  /** Effectif complet, pour désambiguïser les homonymes. */
+  squad: Player[];
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   playerStates: Record<string, PlayerState>;
@@ -264,7 +266,7 @@ export interface PlayerPickerProps {
  * La sélection reste active après une action : on saisit souvent plusieurs
  * actions du même joueur d'affilée. Retoucher la pastille désélectionne.
  */
-export function PlayerPicker({ players, selectedId, onSelect, playerStates }: PlayerPickerProps) {
+export function PlayerPicker({ players, squad, selectedId, onSelect, playerStates }: PlayerPickerProps) {
   const s = useStyles();
   const { theme } = useTheme();
 
@@ -307,7 +309,7 @@ export function PlayerPicker({ players, selectedId, onSelect, playerStates }: Pl
                 numberOfLines={1}
                 style={s.chipText}
               >
-                {p.last_name}
+                {playerDisplayName(p, squad)}
               </Text>
             </View>
             <Text variant="caption" tone="tertiary" numeric>

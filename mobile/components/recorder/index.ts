@@ -22,6 +22,7 @@ export {
   PAIRED_EVENT,
   emptyPlayerState,
   isGoalkeeper,
+  playerDisplayName,
 } from './recorderModel';
 export type {
   RecorderAction,
@@ -41,6 +42,7 @@ export {
 } from './RecorderChrome';
 export { PlayerFieldCard } from './PlayerFieldCard';
 export { PlayerActionCard, BenchCard } from './PlayerActionCard';
+export { TabletControlBar } from './TabletControlBar';
 export { ActionPad } from './ActionPad';
 export { SubstitutionSheet, GoalTypeSheet, ScoreSheet, PlayerPicker } from './RecorderSheets';
 export { StatsTable, ScrollableStatsTable } from './StatsTable';

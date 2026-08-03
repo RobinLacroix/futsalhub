@@ -27,7 +27,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, ScrollView, Pressable, Alert, useWindowDimensions } from 'react-native';
+import { View, ScrollView, Pressable, Alert } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter, useNavigation } from 'expo-router';
@@ -43,10 +43,8 @@ import { Text, Card, Button, Stat, EmptyState } from './ui';
 import {
   useMatchRecorder,
   MatchPicker,
-  ClockBar,
   ClockAlert,
-  FoulRow,
-  OpponentBar,
+  TabletControlBar,
   SyncBadge,
   VoiceOverlay,
   PlayerActionCard,
@@ -55,6 +53,7 @@ import {
   ScoreSheet,
   StatsTable,
   isGoalkeeper,
+  playerDisplayName,
   PLAYER_ACTIONS,
   type RecorderAction,
 } from './recorder';
@@ -79,7 +78,6 @@ export default function TabletMatchRecorder({
   const c = theme.colors;
   const router = useRouter();
   const navigation = useNavigation();
-  const { width } = useWindowDimensions();
   const { setIsRecordingActive, suppressExitGuard, setSuppressExitGuard } =
     useMatchRecorderExitGuard();
 
@@ -166,6 +164,17 @@ export default function TabletMatchRecorder({
     },
     [r]
   );
+
+  const confirmNextHalf = useCallback(() => {
+    Alert.alert(
+      'Passer en seconde période',
+      'Le chrono repart de zéro, les fautes cumulées et les temps morts sont remis à zéro. Les temps de jeu sont conservés.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        { text: 'Confirmer', onPress: r.nextHalf },
+      ]
+    );
+  }, [r]);
 
   const handleUndoLast = useCallback(async () => {
     const undone = await r.undoLast();
@@ -323,11 +332,9 @@ export default function TabletMatchRecorder({
     );
   }
 
-  const wide = width > 900;
   const bench = r.benchPlayers;
-  const draggedName = dragging
-    ? (r.convoquedPlayers.find((p) => p.id === dragging)?.last_name ?? null)
-    : null;
+  const dragged = dragging ? r.convoquedPlayers.find((p) => p.id === dragging) : null;
+  const draggedName = dragged ? playerDisplayName(dragged, r.convoquedPlayers) : null;
 
   // Le gardien passe en tête : c'est la lecture naturelle d'un cinq de futsal.
   const field = [...r.fieldPlayers].sort((a, b) => {
@@ -347,11 +354,16 @@ export default function TabletMatchRecorder({
           </Text>
           <SyncBadge pending={r.outboxLength} />
           <View style={s.headerActions}>
+            {/* Largeur figée : le libellé change à chaque saisie, et un bouton
+                qui grandit décale les trois suivants — donc « Bilan » se
+                dérobe sous le doigt entre le moment où on le vise et celui où
+                on le touche. */}
             <HeaderButton
               icon="arrow-undo"
               label={r.lastAction ? `Annuler ${r.lastAction.label.toLowerCase()}` : 'Annuler'}
               onPress={handleUndoLast}
               disabled={!r.lastAction}
+              width={168}
             />
             <HeaderButton
               icon="pencil"
@@ -369,90 +381,44 @@ export default function TabletMatchRecorder({
           </View>
         </View>
 
-        <View style={[s.controls, wide && s.controlsWide]}>
-          <View style={s.clockCell}>
-            <ClockBar
-              seconds={r.seconds}
-              half={r.half}
-              isRunning={r.isRunning}
-              onToggle={r.toggleClock}
-              scoreUs={r.scoreUs}
-              scoreOpponent={r.scoreOpponent}
-              onEditScore={() => setScoreSheet(true)}
-              voice={{
-                isListening,
-                available: voiceAvailable,
-                onPress: isListening ? stopListening : startListening,
-              }}
-            />
-            <ClockAlert
-              visible={r.clockForgotten}
-              neverStarted={r.clockNeverStarted}
-              onStart={r.startClock}
-            />
-          </View>
+        <TabletControlBar
+          seconds={r.seconds}
+          half={r.half}
+          isRunning={r.isRunning}
+          onToggleClock={r.toggleClock}
+          onNextHalf={confirmNextHalf}
+          scoreUs={r.scoreUs}
+          scoreOpponent={r.scoreOpponent}
+          onEditScore={() => setScoreSheet(true)}
+          foulsUs={r.foulsUs}
+          foulsOpponent={r.foulsOpponent}
+          onChangeFoulsUs={r.setFoulsUs}
+          onChangeFoulsOpponent={r.setFoulsOpponent}
+          onOpponentAction={handleOpponent}
+          onOpponentUndo={(e: MatchEventType) => r.undoEvent(e, '', null)}
+          opponentCounts={{
+            goals: r.scoreOpponent,
+            onTarget: r.opponentShotsOnTarget,
+            total: r.opponentShotsTotal,
+          }}
+          timeoutUs={r.timeoutUs}
+          timeoutOpponent={r.timeoutOpponent}
+          onToggleTimeoutUs={() => r.setTimeoutUs((v) => !v)}
+          onToggleTimeoutOpponent={() => r.setTimeoutOpponent((v) => !v)}
+          voice={{
+            isListening,
+            available: voiceAvailable,
+            onPress: isListening ? stopListening : startListening,
+          }}
+        />
 
-          <View style={s.foulsCell}>
-            <FoulRow
-              foulsUs={r.foulsUs}
-              foulsOpponent={r.foulsOpponent}
-              onChangeUs={r.setFoulsUs}
-              onChangeOpponent={r.setFoulsOpponent}
-            />
-          </View>
-
-          <View style={s.oppCell}>
-            <Text variant="caption" style={s.onBrandMuted}>
-              Actions adverses
-            </Text>
-            <OpponentBar
-              onRecord={handleOpponent}
-              onUndo={(e) => r.undoEvent(e, '', null)}
-              counts={{
-                goals: r.scoreOpponent,
-                onTarget: r.opponentShotsOnTarget,
-                total: r.opponentShotsTotal,
-              }}
-            />
-          </View>
-
-          <View style={s.sideCell}>
-            <View style={s.timeoutRow}>
-              <TimeoutChip
-                label="TM équipe"
-                used={r.timeoutUs}
-                onToggle={() => r.setTimeoutUs((v) => !v)}
-              />
-              <TimeoutChip
-                label="TM adverse"
-                used={r.timeoutOpponent}
-                onToggle={() => r.setTimeoutOpponent((v) => !v)}
-              />
-            </View>
-            {r.half === 1 && (
-              <Pressable
-                onPress={() =>
-                  Alert.alert(
-                    'Passer en seconde période',
-                    'Le chrono repart de zéro, les fautes cumulées et les temps morts sont remis à zéro. Les temps de jeu sont conservés.',
-                    [
-                      { text: 'Annuler', style: 'cancel' },
-                      { text: 'Confirmer', onPress: r.nextHalf },
-                    ]
-                  )
-                }
-                style={({ pressed }) => [s.halfBtn, pressed && s.pressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Passer en seconde mi-temps"
-              >
-                <Ionicons name="play-forward" size={15} color="#FFFFFF" />
-                <Text variant="caption" weight="700" style={s.onBrand}>
-                  2e mi-temps
-                </Text>
-              </Pressable>
-            )}
-          </View>
-        </View>
+        {/* Le rappel prend toute la largeur sous la barre : posé dans une
+            cellule de la rangée, il en débordait. */}
+        <ClockAlert
+          visible={r.clockForgotten}
+          neverStarted={r.clockNeverStarted}
+          onStart={r.startClock}
+        />
       </View>
 
       {view === 'saisie' ? (
@@ -473,6 +439,7 @@ export default function TabletMatchRecorder({
                 >
                   <PlayerActionCard
                     player={p}
+                    name={playerDisplayName(p, r.convoquedPlayers)}
                     state={r.playerStates[p.id]}
                     onAction={(a) => handleAction(p.id, a)}
                     onUndo={(a) => handleCardUndo(p.id, a)}
@@ -511,6 +478,7 @@ export default function TabletMatchRecorder({
                   >
                     <BenchCard
                       player={p}
+                      name={playerDisplayName(p, r.convoquedPlayers)}
                       state={r.playerStates[p.id]}
                       onPress={() => handleSelect(p.id, false)}
                       selected={selectedForChange === p.id}
@@ -606,6 +574,7 @@ function HeaderButton({
   active,
   disabled,
   loading,
+  width,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
@@ -613,6 +582,8 @@ function HeaderButton({
   active?: boolean;
   disabled?: boolean;
   loading?: boolean;
+  /** Fige la largeur quand le libellé varie, pour ne pas décaler les voisins. */
+  width?: number;
 }) {
   const s = useStyles();
   return (
@@ -621,6 +592,7 @@ function HeaderButton({
       disabled={disabled || loading}
       style={({ pressed }) => [
         s.headerBtn,
+        width != null && { width },
         active && s.headerBtnActive,
         (disabled || loading) && s.disabled,
         pressed && s.pressed,
@@ -630,35 +602,6 @@ function HeaderButton({
       accessibilityLabel={label}
     >
       <Ionicons name={loading ? 'hourglass-outline' : icon} size={16} color="#FFFFFF" />
-      <Text variant="caption" weight="600" style={s.onBrand} numberOfLines={1}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function TimeoutChip({
-  label,
-  used,
-  onToggle,
-}: {
-  label: string;
-  used: boolean;
-  onToggle: () => void;
-}) {
-  const s = useStyles();
-  return (
-    <Pressable
-      onPress={() => {
-        haptics.select();
-        onToggle();
-      }}
-      style={({ pressed }) => [s.timeout, used && s.timeoutUsed, pressed && s.pressed]}
-      accessibilityRole="switch"
-      accessibilityState={{ checked: used }}
-      accessibilityLabel={`Temps mort ${label}, ${used ? 'utilisé' : 'disponible'}`}
-    >
-      <Ionicons name={used ? 'checkmark-circle' : 'time-outline'} size={14} color="#FFFFFF" />
       <Text variant="caption" weight="600" style={s.onBrand} numberOfLines={1}>
         {label}
       </Text>
@@ -679,7 +622,6 @@ const useStyles = makeStyles((t) => ({
   pressed: { opacity: 0.72 },
   disabled: { opacity: 0.4 },
   onBrand: { color: '#FFFFFF' },
-  onBrandMuted: { color: 'rgba(255,255,255,0.78)' },
 
   selectContent: { padding: t.space.xxl, paddingBottom: t.space.giant, gap: t.space.sm },
   selectSub: { marginBottom: t.space.sm },
@@ -687,9 +629,9 @@ const useStyles = makeStyles((t) => ({
   header: {
     backgroundColor: t.colors.accent.fill,
     paddingHorizontal: t.space.lg,
-    paddingTop: t.space.xxl,
+    paddingTop: t.space.lg,
     paddingBottom: t.space.md,
-    gap: t.space.md,
+    gap: t.space.sm,
   },
   headerTop: { flexDirection: 'row', alignItems: 'center', gap: t.space.md },
   headerTitle: { color: '#FFFFFF', flex: 1 },
@@ -707,36 +649,7 @@ const useStyles = makeStyles((t) => ({
   },
   headerBtnActive: { backgroundColor: 'rgba(255,255,255,0.32)', borderColor: '#FFFFFF' },
 
-  controls: { gap: t.space.md },
-  controlsWide: { flexDirection: 'row', alignItems: 'flex-start' },
-  clockCell: { flex: 1.4, gap: t.space.xs },
-  foulsCell: { flex: 1.2, justifyContent: 'center' },
-  oppCell: { flex: 1.6, gap: t.space.xs },
-  sideCell: { flex: 1, gap: t.space.sm },
 
-  timeoutRow: { flexDirection: 'row', gap: t.space.sm },
-  timeout: {
-    flex: 1,
-    minHeight: 34,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: t.space.xs,
-    borderRadius: t.radius.sm,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
-  },
-  timeoutUsed: { backgroundColor: 'rgba(255,255,255,0.32)', borderColor: '#FFFFFF' },
-
-  halfBtn: {
-    minHeight: 34,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: t.space.xs,
-    borderRadius: t.radius.sm,
-    backgroundColor: 'rgba(0,0,0,0.22)',
-  },
 
   body: { padding: t.space.lg, paddingBottom: t.space.giant, gap: t.space.sm },
   fieldRow: { flexDirection: 'row', gap: t.space.sm, alignItems: 'stretch' },

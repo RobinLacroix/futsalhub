@@ -453,6 +453,7 @@ export default function PhoneMatchRecorder({
             </Text>
             <PlayerPicker
               players={r.fieldPlayers}
+              squad={r.convoquedPlayers}
               selectedId={selectedPlayerId}
               onSelect={setSelectedPlayerId}
               playerStates={r.playerStates}
