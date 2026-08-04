@@ -1,6 +1,32 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+/**
+ * Échelle de notation — le même bug que sur mobile, resté vivant ici.
+ *
+ * L'état gardait des `number`, et chaque frappe faisait :
+ *
+ *     const v = parseFloat(raw);
+ *     setWeights(prev => ({ ...prev, [key]: Number.isFinite(v) ? v : 0 }));
+ *
+ * Toute saisie illisible devenait **0**, silencieusement. Deux façons d'y
+ * arriver au clavier :
+ *
+ *   - vider le champ pour retaper une valeur : `parseFloat("")` vaut `NaN`,
+ *     le champ se remplit aussitôt d'un `0` qu'il faut effacer à son tour ;
+ *   - saisir « 0,5 » : selon le navigateur et sa locale, un `input[type=number]`
+ *     renvoie `""` pour une virgule. `parseFloat("0,5")` vaut de toute façon 0.
+ *
+ * Le coach croyait pondérer un événement, la note ne bougeait pas, et rien ne
+ * le signalait — les notes de match de tous les joueurs s'en trouvaient
+ * faussées. Corrigé sur mobile le 2026-08-03, pas ici : réparer les données
+ * sans corriger cet écran n'aurait servi à rien, le web les aurait réécrites.
+ *
+ * L'état garde donc des chaînes brutes, la conversion se fait à
+ * l'enregistrement, et une valeur illisible bloque la sauvegarde au lieu d'être
+ * remplacée par 0. La virgule est acceptée comme séparateur décimal.
+ */
+
+import { useEffect, useMemo, useState } from 'react';
 import { SlidersHorizontal } from 'lucide-react';
 import { matchRatingsService } from '@/lib/services';
 import { DEFAULT_RATING_WEIGHTS, type RatingWeights } from '@/types';
@@ -24,52 +50,73 @@ const COLL_FIELDS: { key: keyof RatingWeights; label: string }[] = [
   { key: 'cw_opponent_goal', label: 'But concédé' },
 ];
 
-function pickWeights(w: RatingWeights): RatingWeights {
-  return {
-    w_goal: w.w_goal, w_assist: w.w_assist, w_recovery: w.w_recovery,
-    w_shot_on_target: w.w_shot_on_target, w_shot: w.w_shot, w_ball_loss: w.w_ball_loss,
-    w_yellow_card: w.w_yellow_card, w_red_card: w.w_red_card,
-    cw_goal: w.cw_goal, cw_shot: w.cw_shot,
-    cw_opponent_shot: w.cw_opponent_shot, cw_opponent_goal: w.cw_opponent_goal,
-  };
+const WEIGHT_KEYS = [...INDIV_FIELDS, ...COLL_FIELDS].map(f => f.key);
+
+type StrMap = Record<keyof RatingWeights, string>;
+
+function toStrMap(w: RatingWeights): StrMap {
+  const out = {} as StrMap;
+  WEIGHT_KEYS.forEach(k => { out[k] = String(w[k] ?? 0); });
+  return out;
+}
+
+/** `null` si la saisie n'est pas un nombre. La virgule est acceptée. */
+function parseWeight(raw: string): number | null {
+  const cleaned = raw.trim().replace(',', '.');
+  if (cleaned === '' || cleaned === '-') return null;
+  const v = Number(cleaned);
+  return Number.isFinite(v) ? v : null;
 }
 
 export function RatingScaleEditor() {
-  const [weights, setWeights] = useState<RatingWeights>(DEFAULT_RATING_WEIGHTS);
+  const [values, setValues] = useState<StrMap>(toStrMap(DEFAULT_RATING_WEIGHTS));
   const [isCustom, setIsCustom] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
         const res = await matchRatingsService.getRatingWeights();
-        setWeights(pickWeights(res));
+        setValues(toStrMap(res));
         setIsCustom(res.is_custom);
       } catch {
-        setWeights(DEFAULT_RATING_WEIGHTS);
+        setValues(toStrMap(DEFAULT_RATING_WEIGHTS));
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
+  const invalidKeys = useMemo(
+    () => WEIGHT_KEYS.filter(k => parseWeight(values[k]) === null),
+    [values]
+  );
+
   const setField = (key: keyof RatingWeights, raw: string) => {
-    const v = parseFloat(raw);
-    setWeights(prev => ({ ...prev, [key]: Number.isFinite(v) ? v : 0 }));
+    setValues(prev => ({ ...prev, [key]: raw }));
     setFeedback(null);
   };
 
   const save = async () => {
+    if (invalidKeys.length > 0) {
+      setFeedback({
+        tone: 'error',
+        text: `${invalidKeys.length} valeur(s) illisible(s). Corrigez-les avant d'enregistrer.`,
+      });
+      return;
+    }
     setSaving(true);
     setFeedback(null);
     try {
-      await matchRatingsService.setRatingWeights(weights);
+      const out = {} as RatingWeights;
+      WEIGHT_KEYS.forEach(k => { out[k] = parseWeight(values[k])!; });
+      await matchRatingsService.setRatingWeights(out);
       setIsCustom(true);
-      setFeedback('Échelle enregistrée.');
+      setFeedback({ tone: 'ok', text: 'Échelle enregistrée.' });
     } catch {
-      setFeedback("Échec de l'enregistrement.");
+      setFeedback({ tone: 'error', text: "Échec de l'enregistrement." });
     } finally {
       setSaving(false);
     }
@@ -80,11 +127,11 @@ export function RatingScaleEditor() {
     setFeedback(null);
     try {
       await matchRatingsService.resetRatingWeights();
-      setWeights(DEFAULT_RATING_WEIGHTS);
+      setValues(toStrMap(DEFAULT_RATING_WEIGHTS));
       setIsCustom(false);
-      setFeedback('Échelle réinitialisée aux valeurs par défaut.');
+      setFeedback({ tone: 'ok', text: 'Échelle réinitialisée aux valeurs par défaut.' });
     } catch {
-      setFeedback('Échec de la réinitialisation.');
+      setFeedback({ tone: 'error', text: 'Échec de la réinitialisation.' });
     } finally {
       setSaving(false);
     }
@@ -129,10 +176,14 @@ export function RatingScaleEditor() {
                   <div key={f.key} style={rowStyle}>
                     <span style={{ fontSize: '0.8125rem', color: '#334155' }}>{f.label}</span>
                     <input
-                      type="number" step="0.05" inputMode="decimal"
-                      value={weights[f.key]}
+                      type="text" inputMode="decimal"
+                      value={values[f.key]}
                       onChange={e => setField(f.key, e.target.value)}
-                      style={inputStyle}
+                      aria-invalid={parseWeight(values[f.key]) === null}
+                      style={{
+                        ...inputStyle,
+                        borderColor: parseWeight(values[f.key]) === null ? '#DC2626' : '#E2E8F0',
+                      }}
                     />
                   </div>
                 ))}
@@ -145,10 +196,14 @@ export function RatingScaleEditor() {
                   <div key={f.key} style={rowStyle}>
                     <span style={{ fontSize: '0.8125rem', color: '#334155' }}>{f.label}</span>
                     <input
-                      type="number" step="0.05" inputMode="decimal"
-                      value={weights[f.key]}
+                      type="text" inputMode="decimal"
+                      value={values[f.key]}
                       onChange={e => setField(f.key, e.target.value)}
-                      style={inputStyle}
+                      aria-invalid={parseWeight(values[f.key]) === null}
+                      style={{
+                        ...inputStyle,
+                        borderColor: parseWeight(values[f.key]) === null ? '#DC2626' : '#E2E8F0',
+                      }}
                     />
                   </div>
                 ))}
@@ -158,7 +213,7 @@ export function RatingScaleEditor() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
               <button
                 onClick={save}
-                disabled={saving}
+                disabled={saving || invalidKeys.length > 0}
                 style={{
                   padding: '8px 16px', borderRadius: 8, border: 'none',
                   background: '#1B2D4F', color: '#fff', fontWeight: 700, fontSize: '0.8125rem',
@@ -178,7 +233,11 @@ export function RatingScaleEditor() {
               >
                 Réinitialiser
               </button>
-              {feedback && <span style={{ fontSize: '0.8125rem', color: '#6B7280' }}>{feedback}</span>}
+              {feedback && (
+                <span style={{ fontSize: '0.8125rem', fontWeight: feedback.tone === 'error' ? 700 : 400, color: feedback.tone === 'error' ? '#DC2626' : '#6B7280' }}>
+                  {feedback.text}
+                </span>
+              )}
             </div>
           </>
         )}

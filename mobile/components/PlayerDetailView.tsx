@@ -51,7 +51,7 @@ import { getPlayerPainReports, deleteMyPainReport } from '../lib/services/painRe
 import PainReportModal from './PainReportModal';
 import { INTENSITY_COLORS, INTENSITY_LABELS, zoneLabel } from '../lib/painMap';
 import { Text, Button, Badge, EmptyState, SkeletonList } from './ui';
-import { positionStyle } from './players/positions';
+import { positionStyle, strongFootLabel } from './players/positions';
 import { fmPalette, sessionColor, type FMPalette, type SessionStatus } from './players/fmPalette';
 import { PlayerAccountLink } from './players/PlayerAccountLink';
 import {
@@ -376,7 +376,7 @@ export function PlayerDetailView({
               </View>
               <Text variant="caption" color={p.onBrandMuted}>
                 {player.birth_date ? `${calcAge(player.birth_date)} ans · ` : ''}
-                {player.strong_foot || 'Pied non renseigné'}
+                {strongFootLabel(player.strong_foot)}
               </Text>
               {player.status && player.status !== 'Actif' && (
                 <View

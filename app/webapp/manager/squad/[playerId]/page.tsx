@@ -41,6 +41,7 @@ import { createPlayerLinkCode } from '@/lib/services/playerConvocationsService';
 import { getPlayerPainReports } from '@/lib/services/painReportsService';
 import { teamsService } from '@/lib/services/teamsService';
 import { INTENSITY_COLORS, INTENSITY_LABELS, zoneLabel } from '@/lib/painMap';
+import { strongFootLabel } from '@/lib/playerVocabulary';
 import type { Player, PlayerEvent, PlayerEventType, PainReportGroup, Team } from '@/types';
 import {
   LineChart,
@@ -599,7 +600,7 @@ export default function PlayerProfilePage() {
               );
             })()}
             <p className="text-sm font-medium" style={{ color: 'rgba(255,255,255,0.7)' }}>
-              {player.birth_date ? `${calcAge(player.birth_date)} ans · ` : ''}{player.strong_foot || '—'}
+              {player.birth_date ? `${calcAge(player.birth_date)} ans · ` : ''}{strongFootLabel(player.strong_foot)}
             </p>
           </div>
         </div>

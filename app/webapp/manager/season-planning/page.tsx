@@ -6,6 +6,7 @@ import { useActiveTeam } from '@/app/webapp/hooks/useActiveTeam';
 import { playersService } from '@/lib/services/playersService';
 import { seasonPlanningService, PlanningData, RecruitData } from '@/lib/services/seasonPlanningService';
 import { Player, Team } from '@/types';
+import { STRONG_FOOT_OPTIONS, normalizeStrongFoot } from '@/lib/playerVocabulary';
 import Link from 'next/link';
 import {
   Plus, X, Save, UserPlus, ChevronUp, ChevronDown,
@@ -573,7 +574,10 @@ export default function SeasonPlanningPage() {
       if (pos !== filterPosition) return false;
     }
     if (filterFoot) {
-      if (!p || p.strong_foot !== filterFoot) return false;
+      // Comparaison normalisée des deux côtés : la base contient encore des
+      // « Ambidextre » écrits par le web et des « Droit et gauche » écrits par
+      // le mobile. Sans ça, un filtre en cache toujours une moitié.
+      if (!p || normalizeStrongFoot(p.strong_foot) !== normalizeStrongFoot(filterFoot)) return false;
     }
     if (filterTeam) {
       if (!p) return false; // recruits have no team yet
@@ -909,8 +913,8 @@ export default function SeasonPlanningPage() {
               className="w-full text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 text-gray-600"
             >
               <option value="">Tous les pieds</option>
-              {['Droit', 'Gauche', 'Ambidextre'].map((f) => (
-                <option key={f} value={f}>{f}</option>
+              {STRONG_FOOT_OPTIONS.map((f) => (
+                <option key={f.value} value={f.value}>{f.label}</option>
               ))}
             </select>
             <select

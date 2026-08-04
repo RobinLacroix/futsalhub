@@ -1,8 +1,8 @@
 import * as XLSX from 'xlsx';
+import { normalizeStrongFoot, STRONG_FOOT_VALUES } from '../components/players/positions';
 
 // ─── Colonnes attendues (doivent matcher scripts/generate-import-template.js) ──
 const POSITIONS = ['Gardien', 'Meneur', 'Ailier', 'Pivot'];
-const FEET = ['Droit', 'Gauche', 'Ambidextre'];
 
 const COLUMN_ALIASES: Record<string, string[]> = {
   first_name: ['prenom'],
@@ -181,9 +181,13 @@ export function parsePlayersWorkbook(base64: string): ParsedPlayerRow[] {
     if (!input.position) errors.push('Poste manquant');
     else if (!position) errors.push(`Poste invalide (attendu : ${POSITIONS.join(', ')})`);
 
-    const strongFoot = normalizeEnum(row[cols.strong_foot], FEET);
+    // Cet importeur validait contre ['Droit','Gauche','Ambidextre'] alors que
+    // `new-player`, dans la MÊME application, écrit « Droit et gauche » : un
+    // effectif exporté de FutsalHub n'y était pas réimportable. Le normaliseur
+    // partagé accepte les orthographes historiques.
+    const strongFoot = normalizeStrongFoot(row[cols.strong_foot]);
     if (!input.strong_foot) errors.push('Pied fort manquant');
-    else if (!strongFoot) errors.push(`Pied fort invalide (attendu : ${FEET.join(', ')})`);
+    else if (!strongFoot) errors.push(`Pied fort invalide (attendu : ${STRONG_FOOT_VALUES.join(', ')})`);
 
     const numberResult = normalizeNumber(row[cols.number]);
     if (!numberResult.ok) errors.push('Numéro invalide (entier entre 0 et 99)');

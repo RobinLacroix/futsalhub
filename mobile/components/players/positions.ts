@@ -67,6 +67,47 @@ export const STRONG_FOOT_OPTIONS = [
 
 export type StrongFoot = (typeof STRONG_FOOT_OPTIONS)[number]['value'];
 
+export const STRONG_FOOT_VALUES: readonly string[] = STRONG_FOOT_OPTIONS.map((o) => o.value);
+
+/**
+ * Orthographes rencontrées en base ou dans les fichiers importés.
+ *
+ * Il y en avait **quatre** émetteurs, jamais accordés : `new-player` mobile
+ * (« Droit et gauche »), la modale d'édition mobile (« Les deux »), les écrans
+ * web (« Ambidextre ») et les deux importeurs CSV (« Ambidextre » également,
+ * alors qu'ils tournent dans la même application que `new-player`).
+ *
+ * Miroir de `lib/playerVocabulary.ts` côté web. Les deux tables doivent rester
+ * identiques : `mobile/lib/importPlayers.ts` et `lib/importPlayers.ts` sont
+ * déjà deux copies du même fichier, c'est exactement ainsi que la divergence
+ * s'est installée.
+ */
+const STRONG_FOOT_ALIASES: Record<string, StrongFoot> = {
+  droit: 'Droit',
+  'pied droit': 'Droit',
+  d: 'Droit',
+  gauche: 'Gauche',
+  'pied gauche': 'Gauche',
+  g: 'Gauche',
+  ambidextre: 'Droit et gauche',
+  'les deux': 'Droit et gauche',
+  'droit et gauche': 'Droit et gauche',
+  'deux pieds': 'Droit et gauche',
+};
+
+/** Renvoie la valeur canonique, ou `null` si la saisie n'est pas reconnue. */
+export function normalizeStrongFoot(raw: unknown): StrongFoot | null {
+  if (typeof raw !== 'string') return null;
+  return STRONG_FOOT_ALIASES[raw.trim().toLowerCase()] ?? null;
+}
+
+/** Libellé d'affichage d'une valeur stockée, y compris non normalisée. */
+export function strongFootLabel(raw: unknown): string {
+  const value = normalizeStrongFoot(raw);
+  if (!value) return typeof raw === 'string' && raw.trim() ? raw : 'Pied non renseigné';
+  return STRONG_FOOT_OPTIONS.find((o) => o.value === value)!.label;
+}
+
 /** Statuts d'un joueur dans l'effectif. `left` sort de l'effectif actif. */
 export const PLAYER_STATUS_OPTIONS = [
   { value: 'Actif', label: 'Actif' },

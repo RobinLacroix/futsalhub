@@ -20,6 +20,7 @@ import {
   Lock,
   Upload,
 } from 'lucide-react';
+import { STRONG_FOOT_OPTIONS } from '@/lib/playerVocabulary';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
 import { useActiveSeasonContext } from '../../contexts/ActiveSeasonContext';
 import ImportPlayersModal from './ImportPlayersModal';
@@ -933,9 +934,13 @@ export default function SquadPage() {
                     <label className="fm-label">Pied fort *</label>
                     <select required value={formData.strong_foot} onChange={e => setFormData({ ...formData, strong_foot: e.target.value })} className="fm-select">
                       <option value="">Sélectionner</option>
-                      <option value="Droit">Droit</option>
-                      <option value="Gauche">Gauche</option>
-                      <option value="Ambidextre">Ambidextre</option>
+                      {/* Écrivait « Ambidextre » là où le mobile écrit
+                          « Droit et gauche » : le même joueur changeait de
+                          valeur en base selon l'écran de saisie, et les filtres
+                          « pied fort » du web en cachaient toujours une part. */}
+                      {STRONG_FOOT_OPTIONS.map(f => (
+                        <option key={f.value} value={f.value}>{f.label}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
