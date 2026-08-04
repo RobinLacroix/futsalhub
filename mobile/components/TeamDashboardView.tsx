@@ -21,12 +21,13 @@
 import { useCallback, useEffect, useState, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, RefreshControl, useWindowDimensions,
+  ActivityIndicator, RefreshControl,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { format, isAfter, differenceInDays, parseISO, getDay } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { useIsTablet } from '../hooks/useIsTablet';
 import { useActiveTeam } from '../contexts/ActiveTeamContext';
 import { useActiveSeason } from '../contexts/ActiveSeasonContext';
 import { getTrainingsByTeam } from '../lib/services/trainings';
@@ -168,10 +169,13 @@ function getPos(position?: string) {
 // ─── Component ────────────────────────────────────────────────────────────────
 export function TeamDashboardView() {
   const router  = useRouter();
-  const { width } = useWindowDimensions();
   const { activeTeamId, activeTeam } = useActiveTeam();
   const { activeSeason } = useActiveSeason();
-  const isTablet = width >= 768;
+  // `width >= 768` prenait un iPhone en paysage (l'app autorise la rotation)
+  // pour une tablette, et affichait des grilles de densité iPad sur 390 pt de
+  // haut. `useIsTablet` compare la plus petite dimension : une seule définition
+  // de « tablette » dans le dépôt.
+  const isTablet = useIsTablet();
 
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);

@@ -21,10 +21,11 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { View, StyleSheet, Pressable, Dimensions } from 'react-native';
+import { View, StyleSheet, Pressable, useWindowDimensions } from 'react-native';
 import Svg, { Polygon, Line, Circle, Text as SvgText, Path } from 'react-native-svg';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useIsTablet } from '../../hooks/useIsTablet';
 import { Text } from '../ui';
 import { fmPalette, type FMPalette } from './fmPalette';
 // Tracé et étiquetage partagés avec `components/charts/LineChart` : ces deux
@@ -119,8 +120,13 @@ export function RadarChart({ data, axes }: { data: PlayerRadarResult; axes: read
   const p = useMemo(() => fmPalette(theme.colors, theme.scheme), [theme]);
   const [selected, setSelected] = useState<number | null>(null);
 
-  const screenW = Dimensions.get('window').width;
-  const isTablet = screenW >= 768;
+  // `Dimensions.get()` était lu une fois au rendu, sans s'abonner aux
+  // changements : le radar gardait sa taille portrait après rotation. Et
+  // `width >= 768` prenait un iPhone en paysage pour une tablette, alors que
+  // `useIsTablet` compare la plus PETITE dimension — c'est la définition du
+  // dépôt, il n'en faut qu'une.
+  const { width: screenW } = useWindowDimensions();
+  const isTablet = useIsTablet();
 
   // Le radar occupait 80 % de la largeur utile, dont 76 pt de marge de libellé
   // de chaque côté : la toile réelle tombait à ~73 pt de rayon, soit un

@@ -28,6 +28,18 @@ function HeaderActions() {
   );
 }
 
+/**
+ * ## Le header n'est masqué que sur la racine
+ *
+ * `headerShown: !isTablet` valait pour tout le Stack : sur iPad, « Nouveau
+ * joueur », « Importer un effectif » et la fiche joueur s'ouvraient sans titre
+ * et sans retour. Une racine masque son header sur tablette (la sidebar et la
+ * barre d'actions de `squad/index` prennent le relais) ; un écran empilé le
+ * garde, c'est lui qui porte le titre et le retour.
+ *
+ * `season-planning` reste l'exception : il dessine son propre bandeau complet,
+ * sur téléphone comme sur tablette.
+ */
 export default function SquadLayout() {
   const isTablet = useIsTablet();
   const { theme } = useTheme();
@@ -36,7 +48,7 @@ export default function SquadLayout() {
   return (
     <Stack
       screenOptions={{
-        headerShown: !isTablet,
+        headerShown: true,
         headerStyle: { backgroundColor: c.bg.canvas },
         headerShadowVisible: false,
         headerTintColor: c.text.primary,
@@ -48,6 +60,7 @@ export default function SquadLayout() {
         name="index"
         options={{
           title: 'Équipe',
+          headerShown: !isTablet,
           headerRight: () => (
             <View style={styles.headerRight}>
               <SeasonHeaderButton />

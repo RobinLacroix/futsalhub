@@ -4,7 +4,6 @@ import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { format, isValid, parse } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useTheme } from '../../../contexts/ThemeContext';
-import { useIsTablet } from '../../../hooks/useIsTablet';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 import { useActiveSeason } from '../../../contexts/ActiveSeasonContext';
 import {
@@ -75,7 +74,6 @@ export default function PlayerDetailScreen() {
   const { theme } = useTheme();
   const c = theme.colors;
   const router = useRouter();
-  const isTablet = useIsTablet();
   const { activeTeamId, teams: allTeams } = useActiveTeam();
   const { activeSeason } = useActiveSeason();
 
@@ -288,21 +286,19 @@ export default function PlayerDetailScreen() {
           sa propre ligne « ‹ Effectif / Modifier » juste sous le header système,
           soit deux barres de navigation empilées pour la même chose.
 
-          Sur iPad, `squad/_layout` pose `headerShown: !isTablet` — il n'y a donc
-          aucun header natif, et `headerRight` n'était rendu nulle part : le
-          bouton « Modifier » avait purement disparu de la tablette, et le retour
-          vers l'effectif avec lui. La ligne du bandeau reprend les deux, elle
-          existe exactement pour ça. Même arbitrage que la barre iPad de
-          `squad/index`. */}
+          Ça a fait disparaître « Modifier » de l'iPad : `squad/_layout` posait
+          `headerShown: !isTablet` sur tout le Stack, il n'y avait donc aucun
+          header pour l'accueillir, et le retour vers l'effectif manquait avec
+          lui. Corrigé dans le layout, pas ici : sur tablette seule la racine
+          masque son header, les écrans empilés le gardent. Cet écran n'a donc
+          plus de cas particulier. */}
       <Stack.Screen
         options={{
           title: `${player.first_name} ${player.last_name}`,
-          headerRight: isTablet ? undefined : () => <HeaderEditButton onPress={openEditModal} />,
+          headerRight: () => <HeaderEditButton onPress={openEditModal} />,
         }}
       />
       <PlayerDetailView
-        onBack={isTablet ? () => router.back() : undefined}
-        onEdit={isTablet ? openEditModal : undefined}
         player={player}
         playerTeams={playerTeams}
         availableTeams={availableTeams}

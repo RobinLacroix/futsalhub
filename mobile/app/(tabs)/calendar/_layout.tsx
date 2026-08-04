@@ -6,8 +6,20 @@ import { SeasonHeaderButton } from '../../../components/SeasonHeaderButton';
 import { AddEventButton } from '../../../components/calendar/AddEventButton';
 
 /**
- * Sur iPad le Stack ne rend pas de header : le bouton d'ajout est alors porté
- * par l'écran lui-même (`calendar/index.tsx`), via le même `AddEventButton`.
+ * ## Le header n'est masqué que sur la racine
+ *
+ * `headerShown: !isTablet` était posé sur **tout le Stack**. Conséquence :
+ * sur iPad, « Nouvel entraînement », « Nouveau match », le détail d'un
+ * entraînement et le détail d'un match s'ouvraient sans titre et **sans bouton
+ * retour**. Aucun de ces écrans n'en porte un lui-même : on n'en sortait que
+ * par le geste de balayage, invisible, et sur des formulaires longs.
+ *
+ * La règle est donc affinée : une racine (accessible depuis la sidebar) masque
+ * son header sur tablette, un écran empilé le garde. C'est le header natif qui
+ * fournit alors le titre et le retour, exactement comme sur iPhone.
+ *
+ * Sur la racine, le bouton d'ajout reste porté par l'écran lui-même
+ * (`calendar/index.tsx`), via le même `AddEventButton`.
  */
 export default function CalendarLayout() {
   const isTablet = useIsTablet();
@@ -17,7 +29,7 @@ export default function CalendarLayout() {
   return (
     <Stack
       screenOptions={{
-        headerShown: !isTablet,
+        headerShown: true,
         headerStyle: { backgroundColor: c.bg.canvas },
         headerShadowVisible: false,
         headerTintColor: c.text.primary,
@@ -29,6 +41,7 @@ export default function CalendarLayout() {
         name="index"
         options={{
           title: 'Calendrier',
+          headerShown: !isTablet,
           headerRight: () => (
             <View style={styles.headerRight}>
               <SeasonHeaderButton />

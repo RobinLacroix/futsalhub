@@ -1,8 +1,9 @@
 /**
  * AddEventButton — création d'un entraînement ou d'un match (P0-7)
  *
- * Ce contrôle vit à **deux endroits selon la plateforme**, parce que les Stack
- * du calendrier et de l'effectif sont montés avec `headerShown: !isTablet` :
+ * Ce contrôle vit à **deux endroits selon la plateforme**, parce que la racine
+ * du calendrier est montée avec `headerShown: !isTablet` (les écrans empilés,
+ * eux, gardent leur header sur les deux plateformes) :
  *
  *   - iPhone : dans le `headerRight` du Stack (`calendar/_layout`).
  *   - iPad   : dans le panneau mois de l'écran, puisqu'il n'y a pas de header.
