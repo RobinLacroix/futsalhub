@@ -196,19 +196,26 @@ export function RadarChart({ data, axes }: { data: PlayerRadarResult; axes: read
               />
             );
           })}
+          {/* Le remplissage du joueur était opaque et posé PAR-DESSUS la moyenne
+              d'effectif : partout où le joueur dépassait la moyenne, la ligne de
+              référence disparaissait — c'est-à-dire exactement là où la
+              comparaison est intéressante. Il passe à 50 % d'opacité, le contour
+              reste plein, et la moyenne est tracée après pour rester nette au
+              croisement. */}
+          <Polygon
+            points={dataPoints}
+            fill={p.accentSubtle}
+            fillOpacity={0.5}
+            stroke={p.accent}
+            strokeWidth={2}
+            strokeLinejoin="round"
+          />
           <Polygon
             points={avgPoints}
             fill="none"
             stroke={p.neutral}
             strokeWidth={1.5}
             strokeDasharray="4 3"
-            strokeLinejoin="round"
-          />
-          <Polygon
-            points={dataPoints}
-            fill={p.accentSubtle}
-            stroke={p.accent}
-            strokeWidth={2}
             strokeLinejoin="round"
           />
           {axes.map((a, i) => {
