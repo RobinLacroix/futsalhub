@@ -135,9 +135,21 @@ export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {
         {isExpanded && (
           <>
             <SeasonHeaderButton style={{ alignSelf: 'flex-start', marginBottom: 4 }} />
-            {isPlayer && (
+            {/* Un coach est souvent aussi joueur. Tant qu'aucun profil n'est
+                lié, la sidebar propose la liaison — sans ça, l'écran n'était
+                atteignable que depuis un compte sans aucune équipe. */}
+            {isPlayer ? (
               <TouchableOpacity onPress={handleSwitchToPlayer} style={styles.footerBtn}>
+                <Ionicons name="person-outline" size={20} color="#475569" />
                 <Text style={styles.footerBtnText}>Espace joueur</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                onPress={() => router.push('/join-club' as never)}
+                style={styles.footerBtn}
+              >
+                <Ionicons name="person-add-outline" size={20} color="#475569" />
+                <Text style={styles.footerBtnText}>Profil joueur</Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity onPress={() => router.push('/(tabs)/choose-team')} style={styles.footerBtn}>

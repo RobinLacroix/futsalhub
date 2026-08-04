@@ -1,131 +1,191 @@
+/**
+ * Lier un profil joueur à son compte
+ *
+ * ## Ce n'est plus un écran d'onboarding
+ *
+ * Il n'était atteignable que depuis l'accueil d'un compte **sans aucune
+ * équipe** : trois options de premiers pas, dont « Lier un profil joueur ».
+ * Dès qu'un compte avait une équipe, l'écran devenait inaccessible.
+ *
+ * En club amateur, un coach est très souvent aussi joueur — un senior qui
+ * entraîne les jeunes. Ce compte-là avait donc une équipe, et perdait
+ * définitivement l'accès à son propre espace joueur : ni convocations, ni
+ * questionnaire de séance, ni fiche personnelle. L'entrée vit désormais dans
+ * « Plus » et dans la sidebar iPad, disponible en permanence.
+ *
+ * ## L'arrivée dépend de qui lie
+ *
+ * L'écran faisait `router.replace('/(player-tabs)')` sans condition et sans
+ * enregistrer le rôle. Un coach qui liait son profil se retrouvait donc
+ * propulsé dans l'espace joueur sans l'avoir demandé, avec un `appRole` resté
+ * sur `coach` — incohérence que l'aiguillage de démarrage corrigeait au
+ * lancement suivant en le ramenant côté coach.
+ *
+ * Désormais : un compte sans équipe entre dans l'espace joueur (c'est ce qu'il
+ * venait chercher), un coach revient d'où il vient et bascule quand il le
+ * décide.
+ *
+ * L'échec passe de `Alert` à une erreur sous le champ : un code invalide se
+ * corrige dans le champ, pas dans une boîte de dialogue qui le masque.
+ */
+
 import { useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
-  SafeAreaView,
-} from 'react-native';
+import { View, KeyboardAvoidingView, Platform, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppRole } from '../contexts/AppRoleContext';
+import { useTheme, makeStyles } from '../contexts/ThemeContext';
 import { claimPlayerLinkCode } from '../lib/services/playerConvocations';
+import { HIT_SLOP_MIN } from '../lib/design/tokens';
+import { haptics } from '../lib/design/haptics';
+import { Text, Button, Input } from '../components/ui';
 
 export default function JoinClubScreen() {
   const router = useRouter();
-  const { refetch } = useAppRole();
+  const s = useStyles();
+  const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
+  const { refetch, isCoach, setAppRole } = useAppRole();
+
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
     const trimmed = code.trim().toUpperCase();
     if (!trimmed) {
-      Alert.alert('Code requis', 'Veuillez saisir le code partagé par votre coach.');
+      setError('Saisis le code que ton coach t’a communiqué.');
       return;
     }
+    setError(null);
     setSubmitting(true);
     try {
       const result = await claimPlayerLinkCode(trimmed);
-      if (result.ok) {
-        await refetch();
-        router.replace('/(player-tabs)');
+      if (!result.ok) {
+        haptics.error();
+        setError(result.error ?? 'Impossible de lier le compte.');
+        return;
+      }
+      haptics.success();
+      await refetch();
+      if (isCoach) {
+        // Il gérait son club : on le laisse où il était. La bascule vers
+        // l'espace joueur est offerte dans « Plus » et dans la sidebar.
+        router.back();
       } else {
-        Alert.alert('Erreur', result.error ?? 'Impossible de lier le compte.');
+        await setAppRole('player');
+        router.replace('/(player-tabs)');
       }
     } catch (e) {
-      Alert.alert('Erreur', e instanceof Error ? e.message : 'Une erreur est survenue.');
+      setError(e instanceof Error ? e.message : 'Une erreur est survenue.');
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={[s.root, { paddingTop: insets.top }]}>
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
+        style={s.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={80}
       >
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} disabled={submitting}>
-          <Ionicons name="chevron-back" size={22} color="#374151" />
-          <Text style={styles.backText}>Retour</Text>
-        </TouchableOpacity>
-      <View style={styles.content}>
-        <Text style={styles.title}>Rejoindre le club</Text>
-        <Text style={styles.subtitle}>
-          Aucun profil joueur n'est rattaché à votre compte. Saisissez le code que votre coach vous a communiqué pour accéder à votre espace joueur (convocations, fiche, questionnaires).
-        </Text>
-
-        <Text style={styles.label}>Code de liaison</Text>
-        <TextInput
-          style={styles.input}
-          value={code}
-          onChangeText={(t) => setCode(t.replace(/\s/g, '').toUpperCase())}
-          placeholder="Ex. ABC12XYZ"
-          placeholderTextColor="#9ca3af"
-          autoCapitalize="characters"
-          autoCorrect={false}
-          maxLength={12}
-          editable={!submitting}
-        />
-
-        <TouchableOpacity
-          style={[styles.btn, submitting && styles.btnDisabled]}
-          onPress={handleSubmit}
+        <Pressable
+          onPress={() => router.back()}
           disabled={submitting}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Retour"
+          style={({ pressed }) => [s.backBtn, pressed && s.pressed]}
         >
-          {submitting ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Text style={styles.btnText}>Valider le code</Text>
-          )}
-        </TouchableOpacity>
+          <Ionicons name="chevron-back" size={22} color={theme.colors.text.secondary} />
+          <Text variant="body" tone="secondary">
+            Retour
+          </Text>
+        </Pressable>
 
-        <Text style={styles.hint}>
-          Le code est valable 24 h. Si vous êtes aussi coach, vous pourrez basculer vers l'espace coach depuis l'en-tête.
-        </Text>
-      </View>
+        <View style={s.content}>
+          <View style={[s.icon, { backgroundColor: theme.colors.positive.subtle }]}>
+            <Ionicons name="person-add" size={26} color={theme.colors.positive.default} />
+          </View>
+
+          <Text variant="title" style={s.center}>
+            Lier mon profil joueur
+          </Text>
+          <Text variant="callout" tone="secondary" style={s.center}>
+            {isCoach
+              ? 'On peut être coach et joueur. Saisis le code que le coach de ton équipe t’a communiqué pour accéder aussi à ton espace joueur : convocations, questionnaires, fiche personnelle.'
+              : 'Saisis le code que ton coach t’a communiqué pour accéder à ton espace joueur : convocations, questionnaires, fiche personnelle.'}
+          </Text>
+
+          <Input
+            label="Code de liaison"
+            value={code}
+            onChangeText={(t) => {
+              setError(null);
+              setCode(t.replace(/\s/g, '').toUpperCase());
+            }}
+            placeholder="Ex. ABC12XYZ"
+            autoCapitalize="characters"
+            autoCorrect={false}
+            maxLength={12}
+            editable={!submitting}
+            error={error ?? undefined}
+            containerStyle={s.field}
+            inputStyle={s.codeInput}
+          />
+
+          <Button
+            label="Valider le code"
+            onPress={handleSubmit}
+            loading={submitting}
+            disabled={submitting}
+            block
+          />
+
+          <Text variant="caption" tone="tertiary" style={s.center}>
+            Le code est valable 24 h. S’il a expiré, ton coach peut en générer un
+            nouveau depuis ta fiche.
+          </Text>
+        </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f3f4f6' },
-  backBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, gap: 4 },
-  backText: { fontSize: 16, color: '#374151', fontWeight: '500' },
-  content: { flex: 1, padding: 24, justifyContent: 'center', maxWidth: 400, alignSelf: 'center', width: '100%' },
-  title: { fontSize: 22, fontWeight: '700', color: '#111', textAlign: 'center', marginBottom: 12 },
-  subtitle: {
-    fontSize: 15,
-    color: '#6b7280',
-    textAlign: 'center',
-    marginBottom: 28,
-    lineHeight: 22,
-  },
-  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 8 },
-  input: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 18,
-    letterSpacing: 2,
-    borderWidth: 2,
-    borderColor: '#16a34a',
-    marginBottom: 20,
-  },
-  btn: {
-    backgroundColor: '#16a34a',
-    borderRadius: 12,
-    padding: 16,
+const useStyles = makeStyles((t) => ({
+  flex: { flex: 1 },
+  center: { textAlign: 'center' },
+  pressed: { opacity: 0.6 },
+  root: { flex: 1, backgroundColor: t.colors.bg.canvas },
+  backBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: t.space.lg,
+    minHeight: HIT_SLOP_MIN,
   },
-  btnDisabled: { opacity: 0.7 },
-  btnText: { color: '#fff', fontWeight: '600', fontSize: 16 },
-  hint: { fontSize: 13, color: '#9ca3af', textAlign: 'center', marginTop: 24, lineHeight: 18 },
-});
+  content: {
+    flex: 1,
+    justifyContent: 'center',
+    gap: t.space.md,
+    padding: t.space.xl,
+    maxWidth: 420,
+    alignSelf: 'center',
+    width: '100%',
+  },
+  icon: {
+    alignSelf: 'center',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: t.space.xs,
+  },
+  field: { marginTop: t.space.sm },
+  // Un code de 8 caractères se relit lettre à lettre : interlettrage large,
+  // comme sur la carte qui l'affiche côté coach.
+  codeInput: { fontSize: 20, letterSpacing: 4, textAlign: 'center' },
+}));
