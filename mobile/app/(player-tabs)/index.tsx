@@ -25,7 +25,8 @@
  */
 
 import { useCallback, useState, useEffect, useMemo } from 'react';
-import { View, FlatList, RefreshControl, Linking, Alert, Pressable } from 'react-native';
+import { useRouter } from 'expo-router';
+import { View, FlatList, RefreshControl, Pressable } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme, makeStyles } from '../../contexts/ThemeContext';
 import { Text, EmptyState, Button } from '../../components/ui';
@@ -53,6 +54,7 @@ const itemDate = (i: CalendarItem) =>
 
 export default function PlayerConvocationsScreen() {
   const s = useStyles();
+  const router = useRouter();
   const { theme } = useTheme();
 
   const [convocations, setConvocations] = useState<MyConvolutionRow[]>([]);
@@ -125,23 +127,21 @@ export default function PlayerConvocationsScreen() {
     );
   }, []);
 
-  const openQuestionnaire = useCallback(async (urlPathOrFull: string) => {
-    const base = (process.env.EXPO_PUBLIC_SITE_URL ?? '').replace(/\/$/, '');
-    const url = urlPathOrFull.startsWith('http')
-      ? urlPathOrFull
-      : base
-        ? base + (urlPathOrFull.startsWith('/') ? urlPathOrFull : `/${urlPathOrFull}`)
-        : '';
-    if (!url.startsWith('http')) {
-      Alert.alert('Lien indisponible', "Le questionnaire n'est pas accessible depuis l'application.");
-      return;
-    }
-    try {
-      await Linking.openURL(url);
-    } catch {
-      Alert.alert('Erreur', "Impossible d'ouvrir le lien.");
-    }
-  }, []);
+  /**
+   * Le questionnaire se remplit DANS l'application, onglet « Questionnaires ».
+   *
+   * Ce bouton ouvrait `feedback_url` dans le navigateur — l'ancien parcours web,
+   * antérieur au formulaire natif. Deux conséquences : le joueur sortait de
+   * l'app pour une action qu'elle sait faire, et **il perdait la déclaration de
+   * douleur**, qui n'existe que dans le formulaire natif (`BodyMap` +
+   * `report_pain_by_token`). Le suivi santé dépend de ce geste.
+   */
+  const openQuestionnaire = useCallback(
+    (token: string) => {
+      router.push({ pathname: '/(player-tabs)/questionnaires', params: { token } });
+    },
+    [router]
+  );
 
   if (loading && items.length === 0) {
     return (
@@ -243,7 +243,7 @@ function TrainingItem({
   c: MyConvolutionRow;
   updating: boolean;
   onSetAttendance: (id: string, s: PlayerStatus) => void;
-  onOpenQuestionnaire: (url: string) => void;
+  onOpenQuestionnaire: (token: string) => void;
 }) {
   const s = useStyles();
   const { theme } = useTheme();
@@ -292,12 +292,12 @@ function TrainingItem({
         />
       )}
 
-      {c.feedback_token && c.feedback_url && !other && (
+      {c.feedback_token && !other && (
         <>
           <View style={s.divider} />
           <Button
             label="Remplir le questionnaire"
-            onPress={() => onOpenQuestionnaire(c.feedback_url!)}
+            onPress={() => onOpenQuestionnaire(c.feedback_token!)}
             variant="secondary"
             icon="document-text-outline"
             block

@@ -57,7 +57,7 @@ export default function TeamsScreen() {
   const router = useRouter();
   const { theme } = useTheme();
   const c = theme.colors;
-  const { activeTeamId, setActiveTeamId, refetchTeams } = useActiveTeam();
+  const { activeTeamId, setActiveTeamId, refetchTeams, canEditTeam } = useActiveTeam();
 
   const [clubId, setClubId] = useState<string | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -343,24 +343,38 @@ export default function TeamsScreen() {
                         }}
                       />
                     )}
-                    <Pressable
-                      onPress={() => openEdit(team)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Modifier l'équipe ${team.name}`}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      style={styles.iconBtn}
-                    >
-                      <Ionicons name="pencil-outline" size={20} color={c.text.secondary} />
-                    </Pressable>
-                    <Pressable
-                      onPress={() => remove(team)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Supprimer l'équipe ${team.name}`}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      style={styles.iconBtn}
-                    >
-                      <Ionicons name="trash-outline" size={20} color={c.negative.default} />
-                    </Pressable>
+                    {/* Depuis que la lecture de `teams` est club-scopée
+                        (migration `20260804120000`), un coach voit les équipes
+                        des autres. Il ne peut pas les modifier : l'écriture
+                        reste gardée par `has_team_write_access`. Sans ce test,
+                        les deux boutons s'afficheraient et échoueraient EN
+                        SILENCE — un `.update()` qui ne matche aucune ligne ne
+                        lève pas d'erreur. `canEditTeam` lit la même vérité que
+                        la base, via `get_my_writable_team_ids`. */}
+                    {canEditTeam(team.id) ? (
+                      <>
+                        <Pressable
+                          onPress={() => openEdit(team)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Modifier l'équipe ${team.name}`}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          style={styles.iconBtn}
+                        >
+                          <Ionicons name="pencil-outline" size={20} color={c.text.secondary} />
+                        </Pressable>
+                        <Pressable
+                          onPress={() => remove(team)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Supprimer l'équipe ${team.name}`}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          style={styles.iconBtn}
+                        >
+                          <Ionicons name="trash-outline" size={20} color={c.negative.default} />
+                        </Pressable>
+                      </>
+                    ) : (
+                      <Badge label="Lecture seule" tone="neutral" size="sm" />
+                    )}
                   </View>
                 </View>
               </Card>

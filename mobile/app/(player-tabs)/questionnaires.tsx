@@ -25,7 +25,7 @@
  *   opacité, qui casse silencieusement si la teinte passe en `rgb()`.
  */
 
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import {
   View,
   FlatList,
@@ -37,6 +37,7 @@ import {
   Alert,
   Pressable,
 } from 'react-native';
+import { useLocalSearchParams } from 'expo-router';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -125,6 +126,13 @@ const EMPTY_FORM: FormValues = {
 };
 
 export default function PlayerQuestionnairesScreen() {
+  // Ouverture directe depuis le calendrier : `index.tsx` pousse le token de la
+  // séance concernée. Sans ça, son bouton « Remplir le questionnaire » ouvrait
+  // le formulaire WEB dans le navigateur — l'ancien parcours, sans la
+  // déclaration de douleur.
+  const { token: tokenParam } = useLocalSearchParams<{ token?: string }>();
+  const openedFromParam = useRef<string | null>(null);
+
   const s = useStyles();
   const { theme } = useTheme();
   const c = theme.colors;
@@ -204,6 +212,19 @@ export default function PlayerQuestionnairesScreen() {
       setSessionLoading(false);
     }
   }, []);
+
+  // Le calendrier peut demander l'ouverture d'un questionnaire précis. On
+  // attend que la liste soit chargée pour retrouver la ligne correspondante, et
+  // on ne le fait qu'une fois par token : sinon refermer le formulaire le
+  // rouvrirait immédiatement, le paramètre de route étant toujours là.
+  useEffect(() => {
+    if (!tokenParam || loading) return;
+    if (openedFromParam.current === tokenParam) return;
+    const match = items.find((i) => i.token === tokenParam);
+    if (!match) return;
+    openedFromParam.current = tokenParam;
+    void openForm(match);
+  }, [tokenParam, loading, items, openForm]);
 
   const closeModal = useCallback(() => {
     setActiveItem(null);
