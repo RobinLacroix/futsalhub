@@ -20,6 +20,22 @@
  * À sa place, la bascule clair / sombre. L'espace joueur n'a aucun écran de
  * réglages : sans ça, un joueur qui n'est pas coach n'a aucun moyen de choisir
  * son thème.
+ *
+ * ## Répartition du header
+ *
+ * Les trois contrôles étaient empilés à droite des quatre onglets, dont
+ * « Espace coach » et sa centaine de points de libellé : le titre était comprimé
+ * partout pour deux actions utilisées une fois par session.
+ *
+ *   - **Gauche** : la bascule de thème. Un onglet n'a pas de bouton retour, la
+ *     place est libre, et un réglage d'affichage n'appartient à aucun écran.
+ *   - **Droite, sur « Ma fiche » uniquement** : sortie vers l'espace coach et
+ *     déconnexion. Ce sont des actions de compte, elles vivent sur l'onglet du
+ *     compte — même arbitrage que « Plus » côté coach, qui les regroupe déjà.
+ *
+ * « Ma fiche » gagne au passage son header : il était masqué (`headerShown:
+ * false`) parce que `PlayerDetailView` porte son propre bandeau de marque. Ça
+ * privait l'onglet de titre, et surtout du seul endroit où poser ces actions.
  */
 
 import { Tabs } from 'expo-router';
@@ -47,11 +63,12 @@ export default function PlayerTabsLayout() {
         tabBarActiveTintColor: c.positive.default,
         tabBarInactiveTintColor: c.text.tertiary,
         tabBarStyle: { backgroundColor: c.bg.surface, borderTopColor: c.border.subtle },
-        headerRight: () => (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingRight: 8 }}>
+        // Un onglet n'a pas de bouton retour : la gauche du header est libre, et
+        // c'est la place d'un réglage d'affichage — il n'appartient pas à
+        // l'écran, contrairement à une action.
+        headerLeft: () => (
+          <View style={{ paddingLeft: 12 }}>
             <ThemeToggleButton />
-            <SwitchToCoachButton />
-            <SignOutIconButton />
           </View>
         ),
       }}
@@ -76,8 +93,19 @@ export default function PlayerTabsLayout() {
       <Tabs.Screen
         name="profile"
         options={{
-          headerShown: false,
+          title: 'Ma fiche',
           tabBarLabel: 'Ma fiche',
+          // Les actions de compte vivent ici et nulle part ailleurs. Elles
+          // occupaient la droite du header des quatre onglets, où « Espace
+          // coach » mangeait une centaine de points sur chaque écran. C'est
+          // l'onglet du compte : c'est là qu'on quitte l'espace et qu'on se
+          // déconnecte, comme « Plus » côté coach.
+          headerRight: () => (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingRight: 8 }}>
+              <SwitchToCoachButton />
+              <SignOutIconButton />
+            </View>
+          ),
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? 'person' : 'person-outline'} size={size} color={color} />
           ),

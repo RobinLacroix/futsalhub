@@ -44,7 +44,6 @@ import {
 import { Swipeable } from 'react-native-gesture-handler';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../contexts/ThemeContext';
 import { haptics } from '../lib/design/haptics';
 import { supabase } from '../lib/supabase';
@@ -169,7 +168,6 @@ export function PlayerDetailView({
   onAddToTeam,
   onRemoveFromTeam,
 }: PlayerDetailViewProps) {
-  const insets = useSafeAreaInsets();
   const { theme } = useTheme();
   const p = useMemo(() => fmPalette(theme.colors, theme.scheme), [theme]);
 
@@ -307,7 +305,13 @@ export function PlayerDetailView({
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       {/* ── Bandeau de marque ────────────────────────────────────────────── */}
-      <View style={[styles.header, { paddingTop: insets.top }]}>
+      {/* Le bandeau ajoutait `insets.top` de haut, alors que les deux écrans qui
+          le montent ont un header natif au-dessus — celui-ci consomme déjà
+          l'encoche. Ça posait ~59 pt d'aplat de marque vide sous le header sur
+          la fiche coach, et l'aurait fait sur la fiche joueur en lui rendant son
+          header. `useSafeAreaInsets` ne sait pas qu'un header est présent : il
+          renvoie les marges de la fenêtre, pas celles du contenu. */}
+      <View style={styles.header}>
         {/* Cette ligne ne s'affiche que si elle a quelque chose à porter. Dans
             l'espace coach, l'écran vit sous un header natif qui assure déjà le
             retour et l'édition : la rendre vide empilait deux barres de
@@ -1086,7 +1090,7 @@ const makeStyles = (p: FMPalette) =>
     center: { textAlign: 'center' },
     content: { padding: 10, gap: 10, paddingBottom: 40 },
 
-    header: { backgroundColor: p.brand, paddingHorizontal: 14, paddingBottom: 12, gap: 12 },
+    header: { backgroundColor: p.brand, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 12, gap: 12 },
     headerNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 36 },
     navBtn: { flexDirection: 'row', alignItems: 'center', gap: 2 },
     editBtn: {
