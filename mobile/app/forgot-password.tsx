@@ -1,43 +1,74 @@
+/**
+ * Mot de passe oublié
+ *
+ * Troisième écran de la porte d'entrée, migré avec les deux autres : le lien
+ * qui y mène venait d'être rendu correctement cliquable, il n'avait pas de sens
+ * de le faire aboutir sur une carte blanche en thème sombre.
+ *
+ * ## Le bug de l'URL de redirection
+ *
+ *     const redirectTo =
+ *       process.env.EXPO_PUBLIC_SITE_URL?.replace(/\/$/, '') + '/auth/reset-password' ||
+ *       'https://futsalhub.vercel.app/auth/reset-password';
+ *
+ * `+` lie plus fort que `||`. Sans `EXPO_PUBLIC_SITE_URL`, l'optional chaining
+ * donne `undefined`, puis `undefined + '/auth/reset-password'` produit la
+ * **chaîne** `"undefined/auth/reset-password"` — qui est truthy. Le `||` ne se
+ * déclenchait donc jamais : le repli n'a jamais pu servir, et l'email de
+ * réinitialisation partait avec une URL invalide.
+ *
+ * ## Le message de confirmation reste volontairement ambigu
+ *
+ * « Si un compte existe avec cette adresse… » : c'est délibéré, et conservé.
+ * Confirmer qu'un email est inconnu permettrait d'énumérer les comptes du club.
+ */
+
 import { useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  ActivityIndicator,
-  Alert,
-} from 'react-native';
+import { View } from 'react-native';
 import { useRouter } from 'expo-router';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { supabase } from '../lib/supabase';
+import { authErrorMessage } from '../lib/authErrors';
+import { useTheme, makeStyles } from '../contexts/ThemeContext';
+import { haptics } from '../lib/design/haptics';
+import { Text, Input, Button } from '../components/ui';
+import { AuthCard, AuthError, AuthLink } from '../components/auth/AuthChrome';
+
+const FALLBACK_SITE_URL = 'https://futsalhub.vercel.app';
+
+function resetRedirectUrl(): string {
+  const base = process.env.EXPO_PUBLIC_SITE_URL?.replace(/\/$/, '');
+  return `${base || FALLBACK_SITE_URL}/auth/reset-password`;
+}
 
 export default function ForgotPasswordScreen() {
+  const s = useStyles();
+  const { theme } = useTheme();
+  const router = useRouter();
+
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
-  const router = useRouter();
 
   const handleSubmit = async () => {
     setError(null);
-    if (!email.trim()) {
-      setError('Email requis');
+    const mail = email.trim();
+    if (!mail) {
+      setError('Saisis ton adresse email.');
       return;
     }
     setLoading(true);
     try {
-      const redirectTo =
-        process.env.EXPO_PUBLIC_SITE_URL?.replace(/\/$/, '') + '/auth/reset-password' ||
-        'https://futsalhub.vercel.app/auth/reset-password';
-      const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo,
+      const { error: err } = await supabase.auth.resetPasswordForEmail(mail, {
+        redirectTo: resetRedirectUrl(),
       });
       if (err) throw err;
+      haptics.success();
       setSent(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erreur lors de l'envoi");
+      haptics.error();
+      setError(authErrorMessage(e, "Envoi impossible."));
     } finally {
       setLoading(false);
     }
@@ -45,139 +76,66 @@ export default function ForgotPasswordScreen() {
 
   if (sent) {
     return (
-      <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Email envoyé</Text>
-          <Text style={styles.subtitle}>
-            Si un compte existe avec cette adresse, vous recevrez un lien pour réinitialiser votre
-            mot de passe. Vérifiez votre boîte de réception et vos spams.
+      <AuthCard title="Email envoyé" subtitle="Vérifie ta boîte de réception">
+        <View style={[s.notice, { backgroundColor: theme.colors.positive.subtle }]}>
+          <Ionicons name="mail-unread-outline" size={22} color={theme.colors.positive.default} />
+          <Text variant="callout" style={s.flex}>
+            Si un compte existe avec cette adresse, un lien de réinitialisation vient d’y être
+            envoyé. Pense à regarder tes spams.
           </Text>
-          <TouchableOpacity style={styles.button} onPress={() => router.back()}>
-            <Text style={styles.buttonText}>Retour à la connexion</Text>
-          </TouchableOpacity>
         </View>
-      </KeyboardAvoidingView>
+        <Button
+          label="Retour à la connexion"
+          onPress={() => router.back()}
+          icon="arrow-back-outline"
+          block
+        />
+      </AuthCard>
     );
   }
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={styles.card}>
-        <Text style={styles.title}>Mot de passe oublié</Text>
-        <Text style={styles.subtitle}>
-          Entrez votre adresse email pour recevoir un lien de réinitialisation
-        </Text>
+    <AuthCard
+      title="Mot de passe oublié"
+      subtitle="On t’envoie un lien pour en choisir un nouveau"
+    >
+      <AuthError message={error} />
 
-        {error ? (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        ) : null}
+      <Input
+        label="Email"
+        value={email}
+        onChangeText={setEmail}
+        placeholder="prenom@club.fr"
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="email-address"
+        autoComplete="email"
+        textContentType="emailAddress"
+        editable={!loading}
+        returnKeyType="go"
+        onSubmitEditing={() => void handleSubmit()}
+      />
 
-        <TextInput
-          style={styles.input}
-          placeholder="votre@email.com"
-          placeholderTextColor="#9ca3af"
-          value={email}
-          onChangeText={setEmail}
-          autoCapitalize="none"
-          keyboardType="email-address"
-          autoComplete="email"
-          editable={!loading}
-        />
+      <Button
+        label="Envoyer le lien"
+        onPress={handleSubmit}
+        loading={loading}
+        disabled={loading}
+        block
+      />
 
-        <TouchableOpacity
-          style={[styles.button, loading && styles.buttonDisabled]}
-          onPress={handleSubmit}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Envoyer le lien</Text>
-          )}
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.backLink} onPress={() => router.back()} disabled={loading}>
-          <Text style={styles.backLinkText}>Retour à la connexion</Text>
-        </TouchableOpacity>
-      </View>
-    </KeyboardAvoidingView>
+      <AuthLink label="Retour à la connexion" onPress={() => router.back()} disabled={loading} />
+    </AuthCard>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f3f4f6',
-    justifyContent: 'center',
-    padding: 24,
+const useStyles = makeStyles((t) => ({
+  flex: { flex: 1 },
+  notice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: t.space.md,
+    padding: t.space.lg,
+    borderRadius: t.radius.md,
   },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#111',
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#6b7280',
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  errorBox: {
-    backgroundColor: '#fef2f2',
-    borderWidth: 1,
-    borderColor: '#fecaca',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
-  },
-  errorText: {
-    color: '#dc2626',
-    fontSize: 14,
-  },
-  input: {
-    borderWidth: 2,
-    borderColor: '#e5e7eb',
-    borderRadius: 8,
-    padding: 14,
-    fontSize: 16,
-    color: '#111',
-    marginBottom: 16,
-  },
-  button: {
-    backgroundColor: '#3b82f6',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  backLink: {
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  backLinkText: {
-    fontSize: 14,
-    color: '#3b82f6',
-    fontWeight: '500',
-  },
-});
+}));
