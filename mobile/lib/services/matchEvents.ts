@@ -78,6 +78,20 @@ export interface CreateMatchEventInput {
   player_id?: string | null;
   players_on_field: string[];
   goal_type?: GoalType | null;
+  /**
+   * Laisse la RPC écrire le tir cadré apparié au but, dans la même transaction.
+   *
+   * Un but est nécessairement cadré : il s'écrit donc en deux lignes. Cette
+   * règle vivait dans le composant recorder, ce qui avait deux conséquences —
+   * le recorder web ne l'appliquait pas (110 buts de la saison 25/26 sans tir
+   * cadré), et les deux insertions du mobile n'étaient pas atomiques (deux buts
+   * perdus leur tir sur échec réseau). Elle vit désormais dans
+   * `insert_match_event`, que les deux clients appellent déjà.
+   *
+   * À passer `true` sur `goal` et `opponent_goal` uniquement — la RPC ignore
+   * le drapeau pour les autres types.
+   */
+  write_pair?: boolean;
 }
 
 /** Supprime le dernier événement du type donné (même joueur si `playerId` défini). */
@@ -130,6 +144,11 @@ async function insertMatchEventRemote(input: CreateMatchEventInput): Promise<Mat
     p_location_x: null,
     p_location_y: null,
     p_goal_type: goalType,
+    // L'appariement but → tir cadré est une règle de la base depuis
+    // `20260812110000_insert_match_event_pair.sql`. Le défaut de la RPC est
+    // FALSE, pour que les versions déjà installées continuent d'écrire le leur
+    // sans doublon : c'est l'appelant à jour qui le demande explicitement.
+    p_write_pair: input.write_pair === true,
   });
   if (error) {
     const errMsg = typeof error === 'object' && error !== null && 'message' in error

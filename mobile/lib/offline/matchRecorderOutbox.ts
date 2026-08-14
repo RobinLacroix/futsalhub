@@ -18,6 +18,15 @@ type InsertPayload = {
   player_id?: string | null;
   players_on_field: string[];
   goal_type?: GoalType | null;
+  /**
+   * Demande à la RPC d'écrire elle-même le tir cadré apparié au but.
+   *
+   * **Absent sur les entrées mises en file par une version antérieure**, et
+   * c'est voulu : celles-là ont aussi mis leur tir cadré en file séparément.
+   * Le rejeu d'une file constituée avant la mise à jour de l'app ne doit donc
+   * pas apparier, sous peine d'écrire deux tirs pour un but.
+   */
+  write_pair?: boolean;
 };
 
 type OutboxRow =
@@ -99,6 +108,7 @@ async function rpcInsertMatchEvent(input: InsertPayload): Promise<void> {
     p_location_x: null,
     p_location_y: null,
     p_goal_type: goalType,
+    p_write_pair: input.write_pair === true,
   });
   if (error) throw new Error(error.message);
 }
@@ -127,12 +137,46 @@ export async function getOutboxLength(): Promise<number> {
   return q.length;
 }
 
-/** Événements encore dans la file (inserts non synchronisés), pour affichage / bilan hors ligne. */
+/**
+ * Événements encore dans la file (inserts non synchronisés), pour affichage /
+ * bilan hors ligne.
+ *
+ * Une entrée `write_pair` produit **deux** événements locaux, parce qu'elle
+ * produira deux lignes en base au rejeu : le but et son tir cadré. Sans ça, un
+ * match saisi hors ligne afficherait un tir cadré de moins par but jusqu'à la
+ * synchronisation — l'écart se résorberait tout seul, mais le coach verrait
+ * entre-temps des chiffres qui ne sont pas ceux qu'il aura.
+ */
 export async function getPendingInsertEventsForMatch(matchId: string): Promise<MatchEvent[]> {
   const q = await loadQueue();
-  return q
-    .filter((r): r is Extract<OutboxRow, { op: 'ins' }> => r.op === 'ins' && r.payload.match_id === matchId)
-    .map((r) => syntheticMatchEvent(r.payload, r.localEventId));
+  const out: MatchEvent[] = [];
+  for (const r of q) {
+    if (r.op !== 'ins' || r.payload.match_id !== matchId) continue;
+    out.push(syntheticMatchEvent(r.payload, r.localEventId));
+
+    if (r.payload.write_pair) {
+      const paired =
+        r.payload.event_type === 'goal'
+          ? 'shot_on_target'
+          : r.payload.event_type === 'opponent_goal'
+            ? 'opponent_shot_on_target'
+            : null;
+      if (paired) {
+        out.push(
+          syntheticMatchEvent(
+            {
+              ...r.payload,
+              event_type: paired,
+              player_id: r.payload.event_type === 'goal' ? r.payload.player_id ?? null : null,
+              goal_type: null,
+            },
+            `${r.localEventId}-pair`
+          )
+        );
+      }
+    }
+  }
+  return out;
 }
 
 export async function flushMatchRecorderOutbox(): Promise<void> {

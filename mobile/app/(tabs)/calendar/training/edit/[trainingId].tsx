@@ -1,51 +1,50 @@
 import { useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Modal,
-  Pressable,
-} from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
-
-let DateTimePicker: import('react').ComponentType<any> | null = null;
-try {
-  DateTimePicker = require('@react-native-community/datetimepicker').default;
-} catch {
-  // ignore
-}
-
+import { useTheme } from '../../../../../contexts/ThemeContext';
 import { getTrainingById, updateTraining } from '../../../../../lib/services/trainings';
+import { haptics } from '../../../../../lib/design/haptics';
+import {
+  Card,
+  Button,
+  Field,
+  Input,
+  ChipGroup,
+  EmptyState,
+  SkeletonDetail,
+  type ChipOption,
+} from '../../../../../components/ui';
+import { DateTimeField, hasNativePicker } from '../../../../../components/match/DateTimeField';
 import type { Training } from '../../../../../types';
 
-const THEME_OPTIONS = ['Offensif', 'Défensif', 'Transition', 'Supériorité'] as const;
-type TrainingTheme = (typeof THEME_OPTIONS)[number];
+type TrainingTheme = 'Offensif' | 'Défensif' | 'Transition' | 'Supériorité';
+
+const THEME_OPTIONS: readonly ChipOption<TrainingTheme>[] = [
+  { value: 'Offensif', label: 'Offensif' },
+  { value: 'Défensif', label: 'Défensif' },
+  { value: 'Transition', label: 'Transition' },
+  { value: 'Supériorité', label: 'Supériorité' },
+];
 
 export default function EditTrainingScreen() {
   const { trainingId } = useLocalSearchParams<{ trainingId: string }>();
   const router = useRouter();
+  const { theme } = useTheme();
+  const c = theme.colors;
+
   const [training, setTraining] = useState<Training | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [dateTime, setDateTime] = useState(new Date());
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [dateStr, setDateStr] = useState('');
+  const [timeStr, setTimeStr] = useState('');
   const [location, setLocation] = useState('');
   const [keyPrinciple, setKeyPrinciple] = useState('');
-  const [theme, setTheme] = useState<TrainingTheme>('Offensif');
-
-  const useNativePicker = DateTimePicker != null;
+  const [trainingTheme, setTrainingTheme] = useState<TrainingTheme>('Offensif');
 
   useEffect(() => {
     if (!trainingId) {
@@ -54,38 +53,59 @@ export default function EditTrainingScreen() {
     }
     getTrainingById(trainingId)
       .then((t) => {
-        if (t) {
-          setTraining(t);
-          const dateStr = typeof t.date === 'string' ? t.date : (t.date as Date).toISOString?.();
-          const d = dateStr ? parseISO(dateStr) : new Date();
-          setDateTime(d);
-          setLocation((t.location ?? '').toString());
-          setKeyPrinciple((t.key_principle ?? '').toString());
-          setTheme((t.theme as TrainingTheme) ?? 'Offensif');
+        if (!t) {
+          setError('Entraînement introuvable');
+          return;
         }
+        setTraining(t);
+        const iso = typeof t.date === 'string' ? t.date : (t.date as Date).toISOString?.();
+        const d = iso ? parseISO(iso) : new Date();
+        setDateTime(d);
+        setDateStr(format(d, 'dd/MM/yyyy', { locale: fr }));
+        setTimeStr(format(d, 'HH:mm'));
+        setLocation((t.location ?? '').toString());
+        setKeyPrinciple((t.key_principle ?? '').toString());
+        setTrainingTheme((t.theme as TrainingTheme) ?? 'Offensif');
       })
       .catch(() => setError('Entraînement introuvable'))
       .finally(() => setLoading(false));
   }, [trainingId]);
 
-  const handleSave = async () => {
+  /**
+   * Bug corrigé : sans le module natif `@react-native-community/datetimepicker`,
+   * cet écran affichait la date et l'heure en **texte non modifiable**. Il était
+   * alors impossible de replanifier une séance. `DateTimeField` fournit le repli
+   * en champs texte, comme les autres écrans du module.
+   */
+  const resolveDate = (): Date | null => {
+    if (hasNativePicker) return dateTime;
+    const [d, m, y] = dateStr.trim().split('/').map(Number);
+    const [h, mn] = timeStr.trim().split(':').map(Number);
+    if ([d, m, y, h, mn].some(Number.isNaN)) return null;
+    const out = new Date(y, m - 1, d, h, mn, 0, 0);
+    return Number.isNaN(out.getTime()) ? null : out;
+  };
+
+  const save = async () => {
     if (!trainingId) return;
+    const submitDate = resolveDate();
+    if (!submitDate) {
+      Alert.alert('Date ou heure invalide', 'Date : JJ/MM/AAAA. Heure : HH:MM (ex. 18:30).');
+      return;
+    }
     setSaving(true);
-    setError(null);
     try {
       await updateTraining(trainingId, {
-        date: dateTime,
+        date: submitDate,
         location: location.trim() || undefined,
-        theme,
+        theme: trainingTheme,
         key_principle: keyPrinciple.trim() || undefined,
       });
-      Alert.alert('Enregistré', 'Les modifications ont été enregistrées.', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
+      haptics.success();
+      router.back();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Impossible d'enregistrer";
-      setError(msg);
-      Alert.alert('Erreur', msg);
+      haptics.error();
+      Alert.alert('Erreur', e instanceof Error ? e.message : "Impossible d'enregistrer");
     } finally {
       setSaving(false);
     }
@@ -93,214 +113,83 @@ export default function EditTrainingScreen() {
 
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3b82f6" />
+      <View style={[styles.root, { backgroundColor: c.bg.canvas }]}>
+        <SkeletonDetail />
       </View>
     );
   }
 
-  if (error && !training) {
+  if (error || !training) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Text style={styles.backBtnText}>Retour</Text>
-        </TouchableOpacity>
+      <View style={[styles.root, { backgroundColor: c.bg.canvas }]}>
+        <EmptyState
+          icon="alert-circle-outline"
+          tone="negative"
+          title="Séance indisponible"
+          description={error ?? 'Cet entraînement est introuvable.'}
+          action={{ label: 'Retour', onPress: () => router.back() }}
+        />
       </View>
     );
   }
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.root, { backgroundColor: c.bg.canvas }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={100}
     >
       <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { gap: theme.space.xl }]}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>Modifier l&apos;entraînement</Text>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>Date</Text>
-          {useNativePicker ? (
-            <TouchableOpacity style={styles.pickerTouch} onPress={() => setShowDatePicker(true)}>
-              <Text style={styles.pickerText}>{format(dateTime, 'EEEE d MMMM yyyy', { locale: fr })}</Text>
-            </TouchableOpacity>
-          ) : (
-            <Text style={styles.pickerText}>{format(dateTime, 'dd/MM/yyyy')}</Text>
-          )}
-        </View>
-        <View style={styles.field}>
-          <Text style={styles.label}>Heure</Text>
-          {useNativePicker ? (
-            <TouchableOpacity style={styles.pickerTouch} onPress={() => setShowTimePicker(true)}>
-              <Text style={styles.pickerText}>{format(dateTime, 'HH:mm')}</Text>
-            </TouchableOpacity>
-          ) : (
-            <Text style={styles.pickerText}>{format(dateTime, 'HH:mm')}</Text>
-          )}
-        </View>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>Lieu</Text>
-          <TextInput
-            style={styles.input}
+        <Card variant="raised" padding="lg" style={{ gap: theme.space.lg }}>
+          <DateTimeField
+            value={dateTime}
+            onChange={setDateTime}
+            dateText={dateStr}
+            timeText={timeStr}
+            onDateTextChange={setDateStr}
+            onTimeTextChange={setTimeStr}
+          />
+          <Input
+            label="Lieu"
+            optional
             value={location}
             onChangeText={setLocation}
-            placeholder="ex: Gymnase (optionnel)"
-            placeholderTextColor="#9ca3af"
+            placeholder="ex : Gymnase Jean Jaurès"
           />
-        </View>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>Thème</Text>
-          <View style={styles.themeRow}>
-            {THEME_OPTIONS.map((t) => (
-              <TouchableOpacity
-                key={t}
-                style={[styles.themeChip, theme === t && styles.themeChipActive]}
-                onPress={() => setTheme(t)}
-              >
-                <Text style={[styles.themeChipText, theme === t && styles.themeChipTextActive]}>{t}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>Principe clé (optionnel)</Text>
-          <TextInput
-            style={styles.input}
+          <Field label="Thème">
+            <ChipGroup
+              label="Thème de séance"
+              options={THEME_OPTIONS}
+              value={trainingTheme}
+              onChange={setTrainingTheme}
+            />
+          </Field>
+          <Input
+            label="Principe clé"
+            optional
             value={keyPrinciple}
             onChangeText={setKeyPrinciple}
-            placeholder="Ex: Fixer le bloc équipe"
-            placeholderTextColor="#9ca3af"
+            placeholder="ex : fixer le bloc équipe"
           />
-        </View>
+        </Card>
 
-        <TouchableOpacity
-          style={[styles.submitBtn, saving && styles.submitBtnDisabled]}
-          onPress={handleSave}
+        <Button
+          label={saving ? 'Enregistrement…' : 'Enregistrer'}
+          onPress={save}
+          loading={saving}
           disabled={saving}
-        >
-          <Text style={styles.submitBtnText}>{saving ? 'Enregistrement…' : 'Enregistrer'}</Text>
-        </TouchableOpacity>
+          size="lg"
+          block
+        />
       </ScrollView>
-
-      {useNativePicker && DateTimePicker && (
-        <>
-          <Modal visible={showDatePicker} transparent animationType="slide">
-            <Pressable style={styles.modalOverlay} onPress={() => setShowDatePicker(false)}>
-              <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
-                <View style={styles.modalHeader}>
-                  <Pressable onPress={() => setShowDatePicker(false)}>
-                    <Text style={styles.modalDone}>OK</Text>
-                  </Pressable>
-                </View>
-                <View style={styles.pickerWrapper}>
-                  <DateTimePicker
-                    value={dateTime}
-                    mode="date"
-                    display={Platform.OS === 'ios' ? 'inline' : 'default'}
-                    onChange={(_e: unknown, v?: Date) => {
-                      if (v) {
-                        const next = new Date(dateTime);
-                        next.setFullYear(v.getFullYear(), v.getMonth(), v.getDate());
-                        setDateTime(next);
-                      }
-                      if (Platform.OS !== 'ios') setShowDatePicker(false);
-                    }}
-                    locale="fr-FR"
-                  />
-                </View>
-              </View>
-            </Pressable>
-          </Modal>
-          <Modal visible={showTimePicker} transparent animationType="slide">
-            <Pressable style={styles.modalOverlay} onPress={() => setShowTimePicker(false)}>
-              <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
-                <View style={styles.modalHeader}>
-                  <Pressable onPress={() => setShowTimePicker(false)}>
-                    <Text style={styles.modalDone}>OK</Text>
-                  </Pressable>
-                </View>
-                <View style={styles.pickerWrapper}>
-                  <DateTimePicker
-                    value={dateTime}
-                    mode="time"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={(_e: unknown, v?: Date) => {
-                      if (v) {
-                        const next = new Date(dateTime);
-                        next.setHours(v.getHours(), v.getMinutes(), 0, 0);
-                        setDateTime(next);
-                      }
-                      if (Platform.OS !== 'ios') setShowTimePicker(false);
-                    }}
-                    is24Hour
-                  />
-                </View>
-              </View>
-            </Pressable>
-          </Modal>
-        </>
-      )}
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f3f4f6' },
-  scroll: { flex: 1 },
-  content: { padding: 16, paddingBottom: 32 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  errorText: { fontSize: 14, color: '#dc2626', marginBottom: 16 },
-  backBtn: { marginTop: 12, padding: 12 },
-  backBtnText: { fontSize: 16, color: '#3b82f6', fontWeight: '600' },
-  title: { fontSize: 20, fontWeight: '700', color: '#111', marginBottom: 20 },
-  field: { marginBottom: 16 },
-  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 8 },
-  input: {
-    borderWidth: 2,
-    borderColor: '#e5e7eb',
-    borderRadius: 10,
-    padding: 14,
-    fontSize: 16,
-    backgroundColor: '#fff',
-  },
-  pickerTouch: {
-    borderWidth: 2,
-    borderColor: '#e5e7eb',
-    borderRadius: 10,
-    padding: 14,
-    backgroundColor: '#fff',
-  },
-  pickerText: { fontSize: 16, color: '#111' },
-  themeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  themeChip: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    backgroundColor: '#e5e7eb',
-  },
-  themeChipActive: { backgroundColor: '#3b82f6' },
-  themeChipText: { fontSize: 14, fontWeight: '600', color: '#374151' },
-  themeChipTextActive: { color: '#fff' },
-  submitBtn: {
-    marginTop: 24,
-    padding: 16,
-    backgroundColor: '#22c55e',
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  submitBtnDisabled: { opacity: 0.6 },
-  submitBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingBottom: 24 },
-  modalHeader: { padding: 16, alignItems: 'flex-end' },
-  modalDone: { fontSize: 17, fontWeight: '600', color: '#3b82f6' },
-  pickerWrapper: { paddingHorizontal: 16 },
+  root: { flex: 1 },
+  content: { padding: 16, paddingBottom: 40 },
 });

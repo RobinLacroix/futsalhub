@@ -1,92 +1,50 @@
-import { useEffect, useState, useCallback } from 'react';
-import {
-  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator,
-  ScrollView, Modal, Alert,
-} from 'react-native';
+/**
+ * Accueil — briefing du coach (P0-4)
+ *
+ * Réécriture complète. L'ancien écran affichait une grille de six boutons de
+ * navigation, quatre raccourcis et l'email du compte : un menu déguisé en
+ * dashboard, sans une seule donnée, sur le premier écran d'un produit vendu sur
+ * l'analyse de performance.
+ *
+ * Ce qu'il montre maintenant, dans l'ordre où un coach en a besoin :
+ *   1. la prochaine échéance, avec l'action qui va avec ;
+ *   2. la forme de l'équipe ;
+ *   3. trois indicateurs de saison ;
+ *   4. ce qui demande son attention.
+ *
+ * La grille de fonctionnalités disparaît : c'est le rôle de la navigation, pas
+ * celui de l'accueil (P0-5).
+ */
+
+import { useCallback, useEffect, useState } from 'react';
+import { View } from 'react-native';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useIsTablet } from '../../hooks/useIsTablet';
-import { supabase } from '../../lib/supabase';
+import { useTheme } from '../../contexts/ThemeContext';
 import { useActiveTeam } from '../../contexts/ActiveTeamContext';
+import { useActiveSeason } from '../../contexts/ActiveSeasonContext';
+import { useNotifications } from '../../contexts/NotificationContext';
+import { useBriefing, relativeDayLabel, type ResultLetter } from '../../hooks/useBriefing';
 import { getUserClubId } from '../../lib/services/clubs';
-
-// ─── Features ────────────────────────────────────────────────────────────────
-
-const FEATURES = [
-  {
-    key: 'calendar',
-    label: 'Calendrier',
-    desc: 'Matchs & entraînements',
-    icon: 'calendar' as const,
-    color: '#3b82f6',
-    bg: '#eff6ff',
-    route: '/(tabs)/calendar',
-  },
-  {
-    key: 'squad',
-    label: 'Effectif',
-    desc: 'Joueurs & statistiques',
-    icon: 'people' as const,
-    color: '#10b981',
-    bg: '#ecfdf5',
-    route: '/(tabs)/squad',
-  },
-  {
-    key: 'dashboard',
-    label: 'Dashboard',
-    desc: 'Vue d\'ensemble équipe',
-    icon: 'grid' as const,
-    color: '#8b5cf6',
-    bg: '#f5f3ff',
-    route: '/(tabs)/dashboard',
-  },
-  {
-    key: 'analytics',
-    label: 'Analytics',
-    desc: 'Analyse des performances',
-    icon: 'pie-chart' as const,
-    color: '#ef4444',
-    bg: '#fef2f2',
-    route: '/(tabs)/analytics',
-  },
-  {
-    key: 'share',
-    label: 'Partages',
-    desc: 'Vidéos & ressources',
-    icon: 'share-social' as const,
-    color: '#06b6d4',
-    bg: '#ecfeff',
-    route: '/(tabs)/share',
-  },
-  {
-    key: 'tracker',
-    label: 'Tracker',
-    desc: 'Enregistrer un match',
-    icon: 'stats-chart' as const,
-    color: '#f59e0b',
-    bg: '#fffbeb',
-    route: '/(tabs)/tracker',
-    phoneOnly: true,
-  },
-] as const;
-
-// ─── Composant ───────────────────────────────────────────────────────────────
+import { haptics } from '../../lib/design/haptics';
+import {
+  Screen, Section, Card, Button, Text, Stat, Badge, Sheet, EmptyState, SkeletonStats,
+} from '../../components/ui';
 
 export default function HomeScreen() {
-  const [email, setEmail]           = useState<string | null>(null);
-  const [hasNoClub, setHasNoClub]   = useState<boolean | null>(null);
-  const [teamModal, setTeamModal]   = useState(false);
-  const router    = useRouter();
-  const isTablet  = useIsTablet();
-  const { activeTeam, teams, loading: teamsLoading, setActiveTeamId, refetchTeams } = useActiveTeam();
+  const router = useRouter();
+  const { theme } = useTheme();
+  const c = theme.colors;
+  const { activeTeam, activeTeamId, teams, loading: teamsLoading, setActiveTeamId, refetchTeams } =
+    useActiveTeam();
+  const { activeSeason } = useActiveSeason();
+  const { counts, refresh: refreshCounts } = useNotifications();
+  const { next, form, loading, error, refresh } = useBriefing(activeTeamId ?? null, activeSeason);
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setEmail(session?.user?.email ?? null);
-    });
-  }, []);
+  const [teamSheet, setTeamSheet] = useState(false);
+  const [hasNoClub, setHasNoClub] = useState<boolean | null>(null);
 
-  useEffect(() => { refetchTeams(); }, [refetchTeams]);
+  useEffect(() => { void refetchTeams(); }, [refetchTeams]);
 
   const checkUserClub = useCallback(async () => {
     if (!teamsLoading && teams.length === 0) {
@@ -95,316 +53,363 @@ export default function HomeScreen() {
     } else { setHasNoClub(false); }
   }, [teamsLoading, teams.length]);
 
-  useEffect(() => { checkUserClub(); }, [checkUserClub]);
+  useEffect(() => { void checkUserClub(); }, [checkUserClub]);
 
-  const handleSelectTeam = async (teamId: string) => {
-    await setActiveTeamId(teamId);
-    setTeamModal(false);
-  };
+  const onRefresh = useCallback(async () => {
+    await Promise.all([refresh(), refreshCounts()]);
+  }, [refresh, refreshCounts]);
 
-  const handleSignOut = async () => {
-    Alert.alert('Déconnexion', 'Voulez-vous vous déconnecter ?', [
-      { text: 'Annuler', style: 'cancel' },
-      { text: 'Déconnexion', style: 'destructive', onPress: async () => {
-        await supabase.auth.signOut();
-        router.replace('/sign-in');
-      }},
-    ]);
-  };
+  // ── Aucune équipe : l'accueil redevient un écran d'onboarding ──────────────
 
-  const visibleFeatures = FEATURES.filter((f) => !('phoneOnly' in f) || !f.phoneOnly || !isTablet);
-  const cols = isTablet ? 3 : 2;
+  if (!teamsLoading && teams.length === 0) {
+    return (
+      <Screen>
+        <BrandHeader />
+        {hasNoClub ? (
+          <Section title="Premiers pas" subtitle="Choisis comment tu rejoins FutsalHub">
+            <View style={{ gap: theme.space.md }}>
+              <OnboardingRow
+                icon="add-circle-outline"
+                title="Créer un club"
+                description="Tu deviens administrateur et tu invites ton staff."
+                onPress={() => router.push('/(tabs)/create-club')}
+              />
+              <OnboardingRow
+                icon="enter-outline"
+                title="Rejoindre un club en tant que staff"
+                description="Avec le code d'invitation fourni par l'administrateur."
+                onPress={() => router.push('/(tabs)/join-club-staff' as any)}
+              />
+              <OnboardingRow
+                icon="person-add-outline"
+                title="Lier un profil joueur"
+                description="Avec le code fourni par ton coach."
+                onPress={() => router.push('/join-club' as any)}
+              />
+            </View>
+          </Section>
+        ) : (
+          <Section>
+            <EmptyState
+              icon="flag-outline"
+              title="Aucune équipe"
+              description="Crée ta première équipe pour commencer à suivre tes séances et tes matchs."
+              action={{ label: 'Ajouter une équipe', onPress: () => router.push('/(tabs)/teams') }}
+            />
+          </Section>
+        )}
+      </Screen>
+    );
+  }
+
+  // ── Briefing ───────────────────────────────────────────────────────────────
+
+  const goalsFor = form.played > 0 ? form.goalsFor / form.played : 0;
+  const goalsAgainst = form.played > 0 ? form.goalsAgainst / form.played : 0;
+  const winRate = form.played > 0 ? Math.round((form.wins / form.played) * 100) : 0;
+
+  const alerts = [
+    { key: 'absences', label: 'Absences signalées', count: counts.absence_report, icon: 'person-remove-outline' as const, route: '/(tabs)/calendar' },
+    { key: 'injuries', label: 'Blessures et douleurs', count: counts.injury, icon: 'medkit-outline' as const, route: '/(tabs)/calendar' },
+    { key: 'quest', label: 'Questionnaires reçus', count: counts.questionnaire_response, icon: 'clipboard-outline' as const, route: '/(tabs)/squad' },
+    { key: 'feedback', label: 'Retours joueurs', count: counts.feedback_comment, icon: 'chatbubble-ellipses-outline' as const, route: '/(tabs)/squad' },
+  ].filter((a) => a.count > 0);
 
   return (
-    <ScrollView style={s.root} contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+    <Screen onRefresh={onRefresh} refreshing={loading}>
+      <BrandHeader />
 
-      {/* ── Hero header ── */}
-      <View style={s.hero}>
-        {/* Logo / Brand */}
-        <View style={s.brandRow}>
-          <View style={s.logoBox}>
-            <Ionicons name="football" size={22} color="#fff" />
-          </View>
-          <View>
-            <Text style={s.brandName}>FutsalHub</Text>
-            <Text style={s.brandTagline}>Gestion de club intelligente</Text>
-          </View>
+      {/* Équipe active */}
+      <Card
+        variant="raised"
+        padding="md"
+        onPress={teams.length > 1 ? () => setTeamSheet(true) : undefined}
+        accessibilityLabel={
+          teams.length > 1 ? `Équipe active ${activeTeam?.name}. Toucher pour changer` : undefined
+        }
+        style={{ marginTop: theme.space.lg, flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}
+      >
+        <View
+          style={{
+            width: 10, height: 10, borderRadius: 5,
+            backgroundColor: activeTeam?.color || c.accent.default,
+          }}
+        />
+        <View style={{ flex: 1 }}>
+          <Text variant="caption" tone="tertiary">Équipe active</Text>
+          <Text variant="headline" numberOfLines={1}>{activeTeam?.name ?? '—'}</Text>
         </View>
+        {teams.length > 1 ? (
+          <Badge label="Changer" tone="accent" icon="swap-vertical" size="sm" />
+        ) : null}
+      </Card>
 
-        {/* Équipe active */}
-        {teamsLoading ? (
-          <ActivityIndicator color="#fff" style={{ marginTop: 20 }} />
-        ) : activeTeam ? (
-          <TouchableOpacity
-            style={s.activeTeamCard}
-            onPress={() => teams.length > 1 ? setTeamModal(true) : null}
-            activeOpacity={0.85}
-          >
-            <View style={[s.teamDot, { backgroundColor: activeTeam.color || '#60a5fa' }]} />
-            <View style={{ flex: 1 }}>
-              <Text style={s.activeTeamLabel}>ÉQUIPE ACTIVE</Text>
-              <Text style={s.activeTeamName}>{activeTeam.name}</Text>
-              {activeTeam.category ? (
-                <Text style={s.activeTeamMeta}>{activeTeam.category} · {activeTeam.level}</Text>
+      {error ? (
+        <Section>
+          <EmptyState
+            icon="cloud-offline-outline"
+            title="Données indisponibles"
+            description={error}
+            action={{ label: 'Réessayer', onPress: () => void onRefresh() }}
+            tone="negative"
+            compact
+          />
+        </Section>
+      ) : null}
+
+      {/* 1. Prochaine échéance */}
+      <Section title="Prochaine échéance">
+        {loading ? (
+          <Card variant="flat" padding="none"><SkeletonStats count={2} columns={2} /></Card>
+        ) : next ? (
+          <Card variant={next.daysAway <= 1 ? 'accent' : 'raised'} padding="lg" style={{ gap: theme.space.md }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.sm }}>
+              <Badge
+                label={next.kind === 'match' ? 'Match' : 'Entraînement'}
+                tone={next.kind === 'match' ? 'accent' : 'neutral'}
+                icon={next.kind === 'match' ? 'football-outline' : 'barbell-outline'}
+                size="sm"
+              />
+              <Text variant="caption" tone="secondary">
+                {relativeDayLabel(next.daysAway)}
+              </Text>
+            </View>
+
+            <View style={{ gap: theme.space.xs }}>
+              <Text variant="title" numberOfLines={2}>{next.title}</Text>
+              <Text variant="callout" tone="tertiary" numeric>
+                {next.date.toLocaleDateString('fr-FR', {
+                  weekday: 'long', day: 'numeric', month: 'long',
+                })}
+                {' · '}
+                {next.date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                {next.location ? ` · ${next.location}` : ''}
+              </Text>
+              {next.competition ? (
+                <Text variant="caption" tone="tertiary">{next.competition}</Text>
               ) : null}
             </View>
-            {teams.length > 1 && (
-              <View style={s.switchBadge}>
-                <Ionicons name="swap-vertical" size={14} color="#1e3a5f" />
-                <Text style={s.switchBadgeText}>Changer</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        ) : hasNoClub ? (
-          <View style={s.noClubOptions}>
-            <TouchableOpacity style={s.noClubCard} onPress={() => router.push('/(tabs)/create-club')}>
-              <Ionicons name="add-circle" size={20} color="#f59e0b" />
-              <View style={{ flex: 1 }}>
-                <Text style={s.noClubText}>Créer un club</Text>
-                <Text style={s.noClubSub}>Devenez administrateur</Text>
-              </View>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.joinClubCard} onPress={() => router.push('/(tabs)/join-club-staff' as any)}>
-              <Ionicons name="enter-outline" size={20} color="#a78bfa" />
-              <View style={{ flex: 1 }}>
-                <Text style={s.joinClubText}>Rejoindre un club (staff)</Text>
-                <Text style={s.joinClubSub}>Code d'invitation admin</Text>
-              </View>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.linkPlayerCard} onPress={() => router.push('/join-club' as any)}>
-              <Ionicons name="person-add-outline" size={20} color="#34d399" />
-              <View style={{ flex: 1 }}>
-                <Text style={s.linkPlayerText}>Lier un profil joueur</Text>
-                <Text style={s.linkPlayerSub}>Code fourni par le coach</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
+
+            <View style={{ flexDirection: 'row', gap: theme.space.sm, flexWrap: 'wrap' }}>
+              {next.kind === 'match' && next.daysAway <= 0 ? (
+                <Button
+                  label="Ouvrir le recorder"
+                  onPress={() => router.push('/(tabs)/tracker/record' as any)}
+                  icon="radio-button-on"
+                />
+              ) : null}
+              <Button
+                label="Voir le détail"
+                onPress={() =>
+                  router.push(
+                    (next.kind === 'match'
+                      ? `/(tabs)/calendar/matchDetail/${next.id}`
+                      : `/(tabs)/calendar/training/${next.id}`) as any,
+                  )
+                }
+                variant="secondary"
+              />
+            </View>
+          </Card>
         ) : (
-          <TouchableOpacity style={s.noTeamCard} onPress={() => router.push('/(tabs)/teams')}>
-            <Ionicons name="add-circle" size={20} color="#60a5fa" />
-            <Text style={s.noTeamText}>Ajouter une première équipe</Text>
-          </TouchableOpacity>
+          <EmptyState
+            icon="calendar-outline"
+            title="Rien de programmé"
+            description="Planifie ton prochain match ou ta prochaine séance."
+            action={{ label: 'Nouveau match', onPress: () => router.push('/(tabs)/calendar/new-match' as any) }}
+            secondaryAction={{ label: 'Nouvel entraînement', onPress: () => router.push('/(tabs)/calendar/new' as any) }}
+            compact
+          />
         )}
-      </View>
+      </Section>
 
-      {/* ── Grille features ── */}
-      <View style={s.section}>
-        <Text style={s.sectionTitle}>Fonctionnalités</Text>
-        <View style={[s.grid, { gap: isTablet ? 14 : 12 }]}>
-          {visibleFeatures.map((f) => (
-            <TouchableOpacity
-              key={f.key}
-              style={[s.featureCard, {
-                width: `${(100 / cols) - (isTablet ? 2 : 2)}%` as any,
-                backgroundColor: f.bg,
-                borderColor: f.color + '30',
-              }]}
-              onPress={() => router.push(f.route as any)}
-              activeOpacity={0.8}
+      {/* 2. Forme */}
+      <Section
+        title="Forme"
+        subtitle={form.played > 0 ? `${form.played} match${form.played > 1 ? 's' : ''} joué${form.played > 1 ? 's' : ''} cette saison` : undefined}
+        action={form.played > 0 ? { label: 'Analytics', onPress: () => router.push('/(tabs)/analytics') } : undefined}
+      >
+        <Card variant="raised" padding="lg" style={{ gap: theme.space.lg }}>
+          {form.results.length > 0 ? (
+            <View style={{ flexDirection: 'row', gap: theme.space.sm }}>
+              {form.results.map((r, i) => (
+                <ResultPill key={i} result={r} />
+              ))}
+            </View>
+          ) : (
+            <Text variant="callout" tone="tertiary">Aucun match joué pour l'instant.</Text>
+          )}
+          <View style={{ flexDirection: 'row', gap: theme.space.lg }}>
+            <Stat size="compact" value={String(form.wins)} label="Victoires" style={{ flex: 1 }} />
+            <Stat size="compact" value={String(form.draws)} label="Nuls" style={{ flex: 1 }} />
+            <Stat size="compact" value={String(form.losses)} label="Défaites" style={{ flex: 1 }} />
+          </View>
+        </Card>
+      </Section>
+
+      {/* 3. Indicateurs de saison */}
+      <Section title="Saison">
+        {loading ? (
+          <Card variant="flat" padding="none"><SkeletonStats count={3} columns={3} /></Card>
+        ) : (
+          <View style={{ flexDirection: 'row', gap: theme.space.md }}>
+            <Card variant="raised" padding="lg" style={{ flex: 1 }}>
+              <Stat value={`${winRate}`} unit="%" label="Victoires" size="compact" />
+            </Card>
+            <Card variant="raised" padding="lg" style={{ flex: 1 }}>
+              <Stat value={goalsFor.toFixed(1)} label="Buts marqués / match" size="compact" />
+            </Card>
+            <Card variant="raised" padding="lg" style={{ flex: 1 }}>
+              <Stat
+                value={goalsAgainst.toFixed(1)}
+                label="Buts encaissés / match"
+                size="compact"
+                valueColor={goalsAgainst > 0 && goalsAgainst > goalsFor ? c.negative.default : undefined}
+              />
+            </Card>
+          </View>
+        )}
+      </Section>
+
+      {/* 4. Attention requise */}
+      {alerts.length > 0 ? (
+        <Section title="À traiter">
+          <View style={{ gap: theme.space.sm }}>
+            {alerts.map((a) => (
+              <Card
+                key={a.key}
+                variant="flat"
+                padding="md"
+                onPress={() => router.push(a.route as any)}
+                accessibilityLabel={`${a.count} ${a.label}`}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}
+              >
+                <Ionicons name={a.icon} size={20} color={c.warning.default} />
+                <Text variant="body" style={{ flex: 1 }}>{a.label}</Text>
+                <Badge label={String(a.count)} tone="warning" solid size="sm" />
+                <Ionicons name="chevron-forward" size={16} color={c.text.tertiary} />
+              </Card>
+            ))}
+          </View>
+        </Section>
+      ) : null}
+
+      {/* Sélecteur d'équipe */}
+      <Sheet
+        visible={teamSheet}
+        onClose={() => setTeamSheet(false)}
+        title="Choisir une équipe"
+        subtitle="L'équipe active s'applique à tout le contenu de l'app"
+      >
+        {teams.map((team) => {
+          const isActive = team.id === activeTeamId;
+          return (
+            <Card
+              key={team.id}
+              variant={isActive ? 'accent' : 'flat'}
+              padding="md"
+              onPress={async () => {
+                await setActiveTeamId(team.id);
+                setTeamSheet(false);
+              }}
+              accessibilityLabel={`Activer l'équipe ${team.name}`}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}
             >
-              <View style={[s.featureIconBox, { backgroundColor: f.color }]}>
-                <Ionicons name={f.icon} size={isTablet ? 24 : 20} color="#fff" />
+              <View
+                style={{
+                  width: 10, height: 10, borderRadius: 5,
+                  backgroundColor: team.color || c.neutralData,
+                }}
+              />
+              <View style={{ flex: 1 }}>
+                <Text variant="body" tone={isActive ? 'accent' : 'primary'}>{team.name}</Text>
+                {team.category ? (
+                  <Text variant="caption" tone="tertiary">{team.category} · {team.level}</Text>
+                ) : null}
               </View>
-              <Text style={[s.featureLabel, { color: '#0f172a' }]}>{f.label}</Text>
-              <Text style={s.featureDesc}>{f.desc}</Text>
-              <View style={[s.featureArrow, { backgroundColor: f.color + '18' }]}>
-                <Ionicons name="arrow-forward" size={12} color={f.color} />
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-
-      {/* ── Séction secondaire : raccourcis rapides ── */}
-      {activeTeam && (
-        <View style={s.section}>
-          <Text style={s.sectionTitle}>Accès rapide</Text>
-          <View style={s.quickRow}>
-            <TouchableOpacity style={s.quickBtn} onPress={() => router.push('/(tabs)/calendar/new-match' as any)}>
-              <View style={[s.quickIcon, { backgroundColor: '#eff6ff' }]}>
-                <Ionicons name="add-circle" size={18} color="#3b82f6" />
-              </View>
-              <Text style={s.quickLabel}>Nouveau match</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.quickBtn} onPress={() => router.push('/(tabs)/calendar/new' as any)}>
-              <View style={[s.quickIcon, { backgroundColor: '#ecfdf5' }]}>
-                <Ionicons name="barbell" size={18} color="#10b981" />
-              </View>
-              <Text style={s.quickLabel}>Entraînement</Text>
-            </TouchableOpacity>
-            {!isTablet && (
-              <TouchableOpacity style={s.quickBtn} onPress={() => router.push('/(tabs)/tracker/record' as any)}>
-                <View style={[s.quickIcon, { backgroundColor: '#fffbeb' }]}>
-                  <Ionicons name="radio-button-on" size={18} color="#f59e0b" />
-                </View>
-                <Text style={s.quickLabel}>Live tracker</Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity style={s.quickBtn} onPress={() => teams.length > 1 ? setTeamModal(true) : router.push('/(tabs)/teams' as any)}>
-              <View style={[s.quickIcon, { backgroundColor: '#f5f3ff' }]}>
-                <Ionicons name="swap-horizontal" size={18} color="#8b5cf6" />
-              </View>
-              <Text style={s.quickLabel}>Changer équipe</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {/* ── Compte ── */}
-      <View style={s.section}>
-        <View style={s.accountCard}>
-          <View style={s.accountLeft}>
-            <View style={s.accountAvatar}>
-              <Ionicons name="person" size={18} color="#64748b" />
-            </View>
-            <View>
-              <Text style={s.accountEmail} numberOfLines={1}>{email ?? '—'}</Text>
-              <Text style={s.accountRole}>Coach · Admin</Text>
-            </View>
-          </View>
-          <TouchableOpacity style={s.signOutBtn} onPress={handleSignOut}>
-            <Ionicons name="log-out-outline" size={16} color="#ef4444" />
-            <Text style={s.signOutText}>Déconnexion</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* ── Modal sélection équipe ── */}
-      <Modal visible={teamModal} transparent animationType="slide" onRequestClose={() => setTeamModal(false)}>
-        <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setTeamModal(false)}>
-          <View style={s.modalSheet} onStartShouldSetResponder={() => true}>
-            <View style={s.modalHandle} />
-            <Text style={s.modalTitle}>Choisir une équipe</Text>
-            <Text style={s.modalSub}>L'équipe active s'applique à tout le contenu</Text>
-            <ScrollView>
-              {teams.map((team) => {
-                const isActive = team.id === activeTeam?.id;
-                return (
-                  <TouchableOpacity
-                    key={team.id}
-                    style={[s.modalTeamRow, isActive && s.modalTeamRowActive]}
-                    onPress={() => handleSelectTeam(team.id)}
-                    activeOpacity={0.75}
-                  >
-                    <View style={[s.modalTeamDot, { backgroundColor: team.color || '#94a3b8' }]} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[s.modalTeamName, isActive && { color: '#2563eb' }]}>{team.name}</Text>
-                      {team.category ? (
-                        <Text style={s.modalTeamMeta}>{team.category} · {team.level}</Text>
-                      ) : null}
-                    </View>
-                    {isActive && <Ionicons name="checkmark-circle" size={20} color="#2563eb" />}
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-            <TouchableOpacity style={s.modalAddTeam} onPress={() => { setTeamModal(false); router.push('/(tabs)/teams' as any); }}>
-              <Ionicons name="add" size={16} color="#2563eb" />
-              <Text style={s.modalAddTeamText}>Gérer les équipes</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.modalClose} onPress={() => setTeamModal(false)}>
-              <Text style={s.modalCloseText}>Fermer</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-    </ScrollView>
+              {isActive ? (
+                <Ionicons name="checkmark-circle" size={20} color={c.accent.default} />
+              ) : null}
+            </Card>
+          );
+        })}
+        <Button
+          label="Gérer les équipes"
+          onPress={() => { setTeamSheet(false); router.push('/(tabs)/teams' as any); }}
+          variant="ghost"
+          block
+          icon="settings-outline"
+        />
+      </Sheet>
+    </Screen>
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
+// ─── Sous-composants locaux ──────────────────────────────────────────────────
 
-const s = StyleSheet.create({
-  root:   { flex: 1, backgroundColor: '#f1f5f9' },
-  scroll: { paddingBottom: 40 },
+function BrandHeader() {
+  const { theme } = useTheme();
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md, marginTop: theme.space.lg }}>
+      <View
+        style={{
+          width: 40, height: 40, borderRadius: theme.radius.md,
+          backgroundColor: theme.colors.accent.subtle,
+          alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        <Ionicons name="football" size={22} color={theme.colors.accent.default} />
+      </View>
+      <View>
+        <Text variant="title">FutsalHub</Text>
+        <Text variant="caption" tone="tertiary">Analyse et gestion de club</Text>
+      </View>
+    </View>
+  );
+}
 
-  // Hero
-  hero: {
-    backgroundColor: '#1e3a5f',
-    paddingHorizontal: 20,
-    paddingTop: 24,
-    paddingBottom: 28,
-    gap: 20,
-  },
-  brandRow:    { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  logoBox:     { width: 42, height: 42, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
-  brandName:   { fontSize: 20, fontWeight: '800', color: '#fff', letterSpacing: -0.3 },
-  brandTagline:{ fontSize: 11, color: 'rgba(255,255,255,0.55)', fontWeight: '500', marginTop: 1 },
+function ResultPill({ result }: { result: ResultLetter }) {
+  const { theme } = useTheme();
+  const c = theme.colors;
+  const bg =
+    result === 'V' ? c.positive.fill : result === 'D' ? c.negative.fill : c.neutralData;
+  return (
+    <View
+      style={{
+        width: 32, height: 32, borderRadius: theme.radius.sm,
+        backgroundColor: bg, alignItems: 'center', justifyContent: 'center',
+      }}
+      accessible
+      accessibilityLabel={result === 'V' ? 'Victoire' : result === 'D' ? 'Défaite' : 'Match nul'}
+    >
+      <Text variant="caption" tone="onFill">{result}</Text>
+    </View>
+  );
+}
 
-  activeTeamCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 14,
-    padding: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
-  },
-  teamDot:        { width: 10, height: 10, borderRadius: 5, flexShrink: 0 },
-  activeTeamLabel:{ fontSize: 9, fontWeight: '700', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 2 },
-  activeTeamName: { fontSize: 16, fontWeight: '700', color: '#fff' },
-  activeTeamMeta: { fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 2 },
-  switchBadge:    { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#fff', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99 },
-  switchBadgeText:{ fontSize: 11, fontWeight: '700', color: '#1e3a5f' },
-
-  noClubOptions: { gap: 8 },
-  noClubCard:  { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(245,158,11,0.15)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: 'rgba(245,158,11,0.3)' },
-  noClubText:  { fontSize: 14, color: '#fbbf24', fontWeight: '600' },
-  noClubSub:   { fontSize: 11, color: 'rgba(251,191,36,0.65)', marginTop: 1 },
-  joinClubCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(167,139,250,0.15)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: 'rgba(167,139,250,0.3)' },
-  joinClubText: { fontSize: 14, color: '#a78bfa', fontWeight: '600' },
-  joinClubSub:  { fontSize: 11, color: 'rgba(167,139,250,0.65)', marginTop: 1 },
-  linkPlayerCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(52,211,153,0.15)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: 'rgba(52,211,153,0.3)' },
-  linkPlayerText: { fontSize: 14, color: '#34d399', fontWeight: '600' },
-  linkPlayerSub:  { fontSize: 11, color: 'rgba(52,211,153,0.65)', marginTop: 1 },
-  noTeamCard:  { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(96,165,250,0.15)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: 'rgba(96,165,250,0.3)' },
-  noTeamText:  { fontSize: 14, color: '#93c5fd', fontWeight: '600' },
-
-  // Section
-  section:      { paddingHorizontal: 16, marginTop: 24 },
-  sectionTitle: { fontSize: 12, fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 12 },
-
-  // Grille features
-  grid:        { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  featureCard: {
-    borderRadius: 16, padding: 16, borderWidth: 1,
-    gap: 4,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2,
-  },
-  featureIconBox:  { width: 40, height: 40, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
-  featureLabel:    { fontSize: 14, fontWeight: '700' },
-  featureDesc:     { fontSize: 11, color: '#64748b', lineHeight: 15 },
-  featureArrow:    { width: 24, height: 24, borderRadius: 99, alignItems: 'center', justifyContent: 'center', marginTop: 8, alignSelf: 'flex-start' },
-
-  // Raccourcis rapides
-  quickRow:  { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  quickBtn:  { alignItems: 'center', gap: 6, minWidth: 70 },
-  quickIcon: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  quickLabel:{ fontSize: 10, fontWeight: '600', color: '#475569', textAlign: 'center' },
-
-  // Compte
-  accountCard: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 14,
-    padding: 14, borderWidth: 1, borderColor: '#e2e8f0', gap: 12,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 3, elevation: 1,
-  },
-  accountLeft:   { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  accountAvatar: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center' },
-  accountEmail:  { fontSize: 13, fontWeight: '600', color: '#1e293b', maxWidth: 180 },
-  accountRole:   { fontSize: 10, color: '#94a3b8', marginTop: 1 },
-  signOutBtn:    { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: '#fee2e2', backgroundColor: '#fff5f5' },
-  signOutText:   { fontSize: 12, color: '#ef4444', fontWeight: '600' },
-
-  // Modal équipe
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  modalSheet:   { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 34, maxHeight: '75%' },
-  modalHandle:  { width: 36, height: 4, backgroundColor: '#e2e8f0', borderRadius: 99, alignSelf: 'center', marginBottom: 18 },
-  modalTitle:   { fontSize: 18, fontWeight: '700', color: '#0f172a', marginBottom: 4 },
-  modalSub:     { fontSize: 12, color: '#94a3b8', marginBottom: 16 },
-  modalTeamRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#f1f5f9' },
-  modalTeamRowActive: { },
-  modalTeamDot: { width: 10, height: 10, borderRadius: 5, flexShrink: 0 },
-  modalTeamName:{ fontSize: 15, fontWeight: '600', color: '#0f172a' },
-  modalTeamMeta:{ fontSize: 11, color: '#94a3b8', marginTop: 2 },
-  modalAddTeam: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 16, paddingVertical: 12, borderWidth: 1, borderColor: '#dbeafe', borderRadius: 10, backgroundColor: '#eff6ff' },
-  modalAddTeamText: { fontSize: 14, color: '#2563eb', fontWeight: '600' },
-  modalClose:   { marginTop: 8, paddingVertical: 12, alignItems: 'center' },
-  modalCloseText: { fontSize: 14, color: '#94a3b8', fontWeight: '500' },
-});
+function OnboardingRow({
+  icon, title, description, onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  description: string;
+  onPress: () => void;
+}) {
+  const { theme } = useTheme();
+  return (
+    <Card
+      variant="raised"
+      padding="lg"
+      onPress={onPress}
+      accessibilityLabel={title}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}
+    >
+      <Ionicons name={icon} size={22} color={theme.colors.accent.default} />
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text variant="headline">{title}</Text>
+        <Text variant="caption" tone="tertiary">{description}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={16} color={theme.colors.text.tertiary} />
+    </Card>
+  );
+}

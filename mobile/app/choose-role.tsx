@@ -1,67 +1,151 @@
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+/**
+ * Choisir l'espace à ouvrir — comptes à la fois coach et joueur
+ *
+ * ## Cet écran était du code mort
+ *
+ * Il existait, il était enregistré dans `app/_layout`, et **rien ne le
+ * routait**. L'aiguillage de démarrage forçait `appRole = 'coach'` dès qu'un
+ * compte avait une équipe : la question ne pouvait jamais se poser.
+ *
+ * Il redevient utile maintenant que la préférence de l'utilisateur est
+ * respectée. Il ne s'affiche qu'une fois, au premier lancement d'un compte qui
+ * est les deux — le cas normal en club amateur, un senior qui entraîne les
+ * jeunes. Ensuite le choix est enregistré, et se change depuis « Plus » (ou la
+ * sidebar sur iPad) et depuis l'en-tête de l'espace joueur.
+ *
+ * ## Ce qui change à l'écran
+ *
+ * Douze couleurs en dur, dont le `#16a34a` à 3,30:1 de l'ancienne identité
+ * joueur et un `#3b82f6` qui n'est plus l'accent de l'application. Tout passe
+ * par la rampe, avec la même convention que le reste : `accent` pour l'espace
+ * coach, `positive` pour l'espace joueur.
+ *
+ * Le vouvoiement est corrigé — le reste de l'application tutoie.
+ */
+
+import { View, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAppRole } from '../contexts/AppRoleContext';
+import { useTheme, makeStyles } from '../contexts/ThemeContext';
+import { haptics } from '../lib/design/haptics';
+import { Text } from '../components/ui';
 
 export default function ChooseRoleScreen() {
   const router = useRouter();
-  const { setAppRole } = useAppRole();
+  const s = useStyles();
+  const { theme } = useTheme();
+  const { setAppRole, player } = useAppRole();
+  const c = theme.colors;
 
-  const goCoach = async () => {
-    await setAppRole('coach');
-    router.replace('/(tabs)');
-  };
-
-  const goPlayer = async () => {
-    await setAppRole('player');
-    router.replace('/(player-tabs)');
+  const choose = async (role: 'coach' | 'player') => {
+    haptics.select();
+    await setAppRole(role);
+    router.replace(role === 'coach' ? '/(tabs)' : '/(player-tabs)');
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Choisir l&apos;espace</Text>
-      <Text style={styles.subtitle}>
-        Votre compte est à la fois joueur et coach. Choisissez l&apos;espace à ouvrir.
-      </Text>
+    <View style={s.root}>
+      <View style={s.content}>
+        <Text variant="title" style={s.center}>
+          Quel espace ouvrir ?
+        </Text>
+        <Text variant="callout" tone="secondary" style={s.center}>
+          Ton compte est à la fois coach et joueur. Tu pourras basculer de l’un à
+          l’autre à tout moment : ce choix n’est que celui par défaut.
+        </Text>
 
-      <TouchableOpacity style={[styles.card, styles.cardCoach]} onPress={goCoach} activeOpacity={0.8}>
-        <Text style={styles.cardEmoji}>👔</Text>
-        <Text style={styles.cardTitle}>Espace coach</Text>
-        <Text style={styles.cardText}>Calendrier, effectif, équipes</Text>
-      </TouchableOpacity>
+        <RoleCard
+          icon="clipboard-outline"
+          tint={c.accent.default}
+          tintSubtle={c.accent.subtle}
+          title="Espace coach"
+          description="Calendrier, effectif, séances, matchs"
+          onPress={() => choose('coach')}
+        />
 
-      <TouchableOpacity style={[styles.card, styles.cardPlayer]} onPress={goPlayer} activeOpacity={0.8}>
-        <Text style={styles.cardEmoji}>⚽</Text>
-        <Text style={styles.cardTitle}>Espace joueur</Text>
-        <Text style={styles.cardText}>Convocations, ma fiche, questionnaires</Text>
-      </TouchableOpacity>
+        <RoleCard
+          icon="football-outline"
+          tint={c.positive.default}
+          tintSubtle={c.positive.subtle}
+          title="Espace joueur"
+          description={
+            player
+              ? `Convocations, questionnaires, fiche de ${player.first_name}`
+              : 'Convocations, questionnaires, ma fiche'
+          }
+          onPress={() => choose('player')}
+        />
+      </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
+function RoleCard({
+  icon,
+  tint,
+  tintSubtle,
+  title,
+  description,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  tint: string;
+  tintSubtle: string;
+  title: string;
+  description: string;
+  onPress: () => void;
+}) {
+  const s = useStyles();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${title}. ${description}`}
+      style={({ pressed }) => [s.card, { borderColor: tint }, pressed && s.pressed]}
+    >
+      <View style={[s.cardIcon, { backgroundColor: tintSubtle }]}>
+        <Ionicons name={icon} size={24} color={tint} />
+      </View>
+      <View style={s.flex}>
+        <Text variant="headline">{title}</Text>
+        <Text variant="caption" tone="secondary">
+          {description}
+        </Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={tint} />
+    </Pressable>
+  );
+}
+
+const useStyles = makeStyles((t) => ({
+  flex: { flex: 1 },
+  center: { textAlign: 'center' },
+  pressed: { opacity: 0.65 },
+  root: { flex: 1, backgroundColor: t.colors.bg.canvas },
+  content: {
     flex: 1,
-    backgroundColor: '#f3f4f6',
-    padding: 24,
     justifyContent: 'center',
-  },
-  title: { fontSize: 22, fontWeight: '700', color: '#111', textAlign: 'center', marginBottom: 8 },
-  subtitle: {
-    fontSize: 15,
-    color: '#6b7280',
-    textAlign: 'center',
-    marginBottom: 32,
+    gap: t.space.md,
+    padding: t.space.xl,
+    maxWidth: 460,
+    alignSelf: 'center',
+    width: '100%',
   },
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 24,
-    marginBottom: 16,
-    borderWidth: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: t.space.md,
+    padding: t.space.lg,
+    borderRadius: t.radius.md,
+    borderWidth: 1.5,
+    backgroundColor: t.colors.bg.surface,
   },
-  cardCoach: { borderColor: '#3b82f6' },
-  cardPlayer: { borderColor: '#16a34a' },
-  cardEmoji: { fontSize: 32, marginBottom: 8 },
-  cardTitle: { fontSize: 18, fontWeight: '600', color: '#111', marginBottom: 4 },
-  cardText: { fontSize: 14, color: '#6b7280' },
-});
+  cardIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+}));

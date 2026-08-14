@@ -10,6 +10,8 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../../../lib/supabase';
+import { getMatchPlayerRatings, setMatchCoachEvaluation } from '../../../../lib/services/matchRatings';
+import type { CoachEvaluation, MatchPlayerRating } from '../../../../types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,6 +35,7 @@ interface MatchRow {
   conceded_by_type: GoalsByType | null;
   players: Array<{ id: string; goals: number; yellow_cards: number; red_cards: number; time_played: number }> | null;
   team_id: string | null;
+  coach_evaluation: CoachEvaluation | null;
 }
 
 interface EventRow {
@@ -72,6 +75,25 @@ const GOAL_LABELS: Record<string, string> = {
   cpa: 'CPA',
   superiority: 'Supériorité',
 };
+
+// Volet A : évaluation coach (5 niveaux, flèche blanche sur box colorée).
+const COACH_EVAL_ORDER: CoachEvaluation[] = ['bad', 'poor', 'neutral', 'good', 'great'];
+const COACH_EVAL_CONFIG: Record<CoachEvaluation, { label: string; color: string; arrow: string }> = {
+  bad:     { label: 'Mauvais',  color: '#EF4444', arrow: '↓' },
+  poor:    { label: 'Médiocre', color: '#F97316', arrow: '↘' },
+  neutral: { label: 'Équilibré', color: '#6B7280', arrow: '→' },
+  good:    { label: 'Bon',      color: '#34D399', arrow: '↗' },
+  great:   { label: 'Très bon', color: '#059669', arrow: '↑' },
+};
+
+// Couleur d'une note /10 : rouge sous 5, gris autour de 5, vert au-dessus.
+function ratingColor(rating: number): string {
+  if (rating >= 6.5) return '#059669';
+  if (rating >= 5.5) return '#34D399';
+  if (rating > 4.5)  return '#9CA3AF';
+  if (rating > 3.5)  return '#F97316';
+  return '#EF4444';
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -158,11 +180,28 @@ export default function MatchReportScreen() {
   const [players, setPlayers] = useState<PlayerRow[]>([]);
   const [teamName, setTeamName] = useState('');
   const [loading, setLoading] = useState(true);
+  const [coachEval, setCoachEval] = useState<CoachEvaluation | null>(null);
+  const [savingEval, setSavingEval] = useState(false);
+  const [ratings, setRatings] = useState<Record<string, MatchPlayerRating>>({});
 
   useEffect(() => {
     if (!matchId) return;
     load();
   }, [matchId]);
+
+  async function handleSelectEval(next: CoachEvaluation) {
+    const value = coachEval === next ? null : next;
+    const previous = coachEval;
+    setCoachEval(value);
+    setSavingEval(true);
+    try {
+      await setMatchCoachEvaluation(matchId as string, value);
+    } catch {
+      setCoachEval(previous);
+    } finally {
+      setSavingEval(false);
+    }
+  }
 
   async function load() {
     setLoading(true);
@@ -175,6 +214,14 @@ export default function MatchReportScreen() {
 
     if (!m) { setLoading(false); return; }
     setMatch(m);
+    setCoachEval(m.coach_evaluation ?? null);
+
+    try {
+      const ratingRows = await getMatchPlayerRatings(matchId as string);
+      setRatings(Object.fromEntries(ratingRows.map(r => [r.player_id, r])));
+    } catch {
+      setRatings({});
+    }
 
     if (m.team_id) {
       const { data: t } = await supabase.from('teams').select('name').eq('id', m.team_id).single();
@@ -235,8 +282,22 @@ export default function MatchReportScreen() {
   const oppShotsOnTarget = count(events, 'opponent_shot_on_target');
   const oppShotsOff = count(events, 'opponent_shot');
 
-  const shotsCadres = ourShotsOnTarget + match.score_team;
-  const oppShotsCadres = oppShotsOnTarget + match.score_opponent;
+  // ── Les buts ne se rajoutent PAS aux tirs cadrés ───────────────────────────
+  //
+  // Un but est nécessairement cadré, et il écrit sa propre ligne
+  // `shot_on_target` : les buts sont donc DÉJÀ dans `ourShotsOnTarget`. Cet
+  // écran ajoutait `score_team` par-dessus, ce qui comptait chaque but deux
+  // fois — le total de tirs était gonflé et l'efficacité mécaniquement
+  // sous-estimée (10 buts / 20 cadrés / 20 non cadrés affichaient 20 % au lieu
+  // de 25 %).
+  //
+  // Ce n'était pas vrai partout jusqu'au 2026-08-12 : le recorder web n'écrivait
+  // pas le tir apparié, et 110 buts historiques en étaient dépourvus. C'est
+  // réglé — reprise par `20260812100000_paired_shot_backfill.sql`, règle passée
+  // dans la RPC par `20260812110000_insert_match_event_pair.sql`. La formule est
+  // désormais juste sur l'ensemble des matchs, anciens compris.
+  const shotsCadres = ourShotsOnTarget;
+  const oppShotsCadres = oppShotsOnTarget;
   const totalShots = ourShotsOff + shotsCadres;
   const oppTotalShots = oppShotsOff + oppShotsCadres;
   const maxShots = Math.max(totalShots, oppTotalShots, 1);
@@ -289,6 +350,7 @@ export default function MatchReportScreen() {
         yellowCards: count(pe, 'yellow_card'),
         redCards: count(pe, 'red_card'),
         plusMinus,
+        rating: ratings[p.id]?.rating ?? null,
       };
     })
     .filter(p => p.timePlayed > 0 || p.goals > 0 || p.shotsOnTarget > 0 || p.recovery > 0)
@@ -320,6 +382,33 @@ export default function MatchReportScreen() {
         <View style={styles.metaRow}>
           {match.location ? <Text style={styles.metaText}>📍 {match.location}</Text> : null}
           <Text style={styles.metaText}>📅 {formatDate(match.date)}</Text>
+        </View>
+      </View>
+
+      {/* Volet A : évaluation du match par le coach */}
+      <View style={styles.card}>
+        <View style={styles.evalHeader}>
+          <Text style={styles.sectionTitle}>Évaluation du match</Text>
+          {savingEval ? <Text style={styles.muted}>Enregistrement…</Text> : null}
+        </View>
+        <View style={styles.evalRow}>
+          {COACH_EVAL_ORDER.map(level => {
+            const cfg = COACH_EVAL_CONFIG[level];
+            const active = coachEval === level;
+            return (
+              <TouchableOpacity
+                key={level}
+                onPress={() => handleSelectEval(level)}
+                activeOpacity={0.7}
+                style={[styles.evalItem, active ? { opacity: 1 } : { opacity: 0.4 }]}
+              >
+                <View style={[styles.evalBox, { backgroundColor: cfg.color, borderColor: active ? '#fff' : 'transparent' }]}>
+                  <Text style={styles.evalArrow}>{cfg.arrow}</Text>
+                </View>
+                <Text style={[styles.evalLabel, { color: active ? cfg.color : MUTED }]}>{cfg.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
       </View>
 
@@ -404,9 +493,10 @@ export default function MatchReportScreen() {
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Tirs par mi-temps</Text>
           {[
-            { label: '1ère MT — Cadrés', val: count(h1, 'shot_on_target') + count(h1, 'goal'), color: '#10B981' },
+            // Idem : `shot_on_target` contient déjà les buts, ne pas les rajouter.
+            { label: '1ère MT — Cadrés', val: count(h1, 'shot_on_target'), color: '#10B981' },
             { label: '1ère MT — Non cadrés', val: count(h1, 'shot'), color: '#6EE7B7' },
-            { label: '2ème MT — Cadrés', val: count(h2, 'shot_on_target') + count(h2, 'goal'), color: '#3B82F6' },
+            { label: '2ème MT — Cadrés', val: count(h2, 'shot_on_target'), color: '#3B82F6' },
             { label: '2ème MT — Non cadrés', val: count(h2, 'shot'), color: '#93C5FD' },
           ].map(r => (
             <HorizontalBar key={r.label} label={r.label} value={r.val} max={Math.max(1, totalShots)} color={r.color} />
@@ -428,6 +518,7 @@ export default function MatchReportScreen() {
             <Text style={[styles.tableCell, styles.colStat]}>Tirs⊕</Text>
             <Text style={[styles.tableCell, styles.colStat]}>Récup</Text>
             <Text style={[styles.tableCell, styles.colStat]}>🟨🟥</Text>
+            <Text style={[styles.tableCell, styles.colStat]}>Note</Text>
           </View>
           {playerStats.map((p, i) => {
             const pm = p.plusMinus;
@@ -451,6 +542,13 @@ export default function MatchReportScreen() {
                 <Text style={[styles.tableCell, styles.colStat]}>
                   {p.yellowCards > 0 ? '🟨' : ''}{p.redCards > 0 ? '🟥' : ''}{!p.yellowCards && !p.redCards ? '—' : ''}
                 </Text>
+                {p.rating != null ? (
+                  <Text style={[styles.tableCell, styles.colStat, styles.bold, { color: ratingColor(p.rating) }]}>
+                    {p.rating.toFixed(1)}
+                  </Text>
+                ) : (
+                  <Text style={[styles.tableCell, styles.colStat, styles.muted]}>—</Text>
+                )}
               </View>
             );
           })}
@@ -581,7 +679,15 @@ const styles = StyleSheet.create({
   colStat: { width: 40, textAlign: 'center' },
 
   muted: { color: MUTED, fontSize: 12 },
+  bold: { fontWeight: '800' } as object,
   highlight: { color: AMBER, fontWeight: '800' } as object,
+
+  evalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  evalRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 6 },
+  evalItem: { flex: 1, alignItems: 'center', gap: 6 },
+  evalBox: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
+  evalArrow: { color: '#fff', fontSize: 20, fontWeight: '900', lineHeight: 22 },
+  evalLabel: { fontSize: 10, fontWeight: '700', textAlign: 'center' },
 
   footer: { textAlign: 'center', color: 'rgba(255,255,255,0.15)', fontSize: 10, marginTop: 8 },
 });

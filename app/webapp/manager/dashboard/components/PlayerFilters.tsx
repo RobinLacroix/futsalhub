@@ -2,6 +2,7 @@
 
 import { RefreshCw } from 'lucide-react';
 import type { PlayerFilterState } from '@/types';
+import { STRONG_FOOT_OPTIONS } from '@/lib/playerVocabulary';
 
 interface PlayerFiltersProps {
   filters: PlayerFilterState;
@@ -30,9 +31,9 @@ export function PlayerFilters({ filters, onFilterChange, onReset }: PlayerFilter
           className="rounded-md border-gray-400 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white"
         >
           <option value="">Tous les pieds</option>
-          <option value="Droit">Droit</option>
-          <option value="Gauche">Gauche</option>
-          <option value="Ambidextre">Ambidextre</option>
+          {STRONG_FOOT_OPTIONS.map((f) => (
+            <option key={f.value} value={f.value}>{f.label}</option>
+          ))}
         </select>
 
         <select

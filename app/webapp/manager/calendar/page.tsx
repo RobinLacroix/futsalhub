@@ -54,6 +54,9 @@ import {
   Filter
 } from 'lucide-react';
 import { DurationSlider } from './components/DurationSlider';
+import { ConvocationControls } from './components/ConvocationControls';
+import { useAvailability } from '../../hooks/useAvailability';
+import { needsConvocationWarning } from '@/lib/availability';
 
 // Types
 interface Player {
@@ -259,6 +262,8 @@ export default function CalendarPage() {
   const { activeTeam, teams } = useActiveTeam();
   const { activeSeason } = useActiveSeasonContext();
   const { club } = useUserClub();
+  // Portée club : la convocation propose aussi des joueurs d'autres équipes.
+  const availability = useAvailability(club?.id ?? null);
   const [matches, setMatches] = useState<Match[]>([]);
   const [trainings, setTrainings] = useState<Training[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -2723,9 +2728,20 @@ export default function CalendarPage() {
                       <button
                         type="button"
                         onClick={() => {
+                          // Saute les joueurs non disponibles et le dit. Trois
+                          // confirmations à la suite seraient validées sans être
+                          // lues, et la garde ne protégerait plus de rien.
                           const next = { ...(getTrainingValues('players') || {}) };
-                          players.forEach((p) => { if (!next[p.id]) next[p.id] = { id: p.id, status: 'present' }; });
+                          let skipped = 0;
+                          players.forEach((p) => {
+                            if (next[p.id]) return;
+                            if (needsConvocationWarning(availability.statusOf(p.id))) { skipped += 1; return; }
+                            next[p.id] = { id: p.id, status: 'present' };
+                          });
                           setTrainingValue('players', next, { shouldDirty: true });
+                          if (skipped > 0) {
+                            window.alert(`${skipped} joueur${skipped > 1 ? 's' : ''} non disponible${skipped > 1 ? "s n'ont" : " n'a"} pas été convoqué${skipped > 1 ? 's' : ''}. Ajoutez-les un par un si vous les voulez au groupe.`);
+                          }
                         }}
                         className="text-xs px-2.5 py-1 rounded bg-[#16a34a] text-white hover:bg-[#15803d]"
                       >
@@ -2827,32 +2843,23 @@ export default function CalendarPage() {
                               </button>
                             </div>
                           ) : (
-                            <div
-                              className="flex items-center gap-2 touch-manipulation"
-                              onTouchStart={(e) => (e.currentTarget as HTMLElement).dataset.touchX = String(e.changedTouches?.[0]?.clientX ?? 0)}
-                              onTouchEnd={(e) => {
-                                const el = e.currentTarget as HTMLElement;
-                                const start = Number(el.dataset.touchX) || 0;
-                                const end = e.changedTouches?.[0]?.clientX ?? 0;
-                                if (end - start > 60) setTrainingValue('players', { ...getTrainingValues('players'), [player.id]: { id: player.id, status: 'injured' } });
+                            /* Extrait dans `components/ConvocationControls` : la
+                               règle du dépôt interdit d'ajouter du code à ce
+                               fichier sans décomposer la portion touchée. */
+                            <ConvocationControls
+                              playerName={`${player.first_name} ${player.last_name}`}
+                              status={availability.statusOf(player.id)}
+                              row={availability.rowOf(player.id)}
+                              onConvoke={() => {
+                                // Convoquer un joueur non disponible demande une
+                                // confirmation explicite ; le marquer blessé n'en
+                                // demande jamais.
+                                if (!availability.confirmConvocation(player.id, `${player.first_name} ${player.last_name}`)) return;
+                                setTrainingValue('players', { ...getTrainingValues('players'), [player.id]: { id: player.id, status: 'present' } });
                               }}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => setTrainingValue('players', { ...getTrainingValues('players'), [player.id]: { id: player.id, status: 'present' } })}
-                                className="text-xs px-3 py-1.5 rounded bg-[#16a34a] text-white hover:bg-[#15803d]"
-                              >
-                                Convoquer
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setTrainingValue('players', { ...getTrainingValues('players'), [player.id]: { id: player.id, status: 'injured' } })}
-                                className="text-xs px-3 py-1.5 rounded bg-rose-500 text-white hover:bg-rose-600"
-                                title="Marquer blessé (glisser à droite sur mobile)"
-                              >
-                                Marquer blessé
-                              </button>
-                            </div>
+                              onMarkInjured={() => setTrainingValue('players', { ...getTrainingValues('players'), [player.id]: { id: player.id, status: 'injured' } })}
+                              onSwipeInjured={() => setTrainingValue('players', { ...getTrainingValues('players'), [player.id]: { id: player.id, status: 'injured' } })}
+                            />
                           )}
                         </div>
                       ); })}

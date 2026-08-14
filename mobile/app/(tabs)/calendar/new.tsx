@@ -1,36 +1,46 @@
-import { useEffect, useMemo, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Modal,
-  Pressable,
-} from 'react-native';
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import { View, StyleSheet, ScrollView, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
-
-let DateTimePicker: import('react').ComponentType<any> | null = null;
-try {
-  DateTimePicker = require('@react-native-community/datetimepicker').default;
-} catch {
-  // Expo Go peut ne pas charger le module natif sur certaines versions
-}
-
 import { format, parse, isValid } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
-import { getPlayersByTeam, getPlayersByClubWithTeams, type PlayerWithTeams } from '../../../lib/services/players';
+import { useTheme } from '../../../contexts/ThemeContext';
+import {
+  getPlayersByTeam,
+  getPlayersByClubWithTeams,
+  type PlayerWithTeams,
+} from '../../../lib/services/players';
 import { createTraining, updateTrainingAttendance } from '../../../lib/services/trainings';
+import { haptics } from '../../../lib/design/haptics';
+import {
+  Text,
+  Card,
+  Button,
+  Field,
+  Input,
+  ChipGroup,
+  Section,
+  EmptyState,
+  SkeletonList,
+  type ChipOption,
+} from '../../../components/ui';
+import { PlayerIdentity } from '../../../components/players/PlayerIdentity';
+import { AvailabilityPill } from '../../../components/performance/AvailabilityPill';
+import { useAvailability } from '../../../hooks/useAvailability';
+import { needsConvocationWarning } from '../../../lib/availability';
+import { AttendancePicker } from '../../../components/training/AttendancePicker';
+import { InvitePlayersSheet } from '../../../components/match/InvitePlayersSheet';
+import { DateTimeField, hasNativePicker } from '../../../components/match/DateTimeField';
 import type { Player, PlayerStatus } from '../../../types';
 
-const THEME_OPTIONS = ['Offensif', 'Défensif', 'Transition', 'Supériorité'] as const;
-export type TrainingTheme = (typeof THEME_OPTIONS)[number];
+export type TrainingTheme = 'Offensif' | 'Défensif' | 'Transition' | 'Supériorité';
+
+const THEME_OPTIONS: readonly ChipOption<TrainingTheme>[] = [
+  { value: 'Offensif', label: 'Offensif' },
+  { value: 'Défensif', label: 'Défensif' },
+  { value: 'Transition', label: 'Transition' },
+  { value: 'Supériorité', label: 'Supériorité' },
+];
 
 const defaultDate = () => {
   const d = new Date();
@@ -39,39 +49,32 @@ const defaultDate = () => {
   return d;
 };
 
-const useNativePicker = DateTimePicker != null;
-
-const STATUS_OPTIONS: { value: PlayerStatus; label: string }[] = [
-  { value: 'present', label: '✅' },
-  { value: 'absent', label: '❌' },
-  { value: 'late', label: '⏰' },
-  { value: 'injured', label: '🩹' },
-];
-
 export default function NewTrainingScreen() {
   const router = useRouter();
+  const { theme } = useTheme();
+  const c = theme.colors;
   const { activeTeamId, activeTeam, teams } = useActiveTeam();
+  // Portée club et non équipe : la feuille d'invitation propose des joueurs
+  // d'autres équipes, qui n'auraient sinon aucune pastille.
+  const availability = useAvailability();
+
   const [players, setPlayers] = useState<Player[]>([]);
   const [loadingPlayers, setLoadingPlayers] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const [dateTime, setDateTime] = useState(defaultDate);
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showTimePicker, setShowTimePicker] = useState(false);
   const [dateStr, setDateStr] = useState('');
   const [timeStr, setTimeStr] = useState('');
   const [location, setLocation] = useState('');
   const [keyPrinciple, setKeyPrinciple] = useState('');
-  const [theme, setTheme] = useState<TrainingTheme>('Offensif');
-  /** Pour l'effectif : id -> statut (présent/absent/retard/blessé). Absent = pas convoqué. */
-  const [attendanceSquad, setAttendanceSquad] = useState<Record<string, PlayerStatus>>({});
+  const [trainingTheme, setTrainingTheme] = useState<TrainingTheme>('Offensif');
+
+  /** id → statut. Absent de l'objet = joueur non convoqué. */
+  const [attendance, setAttendance] = useState<Record<string, PlayerStatus>>({});
 
   const [clubPlayersWithTeams, setClubPlayersWithTeams] = useState<PlayerWithTeams[]>([]);
-  const [inviteFilterTeamId, setInviteFilterTeamId] = useState<string>('all');
-  const [inviteModalOpen, setInviteModalOpen] = useState(false);
-  const [inviteModalSelectedIds, setInviteModalSelectedIds] = useState<Record<string, boolean>>({});
-  const [invitedTrainingPlayers, setInvitedTrainingPlayers] = useState<Record<string, PlayerStatus>>({});
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [invited, setInvited] = useState<Record<string, PlayerStatus>>({});
 
   useEffect(() => {
     const d = defaultDate();
@@ -89,7 +92,9 @@ export default function NewTrainingScreen() {
       .then((data) => mounted && setPlayers(data.filter((p) => p.status !== 'left')))
       .catch(() => mounted && setPlayers([]))
       .finally(() => mounted && setLoadingPlayers(false));
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [activeTeamId]);
 
   const clubId = activeTeam?.club_id;
@@ -102,663 +107,358 @@ export default function NewTrainingScreen() {
     getPlayersByClubWithTeams(clubId)
       .then((data) => mounted && setClubPlayersWithTeams(data))
       .catch(() => mounted && setClubPlayersWithTeams([]));
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [clubId]);
 
+  // ── Dérivés ───────────────────────────────────────────────────────────────
+
   const squadIds = useMemo(() => new Set(players.map((p) => p.id)), [players]);
-  const otherTeamPlayersForForm = useMemo(
-    () => clubPlayersWithTeams.filter(({ player }) => !squadIds.has(player.id) && player.status !== 'left'),
+
+  const inviteCandidates = useMemo(
+    () =>
+      clubPlayersWithTeams.filter(
+        ({ player }) => !squadIds.has(player.id) && player.status !== 'left'
+      ),
     [clubPlayersWithTeams, squadIds]
   );
-  const otherTeamPlayersFiltered = useMemo(() => {
-    if (inviteFilterTeamId === 'all') return otherTeamPlayersForForm;
-    return otherTeamPlayersForForm.filter(({ teamIds }) => teamIds.includes(inviteFilterTeamId));
-  }, [otherTeamPlayersForForm, inviteFilterTeamId]);
 
-  const getPlayerDisplayName = (playerId: string) => {
-    const found = clubPlayersWithTeams.find(({ player }) => player.id === playerId);
-    if (found) return `${found.player.first_name} ${found.player.last_name}`;
-    return `Joueur ${playerId.slice(0, 8)}`;
-  };
+  const invitedIds = useMemo(() => Object.keys(invited), [invited]);
+  const invitedSet = useMemo(() => new Set(invitedIds), [invitedIds]);
+  const convokedCount = Object.keys(attendance).length + invitedIds.length;
 
-  const addSquadPlayer = (playerId: string, status: PlayerStatus) => {
-    setAttendanceSquad((prev) => ({ ...prev, [playerId]: status }));
-  };
-  const removeSquadPlayer = (playerId: string) => {
-    setAttendanceSquad((prev) => {
+  const displayName = useCallback(
+    (playerId: string) => {
+      const found = clubPlayersWithTeams.find(({ player }) => player.id === playerId);
+      return found
+        ? `${found.player.first_name} ${found.player.last_name}`
+        : `Joueur ${playerId.slice(0, 8)}`;
+    },
+    [clubPlayersWithTeams]
+  );
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+
+  /**
+   * Saute les joueurs non disponibles et le dit. Trois boîtes de dialogue à la
+   * suite seraient validées sans être lues, et la garde ne protégerait plus de
+   * rien ; le coach reste libre de les ajouter un par un.
+   */
+  const convokeAll = () => {
+    const eligible = players.filter((p) => !needsConvocationWarning(availability.statusOf(p.id)));
+    const skipped = players.length - eligible.length;
+
+    haptics.success();
+    setAttendance((prev) => {
       const next = { ...prev };
-      delete next[playerId];
+      eligible.forEach((p) => {
+        if (!next[p.id]) next[p.id] = 'present';
+      });
       return next;
     });
-  };
-  const setSquadPlayerStatus = (playerId: string, status: PlayerStatus) => {
-    setAttendanceSquad((prev) => ({ ...prev, [playerId]: status }));
-  };
 
-  const convokeAllSquad = () => {
-    setAttendanceSquad((prev) => {
-      const next = { ...prev };
-      players.forEach((p) => { if (!next[p.id]) next[p.id] = 'present'; });
-      return next;
-    });
-  };
-  const clearAllSquad = () => setAttendanceSquad({});
-
-  const onDateChange = (_: unknown, value?: Date) => {
-    setShowDatePicker(Platform.OS === 'ios' ? true : false);
-    if (value) {
-      const next = new Date(dateTime);
-      next.setFullYear(value.getFullYear(), value.getMonth(), value.getDate());
-      setDateTime(next);
+    if (skipped > 0) {
+      Alert.alert(
+        'Groupe convoqué',
+        `${skipped} joueur${skipped > 1 ? 's' : ''} non disponible${skipped > 1 ? "s n'ont" : " n'a"} pas été convoqué${skipped > 1 ? 's' : ''}. Ajoute-les un par un si tu les veux au groupe.`,
+      );
     }
   };
 
-  const onTimeChange = (_: unknown, value?: Date) => {
-    setShowTimePicker(Platform.OS === 'ios' ? true : false);
-    if (value) {
-      const next = new Date(dateTime);
-      next.setHours(value.getHours(), value.getMinutes(), 0, 0);
-      setDateTime(next);
-    }
+  const clearAll = () => {
+    haptics.tapMedium();
+    setAttendance({});
   };
 
-  const getSubmitDate = (): Date | null => {
-    if (useNativePicker) return dateTime;
-    const dParsed = parse(dateStr.trim(), 'dd/MM/yyyy', new Date(), { locale: fr });
-    if (!isValid(dParsed)) return null;
+  const resolveDate = (): Date | null => {
+    if (hasNativePicker) return dateTime;
+    const parsed = parse(dateStr.trim(), 'dd/MM/yyyy', new Date(), { locale: fr });
+    if (!isValid(parsed)) return null;
     const [h, m] = timeStr.trim().split(':').map(Number);
     if (Number.isNaN(h) || Number.isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) return null;
-    const out = new Date(dParsed);
+    const out = new Date(parsed);
     out.setHours(h, m, 0, 0);
     return out;
   };
 
-  const handleSubmit = async () => {
+  const submit = async () => {
     if (!activeTeamId) {
-      Alert.alert('Erreur', 'Aucune équipe sélectionnée. Choisissez une équipe dans l\'onglet Accueil.');
+      Alert.alert('Aucune équipe', "Choisissez une équipe depuis l'accueil.");
       return;
     }
-    const submitDate = getSubmitDate();
+    const submitDate = resolveDate();
     if (!submitDate) {
       Alert.alert('Date ou heure invalide', 'Date : JJ/MM/AAAA. Heure : HH:MM (ex. 18:30).');
       return;
     }
+    const convokedPlayerIds = [...Object.keys(attendance), ...invitedIds];
+    if (convokedPlayerIds.length === 0) {
+      haptics.error();
+      Alert.alert(
+        'Aucun joueur convoqué',
+        'Convoquez au moins un joueur, ou marquez-le blessé, pour créer la séance.'
+      );
+      return;
+    }
+
     setSaving(true);
-    setError(null);
     try {
-      const squadIdsInSession = Object.keys(attendanceSquad);
-      const invitedIds = Object.keys(invitedTrainingPlayers);
-      const convokedPlayerIds = [...squadIdsInSession, ...invitedIds];
-      if (convokedPlayerIds.length === 0) {
-        Alert.alert('Joueurs convoqués', 'Sélectionnez au moins un joueur (convoquer ou marquer blessé) pour cette séance.');
-        setSaving(false);
-        return;
-      }
       const training = await createTraining(activeTeamId, {
         date: submitDate,
         location: location.trim(),
-        theme,
+        theme: trainingTheme,
         key_principle: keyPrinciple.trim(),
         convoked_player_ids: convokedPlayerIds,
       });
-      const initialAttendance: Record<string, PlayerStatus> = {
-        ...attendanceSquad,
-        ...Object.fromEntries(invitedIds.map((id) => [id, 'present' as PlayerStatus])),
-      };
-      await updateTrainingAttendance(training.id, initialAttendance, convokedPlayerIds);
+      await updateTrainingAttendance(
+        training.id,
+        { ...attendance, ...invited },
+        convokedPlayerIds
+      );
+      haptics.success();
       Alert.alert('Entraînement créé', undefined, [
         {
           text: 'Voir le détail',
-          onPress: () => router.replace(`/(tabs)/calendar/training/${training.id}`),
+          onPress: () => router.replace(`/(tabs)/calendar/training/${training.id}` as never),
         },
-        {
-          text: 'Retour au calendrier',
-          onPress: () => router.replace('/(tabs)/calendar'),
-        },
+        { text: 'Retour au calendrier', onPress: () => router.replace('/(tabs)/calendar') },
       ]);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Impossible de créer l\'entraînement';
-      setError(msg);
-      Alert.alert('Erreur', msg);
+      haptics.error();
+      Alert.alert('Erreur', e instanceof Error ? e.message : "Impossible de créer l'entraînement");
     } finally {
       setSaving(false);
     }
   };
 
+  // ── Rendu ─────────────────────────────────────────────────────────────────
+
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.root, { backgroundColor: c.bg.canvas }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={100}
     >
       <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { gap: theme.space.xl }]}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>Nouvel entraînement</Text>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>Date</Text>
-          {useNativePicker ? (
-            <TouchableOpacity
-              style={styles.pickerTouch}
-              onPress={() => setShowDatePicker(true)}
-            >
-              <Text style={styles.pickerText}>{format(dateTime, 'EEEE d MMMM yyyy', { locale: fr })}</Text>
-              <Text style={styles.pickerHint}>Appuyer pour ouvrir le sélecteur</Text>
-            </TouchableOpacity>
-          ) : (
-            <>
-              <TextInput
-                style={styles.input}
-                value={dateStr}
-                onChangeText={setDateStr}
-                placeholder="JJ/MM/AAAA (ex. 22/02/2025)"
-                placeholderTextColor="#9ca3af"
-              />
-              <Text style={styles.pickerHint}>Format : jour/mois/année</Text>
-            </>
-          )}
-        </View>
-        <View style={styles.field}>
-          <Text style={styles.label}>Heure</Text>
-          {useNativePicker ? (
-            <TouchableOpacity
-              style={styles.pickerTouch}
-              onPress={() => setShowTimePicker(true)}
-            >
-              <Text style={styles.pickerText}>{format(dateTime, 'HH:mm')}</Text>
-              <Text style={styles.pickerHint}>Appuyer pour ouvrir le sélecteur</Text>
-            </TouchableOpacity>
-          ) : (
-            <>
-              <TextInput
-                style={styles.input}
-                value={timeStr}
-                onChangeText={setTimeStr}
-                placeholder="HH:MM (ex. 18:30)"
-                placeholderTextColor="#9ca3af"
-                keyboardType="numbers-and-punctuation"
-              />
-              <Text style={styles.pickerHint}>Format : heures:minutes</Text>
-            </>
-          )}
-        </View>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>Lieu</Text>
-          <TextInput
-            style={styles.input}
+        <Card variant="raised" padding="lg" style={{ gap: theme.space.lg }}>
+          <DateTimeField
+            value={dateTime}
+            onChange={setDateTime}
+            dateText={dateStr}
+            timeText={timeStr}
+            onDateTextChange={setDateStr}
+            onTimeTextChange={setTimeStr}
+          />
+          <Input
+            label="Lieu"
+            optional
             value={location}
             onChangeText={setLocation}
-            placeholder="ex: Gymnase Jean Jaurès (optionnel)"
-            placeholderTextColor="#9ca3af"
+            placeholder="ex : Gymnase Jean Jaurès"
           />
-        </View>
-        <View style={styles.field}>
-          <Text style={styles.label}>Thème de séance</Text>
-          <Text style={styles.themeHint}>Choisir parmi :</Text>
-          <View style={styles.themeRow}>
-            {THEME_OPTIONS.map((t) => (
-              <TouchableOpacity
-                key={t}
-                style={[styles.themeChip, theme === t && styles.themeChipActive]}
-                onPress={() => setTheme(t)}
-              >
-                <Text style={[styles.themeChipText, theme === t && styles.themeChipTextActive]}>
-                  {t}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-        <View style={styles.field}>
-          <Text style={styles.label}>Principe clé (optionnel)</Text>
-          <TextInput
-            style={styles.input}
+          <Field label="Thème de séance">
+            <ChipGroup
+              label="Thème de séance"
+              options={THEME_OPTIONS}
+              value={trainingTheme}
+              onChange={setTrainingTheme}
+            />
+          </Field>
+          <Input
+            label="Principe clé"
+            optional
             value={keyPrinciple}
             onChangeText={setKeyPrinciple}
-            placeholder="ex: Conserver le ballon, contre-attaque..."
-            placeholderTextColor="#9ca3af"
+            placeholder="ex : conserver le ballon sous pression"
+            hint="Le fil conducteur de la séance, rappelé sur la fiche."
           />
-        </View>
+        </Card>
 
-        <Text style={styles.sectionTitle}>Joueurs convoqués</Text>
-        <Text style={styles.themeHint}>
-          Seuls les joueurs cochés verront cette séance dans leur calendrier.
-        </Text>
-        {!loadingPlayers && players.length > 0 && (
-          <View style={styles.convocActions}>
-            <TouchableOpacity style={styles.convocAllBtn} onPress={convokeAllSquad} activeOpacity={0.8}>
-              <Text style={styles.convocAllBtnText}>Convoquer tous</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.convocClearBtn} onPress={clearAllSquad} activeOpacity={0.8}>
-              <Text style={styles.convocClearBtnText}>Tout retirer</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-        {loadingPlayers ? (
-          <ActivityIndicator size="small" color="#3b82f6" style={styles.loader} />
-        ) : players.length === 0 ? (
-          <Text style={styles.emptyText}>Aucun joueur dans cette équipe</Text>
-        ) : (
-          players.map((p) => {
-            const status = attendanceSquad[p.id];
-            return (
-              <View key={p.id} style={[styles.playerRow, status && styles.playerRowConvoqued]}>
-                <View style={styles.playerInfo}>
-                  {p.number != null && (
-                    <View style={styles.numberBadge}>
-                      <Text style={styles.numberText}>{p.number}</Text>
-                    </View>
-                  )}
-                  <Text style={styles.playerName}>
-                    {p.first_name} {p.last_name}
-                  </Text>
-                </View>
-                {status != null ? (
-                  <>
-                    <View style={styles.statusRow}>
-                      {STATUS_OPTIONS.map((opt) => (
-                        <TouchableOpacity
-                          key={opt.value}
-                          onPress={() => setSquadPlayerStatus(p.id, opt.value)}
-                          style={[styles.statusChip, status === opt.value && styles.statusChipActive]}
-                        >
-                          <Text style={styles.statusChipText}>{opt.label}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                    <TouchableOpacity onPress={() => removeSquadPlayer(p.id)} style={styles.removeInvitedBtn}>
-                      <Text style={styles.removeInvitedText}>Retirer</Text>
-                    </TouchableOpacity>
-                  </>
-                ) : (
-                  <View style={styles.convoqueActions}>
-                    <TouchableOpacity style={styles.convoqueBtn} onPress={() => addSquadPlayer(p.id, 'present')} activeOpacity={0.8}>
-                      <Text style={styles.convoqueBtnText}>Convoquer</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.marquerBlesseBtn} onPress={() => addSquadPlayer(p.id, 'injured')} activeOpacity={0.8}>
-                      <Text style={styles.convoqueBtnText}>Marquer blessé</Text>
-                    </TouchableOpacity>
-                  </View>
+        <Section
+          title="Convocations"
+          subtitle={
+            convokedCount > 0
+              ? `${convokedCount} joueur(s) convoqué(s).`
+              : 'Seuls les joueurs convoqués verront cette séance dans leur calendrier.'
+          }
+        >
+          {loadingPlayers ? (
+            <SkeletonList rows={4} />
+          ) : players.length === 0 ? (
+            <EmptyState
+              icon="people-outline"
+              title="Effectif vide"
+              description="Ajoutez des joueurs à l'équipe avant de créer une séance."
+              compact
+            />
+          ) : (
+            <>
+              <View style={[styles.bulkRow, { gap: theme.space.sm }]}>
+                <Button
+                  label="Convoquer tous"
+                  variant="secondary"
+                  size="sm"
+                  icon="checkmark-done-outline"
+                  onPress={convokeAll}
+                />
+                {convokedCount > 0 && (
+                  <Button label="Tout retirer" variant="ghost" size="sm" onPress={clearAll} />
                 )}
               </View>
-            );
-          })
+
+              {players.map((p) => {
+                const status = attendance[p.id];
+                const name = `${p.first_name} ${p.last_name}`;
+                return (
+                  <Card
+                    key={p.id}
+                    variant={status ? 'accent' : 'flat'}
+                    padding="sm"
+                    style={styles.playerCard}
+                  >
+                    <View style={styles.playerHeader}>
+                      <PlayerIdentity
+                        firstName={p.first_name}
+                        lastName={p.last_name}
+                        number={p.number}
+                        highlighted={!!status}
+                        muted={!status}
+                      />
+                      {/* Absente pour un joueur disponible : voir AvailabilityPill. */}
+                      <AvailabilityPill
+                        status={availability.statusOf(p.id)}
+                        row={availability.rowOf(p.id)}
+                      />
+                      {status ? (
+                        <Button
+                          label="Retirer"
+                          variant="ghost"
+                          size="sm"
+                          onPress={() =>
+                            setAttendance((prev) => {
+                              const next = { ...prev };
+                              delete next[p.id];
+                              return next;
+                            })
+                          }
+                        />
+                      ) : (
+                        <Button
+                          label="Convoquer"
+                          variant="secondary"
+                          size="sm"
+                          onPress={() => {
+                            haptics.select();
+                            availability.confirmConvocation(p.id, name, () =>
+                              setAttendance((prev) => ({ ...prev, [p.id]: 'present' })),
+                            );
+                          }}
+                        />
+                      )}
+                    </View>
+                    {status && (
+                      <AttendancePicker
+                        value={status}
+                        playerName={name}
+                        onChange={(s) => setAttendance((prev) => ({ ...prev, [p.id]: s }))}
+                      />
+                    )}
+                  </Card>
+                );
+              })}
+            </>
+          )}
+
+          {inviteCandidates.length > 0 && (
+            <Button
+              label="Ajouter un joueur d'une autre équipe"
+              variant="ghost"
+              icon="person-add-outline"
+              block
+              onPress={() => setInviteOpen(true)}
+            />
+          )}
+        </Section>
+
+        {invitedIds.length > 0 && (
+          <Section title="Joueurs d'autres équipes">
+            {invitedIds.map((playerId) => {
+              const name = displayName(playerId);
+              return (
+                <Card key={playerId} variant="flat" padding="sm" style={styles.playerCard}>
+                  <View style={styles.playerHeader}>
+                    <Text variant="body" weight="600" numberOfLines={1} style={styles.flex}>
+                      {name}
+                    </Text>
+                    <Button
+                      label="Retirer"
+                      variant="ghost"
+                      size="sm"
+                      onPress={() => {
+                        haptics.tapLight();
+                        setInvited((prev) => {
+                          const next = { ...prev };
+                          delete next[playerId];
+                          return next;
+                        });
+                      }}
+                    />
+                  </View>
+                  <AttendancePicker
+                    value={invited[playerId] ?? 'present'}
+                    playerName={name}
+                    onChange={(s) => setInvited((prev) => ({ ...prev, [playerId]: s }))}
+                  />
+                </Card>
+              );
+            })}
+          </Section>
         )}
 
-        {otherTeamPlayersForForm.length > 0 && (
-          <View style={styles.inviteSection}>
-            <TouchableOpacity
-              style={styles.addOtherTeamsBtn}
-              onPress={() => setInviteModalOpen(true)}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.addOtherTeamsBtnText}>+ Ajouter joueurs autres équipes</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {Object.keys(invitedTrainingPlayers).length > 0 && (
-          <View style={styles.invitedSection}>
-            <Text style={styles.invitedSectionTitle}>Joueurs d&apos;autres équipes convoqués</Text>
-            {Object.keys(invitedTrainingPlayers).map((playerId) => (
-              <View key={playerId} style={styles.invitedRow}>
-                <Text style={styles.invitedPlayerName}>{getPlayerDisplayName(playerId)}</Text>
-                <TouchableOpacity
-                  onPress={() => {
-                    setInvitedTrainingPlayers((prev) => {
-                      const next = { ...prev };
-                      delete next[playerId];
-                      return next;
-                    });
-                  }}
-                  style={styles.removeInvitedBtn}
-                >
-                  <Text style={styles.removeInvitedText}>Retirer</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-        <TouchableOpacity
-          style={[styles.submitBtn, saving && styles.submitBtnDisabled]}
-          onPress={handleSubmit}
+        <Button
+          label={saving ? 'Création…' : "Créer l'entraînement"}
+          onPress={submit}
+          loading={saving}
           disabled={saving}
-        >
-          <Text style={styles.submitBtnText}>
-            {saving ? 'Création…' : 'Créer l\'entraînement'}
-          </Text>
-        </TouchableOpacity>
+          size="lg"
+          block
+          style={styles.submit}
+        />
       </ScrollView>
 
-      {useNativePicker && DateTimePicker && (
-        <>
-          <Modal visible={showDatePicker} transparent animationType="slide">
-            <Pressable style={styles.modalOverlay} onPress={() => setShowDatePicker(false)}>
-              <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
-                <View style={styles.modalHeader}>
-                  <Pressable onPress={() => setShowDatePicker(false)}>
-                    <Text style={styles.modalDone}>OK</Text>
-                  </Pressable>
-                </View>
-                <View style={styles.pickerWrapper}>
-                  <DateTimePicker
-                    value={dateTime}
-                    mode="date"
-                    display={Platform.OS === 'ios' ? 'inline' : 'default'}
-                    onChange={(_e: unknown, v?: Date) => {
-                      if (v) {
-                        const next = new Date(dateTime);
-                        next.setFullYear(v.getFullYear(), v.getMonth(), v.getDate());
-                        setDateTime(next);
-                      }
-                      if (Platform.OS !== 'ios') setShowDatePicker(false);
-                    }}
-                    locale="fr-FR"
-                    textColor="#111111"
-                    themeVariant="light"
-                  />
-                </View>
-              </View>
-            </Pressable>
-          </Modal>
-          <Modal visible={showTimePicker} transparent animationType="slide">
-            <Pressable style={styles.modalOverlay} onPress={() => setShowTimePicker(false)}>
-              <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
-                <View style={styles.modalHeader}>
-                  <Pressable onPress={() => setShowTimePicker(false)}>
-                    <Text style={styles.modalDone}>OK</Text>
-                  </Pressable>
-                </View>
-                <View style={styles.pickerWrapper}>
-                  <DateTimePicker
-                    value={dateTime}
-                    mode="time"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={(_e: unknown, v?: Date) => {
-                      if (v) {
-                        const next = new Date(dateTime);
-                        next.setHours(v.getHours(), v.getMinutes(), 0, 0);
-                        setDateTime(next);
-                      }
-                      if (Platform.OS !== 'ios') setShowTimePicker(false);
-                    }}
-                    locale="fr-FR"
-                    is24Hour
-                    textColor="#111111"
-                    themeVariant="light"
-                  />
-                </View>
-              </View>
-            </Pressable>
-          </Modal>
-        </>
-      )}
-
-      <Modal visible={inviteModalOpen} transparent animationType="slide">
-        <Pressable style={styles.modalOverlay} onPress={() => setInviteModalOpen(false)}>
-          <View style={styles.inviteModalContent} onStartShouldSetResponder={() => true}>
-            <View style={styles.inviteModalHeader}>
-              <Text style={styles.inviteModalTitle}>Ajouter des joueurs d&apos;autres équipes</Text>
-              <Pressable onPress={() => { setInviteModalOpen(false); setInviteModalSelectedIds({}); }}>
-                <Text style={styles.modalDone}>Fermer</Text>
-              </Pressable>
-            </View>
-            <Text style={styles.label}>Filtrer par équipe</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
-              <TouchableOpacity
-                style={[styles.filterChip, inviteFilterTeamId === 'all' && styles.filterChipActive]}
-                onPress={() => setInviteFilterTeamId('all')}
-              >
-                <Text style={[styles.filterChipText, inviteFilterTeamId === 'all' && styles.filterChipTextActive]}>
-                  Toutes
-                </Text>
-              </TouchableOpacity>
-              {teams.filter((t) => t.id !== activeTeamId).map((t) => (
-                <TouchableOpacity
-                  key={t.id}
-                  style={[styles.filterChip, inviteFilterTeamId === t.id && styles.filterChipActive]}
-                  onPress={() => setInviteFilterTeamId(t.id)}
-                >
-                  <Text style={[styles.filterChipText, inviteFilterTeamId === t.id && styles.filterChipTextActive]}>
-                    {t.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <ScrollView style={styles.inviteModalList}>
-              {otherTeamPlayersFiltered.map(({ player, teamNames }) => (
-                <TouchableOpacity
-                  key={player.id}
-                  style={styles.inviteModalPlayerRow}
-                  onPress={() =>
-                    setInviteModalSelectedIds((prev) => ({ ...prev, [player.id]: !prev[player.id] }))
-                  }
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.inviteModalPlayerName}>
-                    {player.first_name} {player.last_name}
-                    {teamNames.length > 0 ? ` (${teamNames.join(', ')})` : ''}
-                  </Text>
-                  <View style={[styles.checkbox, inviteModalSelectedIds[player.id] && styles.checkboxChecked]}>
-                    {inviteModalSelectedIds[player.id] ? <Text style={styles.checkboxText}>✓</Text> : null}
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <View style={styles.inviteModalFooter}>
-              <TouchableOpacity style={styles.inviteModalCancelBtn} onPress={() => { setInviteModalOpen(false); setInviteModalSelectedIds({}); }}>
-                <Text style={styles.inviteModalCancelText}>Annuler</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.inviteModalAddBtn}
-                onPress={() => {
-                  const toAdd = Object.entries(inviteModalSelectedIds)
-                    .filter(([, v]) => v)
-                    .map(([id]) => id)
-                    .filter((id) => !invitedTrainingPlayers[id]);
-                  setInvitedTrainingPlayers((prev) => {
-                    const next = { ...prev };
-                    toAdd.forEach((id) => (next[id] = 'present'));
-                    return next;
-                  });
-                  setInviteModalOpen(false);
-                  setInviteModalSelectedIds({});
-                }}
-              >
-                <Text style={styles.inviteModalAddText}>Ajouter la sélection</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Pressable>
-      </Modal>
+      <InvitePlayersSheet
+        availability={availability}
+        visible={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        candidates={inviteCandidates}
+        teams={teams.filter((t) => t.id !== activeTeamId)}
+        alreadyInvited={invitedSet}
+        onConfirm={(ids) => {
+          setInvited((prev) => {
+            const next = { ...prev };
+            ids.forEach((id) => {
+              if (!next[id]) next[id] = 'present';
+            });
+            return next;
+          });
+          haptics.success();
+          setInviteOpen(false);
+        }}
+      />
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f3f4f6' },
-  scroll: { flex: 1 },
-  content: { padding: 16, paddingBottom: 32 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  backBtn: { marginBottom: 16 },
-  backBtnText: { fontSize: 16, color: '#3b82f6' },
-  title: { fontSize: 20, fontWeight: '700', color: '#111', marginBottom: 20 },
-  field: { marginBottom: 16 },
-  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 6 },
-  input: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  pickerTouch: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  pickerText: { fontSize: 16, color: '#111', fontWeight: '500' },
-  pickerHint: { fontSize: 12, color: '#9ca3af', marginTop: 4 },
-  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
-  modalContent: {
-    backgroundColor: '#ffffff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingBottom: 24,
-  },
-  modalHeader: { flexDirection: 'row', justifyContent: 'flex-end', padding: 16 },
-  modalDone: { fontSize: 17, fontWeight: '600', color: '#3b82f6' },
-  pickerWrapper: {
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
-    minHeight: 220,
-    width: '100%',
-  },
-  themeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  themeChip: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    backgroundColor: '#e5e7eb',
-  },
-  themeHint: { fontSize: 12, color: '#6b7280', marginBottom: 8 },
-  themeChipActive: { backgroundColor: '#3b82f6' },
-  themeChipText: { fontSize: 14, fontWeight: '500', color: '#374151' },
-  themeChipTextActive: { color: '#fff' },
-  sectionTitle: { fontSize: 18, fontWeight: '600', marginTop: 8, marginBottom: 12 },
-  convocActions: { flexDirection: 'row', gap: 8, marginBottom: 12, marginTop: 4 },
-  convocAllBtn: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: '#16a34a' },
-  convocAllBtnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
-  convocClearBtn: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: '#e5e7eb' },
-  convocClearBtnText: { color: '#374151', fontWeight: '600', fontSize: 13 },
-  loader: { marginVertical: 16 },
-  emptyText: { fontSize: 14, color: '#6b7280', marginBottom: 16 },
-  playerRow: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 8,
-  },
-  playerRowConvoqued: { borderWidth: 2, borderColor: '#3b82f6', backgroundColor: '#eff6ff' },
-  playerInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
-  convoqueCheck: { marginTop: 4 },
-  convoqueText: { fontSize: 13, color: '#6b7280', fontWeight: '500' },
-  convoqueActions: { flexDirection: 'row', gap: 8, marginTop: 4, flexWrap: 'wrap' },
-  convoqueBtn: { paddingVertical: 8, paddingHorizontal: 14, backgroundColor: '#16a34a', borderRadius: 8 },
-  marquerBlesseBtn: { paddingVertical: 8, paddingHorizontal: 14, backgroundColor: '#e11d48', borderRadius: 8 },
-  convoqueBtnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
-  numberBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#3b82f6',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 10,
-  },
-  numberText: { color: '#fff', fontWeight: '700', fontSize: 12 },
-  playerName: { fontSize: 15, fontWeight: '600', color: '#111' },
-  errorText: { fontSize: 14, color: '#dc2626', marginTop: 12 },
-  submitBtn: {
-    marginTop: 24,
-    padding: 16,
-    backgroundColor: '#22c55e',
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  submitBtnDisabled: { opacity: 0.6 },
-  submitBtnText: { color: '#fff', fontWeight: '600', fontSize: 16 },
-  inviteSection: { marginTop: 16, marginBottom: 8 },
-  addOtherTeamsBtn: {
-    padding: 14,
-    backgroundColor: '#16a34a',
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  addOtherTeamsBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
-  invitedSection: { marginTop: 16, marginBottom: 8 },
-  invitedSectionTitle: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 10 },
-  invitedRow: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  invitedPlayerName: { fontSize: 15, fontWeight: '600', color: '#111', marginBottom: 8 },
-  statusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
-  statusChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    backgroundColor: '#e5e7eb',
-  },
-  statusChipActive: { backgroundColor: '#3b82f6' },
-  statusChipText: { fontSize: 14 },
-  removeInvitedBtn: { alignSelf: 'flex-start', paddingVertical: 4 },
-  removeInvitedText: { fontSize: 13, color: '#dc2626', fontWeight: '500' },
-  inviteModalContent: {
-    backgroundColor: '#fff',
-    marginTop: 80,
-    marginHorizontal: 16,
-    borderRadius: 16,
-    maxHeight: '80%',
-    padding: 16,
-  },
-  inviteModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  inviteModalTitle: { fontSize: 18, fontWeight: '700', color: '#111', flex: 1 },
-  filterRow: { marginBottom: 12, maxHeight: 44 },
-  filterChip: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    backgroundColor: '#e5e7eb',
-    marginRight: 8,
-  },
-  filterChipActive: { backgroundColor: '#16a34a' },
-  filterChipText: { fontSize: 14, fontWeight: '500', color: '#374151' },
-  filterChipTextActive: { color: '#fff' },
-  inviteModalList: { maxHeight: 280, marginBottom: 16 },
-  inviteModalPlayerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
-  },
-  inviteModalPlayerName: { fontSize: 15, color: '#111', flex: 1 },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#d1d5db',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkboxChecked: { backgroundColor: '#16a34a', borderColor: '#16a34a' },
-  checkboxText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  inviteModalFooter: { flexDirection: 'row', gap: 12, justifyContent: 'flex-end' },
-  inviteModalCancelBtn: { paddingVertical: 12, paddingHorizontal: 20 },
-  inviteModalCancelText: { fontSize: 16, color: '#6b7280', fontWeight: '500' },
-  inviteModalAddBtn: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    backgroundColor: '#16a34a',
-    borderRadius: 10,
-  },
-  inviteModalAddText: { fontSize: 16, color: '#fff', fontWeight: '600' },
+  root: { flex: 1 },
+  flex: { flex: 1 },
+  content: { padding: 16, paddingBottom: 40 },
+  bulkRow: { flexDirection: 'row', flexWrap: 'wrap' },
+  playerCard: { gap: 10 },
+  playerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  submit: { marginTop: 8 },
 });

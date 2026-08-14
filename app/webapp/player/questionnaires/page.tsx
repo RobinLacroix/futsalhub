@@ -4,8 +4,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { getMyPendingFeedbackTokens, type MyPendingFeedbackRow } from '@/lib/services/playerConvocationsService';
-import { getFeedbackSessionByToken, submitTrainingFeedback } from '@/lib/services';
-import { AlertCircle, CheckCircle2, ChevronRight, FileText, Loader2, MessageCircle, RefreshCw, X } from 'lucide-react';
+import { getFeedbackSessionByToken, submitTrainingFeedback, reportPainByToken } from '@/lib/services';
+import { toPayload } from '@/lib/painMap';
+import BodyMap, { type PainSelection } from '@/components/BodyMap';
+import { AlertCircle, Activity, CheckCircle2, ChevronRight, FileText, Loader2, MessageCircle, RefreshCw, X } from 'lucide-react';
+
+type Onset = 'aigu' | 'chronique' | null;
 
 // ─── Theme FM light ───────────────────────────────────────────────────────────
 
@@ -57,6 +61,8 @@ export default function PlayerQuestionnairesPage() {
   const [sessionTheme,    setSessionTheme]    = useState<string | null>(null);
   const [form,            setForm]            = useState<FormValues>(INITIAL_FORM);
   const [comment,         setComment]         = useState('');
+  const [pain,            setPain]            = useState<PainSelection>({});
+  const [onset,           setOnset]           = useState<Onset>(null);
   const [submitting,      setSubmitting]      = useState(false);
   const [submitted,       setSubmitted]       = useState(false);
 
@@ -85,6 +91,8 @@ export default function PlayerQuestionnairesPage() {
     setSubmitted(false);
     setForm(INITIAL_FORM);
     setComment('');
+    setPain({});
+    setOnset(null);
     setSessionDate(null);
     setSessionTheme(null);
 
@@ -127,6 +135,10 @@ export default function PlayerQuestionnairesPage() {
           : 'Une erreur est survenue.'
         );
       } else {
+        const zones = toPayload(pain);
+        if (zones.length > 0) {
+          await reportPainByToken(activeItem.token, zones, null, onset);
+        }
         setSubmitted(true);
         setItems(prev => prev.filter(i => i.token !== activeItem.token));
       }
@@ -143,6 +155,8 @@ export default function PlayerQuestionnairesPage() {
     setSubmitted(false);
     setForm(INITIAL_FORM);
     setComment('');
+    setPain({});
+    setOnset(null);
   };
 
   const allFilled = Object.values(form).every(v => v !== null);
@@ -349,6 +363,34 @@ export default function PlayerQuestionnairesPage() {
                         resize: 'vertical', fontFamily: 'inherit', outline: 'none', lineHeight: 1.5,
                       }}
                     />
+                  </div>
+
+                  {/* Body-map douleur */}
+                  <div style={{ borderTop: `1px solid ${T.divider}`, paddingTop: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                      <Activity size={13} color={T.red} />
+                      <span style={{ fontSize: 11, fontWeight: 700, color: T.textFaint, textTransform: 'uppercase', letterSpacing: '0.6px' }}>
+                        Une douleur ?
+                      </span>
+                      <span style={{ fontSize: 10, color: T.textFaint, background: T.cardBg2, border: `1px solid ${T.border}`, borderRadius: 4, padding: '1px 6px' }}>
+                        optionnel
+                      </span>
+                    </div>
+                    <BodyMap value={pain} onChange={setPain} />
+                    {Object.keys(pain).length > 0 && (
+                      <div style={{ marginTop: 14 }}>
+                        <p style={{ fontSize: 11, fontWeight: 700, color: T.textFaint, textTransform: 'uppercase', letterSpacing: '0.6px', margin: '0 0 6px' }}>Depuis quand ?</p>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          {([['aigu', 'Récent / aigu'], ['chronique', 'Qui traîne']] as const).map(([v, lbl]) => (
+                            <button key={v} type="button" onClick={() => setOnset(o => (o === v ? null : v))}
+                              style={{ flex: 1, padding: '8px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                                border: `1.5px solid ${onset === v ? T.navy : T.border}`, background: onset === v ? T.navy : T.cardBg2, color: onset === v ? '#fff' : T.textMuted }}>
+                              {lbl}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Submit */}

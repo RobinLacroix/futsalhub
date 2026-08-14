@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Calendar, UserCircle, FileText } from 'lucide-react';
+import PainReportButton from '@/components/PainReportButton';
 
 const PLAYER_TABS = [
   { href: '/webapp/player/calendar', label: 'Calendrier', icon: Calendar },
@@ -16,6 +17,8 @@ export default function PlayerLayout({ children }: { children: React.ReactNode }
   return (
     <div className="min-h-[calc(100dvh-3.5rem)] md:min-h-screen pb-20 md:pb-0">
       {children}
+
+      <PainReportButton />
 
       {/* Barre d'onglets mobile (style app) */}
       <nav

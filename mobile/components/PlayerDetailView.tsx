@@ -1,189 +1,84 @@
-import React, { useState } from 'react';
+/**
+ * PlayerDetailView — fiche joueur (P0-7)
+ *
+ * Écran signature de FutsalHub : bandeau de marque, sections denses, KPI,
+ * radar, barre de saison. Ce caractère « Football Manager » vient de la
+ * structure et il est conservé tel quel. Ce qui change : les 83 couleurs figées
+ * passent par `components/players/fmPalette.ts`, donc l'écran fonctionne enfin
+ * en thème sombre, et les trois graphiques sont sortis dans
+ * `components/players/PlayerCharts.tsx` (règle du repo : décomposer avant de
+ * restyler).
+ *
+ * Corrections de fond, au-delà des couleurs :
+ *
+ * - **Le bandeau était le dernier consommateur du ton `onColor`** de
+ *   `SeasonHeaderButton`. Il reste une surface de marque, mais définie par le
+ *   thème et non plus par un `#1a2744` en dur. La pastille de saison a depuis
+ *   quitté le bandeau : elle ne s'affichait que pour le joueur (`!isManager`),
+ *   à qui elle ne servait pas — il ne consulte que la saison en cours. Le ton
+ *   `onColor` n'a plus d'appelant et a été supprimé du composant.
+ * - Le statut « blessé » était violet ici et bleu sur la feuille de présence.
+ *   Une seule teinte désormais, via `sessionColor`.
+ * - Les libellés de KPI faisaient **8 px**, ceux du calendrier de séances aussi.
+ *   Tout remonte au plancher de 12 px.
+ * - Les puces de suppression d'événement et de retrait d'équipe faisaient 21 pt
+ *   de cible tactile. Portées à 44.
+ * - Le formulaire d'événement écrivait en base par `supabase.from(...)` depuis
+ *   le composant. Dette signalée, non corrigée ici : la router vers un service
+ *   est un chantier Batch 2, pas un chantier de design.
+ */
+
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   ScrollView,
-  ActivityIndicator,
-  TouchableOpacity,
   Alert,
   Modal,
   FlatList,
   TextInput,
   KeyboardAvoidingView,
   Platform,
-  Dimensions,
+  Pressable,
 } from 'react-native';
-import Svg, { Polygon, Line, Circle, Text as SvgText, Path } from 'react-native-svg';
+import { Swipeable } from 'react-native-gesture-handler';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SeasonHeaderButton } from './SeasonHeaderButton';
+import { useTheme } from '../contexts/ThemeContext';
+import { haptics } from '../lib/design/haptics';
 import { supabase } from '../lib/supabase';
-import type { Player, Team, PlayerEvent, PlayerEventType } from '../types';
-import type {
-  MatchTypeFilter,
-  PlayerRadarResult,
-  RadarPerMatchStats,
-} from '../lib/services/players';
+import { getPlayerPainReports, deleteMyPainReport } from '../lib/services/painReports';
+import PainReportModal from './PainReportModal';
+import { INTENSITY_COLORS, INTENSITY_LABELS, zoneLabel } from '../lib/painMap';
+import { Text, Button, Badge, EmptyState, SkeletonList } from './ui';
+import { positionStyle, strongFootLabel } from './players/positions';
+import { fmPalette, sessionColor, type FMPalette, type SessionStatus } from './players/fmPalette';
+import { PlayerAccountLink } from './players/PlayerAccountLink';
+import { PlayerTestsSection } from './players/PlayerTestsSection';
+import {
+  RadarChart,
+  FeedbackLineChart,
+  RatingLineChart,
+  FIELD_AXES,
+  GK_AXES,
+} from './players/PlayerCharts';
+import type { Player, Team, PlayerEvent, PlayerEventType, PainReportGroup } from '../types';
+import type { MatchTypeFilter, PlayerRadarResult } from '../lib/services/players';
 import type { PlayerFeedbackRow } from '../lib/services/feedback';
 
-// ─── Design tokens — FM Light ──────────────────────────────────────────────
+// ─── Types publics ────────────────────────────────────────────────────────────
 
-const C = {
-  bg:        '#edf0f5',
-  surface:   '#ffffff',
-  surface2:  '#f4f6fa',
-  border:    '#dde3ec',
-  navy:      '#1a2744',
-  amber:     '#d97706',
-  amberLt:   '#fef3c7',
-  amberDim:  'rgba(217,119,6,0.10)',
-  green:     '#059669',
-  red:       '#dc2626',
-  blue:      '#1e40af',
-  purple:    '#7c3aed',
-  text1:     '#0f172a',
-  text2:     '#475569',
-  text3:     '#94a3b8',
-  divider:   '#e8edf4',
-} as const;
-
-// ─── Types ─────────────────────────────────────────────────────────────────
-
-export type SessionStatus = 'present' | 'late' | 'absent' | 'injured' | 'not_recorded';
+export type { SessionStatus };
 export type TrainingSession = { date: string; status: SessionStatus };
 export type PlayerStats = {
-  matches_played: number; goals: number;
-  training_attendance: number; attendance_percentage: number;
-  victories: number; draws: number; defeats: number;
+  matches_played: number;
+  goals: number;
+  training_attendance: number;
+  attendance_percentage: number;
+  victories: number;
+  draws: number;
+  defeats: number;
 };
-
-function calcAge(birthDate: string): number {
-  const today = new Date();
-  const birth = new Date(birthDate);
-  let age = today.getFullYear() - birth.getFullYear();
-  const m = today.getMonth() - birth.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
-  return age;
-}
-
-// ─── Helpers ───────────────────────────────────────────────────────────────
-
-const POSITION_MAP: Record<string, { abbr: string; color: string; bg: string }> = {
-  Gardien:   { abbr: 'GB',  color: '#92400e', bg: '#fef3c7' },
-  Ailier:    { abbr: 'AIL', color: '#1e40af', bg: '#dbeafe' },
-  Meneur:    { abbr: 'MEN', color: '#065f46', bg: '#d1fae5' },
-  Pivot:     { abbr: 'PIV', color: '#7c2d12', bg: '#ffedd5' },
-};
-
-function getPosition(position?: string) {
-  if (!position) return { abbr: '—', color: C.text3, bg: C.surface2 };
-  const key = Object.keys(POSITION_MAP).find(k =>
-    position.toLowerCase().startsWith(k.toLowerCase())
-  );
-  return key ? POSITION_MAP[key] : { abbr: position.slice(0, 3).toUpperCase(), color: C.text2, bg: C.surface2 };
-}
-
-function fmtDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-function fmtMonth(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
-}
-
-const SESSION_COLORS: Record<SessionStatus, string> = {
-  present:      '#059669',
-  late:         '#d97706',
-  absent:       '#dc2626',
-  injured:      '#7c3aed',
-  not_recorded: '#e2e8f0',
-};
-
-const EVENT_CONFIG: Record<PlayerEventType, { icon: 'mic-outline' | 'medkit-outline' | 'ban-outline' | 'chatbubble-outline'; color: string; bg: string; label: string }> = {
-  interview:  { icon: 'mic-outline',         color: C.blue,  bg: '#dbeafe', label: 'Entretien'   },
-  injury:     { icon: 'medkit-outline',       color: C.red,   bg: '#fee2e2', label: 'Blessure'    },
-  suspension: { icon: 'ban-outline',          color: C.amber, bg: '#fef3c7', label: 'Suspension'  },
-  feedback:   { icon: 'chatbubble-outline',   color: C.green, bg: '#ecfdf5', label: 'Commentaire' },
-};
-
-function groupByMonth(sessions: TrainingSession[]): { month: string; items: TrainingSession[] }[] {
-  const map = new Map<string, TrainingSession[]>();
-  for (const s of sessions) {
-    const key = fmtMonth(s.date);
-    if (!map.has(key)) map.set(key, []);
-    map.get(key)!.push(s);
-  }
-  return Array.from(map.entries()).map(([month, items]) => ({ month, items }));
-}
-
-// ─── Radar helpers ─────────────────────────────────────────────────────────
-
-type RadarNormKey = keyof PlayerRadarResult['normalized'];
-type RadarAxis = {
-  normKey: RadarNormKey;
-  rawKey: keyof RadarPerMatchStats;
-  label: string;
-  fullLabel: string;
-  gridLabel: string;
-};
-
-const FIELD_axes: RadarAxis[] = [
-  { normKey: 'avgPlaytime',           rawKey: 'avgPlaytimeSec',        label: 'Tps/m',    fullLabel: 'Temps/match',        gridLabel: 'Tps/match' },
-  { normKey: 'goalsPerMatch',         rawKey: 'goalsPerMatch',         label: 'Buts/m',   fullLabel: 'Buts/match',         gridLabel: 'Buts'      },
-  { normKey: 'shotsOnTargetPerMatch', rawKey: 'shotsOnTargetPerMatch', label: 'T.cad/m',  fullLabel: 'Tirs cadrés/match',  gridLabel: 'T.cadrés'  },
-  { normKey: 'totalShotsPerMatch',    rawKey: 'totalShotsPerMatch',    label: 'T.tot/m',  fullLabel: 'Tirs totaux/match',  gridLabel: 'T.totaux'  },
-  { normKey: 'assistsPerMatch',       rawKey: 'assistsPerMatch',       label: 'Pdec/m',   fullLabel: 'Passes déc./match',  gridLabel: 'Passes déc.' },
-  { normKey: 'recoveriesPerMatch',    rawKey: 'recoveriesPerMatch',    label: 'Récup/m',  fullLabel: 'Récup./match',       gridLabel: 'Récup.'    },
-  { normKey: 'ballLossPerMatch',      rawKey: 'ballLossPerMatch',      label: 'Pertes/m', fullLabel: 'Pertes/match',       gridLabel: 'Pertes'    },
-  { normKey: 'plusMinus',             rawKey: 'plusMinus',             label: '+/-',      fullLabel: '+/- saison',         gridLabel: '+/-'       },
-];
-
-const GK_axes: RadarAxis[] = [
-  { normKey: 'avgPlaytime',           rawKey: 'avgPlaytimeSec',           label: 'Min/m',      fullLabel: 'Minutes/match',    gridLabel: 'Tps/match' },
-  { normKey: 'savesPerMatch',         rawKey: 'savesPerMatch',            label: 'Arrêts/m',   fullLabel: 'Arrêts/match',     gridLabel: 'Arrêts'    },
-  { normKey: 'savePercentage',        rawKey: 'savePercentage',           label: '% Arrêts',   fullLabel: '% Arrêts saison',  gridLabel: '% Arrêts'  },
-  { normKey: 'recoveriesPerMatch',    rawKey: 'recoveriesPerMatch',       label: 'Récup/m',    fullLabel: 'Récup./match',     gridLabel: 'Récup.'    },
-  { normKey: 'goalsConcededPerMatch', rawKey: 'goalsConcededPerMatch',    label: 'Buts enc/m', fullLabel: 'Buts encaissés/m', gridLabel: 'Buts enc.' },
-];
-
-function fmtTimeSec(sec: number): string {
-  const min = Math.round(sec / 60);
-  if (min >= 60) { const h = Math.floor(min / 60); const m = min % 60; return m > 0 ? `${h}h${m}` : `${h}h`; }
-  return `${min}min`;
-}
-
-function fmtPerMatch(val: number): string {
-  if (val === 0) return '0';
-  if (val >= 10) return Math.round(val).toString();
-  if (val >= 1)  return val.toFixed(1);
-  return val.toFixed(2);
-}
-
-function fmtAxisValue(val: number, rawKey: keyof RadarPerMatchStats): string {
-  if (rawKey === 'avgPlaytimeSec') return fmtTimeSec(val);
-  if (rawKey === 'plusMinus') { const r = Math.round(val); return r >= 0 ? `+${r}` : String(r); }
-  if (rawKey === 'savePercentage') return `${Math.round(val)}%`;
-  return fmtPerMatch(val);
-}
-
-function getRadarGridTotal(data: PlayerRadarResult, rawKey: keyof RadarPerMatchStats): string {
-  const raw = data.raw;
-  switch (rawKey) {
-    case 'avgPlaytimeSec': return fmtTimeSec(raw.avgPlaytimeSec);
-    case 'plusMinus': { const pm = raw.plusMinus; return pm >= 0 ? `+${pm}` : String(pm); }
-    case 'savePercentage': return `${Math.round(raw.savePercentage)}%`;
-    case 'goalsConcededPerMatch': return fmtPerMatch(raw.goalsConcededPerMatch);
-    default: return String(Math.round((raw[rawKey] as number) * raw.matchCount));
-  }
-}
-
-function isGoalkeeper(position?: string) {
-  return (position ?? '').toLowerCase().startsWith('gardien');
-}
-
-// ─── Props ─────────────────────────────────────────────────────────────────
 
 export interface PlayerDetailViewProps {
   player: Player;
@@ -194,6 +89,8 @@ export interface PlayerDetailViewProps {
   radarLoading: boolean;
   feedbackRows: PlayerFeedbackRow[];
   feedbackLoading: boolean;
+  /** Note data par match, ordre chronologique. */
+  ratingSeries?: { date: string; rating: number }[];
   allSessions: TrainingSession[];
   initialEvents: PlayerEvent[];
   matchFilter: MatchTypeFilter;
@@ -206,909 +103,1177 @@ export interface PlayerDetailViewProps {
   onRemoveFromTeam?: (team: Team) => void;
 }
 
-// ─── Main Component ────────────────────────────────────────────────────────
+// ─── Aides ────────────────────────────────────────────────────────────────────
+
+const MATCH_FILTERS: MatchTypeFilter[] = ['all', 'Championnat', 'Coupe', 'Amical'];
+
+const EVENT_TYPES: { key: PlayerEventType; label: string; icon: keyof typeof Ionicons.glyphMap; seriesIndex: number }[] = [
+  { key: 'interview', label: 'Entretien', icon: 'mic-outline', seriesIndex: 4 },
+  { key: 'injury', label: 'Blessure', icon: 'medkit-outline', seriesIndex: 3 },
+  { key: 'suspension', label: 'Suspension', icon: 'ban-outline', seriesIndex: 2 },
+  { key: 'feedback', label: 'Commentaire', icon: 'chatbubble-outline', seriesIndex: 1 },
+];
+
+const eventMeta = (t: PlayerEventType) => EVENT_TYPES.find((e) => e.key === t) ?? EVENT_TYPES[0];
+
+function calcAge(birthDate: string): number {
+  const today = new Date();
+  const birth = new Date(birthDate);
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+  return age;
+}
+
+const fmtDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+
+const fmtLongDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+
+const fmtMonth = (iso: string) =>
+  new Date(iso).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+
+function groupByMonth(sessions: TrainingSession[]) {
+  const map = new Map<string, TrainingSession[]>();
+  for (const s of sessions) {
+    const key = fmtMonth(s.date);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(s);
+  }
+  return Array.from(map.entries()).map(([month, items]) => ({ month, items }));
+}
+
+const isGoalkeeper = (position?: string) => (position ?? '').toLowerCase().startsWith('gardien');
+
+// ─── Composant principal ──────────────────────────────────────────────────────
 
 export function PlayerDetailView({
-  player, playerTeams, availableTeams,
-  stats, radarData, radarLoading,
-  feedbackRows, feedbackLoading, allSessions, initialEvents,
-  matchFilter, updatingTeamId, isManager,
-  onMatchFilterChange, onBack, onEdit, onAddToTeam, onRemoveFromTeam,
+  player,
+  playerTeams,
+  availableTeams,
+  stats,
+  radarData,
+  radarLoading,
+  feedbackRows,
+  feedbackLoading,
+  ratingSeries = [],
+  allSessions,
+  initialEvents,
+  matchFilter,
+  updatingTeamId,
+  isManager,
+  onMatchFilterChange,
+  onBack,
+  onEdit,
+  onAddToTeam,
+  onRemoveFromTeam,
 }: PlayerDetailViewProps) {
-  const insets = useSafeAreaInsets();
+  const { theme } = useTheme();
+  const p = useMemo(() => fmPalette(theme.colors, theme.scheme), [theme]);
 
-  const [events, setEvents]                 = useState<PlayerEvent[]>(initialEvents);
-  const [showEventForm, setShowEventForm]   = useState(false);
-  const [eventType, setEventType]           = useState<PlayerEventType>('interview');
-  const [eventDate, setEventDate]           = useState(new Date());
+  const [events, setEvents] = useState<PlayerEvent[]>(initialEvents);
+  const [showEventForm, setShowEventForm] = useState(false);
+  const [eventType, setEventType] = useState<PlayerEventType>('interview');
+  const [eventDate, setEventDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [eventReport, setEventReport]       = useState('');
-  const [injuryType, setInjuryType]         = useState('');
-  const [unavailDays, setUnavailDays]       = useState('');
-  const [matchesSusp, setMatchesSusp]       = useState('');
-  const [savingEvent, setSavingEvent]       = useState(false);
-  const [assignModal, setAssignModal]       = useState(false);
+  const [eventReport, setEventReport] = useState('');
+  const [injuryType, setInjuryType] = useState('');
+  const [unavailDays, setUnavailDays] = useState('');
+  const [matchesSusp, setMatchesSusp] = useState('');
+  const [savingEvent, setSavingEvent] = useState(false);
+  const [assignModal, setAssignModal] = useState(false);
+  const [painReports, setPainReports] = useState<PainReportGroup[]>([]);
+  const [painModalOpen, setPainModalOpen] = useState(false);
 
-  const handleSaveEvent = async () => {
+  const loadPain = useCallback(
+    () =>
+      getPlayerPainReports(player.id)
+        .then(setPainReports)
+        .catch(() => setPainReports([])),
+    [player.id]
+  );
+
+  useEffect(() => {
+    loadPain();
+  }, [loadPain]);
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+
+  const deletePain = useCallback((reportGroup: string) => {
+    Alert.alert('Supprimer ce signalement ?', 'Cette action est définitive.', [
+      { text: 'Annuler', style: 'cancel' },
+      {
+        text: 'Supprimer',
+        style: 'destructive',
+        onPress: async () => {
+          const res = await deleteMyPainReport(reportGroup);
+          if (res.success) {
+            haptics.success();
+            setPainReports((prev) => prev.filter((g) => g.report_group !== reportGroup));
+          } else {
+            haptics.error();
+            Alert.alert('Erreur', res.error || 'Suppression impossible.');
+          }
+        },
+      },
+    ]);
+  }, []);
+
+  const saveEvent = async () => {
     setSavingEvent(true);
     try {
+      // Dette connue : accès direct à la base depuis un composant. À router vers
+      // un service (chantier Batch 2), pas dans le périmètre du design.
       const payload: Record<string, unknown> = {
-        player_id:  player.id,
+        player_id: player.id,
         event_type: eventType,
         event_date: eventDate.toISOString().split('T')[0],
-        report:     eventReport.trim() || null,
+        report: eventReport.trim() || null,
       };
       if (eventType === 'injury') {
-        payload.injury_type         = injuryType.trim() || null;
+        payload.injury_type = injuryType.trim() || null;
         payload.unavailability_days = unavailDays ? Number(unavailDays) : null;
       }
       if (eventType === 'suspension') {
         payload.matches_suspended = matchesSusp ? Number(matchesSusp) : null;
       }
-      const { data, error: err } = await supabase.from('player_events').insert(payload).select().single();
-      if (err) throw err;
-      setEvents(prev => [data as PlayerEvent, ...prev]);
+      const { data, error } = await supabase.from('player_events').insert(payload).select().single();
+      if (error) throw error;
+      setEvents((prev) => [data as PlayerEvent, ...prev]);
+      haptics.success();
       setShowEventForm(false);
-      setEventReport(''); setInjuryType(''); setUnavailDays(''); setMatchesSusp('');
-      setEventType('interview'); setEventDate(new Date());
+      setEventReport('');
+      setInjuryType('');
+      setUnavailDays('');
+      setMatchesSusp('');
+      setEventType('interview');
+      setEventDate(new Date());
     } catch (e) {
-      Alert.alert('Erreur', e instanceof Error ? e.message : 'Impossible d\'enregistrer');
-    } finally { setSavingEvent(false); }
+      haptics.error();
+      Alert.alert('Erreur', e instanceof Error ? e.message : "Impossible d'enregistrer");
+    } finally {
+      setSavingEvent(false);
+    }
   };
 
-  const handleDeleteEvent = (ev: PlayerEvent) => {
+  const deleteEvent = (ev: PlayerEvent) => {
     Alert.alert('Supprimer', 'Supprimer cet événement ?', [
       { text: 'Annuler', style: 'cancel' },
-      { text: 'Supprimer', style: 'destructive', onPress: async () => {
-        await supabase.from('player_events').delete().eq('id', ev.id);
-        setEvents(prev => prev.filter(e => e.id !== ev.id));
-      }},
+      {
+        text: 'Supprimer',
+        style: 'destructive',
+        onPress: async () => {
+          await supabase.from('player_events').delete().eq('id', ev.id);
+          haptics.success();
+          setEvents((prev) => prev.filter((e) => e.id !== ev.id));
+        },
+      },
     ]);
   };
 
-  const pos          = getPosition(player.position);
-  const totalMatches = stats ? stats.victories + stats.draws + stats.defeats : 0;
-  const winPct       = totalMatches > 0 ? Math.round((stats!.victories / totalMatches) * 100) : null;
+  // ── Dérivés ───────────────────────────────────────────────────────────────
 
-  const recordedSessions = allSessions.filter(s => s.status !== 'not_recorded');
-  const presentCount     = allSessions.filter(s => s.status === 'present').length;
-  const lateCount        = allSessions.filter(s => s.status === 'late').length;
-  const absentCount      = allSessions.filter(s => s.status === 'absent').length;
-  const injuredCount     = allSessions.filter(s => s.status === 'injured').length;
-  const attendedCount    = presentCount + lateCount;
-  const attPct           = recordedSessions.length > 0 ? Math.round((attendedCount / recordedSessions.length) * 100) : 0;
-  const monthGroups      = groupByMonth(allSessions);
+  const pos = positionStyle(player.position, theme.colors);
+  const totalMatches = stats ? stats.victories + stats.draws + stats.defeats : 0;
+  const winPct = totalMatches > 0 ? Math.round((stats!.victories / totalMatches) * 100) : null;
+
+  const attendance = useMemo(() => {
+    const recorded = allSessions.filter((s) => s.status !== 'not_recorded');
+    const by = (s: SessionStatus) => allSessions.filter((x) => x.status === s).length;
+    const present = by('present');
+    const late = by('late');
+    const attended = present + late;
+    return {
+      recorded: recorded.length,
+      present,
+      late,
+      absent: by('absent'),
+      injured: by('injured'),
+      attended,
+      pct: recorded.length > 0 ? Math.round((attended / recorded.length) * 100) : 0,
+    };
+  }, [allSessions]);
+
+  const monthGroups = useMemo(() => groupByMonth(allSessions), [allSessions]);
+  const styles = useMemo(() => makeStyles(p), [p]);
+
+  // ── Rendu ─────────────────────────────────────────────────────────────────
 
   return (
-    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView
+      style={[styles.root, { backgroundColor: p.bg }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      {/* ── Bandeau de marque ────────────────────────────────────────────── */}
+      {/* Le bandeau ajoutait `insets.top` de haut, alors que les deux écrans qui
+          le montent ont un header natif au-dessus — celui-ci consomme déjà
+          l'encoche. Ça posait ~59 pt d'aplat de marque vide sous le header sur
+          la fiche coach, et l'aurait fait sur la fiche joueur en lui rendant son
+          header. `useSafeAreaInsets` ne sait pas qu'un header est présent : il
+          renvoie les marges de la fenêtre, pas celles du contenu. */}
+      <View style={styles.header}>
+        {/* Cette ligne ne s'affiche que si elle a quelque chose à porter. Dans
+            l'espace coach, l'écran vit sous un header natif qui assure déjà le
+            retour et l'édition : la rendre vide empilait deux barres de
+            navigation et mangeait 36 pt de haut d'écran pour rien.
 
-      {/* ── Header joueur (navy) ── */}
-      <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
+            Le `|| !isManager` a disparu de cette condition en même temps que la
+            pastille de saison : c'était son seul motif. Sans lui, la fiche du
+            joueur rendait de nouveau une barre vide. */}
+        {(onBack || (isManager && onEdit)) && (
         <View style={styles.headerNav}>
           {onBack ? (
-            <TouchableOpacity style={styles.navBtn} onPress={onBack} activeOpacity={0.7}>
-              <Ionicons name="chevron-back" size={18} color="rgba(255,255,255,0.7)" />
-              <Text style={styles.navBtnText}>Effectif</Text>
-            </TouchableOpacity>
-          ) : <View />}
-          {isManager && onEdit && (
-            <TouchableOpacity style={styles.editBtn} onPress={onEdit} activeOpacity={0.7}>
-              <Ionicons name="pencil-outline" size={13} color={C.navy} />
-              <Text style={styles.editBtnText}>Modifier</Text>
-            </TouchableOpacity>
+            <Pressable
+              onPress={onBack}
+              accessibilityRole="button"
+              accessibilityLabel="Retour à l'effectif"
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              style={styles.navBtn}
+            >
+              <Ionicons name="chevron-back" size={19} color={p.onBrandMuted} />
+              <Text variant="callout" color={p.onBrandMuted}>
+                Effectif
+              </Text>
+            </Pressable>
+          ) : (
+            <View />
           )}
-          {!isManager && <SeasonHeaderButton />}
+          {isManager && onEdit && (
+            <Pressable
+              onPress={onEdit}
+              accessibilityRole="button"
+              accessibilityLabel="Modifier la fiche du joueur"
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              style={[styles.editBtn, { backgroundColor: p.onBrandFill, borderColor: p.onBrandBorder }]}
+            >
+              <Ionicons name="pencil-outline" size={13} color={p.onBrand} />
+              <Text variant="caption" color={p.onBrand} weight="700">
+                Modifier
+              </Text>
+            </Pressable>
+          )}
         </View>
+        )}
 
         <View style={styles.playerCard}>
-          <View style={styles.numberRing}>
-            <Text style={styles.numberVal}>{player.number ?? '—'}</Text>
+          <View style={[styles.numberRing, { borderColor: p.onBrandBorder, backgroundColor: p.onBrandFill }]}>
+            <Text variant="display" color={p.onBrand} numeric>
+              {player.number ?? '—'}
+            </Text>
           </View>
-          <View style={styles.playerIdentity}>
-            <Text style={styles.lastName}>{player.last_name.toUpperCase()}</Text>
-            <Text style={styles.firstName}>{player.first_name}</Text>
+          <View style={styles.identity}>
+            <Text variant="display" color={p.onBrand} numberOfLines={1}>
+              {player.last_name.toUpperCase()}
+            </Text>
+            <Text variant="body" color={p.onBrandMuted} numberOfLines={1}>
+              {player.first_name}
+            </Text>
             <View style={styles.tagRow}>
-              <View style={[styles.posBadge, { backgroundColor: pos.bg }]}>
-                <Text style={[styles.posText, { color: pos.color }]}>{pos.abbr}</Text>
+              <View style={[styles.posBadge, { borderColor: pos.color }]}>
+                <Text variant="caption" color={pos.color} weight="700">
+                  {pos.abbr}
+                </Text>
               </View>
-              <Text style={styles.tagInfo}>{player.birth_date ? `${calcAge(player.birth_date)} ans · ` : ''}{player.strong_foot || '—'}</Text>
+              <Text variant="caption" color={p.onBrandMuted}>
+                {player.birth_date ? `${calcAge(player.birth_date)} ans · ` : ''}
+                {strongFootLabel(player.strong_foot)}
+              </Text>
               {player.status && player.status !== 'Actif' && (
-                <View style={[styles.statusBadge, player.status === 'Blessé' ? { backgroundColor: '#fee2e2' } : { backgroundColor: '#fef3c7' }]}>
-                  <Text style={[styles.statusText, player.status === 'Blessé' ? { color: C.red } : { color: C.amber }]}>{player.status}</Text>
+                <View
+                  style={[
+                    styles.statusBadge,
+                    { borderColor: player.status === 'Blessé' ? p.negative : p.warning },
+                  ]}
+                >
+                  <Text
+                    variant="caption"
+                    color={player.status === 'Blessé' ? p.negative : p.warning}
+                    weight="700"
+                  >
+                    {player.status}
+                  </Text>
                 </View>
               )}
             </View>
           </View>
         </View>
 
+        {!isManager && (
+          <Button
+            label="Signaler une douleur"
+            icon="body-outline"
+            variant="destructive"
+            block
+            onPress={() => setPainModalOpen(true)}
+            style={styles.painBtn}
+          />
+        )}
+
         <View style={styles.filterRow}>
-          {(['all', 'Championnat', 'Coupe', 'Amical'] as MatchTypeFilter[]).map(v => (
-            <TouchableOpacity
-              key={v}
-              style={[styles.chip, matchFilter === v && styles.chipActive]}
-              onPress={() => onMatchFilterChange(v)}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.chipText, matchFilter === v && styles.chipTextActive]}>
-                {v === 'all' ? 'Tous' : v}
-              </Text>
-            </TouchableOpacity>
-          ))}
+          {MATCH_FILTERS.map((v) => {
+            const active = matchFilter === v;
+            return (
+              <Pressable
+                key={v}
+                onPress={() => onMatchFilterChange(v)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: active, checked: active }}
+                accessibilityLabel={v === 'all' ? 'Toutes compétitions' : v}
+                style={[
+                  styles.chip,
+                  {
+                    backgroundColor: active ? p.accentFill : p.onBrandFill,
+                    borderColor: active ? p.accentFill : p.onBrandBorder,
+                  },
+                ]}
+              >
+                <Text
+                  variant="caption"
+                  color={active ? p.onFill : p.onBrandMuted}
+                  weight="600"
+                >
+                  {v === 'all' ? 'Tous' : v}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
       </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-
-        {/* ── Performances ── */}
-        <FMSection title="Performances matchs">
-          {stats ? (
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/* ── Performances ───────────────────────────────────────────────── */}
+        <FMSection title="Performances matchs" p={p}>
+          {!stats ? (
+            <SkeletonList rows={2} />
+          ) : (
             <>
               <View style={styles.kpiGrid}>
-                <KPIBlock label="Matchs"    value={String(stats.matches_played)} />
-                <KPIBlock label="Buts"      value={String(stats.goals)}          color={C.amber} />
-                <KPIBlock label="Victoires" value={String(stats.victories)}      color={C.green} />
-                <KPIBlock label="Win %"     value={winPct !== null ? `${winPct}%` : '—'} color={winPct !== null && winPct >= 50 ? C.green : C.red} />
+                <KPIBlock p={p} label="Matchs" value={String(stats.matches_played)} />
+                <KPIBlock p={p} label="Buts" value={String(stats.goals)} color={p.accent} />
+                <KPIBlock p={p} label="Victoires" value={String(stats.victories)} color={p.positive} />
+                <KPIBlock
+                  p={p}
+                  label="Taux de victoire"
+                  value={winPct !== null ? `${winPct}%` : '—'}
+                  color={winPct === null ? undefined : winPct >= 50 ? p.positive : p.negative}
+                />
               </View>
               {totalMatches > 0 && (
-                <View style={styles.vndBlock}>
+                <View
+                  style={styles.vndBlock}
+                  accessible
+                  accessibilityLabel={`${stats.victories} victoires, ${stats.draws} nuls, ${stats.defeats} défaites`}
+                >
                   <View style={styles.vndBar}>
                     {stats.victories > 0 && (
-                      <View style={[styles.vndSeg, { flex: stats.victories, backgroundColor: C.green }]}>
-                        <Text style={styles.vndText}>{stats.victories}V</Text>
+                      <View style={[styles.vndSeg, { flex: stats.victories, backgroundColor: p.positive }]}>
+                        <Text variant="caption" color={p.onFill} weight="700">
+                          {stats.victories}V
+                        </Text>
                       </View>
                     )}
                     {stats.draws > 0 && (
-                      <View style={[styles.vndSeg, { flex: stats.draws, backgroundColor: '#94a3b8' }]}>
-                        <Text style={styles.vndText}>{stats.draws}N</Text>
+                      <View style={[styles.vndSeg, { flex: stats.draws, backgroundColor: p.neutral }]}>
+                        <Text variant="caption" color={p.onFill} weight="700">
+                          {stats.draws}N
+                        </Text>
                       </View>
                     )}
                     {stats.defeats > 0 && (
-                      <View style={[styles.vndSeg, { flex: stats.defeats, backgroundColor: C.red }]}>
-                        <Text style={styles.vndText}>{stats.defeats}D</Text>
+                      <View style={[styles.vndSeg, { flex: stats.defeats, backgroundColor: p.negative }]}>
+                        <Text variant="caption" color={p.onFill} weight="700">
+                          {stats.defeats}D
+                        </Text>
                       </View>
                     )}
-                  </View>
-                  <View style={styles.vndLegend}>
-                    <Text style={[styles.vndLegTxt, { color: C.green }]}>{stats.victories}V</Text>
-                    <Text style={[styles.vndLegTxt, { color: C.text3 }]}>{stats.draws}N</Text>
-                    <Text style={[styles.vndLegTxt, { color: C.red }]}>{stats.defeats}D</Text>
                   </View>
                 </View>
               )}
             </>
-          ) : (
-            <ActivityIndicator size="small" color={C.amber} style={{ marginVertical: 20 }} />
           )}
         </FMSection>
 
-        {/* ── Radar ── */}
-        <FMSection title="Radar de performance">
-          {radarLoading
-            ? <ActivityIndicator size="small" color={C.amber} style={{ marginVertical: 20 }} />
-            : radarData && Object.values(radarData.normalized).some(v => v > 0)
-            ? <RadarChart data={radarData} axes={isGoalkeeper(player.position) ? GK_axes : FIELD_axes} />
-            : <EmptyState text="Aucune donnée du match recorder disponible" />
-          }
+        {/* ── Radar ──────────────────────────────────────────────────────── */}
+        <FMSection title="Radar de performance" p={p}>
+          {radarLoading ? (
+            <SkeletonList rows={3} />
+          ) : radarData && Object.values(radarData.normalized).some((v) => v > 0) ? (
+            <RadarChart
+              data={radarData}
+              axes={isGoalkeeper(player.position) ? GK_AXES : FIELD_AXES}
+            />
+          ) : (
+            <EmptyState
+              icon="analytics-outline"
+              title="Pas encore de données"
+              description="Le radar se remplit à partir des événements saisis dans le match recorder."
+              compact
+            />
+          )}
         </FMSection>
 
-        {/* ── Feedback ── */}
-        <FMSection title="Questionnaire — Évolution">
-          {feedbackLoading
-            ? <ActivityIndicator size="small" color={C.amber} style={{ marginVertical: 20 }} />
-            : feedbackRows.length < 2
-            ? <EmptyState text={feedbackRows.length === 0 ? 'Aucun questionnaire rempli' : 'Minimum 2 séances requises'} />
-            : <FeedbackLineChart rows={feedbackRows} />
-          }
+        {/* ── Note de match ──────────────────────────────────────────────── */}
+        {!isGoalkeeper(player.position) && ratingSeries.length > 0 && (
+          <FMSection title="Note de match" p={p}>
+            <RatingLineChart series={ratingSeries} />
+          </FMSection>
+        )}
+
+        {/* ── Tests physiques ────────────────────────────────────────────── */}
+        {/* Le repère d'effectif n'est passé qu'à l'encadrement : RLS n'ouvre les
+            résultats d'un joueur qu'à lui-même et au staff, donc une « moyenne
+            du groupe » calculée par un joueur vaudrait sa propre valeur. */}
+        <FMSection title="Tests physiques" p={p}>
+          <PlayerTestsSection playerId={player.id} showSquadReference={isManager} p={p} />
         </FMSection>
 
-        {/* ── Présence ── */}
-        <FMSection title="Présence aux séances">
+        {/* ── Questionnaire ──────────────────────────────────────────────── */}
+        <FMSection title="Questionnaire de séance" p={p}>
+          {feedbackLoading ? (
+            <SkeletonList rows={3} />
+          ) : feedbackRows.length < 2 ? (
+            <EmptyState
+              icon="clipboard-outline"
+              title={feedbackRows.length === 0 ? 'Aucun questionnaire rempli' : 'Une seule séance'}
+              description="Il faut au moins deux séances renseignées pour tracer une évolution."
+              compact
+            />
+          ) : (
+            <FeedbackLineChart rows={feedbackRows} />
+          )}
+        </FMSection>
+
+        {/* ── Présence ───────────────────────────────────────────────────── */}
+        <FMSection title="Présence aux séances" p={p}>
           <View style={styles.attHeader}>
             <View>
-              <Text style={styles.attPct}>{attPct}<Text style={styles.attPctUnit}>%</Text></Text>
-              <Text style={styles.attPctSub}>{attendedCount} / {recordedSessions.length} séances</Text>
+              <Text variant="hero" color={p.accent}>
+                {attendance.pct}
+                <Text variant="title" color={p.accent}>
+                  %
+                </Text>
+              </Text>
+              <Text variant="caption" tone="tertiary">
+                {attendance.attended} sur {attendance.recorded} séances
+              </Text>
             </View>
             <View style={styles.attRight}>
-              <View style={styles.attBarBg}>
-                <View style={[styles.attBarFill, { width: `${attPct}%` }]} />
+              <View style={[styles.attBarBg, { backgroundColor: p.surface2 }]}>
+                <View
+                  style={[styles.attBarFill, { width: `${attendance.pct}%`, backgroundColor: p.accent }]}
+                />
               </View>
               <View style={styles.attLegend}>
-                <AttLegendItem color={C.green}   label="Présent"  value={presentCount}  />
-                <AttLegendItem color={C.amber}   label="Retard"   value={lateCount}     />
-                <AttLegendItem color={C.red}     label="Absent"   value={absentCount}   />
-                <AttLegendItem color={C.purple}  label="Blessé"   value={injuredCount}  />
+                <AttLegendItem p={p} color={sessionColor('present', p)} label="Présent" value={attendance.present} />
+                <AttLegendItem p={p} color={sessionColor('late', p)} label="Retard" value={attendance.late} />
+                <AttLegendItem p={p} color={sessionColor('absent', p)} label="Absent" value={attendance.absent} />
+                <AttLegendItem p={p} color={sessionColor('injured', p)} label="Blessé" value={attendance.injured} />
               </View>
             </View>
           </View>
 
-          <View style={styles.divider} />
-          <Text style={styles.attSeasonLabel}>{allSessions.length} séances cette saison</Text>
-
           {allSessions.length > 0 && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }}>
-              <View style={styles.calContainer}>
-                {monthGroups.map(group => (
-                  <View key={group.month} style={styles.calMonth}>
-                    <Text style={styles.calMonthLabel}>{group.month}</Text>
-                    <View style={styles.calDots}>
-                      {group.items.map((s, i) => (
-                        <View key={i} style={[styles.calDot, { backgroundColor: SESSION_COLORS[s.status] }]} />
-                      ))}
-                    </View>
-                  </View>
-                ))}
-              </View>
-            </ScrollView>
-          )}
-
-          {recordedSessions.length > 0 && (
-            <View style={styles.seasonBar}>
-              {allSessions.map((s, i) => (
-                <View key={i} style={[styles.seasonBarSeg, { backgroundColor: SESSION_COLORS[s.status] }]} />
-              ))}
-            </View>
-          )}
-        </FMSection>
-
-        {/* ── Événements ── */}
-        <FMSection
-          title="Événements"
-          count={events.length}
-          action={isManager ? (
-            <TouchableOpacity style={styles.addBtn} onPress={() => setShowEventForm(v => !v)} activeOpacity={0.7}>
-              <Ionicons name={showEventForm ? 'close' : 'add'} size={14} color={C.amber} />
-              <Text style={styles.addBtnText}>{showEventForm ? 'Annuler' : 'Ajouter'}</Text>
-            </TouchableOpacity>
-          ) : undefined}
-        >
-          {isManager && showEventForm && (
-            <View style={styles.eventForm}>
-              <Text style={styles.formLabel}>Type</Text>
-              <View style={styles.eventTypeRow}>
-                {(['interview', 'injury', 'suspension'] as PlayerEventType[]).map(t => {
-                  const cfg = EVENT_CONFIG[t];
-                  const active = eventType === t;
-                  return (
-                    <TouchableOpacity
-                      key={t}
-                      style={[styles.typeChip, active && { backgroundColor: cfg.bg, borderColor: cfg.color }]}
-                      onPress={() => setEventType(t)}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons name={cfg.icon} size={13} color={active ? cfg.color : C.text2} />
-                      <Text style={[styles.typeChipText, active && { color: cfg.color }]}>{cfg.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-              <Text style={styles.formLabel}>Date</Text>
-              <TouchableOpacity style={styles.dateInput} onPress={() => setShowDatePicker(true)} activeOpacity={0.7}>
-                <Ionicons name="calendar-outline" size={15} color={C.text2} />
-                <Text style={styles.dateInputText}>{eventDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</Text>
-              </TouchableOpacity>
-              {showDatePicker && (
-                <DateTimePicker value={eventDate} mode="date" display="spinner" onChange={(_e, d) => { setShowDatePicker(false); if (d) setEventDate(d); }} maximumDate={new Date()} />
-              )}
-              {eventType === 'injury' && (
-                <>
-                  <Text style={styles.formLabel}>Type de blessure</Text>
-                  <TextInput style={styles.formInput} placeholder="Ex : entorse cheville..." placeholderTextColor={C.text3} value={injuryType} onChangeText={setInjuryType} />
-                  <Text style={styles.formLabel}>Jours d'indisponibilité</Text>
-                  <TextInput style={styles.formInput} placeholder="Nombre de jours" placeholderTextColor={C.text3} value={unavailDays} onChangeText={setUnavailDays} keyboardType="numeric" />
-                </>
-              )}
-              {eventType === 'suspension' && (
-                <>
-                  <Text style={styles.formLabel}>Matchs suspendus</Text>
-                  <TextInput style={styles.formInput} placeholder="Nombre de matchs" placeholderTextColor={C.text3} value={matchesSusp} onChangeText={setMatchesSusp} keyboardType="numeric" />
-                </>
-              )}
-              <Text style={styles.formLabel}>Notes / Rapport</Text>
-              <TextInput style={[styles.formInput, styles.formTextarea]} placeholder="Observations, contexte..." placeholderTextColor={C.text3} value={eventReport} onChangeText={setEventReport} multiline numberOfLines={3} textAlignVertical="top" />
-              <TouchableOpacity style={[styles.saveEventBtn, savingEvent && { opacity: 0.6 }]} onPress={handleSaveEvent} disabled={savingEvent} activeOpacity={0.8}>
-                {savingEvent ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.saveEventBtnText}>Enregistrer</Text>}
-              </TouchableOpacity>
-            </View>
-          )}
-          {events.length === 0
-            ? <EmptyState text="Aucun événement enregistré" />
-            : (
-              <View style={styles.timeline}>
-                {events.map((ev, i) => (
-                  <EventRow key={ev.id} event={ev} isLast={i === events.length - 1} onDelete={isManager ? () => handleDeleteEvent(ev) : undefined} />
-                ))}
-              </View>
-            )
-          }
-        </FMSection>
-
-        {/* ── Équipes (coach seulement) ── */}
-        {isManager && (
-          <FMSection title="Équipes" last>
-            {playerTeams.length === 0
-              ? <EmptyState text="Ce joueur n'est dans aucune équipe" />
-              : (
-                <View style={{ gap: 6, marginBottom: 12 }}>
-                  {playerTeams.map(t => (
-                    <View key={t.id} style={styles.teamRow}>
-                      <View style={[styles.teamDot, { backgroundColor: t.color || C.text3 }]} />
-                      <Text style={styles.teamName}>{t.name}</Text>
-                      {onRemoveFromTeam && (
-                        <TouchableOpacity onPress={() => onRemoveFromTeam(t)} disabled={updatingTeamId !== null} style={{ padding: 4 }}>
-                          {updatingTeamId === t.id
-                            ? <ActivityIndicator size="small" color={C.red} />
-                            : <Ionicons name="close-circle-outline" size={20} color={C.red} />
-                          }
-                        </TouchableOpacity>
-                      )}
+            <>
+              <View style={[styles.divider, { backgroundColor: p.divider }]} />
+              <Text variant="caption" tone="tertiary">
+                {allSessions.length} séances cette saison
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.calScroll}>
+                <View style={styles.calRow}>
+                  {monthGroups.map((group) => (
+                    <View key={group.month} style={styles.calMonth}>
+                      <Text variant="caption" tone="tertiary" weight="700" style={styles.center}>
+                        {group.month}
+                      </Text>
+                      <View style={styles.calDots}>
+                        {group.items.map((s, i) => (
+                          <View
+                            key={i}
+                            style={[styles.calDot, { backgroundColor: sessionColor(s.status, p) }]}
+                          />
+                        ))}
+                      </View>
                     </View>
                   ))}
                 </View>
-              )
-            }
+              </ScrollView>
+            </>
+          )}
+        </FMSection>
+
+        {/* ── Événements ─────────────────────────────────────────────────── */}
+        <FMSection
+          title="Événements"
+          p={p}
+          count={events.length}
+          action={
+            isManager ? (
+              <Button
+                label={showEventForm ? 'Annuler' : 'Ajouter'}
+                icon={showEventForm ? 'close' : 'add'}
+                variant="ghost"
+                size="sm"
+                onPress={() => setShowEventForm((v) => !v)}
+              />
+            ) : undefined
+          }
+        >
+          {isManager && showEventForm && (
+            <View style={[styles.eventForm, { backgroundColor: p.surface2, borderColor: p.border }]}>
+              <Text variant="callout" tone="secondary" weight="700">
+                Type
+              </Text>
+              <View style={styles.typeRow}>
+                {EVENT_TYPES.filter((t) => t.key !== 'feedback').map((t) => {
+                  const active = eventType === t.key;
+                  const color = p.series[t.seriesIndex] ?? p.accent;
+                  return (
+                    <Pressable
+                      key={t.key}
+                      onPress={() => setEventType(t.key)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: active, checked: active }}
+                      accessibilityLabel={t.label}
+                      style={[
+                        styles.typeChip,
+                        {
+                          borderColor: active ? color : p.border,
+                          backgroundColor: active ? p.surface : 'transparent',
+                        },
+                      ]}
+                    >
+                      <Ionicons name={t.icon} size={14} color={active ? color : p.text3} />
+                      <Text variant="caption" color={active ? color : p.text2} weight="700">
+                        {t.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <Text variant="callout" tone="secondary" weight="700">
+                Date
+              </Text>
+              <Pressable
+                onPress={() => setShowDatePicker(true)}
+                accessibilityRole="button"
+                accessibilityLabel={`Date de l'événement : ${fmtLongDate(eventDate.toISOString())}. Appuyer pour modifier`}
+                style={[styles.formRow, { backgroundColor: p.surface, borderColor: p.border }]}
+              >
+                <Ionicons name="calendar-outline" size={16} color={p.text2} />
+                <Text variant="body">{fmtLongDate(eventDate.toISOString())}</Text>
+              </Pressable>
+              {showDatePicker && (
+                <DateTimePicker
+                  value={eventDate}
+                  mode="date"
+                  display="spinner"
+                  maximumDate={new Date()}
+                  onChange={(_e, d) => {
+                    setShowDatePicker(false);
+                    if (d) setEventDate(d);
+                  }}
+                  textColor={p.text1}
+                  themeVariant={theme.scheme}
+                  accentColor={p.accent}
+                />
+              )}
+
+              {eventType === 'injury' && (
+                <>
+                  <FormInput p={p} label="Type de blessure" value={injuryType} onChangeText={setInjuryType} placeholder="ex : entorse de la cheville" />
+                  <FormInput p={p} label="Jours d'indisponibilité" value={unavailDays} onChangeText={setUnavailDays} placeholder="14" keyboardType="numeric" />
+                </>
+              )}
+              {eventType === 'suspension' && (
+                <FormInput p={p} label="Matchs suspendus" value={matchesSusp} onChangeText={setMatchesSusp} placeholder="2" keyboardType="numeric" />
+              )}
+              <FormInput
+                p={p}
+                label="Notes"
+                value={eventReport}
+                onChangeText={setEventReport}
+                placeholder="Observations, contexte…"
+                multiline
+              />
+
+              <Button
+                label={savingEvent ? 'Enregistrement…' : 'Enregistrer'}
+                onPress={saveEvent}
+                loading={savingEvent}
+                disabled={savingEvent}
+                block
+              />
+            </View>
+          )}
+
+          {events.length === 0 ? (
+            <EmptyState
+              icon="time-outline"
+              title="Aucun événement"
+              description={isManager ? 'Entretiens, blessures et suspensions se consignent ici.' : undefined}
+              compact
+            />
+          ) : (
+            events.map((ev, i) => (
+              <EventRow
+                key={ev.id}
+                p={p}
+                event={ev}
+                isLast={i === events.length - 1}
+                onDelete={isManager ? () => deleteEvent(ev) : undefined}
+              />
+            ))
+          )}
+        </FMSection>
+
+        {/* ── Douleurs ───────────────────────────────────────────────────── */}
+        <FMSection
+          title="Suivi des douleurs"
+          p={p}
+          count={painReports.length}
+          action={
+            painReports.length > 0 && painReports[0].max_intensity >= 3 ? (
+              <Badge label="Intense récent" tone="negative" size="sm" icon="warning-outline" />
+            ) : undefined
+          }
+        >
+          {painReports.length === 0 ? (
+            <EmptyState icon="body-outline" title="Aucune douleur signalée" compact />
+          ) : (
+            <View style={styles.painList}>
+              {!isManager && (
+                <Text variant="caption" tone="tertiary">
+                  Glisse un signalement vers la gauche pour le supprimer.
+                </Text>
+              )}
+              {painReports.map((g) => {
+                const card = (
+                  <View style={[styles.painCard, { backgroundColor: p.surface2, borderColor: p.border }]}>
+                    <View style={styles.painHead}>
+                      <Text variant="body" weight="700" style={styles.flex}>
+                        {fmtLongDate(g.reported_at)}
+                      </Text>
+                      <Text variant="callout" color={INTENSITY_COLORS[g.max_intensity]} weight="700">
+                        {INTENSITY_LABELS[g.max_intensity]}
+                      </Text>
+                    </View>
+                    <View style={styles.painMeta}>
+                      <Badge label={g.source === 'questionnaire' ? 'Fin de séance' : 'Spontané'} size="sm" />
+                      {g.onset && <Badge label={g.onset === 'aigu' ? 'Aigu' : 'Chronique'} size="sm" />}
+                    </View>
+                    <View style={styles.painChips}>
+                      {g.zones.map((z, i) => (
+                        <View
+                          key={i}
+                          style={[styles.painChip, { borderColor: INTENSITY_COLORS[z.intensity] }]}
+                        >
+                          <View style={[styles.painDot, { backgroundColor: INTENSITY_COLORS[z.intensity] }]} />
+                          <Text variant="caption" color={INTENSITY_COLORS[z.intensity]} weight="700">
+                            {zoneLabel(z.zone)}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                    {g.note ? (
+                      <Text variant="callout" tone="secondary">
+                        {g.note}
+                      </Text>
+                    ) : null}
+                  </View>
+                );
+
+                if (isManager) return <View key={g.report_group}>{card}</View>;
+
+                return (
+                  <Swipeable
+                    key={g.report_group}
+                    renderRightActions={() => (
+                      <Pressable
+                        onPress={() => deletePain(g.report_group)}
+                        accessibilityRole="button"
+                        accessibilityLabel="Supprimer ce signalement"
+                        style={[styles.painDelete, { backgroundColor: p.negative }]}
+                      >
+                        <Ionicons name="trash-outline" size={18} color={p.onFill} />
+                        <Text variant="caption" color={p.onFill} weight="700">
+                          Supprimer
+                        </Text>
+                      </Pressable>
+                    )}
+                  >
+                    {card}
+                  </Swipeable>
+                );
+              })}
+            </View>
+          )}
+        </FMSection>
+
+        {/* ── Équipes ────────────────────────────────────────────────────── */}
+        {isManager && (
+          <FMSection title="Équipes" p={p}>
+            {playerTeams.length === 0 ? (
+              <EmptyState icon="shield-outline" title="Aucune équipe" compact />
+            ) : (
+              <View style={styles.teamList}>
+                {playerTeams.map((t) => (
+                  <View
+                    key={t.id}
+                    style={[styles.teamRow, { backgroundColor: p.surface2, borderColor: p.border }]}
+                  >
+                    <View style={[styles.teamDot, { backgroundColor: t.color || p.neutral }]} />
+                    <Text variant="body" weight="600" style={styles.flex}>
+                      {t.name}
+                    </Text>
+                    {onRemoveFromTeam && (
+                      <Pressable
+                        onPress={() => onRemoveFromTeam(t)}
+                        disabled={updatingTeamId !== null}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Retirer le joueur de ${t.name}`}
+                        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                        style={styles.teamRemove}
+                      >
+                        <Ionicons
+                          name={updatingTeamId === t.id ? 'hourglass-outline' : 'close-circle-outline'}
+                          size={20}
+                          color={p.negative}
+                        />
+                      </Pressable>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
             {onAddToTeam && (
-              <TouchableOpacity style={styles.assignBtn} onPress={() => setAssignModal(true)} disabled={availableTeams.length === 0} activeOpacity={0.8}>
-                <Ionicons name="add-circle-outline" size={15} color="#fff" />
-                <Text style={styles.assignBtnText}>Assigner à une équipe</Text>
-              </TouchableOpacity>
+              <Button
+                label="Assigner à une équipe"
+                icon="add-circle-outline"
+                variant="secondary"
+                block
+                disabled={availableTeams.length === 0}
+                onPress={() => setAssignModal(true)}
+              />
             )}
           </FMSection>
         )}
 
+        {/* ── Compte joueur ──────────────────────────────────────────────── */}
+        {isManager && (
+          <FMSection title="Compte joueur" p={p} last>
+            <PlayerAccountLink
+              playerId={player.id}
+              playerName={`${player.first_name} ${player.last_name}`}
+              linked={!!player.user_id}
+              p={p}
+            />
+          </FMSection>
+        )}
       </ScrollView>
 
       {isManager && (
         <Modal visible={assignModal} transparent animationType="fade" onRequestClose={() => setAssignModal(false)}>
-          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setAssignModal(false)}>
-            <View style={styles.modalBox} onStartShouldSetResponder={() => true}>
-              <Text style={styles.modalTitle}>Choisir une équipe</Text>
-              {availableTeams.length === 0
-                ? <EmptyState text="Aucune équipe disponible" />
-                : (
-                  <FlatList
-                    data={availableTeams}
-                    keyExtractor={t => t.id}
-                    renderItem={({ item }) => (
-                      <TouchableOpacity style={styles.modalTeamRow} onPress={() => { setAssignModal(false); onAddToTeam!(item.id); }} disabled={updatingTeamId !== null}>
-                        <View style={[styles.teamDot, { backgroundColor: item.color || C.text3 }]} />
-                        <Text style={styles.modalTeamName}>{item.name}</Text>
-                        {updatingTeamId === item.id
-                          ? <ActivityIndicator size="small" color={C.navy} />
-                          : <Ionicons name="add" size={20} color={C.navy} />
-                        }
-                      </TouchableOpacity>
-                    )}
-                  />
-                )
-              }
-              <TouchableOpacity style={styles.modalClose} onPress={() => setAssignModal(false)}>
-                <Text style={styles.modalCloseText}>Fermer</Text>
-              </TouchableOpacity>
+          <Pressable
+            style={[styles.modalOverlay, { backgroundColor: theme.colors.overlay }]}
+            onPress={() => setAssignModal(false)}
+            accessibilityLabel="Fermer"
+          >
+            <View
+              style={[styles.modalBox, { backgroundColor: p.surface, borderColor: p.border }]}
+              onStartShouldSetResponder={() => true}
+            >
+              <Text variant="title">Choisir une équipe</Text>
+              {availableTeams.length === 0 ? (
+                <EmptyState icon="shield-outline" title="Aucune équipe disponible" compact />
+              ) : (
+                <FlatList
+                  data={availableTeams}
+                  keyExtractor={(t) => t.id}
+                  renderItem={({ item }) => (
+                    <Pressable
+                      onPress={() => {
+                        setAssignModal(false);
+                        onAddToTeam!(item.id);
+                      }}
+                      disabled={updatingTeamId !== null}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Assigner à ${item.name}`}
+                      style={[styles.modalRow, { borderBottomColor: p.divider }]}
+                    >
+                      <View style={[styles.teamDot, { backgroundColor: item.color || p.neutral }]} />
+                      <Text variant="body" style={styles.flex}>
+                        {item.name}
+                      </Text>
+                      <Ionicons
+                        name={updatingTeamId === item.id ? 'hourglass-outline' : 'add'}
+                        size={20}
+                        color={p.accent}
+                      />
+                    </Pressable>
+                  )}
+                />
+              )}
+              <Button label="Fermer" variant="ghost" block onPress={() => setAssignModal(false)} />
             </View>
-          </TouchableOpacity>
+          </Pressable>
         </Modal>
+      )}
+
+      {!isManager && (
+        <PainReportModal
+          visible={painModalOpen}
+          onClose={() => setPainModalOpen(false)}
+          onSubmitted={loadPain}
+        />
       )}
     </KeyboardAvoidingView>
   );
 }
 
-// ─── Sub-components ────────────────────────────────────────────────────────
+// ─── Sous-composants ──────────────────────────────────────────────────────────
 
-function FMSection({ title, children, count, last = false, action }: {
-  title: string; children: React.ReactNode; count?: number; last?: boolean; action?: React.ReactNode;
+function FMSection({
+  title,
+  children,
+  count,
+  last = false,
+  action,
+  p,
+}: {
+  title: string;
+  children: React.ReactNode;
+  count?: number;
+  last?: boolean;
+  action?: React.ReactNode;
+  p: FMPalette;
 }) {
+  const styles = useMemo(() => makeStyles(p), [p]);
   return (
-    <View style={[sec.wrap, last && { marginBottom: 40 }]}>
-      <View style={sec.head}>
-        <View style={sec.titleRow}>
-          <View style={sec.accent} />
-          <Text style={sec.title}>{title.toUpperCase()}</Text>
-          {count !== undefined && (
-            <View style={sec.badge}><Text style={sec.badgeText}>{count}</Text></View>
-          )}
-        </View>
-        {action && <View>{action}</View>}
+    <View style={[styles.section, { backgroundColor: p.surface, borderColor: p.border }, last && styles.sectionLast]}>
+      <View style={[styles.sectionHead, { backgroundColor: p.surface2, borderBottomColor: p.divider }]}>
+        <View style={[styles.sectionAccent, { backgroundColor: p.accent }]} />
+        <Text variant="headline" style={styles.flex} numberOfLines={1}>
+          {title}
+        </Text>
+        {count !== undefined && <Badge label={String(count)} tone="neutral" size="sm" />}
+        {action}
       </View>
-      <View style={sec.body}>{children}</View>
+      <View style={styles.sectionBody}>{children}</View>
     </View>
   );
 }
-const sec = StyleSheet.create({
-  wrap:     { backgroundColor: C.surface, borderRadius: 10, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
-  head:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingTop: 11, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: C.divider, backgroundColor: C.surface2 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  accent:   { width: 3, height: 13, borderRadius: 2, backgroundColor: C.amber },
-  title:    { fontSize: 10, fontWeight: '800', color: C.navy, letterSpacing: 1.1 },
-  badge:    { backgroundColor: C.amberDim, paddingHorizontal: 7, paddingVertical: 1, borderRadius: 99, borderWidth: 1, borderColor: C.amber + '44' },
-  badgeText:{ fontSize: 10, fontWeight: '700', color: C.amber },
-  body:     { padding: 14 },
-});
 
-function KPIBlock({ label, value, color }: { label: string; value: string; color?: string }) {
+function KPIBlock({ label, value, color, p }: { label: string; value: string; color?: string; p: FMPalette }) {
+  const styles = useMemo(() => makeStyles(p), [p]);
   return (
-    <View style={kpi.block}>
-      <Text style={[kpi.value, { color: color ?? C.text1 }]}>{value}</Text>
-      <Text style={kpi.label}>{label.toUpperCase()}</Text>
+    <View
+      style={[styles.kpiBlock, { backgroundColor: p.surface2, borderColor: p.border }]}
+      accessible
+      accessibilityLabel={`${label} : ${value}`}
+    >
+      <Text variant="display" color={color ?? p.text1} numeric>
+        {value}
+      </Text>
+      <Text variant="caption" tone="tertiary" numberOfLines={2} style={styles.center}>
+        {label}
+      </Text>
     </View>
   );
 }
-const kpi = StyleSheet.create({
-  block: { flex: 1, alignItems: 'center', paddingVertical: 14, borderWidth: 1, borderColor: C.border, borderRadius: 8, backgroundColor: C.surface2 },
-  value: { fontSize: 26, fontWeight: '800', lineHeight: 30 },
-  label: { fontSize: 8, fontWeight: '700', color: C.text3, letterSpacing: 0.8, marginTop: 4 },
-});
 
-function AttLegendItem({ color, label, value }: { color: string; label: string; value: number }) {
+function AttLegendItem({ color, label, value, p }: { color: string; label: string; value: number; p: FMPalette }) {
+  const styles = useMemo(() => makeStyles(p), [p]);
   return (
-    <View style={al.row}>
-      <View style={[al.dot, { backgroundColor: color }]} />
-      <Text style={al.label}>{label}</Text>
-      <Text style={[al.val, { color }]}>{value}</Text>
+    <View style={styles.legendRow} accessible accessibilityLabel={`${label} : ${value}`}>
+      <View style={[styles.legendDot, { backgroundColor: color }]} />
+      <Text variant="caption" tone="secondary" style={styles.flex}>
+        {label}
+      </Text>
+      <Text variant="caption" color={color} weight="700" numeric>
+        {value}
+      </Text>
     </View>
   );
 }
-const al = StyleSheet.create({
-  row:   { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  dot:   { width: 6, height: 6, borderRadius: 3 },
-  label: { fontSize: 10, color: C.text2, flex: 1 },
-  val:   { fontSize: 11, fontWeight: '700' },
-});
 
-function EmptyState({ text }: { text: string }) {
-  return <Text style={{ fontSize: 13, color: C.text3, fontStyle: 'italic', paddingVertical: 4 }}>{text}</Text>;
+function FormInput({
+  label,
+  p,
+  multiline,
+  ...rest
+}: {
+  label: string;
+  p: FMPalette;
+  multiline?: boolean;
+} & React.ComponentProps<typeof TextInput>) {
+  const styles = useMemo(() => makeStyles(p), [p]);
+  return (
+    <View style={styles.formField}>
+      <Text variant="callout" tone="secondary" weight="700">
+        {label}
+      </Text>
+      <TextInput
+        {...rest}
+        multiline={multiline}
+        accessibilityLabel={label}
+        placeholderTextColor={p.text3}
+        style={[
+          styles.formInput,
+          { backgroundColor: p.surface, borderColor: p.border, color: p.text1 },
+          multiline && styles.formTextarea,
+        ]}
+      />
+    </View>
+  );
 }
 
-function EventRow({ event, isLast, onDelete }: { event: PlayerEvent; isLast: boolean; onDelete?: () => void }) {
-  const cfg = EVENT_CONFIG[event.event_type] ?? EVENT_CONFIG.interview;
+function EventRow({
+  event,
+  isLast,
+  onDelete,
+  p,
+}: {
+  event: PlayerEvent;
+  isLast: boolean;
+  onDelete?: () => void;
+  p: FMPalette;
+}) {
+  const styles = useMemo(() => makeStyles(p), [p]);
+  const meta = eventMeta(event.event_type);
+  const color = p.series[meta.seriesIndex] ?? p.accent;
+
   return (
-    <View style={er.wrap}>
-      <View style={er.left}>
-        <View style={[er.dot, { backgroundColor: cfg.bg, borderColor: cfg.color + '66' }]}>
-          <Ionicons name={cfg.icon} size={11} color={cfg.color} />
+    <View style={styles.eventRow}>
+      <View style={styles.eventLeft}>
+        <View style={[styles.eventDot, { borderColor: color, backgroundColor: p.surface2 }]}>
+          <Ionicons name={meta.icon} size={12} color={color} />
         </View>
-        {!isLast && <View style={er.line} />}
+        {!isLast && <View style={[styles.eventLine, { backgroundColor: p.border }]} />}
       </View>
-      <View style={er.body}>
-        <View style={er.head}>
-          <Text style={[er.type, { color: cfg.color }]}>{cfg.label}</Text>
-          <Text style={er.date}>{fmtDate(event.event_date)}</Text>
+      <View style={styles.eventBody}>
+        <View style={styles.eventHead}>
+          <Text variant="callout" color={color} weight="700" style={styles.flex}>
+            {meta.label}
+          </Text>
+          <Text variant="caption" tone="tertiary">
+            {fmtDate(event.event_date)}
+          </Text>
           {onDelete && (
-            <TouchableOpacity onPress={onDelete} style={{ padding: 4 }}>
-              <Ionicons name="trash-outline" size={13} color={C.text3} />
-            </TouchableOpacity>
+            <Pressable
+              onPress={onDelete}
+              accessibilityRole="button"
+              accessibilityLabel={`Supprimer l'événement ${meta.label} du ${fmtDate(event.event_date)}`}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Ionicons name="trash-outline" size={15} color={p.text3} />
+            </Pressable>
           )}
         </View>
-        {event.report ? <Text style={er.report}>{event.report}</Text> : null}
-        <View style={er.chips}>
-          {event.injury_type ? <View style={[er.chip, { backgroundColor: '#fee2e2', borderColor: '#fca5a5' }]}><Text style={[er.chipText, { color: C.red }]}>{event.injury_type}</Text></View> : null}
-          {event.unavailability_days != null && event.unavailability_days > 0
-            ? <View style={er.chip}><Text style={er.chipText}>{event.unavailability_days}j indispo.</Text></View> : null}
-          {event.matches_suspended != null && event.matches_suspended > 0
-            ? <View style={[er.chip, { backgroundColor: C.amberLt, borderColor: C.amber + '55' }]}><Text style={[er.chipText, { color: C.amber }]}>{event.matches_suspended} match(s) suspendu</Text></View> : null}
+        {event.report ? (
+          <Text variant="callout" tone="secondary">
+            {event.report}
+          </Text>
+        ) : null}
+        <View style={styles.eventChips}>
+          {event.injury_type ? <Badge label={event.injury_type} tone="negative" size="sm" /> : null}
+          {event.unavailability_days != null && event.unavailability_days > 0 ? (
+            <Badge label={`${event.unavailability_days} j d'indispo.`} size="sm" />
+          ) : null}
+          {event.matches_suspended != null && event.matches_suspended > 0 ? (
+            <Badge label={`${event.matches_suspended} match(s) suspendu(s)`} tone="warning" size="sm" />
+          ) : null}
         </View>
       </View>
     </View>
   );
 }
-const er = StyleSheet.create({
-  wrap:  { flexDirection: 'row', gap: 10 },
-  left:  { width: 26, alignItems: 'center' },
-  dot:   { width: 26, height: 26, borderRadius: 13, borderWidth: 1, justifyContent: 'center', alignItems: 'center', zIndex: 1 },
-  line:  { flex: 1, width: 1, backgroundColor: C.border, marginTop: 2 },
-  body:  { flex: 1, paddingBottom: 14 },
-  head:  { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4, height: 26 },
-  type:  { fontSize: 12, fontWeight: '700', flex: 1 },
-  date:  { fontSize: 10, color: C.text3 },
-  report:{ fontSize: 12, color: C.text2, lineHeight: 17, marginBottom: 5 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
-  chip:  { borderWidth: 1, borderColor: C.border, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 4, backgroundColor: C.surface2 },
-  chipText: { fontSize: 10, color: C.text2, fontWeight: '600' },
-});
 
-// ─── RadarChart ────────────────────────────────────────────────────────────
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
-function RadarChart({ data, axes }: { data: PlayerRadarResult; axes: RadarAxis[] }) {
-  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
-  const screenW  = Dimensions.get('window').width;
-  const isTablet = screenW >= 768;
-  const svgW  = (screenW - 56) * (isTablet ? 0.4 : 0.8);
-  const cx    = svgW / 2;
-  const cy    = svgW / 2;
-  const maxR  = cx - 72;
-  const lblR  = maxR + 26;
-  const svgH  = svgW + 24;
-  const N     = axes.length;
-  const step  = (2 * Math.PI) / N;
-  const start = -Math.PI / 2;
+const makeStyles = (p: FMPalette) =>
+  StyleSheet.create({
+    root: { flex: 1 },
+    flex: { flex: 1 },
+    center: { textAlign: 'center' },
+    content: { padding: 10, gap: 10, paddingBottom: 40 },
 
-  const pt = (i: number, r: number) => ({
-    x: cx + r * Math.cos(start + i * step),
-    y: cy + r * Math.sin(start + i * step),
+    header: { backgroundColor: p.brand, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 12, gap: 12 },
+    headerNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 36 },
+    navBtn: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+    editBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 12,
+      minHeight: 34,
+      borderRadius: 999,
+      borderWidth: StyleSheet.hairlineWidth,
+    },
+
+    playerCard: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+    numberRing: {
+      width: 58,
+      height: 58,
+      borderRadius: 29,
+      borderWidth: 2,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    identity: { flex: 1, gap: 1 },
+    tagRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 4 },
+    posBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
+    statusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
+    painBtn: { marginTop: 2 },
+
+    filterRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+    chip: {
+      paddingHorizontal: 14,
+      minHeight: 36,
+      justifyContent: 'center',
+      borderRadius: 999,
+      borderWidth: StyleSheet.hairlineWidth,
+    },
+
+    section: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+    sectionLast: { marginBottom: 20 },
+    sectionHead: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+    },
+    sectionAccent: { width: 3, height: 16, borderRadius: 2 },
+    sectionBody: { padding: 14, gap: 10 },
+
+    kpiGrid: { flexDirection: 'row', gap: 6 },
+    kpiBlock: {
+      flex: 1,
+      alignItems: 'center',
+      paddingVertical: 12,
+      paddingHorizontal: 4,
+      borderRadius: 10,
+      borderWidth: StyleSheet.hairlineWidth,
+      gap: 2,
+    },
+
+    vndBlock: { gap: 6 },
+    vndBar: { flexDirection: 'row', height: 30, borderRadius: 8, overflow: 'hidden', gap: 2 },
+    vndSeg: { justifyContent: 'center', alignItems: 'center' },
+
+    attHeader: { flexDirection: 'row', gap: 16, alignItems: 'flex-start' },
+    attRight: { flex: 1, justifyContent: 'center', gap: 10 },
+    attBarBg: { height: 8, borderRadius: 99, overflow: 'hidden' },
+    attBarFill: { height: '100%', borderRadius: 99 },
+    attLegend: { gap: 5 },
+    legendRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    legendDot: { width: 8, height: 8, borderRadius: 4 },
+    divider: { height: StyleSheet.hairlineWidth, marginVertical: 6 },
+    calScroll: { marginTop: 8 },
+    calRow: { flexDirection: 'row', gap: 12, paddingBottom: 4 },
+    calMonth: { gap: 5 },
+    calDots: { flexDirection: 'row', flexWrap: 'wrap', gap: 3, maxWidth: 84 },
+    calDot: { width: 12, height: 12, borderRadius: 3 },
+
+    eventForm: { borderRadius: 10, padding: 12, gap: 10, borderWidth: StyleSheet.hairlineWidth },
+    typeRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+    typeChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 12,
+      minHeight: 40,
+      borderRadius: 999,
+      borderWidth: 1.5,
+    },
+    formField: { gap: 6 },
+    formRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingHorizontal: 12,
+      minHeight: 48,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+    },
+    formInput: {
+      minHeight: 48,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      fontSize: 15,
+    },
+    formTextarea: { minHeight: 80, paddingTop: 12, textAlignVertical: 'top' },
+
+    eventRow: { flexDirection: 'row', gap: 12 },
+    eventLeft: { width: 28, alignItems: 'center' },
+    eventDot: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      borderWidth: 1.5,
+      justifyContent: 'center',
+      alignItems: 'center',
+      zIndex: 1,
+    },
+    eventLine: { flex: 1, width: 1, marginTop: 2 },
+    eventBody: { flex: 1, paddingBottom: 16, gap: 4 },
+    eventHead: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 28 },
+    eventChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+
+    painList: { gap: 10 },
+    painCard: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, padding: 12, gap: 8 },
+    painHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    painMeta: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+    painChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+    painChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      borderWidth: 1,
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+    },
+    painDot: { width: 7, height: 7, borderRadius: 4 },
+    painDelete: {
+      justifyContent: 'center',
+      alignItems: 'center',
+      width: 96,
+      borderRadius: 12,
+      marginLeft: 8,
+      gap: 4,
+    },
+
+    teamList: { gap: 8 },
+    teamRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      borderRadius: 10,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderWidth: StyleSheet.hairlineWidth,
+    },
+    teamDot: { width: 10, height: 10, borderRadius: 5 },
+    teamRemove: { padding: 2 },
+
+    modalOverlay: { flex: 1, justifyContent: 'center', padding: 24 },
+    modalBox: {
+      borderRadius: 16,
+      padding: 20,
+      maxHeight: '70%',
+      gap: 14,
+      borderWidth: StyleSheet.hairlineWidth,
+    },
+    modalRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      minHeight: 52,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+    },
   });
-
-  const dataPoints = axes.map(({ normKey }, i) => {
-    const { x, y } = pt(i, (data.normalized[normKey] / 100) * maxR);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(' ');
-
-  const avgPoints = axes.map(({ rawKey }, i) => {
-    const max = data.squadMax[rawKey];
-    const avg = data.squadAvg[rawKey];
-    const frac = max > 0 ? Math.min(1, Math.max(0, avg / max)) : 0;
-    const { x, y } = pt(i, frac * maxR);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(' ');
-
-  const gridPts = (pct: number) =>
-    axes.map((_, i) => { const { x, y } = pt(i, pct * maxR); return `${x.toFixed(1)},${y.toFixed(1)}`; }).join(' ');
-
-  const sel = selectedIdx !== null ? axes[selectedIdx] : null;
-
-  return (
-    <View>
-      <Svg width={svgW} height={svgH} style={{ alignSelf: 'center' }}>
-        {[0.25, 0.5, 0.75, 1].map(pct => (
-          <Polygon key={pct} points={gridPts(pct)}
-            fill={pct === 1 ? 'rgba(26,39,68,0.03)' : 'none'}
-            stroke={pct === 1 ? 'rgba(26,39,68,0.18)' : 'rgba(26,39,68,0.08)'}
-            strokeWidth={pct === 1 ? 1.5 : 1}
-          />
-        ))}
-        {axes.map((_, i) => {
-          const { x, y } = pt(i, maxR);
-          return <Line key={i} x1={cx.toFixed(1)} y1={cy.toFixed(1)} x2={x.toFixed(1)} y2={y.toFixed(1)} stroke={selectedIdx === i ? C.amber : 'rgba(26,39,68,0.1)'} strokeWidth={selectedIdx === i ? 1.5 : 1} />;
-        })}
-        <Polygon points={avgPoints} fill="rgba(148,163,184,0.12)" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 2" strokeLinejoin="round" />
-        <Polygon points={dataPoints} fill="rgba(217,119,6,0.12)" stroke={C.amber} strokeWidth={2} strokeLinejoin="round" />
-        {axes.map(({ normKey }, i) => {
-          const { x, y } = pt(i, (data.normalized[normKey] / 100) * maxR);
-          return <Circle key={i} cx={x} cy={y} r={selectedIdx === i ? 5 : 3} fill={selectedIdx === i ? C.navy : C.amber} />;
-        })}
-        {axes.map(({ label }, i) => {
-          const angle  = start + i * step;
-          const ca     = Math.cos(angle);
-          const sa     = Math.sin(angle);
-          const lx     = cx + lblR * ca;
-          const ly     = cy + lblR * sa;
-          const anchor: 'start' | 'end' | 'middle' = ca > 0.2 ? 'start' : ca < -0.2 ? 'end' : 'middle';
-          const dy = sa > 0.2 ? 12 : sa < -0.2 ? -2 : 4;
-          const active = selectedIdx === i;
-          return (
-            // @ts-ignore
-            <SvgText key={i} x={lx} y={ly + dy} textAnchor={anchor} fontSize={9} fontWeight="700" fill={active ? C.amber : C.text2} onPress={() => setSelectedIdx(p => p === i ? null : i)}>
-              {label}
-            </SvgText>
-          );
-        })}
-        {axes.map((_, i) => {
-          const angle = start + i * step;
-          return <Circle key={`t${i}`} cx={cx + lblR * Math.cos(angle)} cy={cy + lblR * Math.sin(angle)} r={16} fill="transparent" onPress={() => setSelectedIdx(p => p === i ? null : i)} />;
-        })}
-        {[0.5, 1].map(pct => {
-          const { y: gy } = pt(0, pct * maxR);
-          return <SvgText key={pct} x={cx + 3} y={gy - 2} textAnchor="start" fontSize={7} fill="rgba(26,39,68,0.2)">{Math.round(pct * 100)}</SvgText>;
-        })}
-      </Svg>
-
-      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 4 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-          <View style={{ width: 12, height: 2, backgroundColor: C.amber }} />
-          <Text style={{ fontSize: 9, color: C.text3, fontWeight: '600' }}>Joueur</Text>
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-          <View style={{ width: 12, height: 2, backgroundColor: '#94a3b8' }} />
-          <Text style={{ fontSize: 9, color: C.text3, fontWeight: '600' }}>Moy. effectif</Text>
-        </View>
-      </View>
-
-      {sel && (
-        <View style={rdr.tooltip}>
-          <View style={rdr.tooltipHead}>
-            <Text style={rdr.tooltipTitle}>{sel.fullLabel}</Text>
-            <TouchableOpacity onPress={() => setSelectedIdx(null)} hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}>
-              <Ionicons name="close" size={13} color={C.text3} />
-            </TouchableOpacity>
-          </View>
-          <View style={rdr.tooltipRow}>
-            {[
-              { val: fmtAxisValue(data.raw[sel.rawKey], sel.rawKey), label: 'Vous', color: C.amber },
-              { val: fmtAxisValue(data.squadMax[sel.rawKey], sel.rawKey), label: 'Max', color: C.green },
-              { val: fmtAxisValue(data.squadAvg[sel.rawKey], sel.rawKey), label: 'Moy.', color: C.text2 },
-            ].map((col, i) => (
-              <React.Fragment key={i}>
-                {i > 0 && <View style={rdr.div} />}
-                <View style={rdr.col}>
-                  <Text style={[rdr.colVal, { color: col.color }]}>{col.val}</Text>
-                  <Text style={rdr.colLbl}>{col.label}</Text>
-                </View>
-              </React.Fragment>
-            ))}
-          </View>
-        </View>
-      )}
-
-      <View style={rdr.grid}>
-        {axes.map(({ normKey, rawKey, gridLabel }) => {
-          const isPM    = rawKey === 'plusMinus';
-          const pm      = data.raw.plusMinus;
-          const pmColor = isPM ? (pm > 0 ? C.green : pm < 0 ? C.red : C.text1) : C.text1;
-          const col     = `${100 / (axes.length <= 6 ? 3 : 4)}%` as const;
-          return (
-            <View key={normKey} style={[rdr.statItem, { width: col }]}>
-              <Text style={[rdr.statVal, { color: pmColor }]}>{getRadarGridTotal(data, rawKey)}</Text>
-              <Text style={rdr.statLbl}>{gridLabel}</Text>
-            </View>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
-
-const rdr = StyleSheet.create({
-  tooltip:     { backgroundColor: C.surface2, borderRadius: 8, borderWidth: 1, borderColor: C.border, padding: 12, marginTop: 10, marginBottom: 4 },
-  tooltipHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  tooltipTitle:{ fontSize: 10, fontWeight: '800', color: C.navy, textTransform: 'uppercase', letterSpacing: 0.8 },
-  tooltipRow:  { flexDirection: 'row', alignItems: 'center' },
-  col:         { flex: 1, alignItems: 'center' },
-  colVal:      { fontSize: 17, fontWeight: '800' },
-  colLbl:      { fontSize: 9, fontWeight: '600', color: C.text3, textTransform: 'uppercase', letterSpacing: 0.3, marginTop: 2 },
-  div:         { width: StyleSheet.hairlineWidth, height: 32, backgroundColor: C.border },
-  grid:        { flexDirection: 'row', flexWrap: 'wrap', marginTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.divider, paddingTop: 10 },
-  statItem:    { alignItems: 'center', paddingVertical: 5 },
-  statVal:     { fontSize: 13, fontWeight: '800', color: C.text1 },
-  statLbl:     { fontSize: 8, fontWeight: '600', color: C.text3, textTransform: 'uppercase', letterSpacing: 0.3, marginTop: 1 },
-});
-
-// ─── FeedbackLineChart ─────────────────────────────────────────────────────
-
-function buildSmoothPath(
-  pts: { x: number; y: number }[]
-): string {
-  if (pts.length < 2) return '';
-  const d: string[] = [`M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`];
-  for (let i = 1; i < pts.length; i++) {
-    const p0 = pts[i - 2] ?? pts[i - 1];
-    const p1 = pts[i - 1];
-    const p2 = pts[i];
-    const p3 = pts[i + 1] ?? p2;
-    const cp1x = p1.x + (p2.x - p0.x) / 6;
-    const cp1y = p1.y + (p2.y - p0.y) / 6;
-    const cp2x = p2.x - (p3.x - p1.x) / 6;
-    const cp2y = p2.y - (p3.y - p1.y) / 6;
-    d.push(`C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`);
-  }
-  return d.join(' ');
-}
-
-const FEEDBACK_LINES = [
-  { key: 'auto_evaluation' as const, label: 'Auto-éval.',  color: '#2563eb' },
-  { key: 'rpe'             as const, label: 'Intensité',   color: '#dc2626' },
-  { key: 'physical_form'   as const, label: 'Forme',       color: '#059669' },
-  { key: 'pleasure'        as const, label: 'Plaisir',     color: C.amber  },
-];
-
-function FeedbackLineChart({ rows }: { rows: PlayerFeedbackRow[] }) {
-  const [activeKeys, setActiveKeys] = useState<Set<string>>(
-    () => new Set(FEEDBACK_LINES.map(l => l.key))
-  );
-  const [chartWidth, setChartWidth] = useState(0);
-
-  const data = rows.slice(-20);
-  const n    = data.length;
-
-  const PAD_L = 26; const PAD_R = 8; const PAD_T = 10; const PAD_B = 32;
-  const plotW   = Math.max(0, chartWidth - PAD_L - PAD_R);
-  const plotH   = 130;
-  const svgH    = PAD_T + plotH + PAD_B;
-  const toY     = (v: number) => PAD_T + plotH - ((v - 1) / 9) * plotH;
-  const toX     = (i: number) => PAD_L + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
-  const dateIdxs = (() => {
-    if (n <= 5) return data.map((_, i) => i);
-    const st = Math.floor((n - 1) / 4);
-    const r = [0]; for (let k = 1; k <= 3; k++) r.push(st * k); r.push(n - 1);
-    return [...new Set(r)];
-  })();
-
-  const toggleKey = (k: string) => {
-    setActiveKeys(prev => {
-      if (prev.has(k) && prev.size === 1) return prev;
-      const next = new Set(prev);
-      next.has(k) ? next.delete(k) : next.add(k);
-      return next;
-    });
-  };
-
-  const activeLines = FEEDBACK_LINES.filter(l => activeKeys.has(l.key));
-
-  return (
-    <View>
-      {/* Filter / legend chips */}
-      <View style={fb.filterRow}>
-        {FEEDBACK_LINES.map(({ key, label, color }) => {
-          const active = activeKeys.has(key);
-          return (
-            <TouchableOpacity
-              key={key}
-              style={[fb.filterChip, active && { backgroundColor: color + '22', borderColor: color }]}
-              onPress={() => toggleKey(key)}
-              activeOpacity={0.7}
-            >
-              <View style={[fb.filterDot, { backgroundColor: active ? color : C.border }]} />
-              <Text style={[fb.filterLabel, { color: active ? color : C.text3 }]}>{label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      <View onLayout={e => setChartWidth(e.nativeEvent.layout.width)} style={{ width: '100%' }}>
-      {chartWidth > 0 && <Svg width={chartWidth} height={svgH}>
-        {[2, 4, 6, 8, 10].map(v => {
-          const gy = toY(v);
-          return (
-            <React.Fragment key={v}>
-              <Line x1={PAD_L} y1={gy} x2={PAD_L + plotW} y2={gy} stroke="rgba(26,39,68,0.06)" strokeWidth={1} />
-              <SvgText x={PAD_L - 4} y={gy + 4} textAnchor="end" fontSize={8} fill={C.text3}>{v}</SvgText>
-            </React.Fragment>
-          );
-        })}
-        <Line x1={PAD_L} y1={PAD_T + plotH} x2={PAD_L + plotW} y2={PAD_T + plotH} stroke={C.border} strokeWidth={1} />
-        {FEEDBACK_LINES.map(({ key, color }) => {
-          if (!activeKeys.has(key)) return null;
-          const pts = data.reduce<{ x: number; y: number }[]>((acc, row, i) => {
-            const v = row[key];
-            if (v != null) acc.push({ x: toX(i), y: toY(v as number) });
-            return acc;
-          }, []);
-          const d = buildSmoothPath(pts);
-          if (!d) return null;
-          return <Path key={key} d={d} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" />;
-        })}
-        {FEEDBACK_LINES.map(({ key, color }) =>
-          !activeKeys.has(key) ? null :
-          data.map((row, i) => { const v = row[key]; if (v == null) return null; return <Circle key={`${key}${i}`} cx={toX(i)} cy={toY(v)} r={3} fill={color} />; })
-        )}
-        {dateIdxs.map(i => (
-          <SvgText key={i} x={toX(i)} y={PAD_T + plotH + 14} textAnchor="middle" fontSize={8} fill={C.text3}>
-            {new Date(data[i].date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
-          </SvgText>
-        ))}
-      </Svg>}
-      </View>
-
-      {(() => {
-        const last = data[data.length - 1];
-        if (!activeLines.some(l => last[l.key] != null)) return null;
-        return (
-          <View style={fb.lastRow}>
-            <Text style={fb.lastTitle}>Dernière séance</Text>
-            <View style={fb.lastVals}>
-              {activeLines.map(({ key, label, color }) => (
-                last[key] != null ? (
-                  <View key={key} style={fb.lastItem}>
-                    <Text style={[fb.lastVal, { color }]}>{last[key]}</Text>
-                    <Text style={fb.lastLabel}>{label}</Text>
-                  </View>
-                ) : null
-              ))}
-            </View>
-          </View>
-        );
-      })()}
-    </View>
-  );
-}
-
-const fb = StyleSheet.create({
-  filterRow:   { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
-  filterChip:  { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 99, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.surface2 },
-  filterDot:   { width: 8, height: 8, borderRadius: 4 },
-  filterLabel: { fontSize: 11, fontWeight: '700' },
-  lastRow:     { marginTop: 12, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.divider },
-  lastTitle:   { fontSize: 8, fontWeight: '800', color: C.text3, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 },
-  lastVals:    { flexDirection: 'row', gap: 6 },
-  lastItem:    { flex: 1, alignItems: 'center', backgroundColor: C.surface2, borderRadius: 6, paddingVertical: 8, borderWidth: 1, borderColor: C.border },
-  lastVal:     { fontSize: 18, fontWeight: '800' },
-  lastLabel:   { fontSize: 8, color: C.text3, fontWeight: '600', textTransform: 'uppercase', marginTop: 2 },
-});
-
-// ─── Styles ────────────────────────────────────────────────────────────────
-
-const styles = StyleSheet.create({
-  root:   { flex: 1, backgroundColor: C.bg },
-  scroll: { flex: 1 },
-  content:{ padding: 12, gap: 10 },
-
-  // Header navy
-  header:      { backgroundColor: C.navy, paddingHorizontal: 16, paddingBottom: 14 },
-  headerNav:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
-  navBtn:      { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  navBtnText:  { color: 'rgba(255,255,255,0.65)', fontSize: 13 },
-  editBtn:     { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, backgroundColor: C.amberLt },
-  editBtnText: { fontSize: 12, fontWeight: '700', color: C.navy },
-
-  // Player card
-  playerCard:     { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },
-  numberRing:     { width: 52, height: 52, borderRadius: 26, borderWidth: 2, borderColor: 'rgba(255,255,255,0.25)', backgroundColor: 'rgba(255,255,255,0.08)', justifyContent: 'center', alignItems: 'center' },
-  numberVal:      { fontSize: 20, fontWeight: '900', color: '#fff', letterSpacing: -0.5 },
-  playerIdentity: { flex: 1 },
-  lastName:       { fontSize: 22, fontWeight: '900', color: '#fff', letterSpacing: 0.3, lineHeight: 24 },
-  firstName:      { fontSize: 13, color: 'rgba(255,255,255,0.6)', marginTop: 2, marginBottom: 6 },
-  tagRow:         { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
-  posBadge:       { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
-  posText:        { fontSize: 10, fontWeight: '800', letterSpacing: 0.4 },
-  tagInfo:        { fontSize: 11, color: 'rgba(255,255,255,0.55)' },
-  statusBadge:    { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
-  statusText:     { fontSize: 10, fontWeight: '700' },
-
-  // Filter chips
-  filterRow:      { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
-  chip:           { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', backgroundColor: 'rgba(255,255,255,0.08)' },
-  chipActive:     { backgroundColor: C.amber, borderColor: C.amber },
-  chipText:       { fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.65)' },
-  chipTextActive: { color: '#fff' },
-
-  // KPI
-  kpiGrid:  { flexDirection: 'row', gap: 6, marginBottom: 14 },
-
-  // V/N/D
-  vndBlock:  { gap: 6 },
-  vndBar:    { flexDirection: 'row', height: 28, borderRadius: 6, overflow: 'hidden', gap: 2 },
-  vndSeg:    { justifyContent: 'center', alignItems: 'center' },
-  vndText:   { color: '#fff', fontSize: 11, fontWeight: '800' },
-  vndLegend: { flexDirection: 'row', justifyContent: 'space-between' },
-  vndLegTxt: { fontSize: 11, fontWeight: '700' },
-
-  // Attendance
-  attHeader:      { flexDirection: 'row', gap: 14, alignItems: 'flex-start', marginBottom: 10 },
-  attPct:         { fontSize: 40, fontWeight: '900', color: C.amber, lineHeight: 42 },
-  attPctUnit:     { fontSize: 20, fontWeight: '700', color: C.amber },
-  attPctSub:      { fontSize: 10, color: C.text3, marginTop: 2 },
-  attRight:       { flex: 1, justifyContent: 'center', gap: 10 },
-  attBarBg:       { height: 6, backgroundColor: C.border, borderRadius: 99, overflow: 'hidden' },
-  attBarFill:     { height: '100%', backgroundColor: C.amber, borderRadius: 99 },
-  attLegend:      { gap: 4 },
-  divider:        { height: 1, backgroundColor: C.divider, marginVertical: 10 },
-  attSeasonLabel: { fontSize: 10, color: C.text3, marginBottom: 2 },
-  calContainer:   { flexDirection: 'row', gap: 10, paddingHorizontal: 2, paddingBottom: 4 },
-  calMonth:       { gap: 4 },
-  calMonthLabel:  { fontSize: 8, fontWeight: '700', color: C.text3, textTransform: 'uppercase', letterSpacing: 0.5, textAlign: 'center' },
-  calDots:        { flexDirection: 'row', flexWrap: 'wrap', gap: 3, maxWidth: 80 },
-  calDot:         { width: 11, height: 11, borderRadius: 2 },
-  seasonBar:      { flexDirection: 'row', height: 5, borderRadius: 99, overflow: 'hidden', gap: 1, marginTop: 10 },
-  seasonBarSeg:   { flex: 1, height: '100%' },
-
-  // Event form
-  addBtn:          { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 5, borderWidth: 1, borderColor: C.amber + '66', backgroundColor: C.amberDim },
-  addBtnText:      { fontSize: 11, fontWeight: '700', color: C.amber },
-  eventForm:       { backgroundColor: C.surface2, borderRadius: 8, padding: 12, marginBottom: 12, gap: 8, borderWidth: 1, borderColor: C.border },
-  formLabel:       { fontSize: 10, fontWeight: '700', color: C.text2, textTransform: 'uppercase', letterSpacing: 0.6 },
-  formInput:       { backgroundColor: C.surface, borderRadius: 7, paddingHorizontal: 12, paddingVertical: 9, fontSize: 14, color: C.text1, borderWidth: 1, borderColor: C.border },
-  formTextarea:    { minHeight: 64, textAlignVertical: 'top' },
-  eventTypeRow:    { flexDirection: 'row', gap: 7 },
-  typeChip:        { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 11, paddingVertical: 7, borderRadius: 7, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.surface },
-  typeChipText:    { fontSize: 12, fontWeight: '700', color: C.text2 },
-  dateInput:       { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.surface, borderRadius: 7, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1, borderColor: C.border },
-  dateInputText:   { fontSize: 13, color: C.text1 },
-  saveEventBtn:    { backgroundColor: C.navy, borderRadius: 7, paddingVertical: 11, alignItems: 'center', marginTop: 4 },
-  saveEventBtnText:{ color: '#fff', fontWeight: '800', fontSize: 13 },
-
-  // Timeline
-  timeline: { gap: 0 },
-
-  // Teams
-  teamRow:       { flexDirection: 'row', alignItems: 'center', backgroundColor: C.surface2, borderRadius: 7, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: C.border },
-  teamDot:       { width: 8, height: 8, borderRadius: 4, marginRight: 10 },
-  teamName:      { flex: 1, fontSize: 13, fontWeight: '600', color: C.text1 },
-  assignBtn:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: C.navy, paddingVertical: 10, borderRadius: 7 },
-  assignBtnText: { color: '#fff', fontSize: 13, fontWeight: '800' },
-
-  // Modal
-  modalOverlay:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 24 },
-  modalBox:      { backgroundColor: C.surface, borderRadius: 14, padding: 20, maxHeight: '70%', borderWidth: 1, borderColor: C.border },
-  modalTitle:    { fontSize: 16, fontWeight: '700', color: C.text1, marginBottom: 14 },
-  modalTeamRow:  { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.divider },
-  modalTeamName: { flex: 1, fontSize: 14, color: C.text1, fontWeight: '500' },
-  modalClose:    { marginTop: 14, paddingVertical: 11, alignItems: 'center' },
-  modalCloseText:{ fontSize: 14, color: C.navy, fontWeight: '600' },
-});

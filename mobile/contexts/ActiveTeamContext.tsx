@@ -19,6 +19,12 @@ interface ActiveTeamContextValue {
   setActiveTeamId: (teamId: string) => Promise<void>;
   refetchTeams: () => Promise<void>;
   refetchCalendar: () => Promise<void>;
+  /** Équipes modifiables (admin => toutes ; coach => ses équipes). */
+  writableTeamIds: string[];
+  /** L'équipe active est-elle modifiable ? */
+  canEditActiveTeam: boolean;
+  /** Une équipe donnée est-elle modifiable ? */
+  canEditTeam: (teamId: string) => boolean;
 }
 
 const ActiveTeamContext = createContext<ActiveTeamContextValue | null>(null);
@@ -30,10 +36,20 @@ export function ActiveTeamProvider({ children }: { children: React.ReactNode }) 
   const [calendarMatches, setCalendarMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(true);
   const [calendarLoading, setCalendarLoading] = useState(true);
+  const [writableTeamIds, setWritableTeamIds] = useState<string[]>([]);
 
   const loadCalendarForTeam = useCallback(async (teamId: string | null) => {
     const data = await getCoachCalendarData(teamId);
     return data;
+  }, []);
+
+  const refetchWritableTeams = useCallback(async () => {
+    try {
+      const { data } = await supabase.rpc('get_my_writable_team_ids');
+      setWritableTeamIds((data as string[] | null) || []);
+    } catch {
+      setWritableTeamIds([]);
+    }
   }, []);
 
   const setActiveTeamId = useCallback(async (teamId: string) => {
@@ -57,6 +73,7 @@ export function ActiveTeamProvider({ children }: { children: React.ReactNode }) 
         setTeams(data.teams);
         setCalendarTrainings(data.trainings);
         setCalendarMatches(data.matches);
+        void refetchWritableTeams();
         const valid = data.teams.some((t) => t.id === teamId);
         if (teamId && valid) {
           setActiveTeamIdState(teamId);
@@ -81,7 +98,7 @@ export function ActiveTeamProvider({ children }: { children: React.ReactNode }) 
     };
     load();
     return () => { mounted = false; };
-  }, [loadCalendarForTeam]);
+  }, [loadCalendarForTeam, refetchWritableTeams]);
 
   const refetchCalendar = useCallback(async () => {
     if (!activeTeamId) return;
@@ -110,6 +127,7 @@ export function ActiveTeamProvider({ children }: { children: React.ReactNode }) 
       setTeams(data.teams);
       setCalendarTrainings(data.trainings);
       setCalendarMatches(data.matches);
+      void refetchWritableTeams();
       const valid = data.teams.some((t) => t.id === activeTeamId);
       if (!valid && data.teams.length > 0) {
         setActiveTeamIdState(data.teams[0].id);
@@ -121,7 +139,7 @@ export function ActiveTeamProvider({ children }: { children: React.ReactNode }) 
     } finally {
       setLoading(false);
     }
-  }, [activeTeamId, loadCalendarForTeam]);
+  }, [activeTeamId, loadCalendarForTeam, refetchWritableTeams]);
 
   // Recharger les équipes après connexion (au premier chargement on peut ne pas avoir de session)
   useEffect(() => {
@@ -143,6 +161,12 @@ export function ActiveTeamProvider({ children }: { children: React.ReactNode }) 
 
   const activeTeam = teams.find((t) => t.id === activeTeamId);
 
+  const canEditTeam = useCallback(
+    (teamId: string) => writableTeamIds.includes(teamId),
+    [writableTeamIds],
+  );
+  const canEditActiveTeam = !!activeTeamId && writableTeamIds.includes(activeTeamId);
+
   const value: ActiveTeamContextValue = {
     activeTeamId,
     activeTeam,
@@ -154,6 +178,9 @@ export function ActiveTeamProvider({ children }: { children: React.ReactNode }) 
     setActiveTeamId,
     refetchTeams,
     refetchCalendar,
+    writableTeamIds,
+    canEditActiveTeam,
+    canEditTeam,
   };
 
   return (

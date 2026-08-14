@@ -1,134 +1,65 @@
-import { useState } from 'react';
-import { Stack, useRouter } from 'expo-router';
+import { Stack } from 'expo-router';
+import { View, StyleSheet } from 'react-native';
 import { useIsTablet } from '../../../hooks/useIsTablet';
-import { PhoneNavMenu } from '../../../components/PhoneNavMenu';
+import { useTheme } from '../../../contexts/ThemeContext';
 import { SeasonHeaderButton } from '../../../components/SeasonHeaderButton';
-import {
-  TouchableOpacity,
-  Text,
-  StyleSheet,
-  Modal,
-  View,
-  Pressable,
-} from 'react-native';
+import { AddEventButton } from '../../../components/calendar/AddEventButton';
 
-function HeaderAddButton() {
-  const router = useRouter();
-  const [menuVisible, setMenuVisible] = useState(false);
-
-  const openMenu = () => setMenuVisible(true);
-  const closeMenu = () => setMenuVisible(false);
-
-  const addTraining = () => {
-    closeMenu();
-    router.push('/(tabs)/calendar/new');
-  };
-  const addMatch = () => {
-    closeMenu();
-    router.push('/(tabs)/calendar/new-match');
-  };
-
-  return (
-    <>
-      <TouchableOpacity
-        style={styles.addButton}
-        onPress={openMenu}
-        activeOpacity={0.8}
-      >
-        <Text style={styles.addButtonText}>+</Text>
-      </TouchableOpacity>
-      <Modal
-        visible={menuVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={closeMenu}
-      >
-        <Pressable style={styles.menuOverlay} onPress={closeMenu}>
-          <View style={styles.menuBox}>
-            <TouchableOpacity style={styles.menuItem} onPress={addTraining} activeOpacity={0.7}>
-              <Text style={styles.menuItemText}>Entraînement</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={addMatch} activeOpacity={0.7}>
-              <Text style={styles.menuItemText}>Match</Text>
-            </TouchableOpacity>
-          </View>
-        </Pressable>
-      </Modal>
-    </>
-  );
-}
-
+/**
+ * ## Le header n'est masqué que sur la racine
+ *
+ * `headerShown: !isTablet` était posé sur **tout le Stack**. Conséquence :
+ * sur iPad, « Nouvel entraînement », « Nouveau match », le détail d'un
+ * entraînement et le détail d'un match s'ouvraient sans titre et **sans bouton
+ * retour**. Aucun de ces écrans n'en porte un lui-même : on n'en sortait que
+ * par le geste de balayage, invisible, et sur des formulaires longs.
+ *
+ * La règle est donc affinée : une racine (accessible depuis la sidebar) masque
+ * son header sur tablette, un écran empilé le garde. C'est le header natif qui
+ * fournit alors le titre et le retour, exactement comme sur iPhone.
+ *
+ * Sur la racine, le bouton d'ajout reste porté par l'écran lui-même
+ * (`calendar/index.tsx`), via le même `AddEventButton`.
+ */
 export default function CalendarLayout() {
   const isTablet = useIsTablet();
+  const { theme } = useTheme();
+  const c = theme.colors;
+
   return (
     <Stack
       screenOptions={{
-        headerShown: !isTablet,
-        headerStyle: { backgroundColor: '#3b82f6' },
-        headerTintColor: '#fff',
-        headerTitleStyle: { fontWeight: '600', fontSize: 18 },
+        headerShown: true,
+        headerStyle: { backgroundColor: c.bg.canvas },
+        headerShadowVisible: false,
+        headerTintColor: c.text.primary,
+        headerTitleStyle: { color: c.text.primary, fontWeight: '600', fontSize: 18 },
+        contentStyle: { backgroundColor: c.bg.canvas },
       }}
     >
       <Stack.Screen
         name="index"
         options={{
           title: 'Calendrier',
-          headerLeft: isTablet ? undefined : () => <PhoneNavMenu />,
+          headerShown: !isTablet,
           headerRight: () => (
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <View style={styles.headerRight}>
               <SeasonHeaderButton />
-              <HeaderAddButton />
+              <AddEventButton />
             </View>
           ),
         }}
       />
-      <Stack.Screen
-        name="new"
-        options={{
-          title: 'Nouvel entraînement',
-          headerLeft: isTablet ? undefined : () => <PhoneNavMenu />,
-        }}
-      />
-      <Stack.Screen
-        name="new-match"
-        options={{
-          title: 'Nouveau match',
-          headerLeft: isTablet ? undefined : () => <PhoneNavMenu />,
-        }}
-      />
+      <Stack.Screen name="new" options={{ title: 'Nouvel entraînement' }} />
+      <Stack.Screen name="new-match" options={{ title: 'Nouveau match' }} />
       <Stack.Screen name="training/[trainingId]" options={{ title: 'Entraînement' }} />
       <Stack.Screen name="training/edit/[trainingId]" options={{ title: "Modifier l'entraînement" }} />
       <Stack.Screen name="matchDetail/[matchId]" options={{ title: 'Match' }} />
+      <Stack.Screen name="tests/[sessionId]" options={{ title: 'Tests physiques' }} />
     </Stack>
   );
 }
 
 const styles = StyleSheet.create({
-  addButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  addButtonText: { color: '#fff', fontSize: 22, fontWeight: '600', lineHeight: 24 },
-  menuOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  menuBox: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    minWidth: 200,
-    overflow: 'hidden',
-  },
-  menuItem: {
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-  },
-  menuItemText: { fontSize: 16, color: '#111' },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8, marginRight: 4 },
 });

@@ -6,6 +6,8 @@ import { useUserClub } from '../hooks/useUserClub';
 import { usePlayerProfile } from '../hooks/usePlayerProfile';
 import { claimPlayerLinkCode } from '@/lib/services/playerConvocationsService';
 import { clubsService } from '@/lib/services';
+import { RatingScaleEditor } from './RatingScaleEditor';
+import { NotificationPreferencesEditor } from './NotificationPreferencesEditor';
 import {
   Building2,
   Plus,
@@ -67,7 +69,8 @@ export default function SettingsPage() {
   const { club, loading, error, refetch } = useUserClub();
   const [members, setMembers] = useState<(Record<string, unknown> & { email?: string })[]>([]);
   const [teams, setTeams] = useState<{ id: string; name: string; category: string; level: string; color: string }[]>([]);
-  const [invitations, setInvitations] = useState<{ id: string; email: string; role: string; team_id: string | null; token: string; expires_at: string; status: string }[]>([]);
+  const [invitations, setInvitations] = useState<{ id: string; email: string; role: string; team_id: string | null; token: string; code: string; expires_at: string; status: string }[]>([]);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [clubName, setClubName] = useState('');
   const [clubDescription, setClubDescription] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
@@ -205,6 +208,12 @@ export default function SettingsPage() {
     navigator.clipboard.writeText(getInviteLink(token));
     setCopiedToken(token);
     setTimeout(() => setCopiedToken(null), 2000);
+  };
+
+  const copyInviteCode = (code: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedCode(code);
+    setTimeout(() => setCopiedCode(null), 2000);
   };
 
   const handleUpdateMember = async () => {
@@ -558,6 +567,19 @@ export default function SettingsPage() {
                       <div>
                         <span style={{ fontWeight: 600, fontSize: '0.875rem', color: '#0F172A' }}>{inv.email}</span>
                         <span style={{ fontSize: '0.8125rem', color: '#6B7280', marginLeft: 8 }}>— {ROLE_LABELS[inv.role as ClubMemberRole]}</span>
+                        <button
+                          onClick={() => copyInviteCode(inv.code)}
+                          title="Copier le code d'invitation"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 4,
+                            padding: '3px 8px', borderRadius: 6, border: '1px solid #E2E8F0',
+                            background: '#F8FAFC', cursor: 'pointer',
+                            fontFamily: 'monospace', fontSize: '0.8125rem', letterSpacing: 1, color: '#0F172A',
+                          }}
+                        >
+                          {inv.code}
+                          {copiedCode === inv.code ? <Check size={12} style={{ color: '#16A34A' }} /> : <Copy size={12} style={{ color: '#94A3B8' }} />}
+                        </button>
                       </div>
                       <div style={{ display: 'flex', gap: 4 }}>
                         <button
@@ -717,6 +739,12 @@ export default function SettingsPage() {
               </ul>
             </div>
           </div>
+
+          {/* ── Préférences de notification ──────────────────────── */}
+          <NotificationPreferencesEditor />
+
+          {/* ── Échelle de notation ──────────────────────────────── */}
+          <RatingScaleEditor />
 
           {/* ── Zone dangereuse ──────────────────────────────────── */}
           <div className="fm-card" style={{ borderColor: '#FECACA' }}>

@@ -1,67 +1,76 @@
 /**
- * Affiche la répartition des événements par quart de mi-temps (8 quarts au total).
- * Graphique à courbes avec possibilité d'afficher/masquer chaque type d'événement.
+ * MatchMomentsView — répartition des événements par quart de match (P0-7, P1-2)
+ *
+ * Passe de `react-native-chart-kit` au `LineChart` maison sur `react-native-svg`.
+ *
+ * Deux corrections de lecture, au-delà du changement de bibliothèque :
+ *
+ * 1. **La courbe était lissée en Bézier (`bezier`) alors qu'elle affiche des
+ *    COMPTAGES par quart.** Le lissage inventait des valeurs intermédiaires —
+ *    la courbe passait par 1,4 tir entre deux quarts — et pouvait descendre
+ *    sous zéro entre deux points. Sur une donnée discrète, l'interpolation
+ *    ment : les segments sont maintenant droits.
+ * 2. **Huit séries étaient activées par défaut**, toutes superposées sur un
+ *    graphique de 220 pt de haut. Le défaut passe aux quatre séries de l'équipe ;
+ *    celles de l'adversaire s'ajoutent à la demande.
+ *
+ * Le code de calcul des quarts est repris à l'identique.
  */
+
 import { useMemo, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import LineChart from 'react-native-chart-kit/dist/line-chart';
-import type { Match, MatchEvent } from '../types';
-import type { MatchEventType } from '../types';
+import { View, StyleSheet, ScrollView } from 'react-native';
+import { useTheme } from '../contexts/ThemeContext';
+import { haptics } from '../lib/design/haptics';
+import { Text, Card, EmptyState } from './ui';
+import { LineChart, SeriesToggle, type LineSeries } from './charts/LineChart';
+import type { Match, MatchEvent, MatchEventType } from '../types';
 
 const DEFAULT_HALF_DURATION_SEC = 20 * 60;
 const QUARTERS_PER_HALF = 4;
+const QUARTERS = [0, 1, 2, 3, 4, 5, 6, 7] as const;
 
-/** Calcule la durée de chaque mi-temps à partir des événements du match.
- * match_time_seconds = temps écoulé depuis le début de la mi-temps (par mi-temps).
- * Ex: 48min MT1 + 56min MT2 → quarts MT1: 12min chacun, quarts MT2: 14min chacun.
+type SeriesKey = MatchEventType | 'total_shots' | 'opponent_total_shots';
+
+/**
+ * `seriesIndex` pointe dans `chartSeries` du thème. `opponent` détermine ce qui
+ * est affiché par défaut : montrer huit courbes d'emblée rendait le graphique
+ * illisible.
  */
-function getHalfDurationsFromEvents(events: MatchEvent[]): { durationHalf1: number; durationHalf2: number } {
-  const half1 = events.filter((e) => e.half === 1);
-  const half2 = events.filter((e) => e.half === 2);
-  const max1 = half1.length > 0 ? Math.max(...half1.map((e) => e.match_time_seconds)) : 0;
-  const max2 = half2.length > 0 ? Math.max(...half2.map((e) => e.match_time_seconds)) : 0;
-
-  const durationHalf1 = max1 > 0 ? max1 : DEFAULT_HALF_DURATION_SEC;
-  const durationHalf2 = max2 > 0 ? max2 : DEFAULT_HALF_DURATION_SEC;
-
-  return { durationHalf1, durationHalf2 };
-}
-
-/** Attribue un événement au quart (0-7) en fonction des durées réelles des mi-temps.
- * match_time_seconds est relatif au début de chaque mi-temps.
- */
-function getQuarterFromEvent(
-  ev: MatchEvent,
-  durations: { durationHalf1: number; durationHalf2: number }
-): number {
-  const t = ev.match_time_seconds;
-  const half = ev.half;
-  const duration = half === 1 ? durations.durationHalf1 : durations.durationHalf2;
-
-  const quarterInHalf = Math.min(
-    Math.floor((t / duration) * QUARTERS_PER_HALF),
-    QUARTERS_PER_HALF - 1
-  );
-  const q = Math.max(0, quarterInHalf);
-  return half === 1 ? q : QUARTERS_PER_HALF + q;
-}
-
-const EVENT_TYPES: { key: MatchEventType | 'total_shots' | 'opponent_total_shots'; label: string; color: string }[] = [
-  { key: 'goal', label: 'But', color: '#3b82f6' },
-  { key: 'total_shots', label: 'Tirs', color: '#f97316' },
-  { key: 'shot_on_target', label: 'Tir cadré', color: '#22c55e' },
-  { key: 'shot', label: 'Tir non cadré', color: '#eab308' },
-  { key: 'opponent_goal', label: 'But adv', color: '#dc2626' },
-  { key: 'opponent_total_shots', label: 'Tirs adv', color: '#7c3aed' },
-  { key: 'opponent_shot_on_target', label: 'TC adv', color: '#94a3b8' },
-  { key: 'opponent_shot', label: 'Tir adv non cadré', color: '#64748b' },
+const EVENT_SERIES: { key: SeriesKey; label: string; seriesIndex: number; opponent: boolean }[] = [
+  { key: 'goal', label: 'Buts', seriesIndex: 0, opponent: false },
+  { key: 'total_shots', label: 'Tirs', seriesIndex: 2, opponent: false },
+  { key: 'shot_on_target', label: 'Tirs cadrés', seriesIndex: 1, opponent: false },
+  { key: 'shot', label: 'Tirs non cadrés', seriesIndex: 5, opponent: false },
+  { key: 'opponent_goal', label: 'Buts adverses', seriesIndex: 3, opponent: true },
+  { key: 'opponent_total_shots', label: 'Tirs adverses', seriesIndex: 4, opponent: true },
+  { key: 'opponent_shot_on_target', label: 'Tirs cadrés adv.', seriesIndex: 4, opponent: true },
+  { key: 'opponent_shot', label: 'Tirs non cadrés adv.', seriesIndex: 5, opponent: true },
 ];
 
-function formatQuarterLabel(q: number): string {
-  const half = Math.floor(q / QUARTERS_PER_HALF) + 1;
-  const quarterInHalf = (q % QUARTERS_PER_HALF) + 1;
-  return `MT${half} Q${quarterInHalf}`;
+function halfDurations(events: MatchEvent[]): { h1: number; h2: number } {
+  const max = (half: number) => {
+    const list = events.filter((e) => e.half === half);
+    return list.length > 0 ? Math.max(...list.map((e) => e.match_time_seconds)) : 0;
+  };
+  const m1 = max(1);
+  const m2 = max(2);
+  return {
+    h1: m1 > 0 ? m1 : DEFAULT_HALF_DURATION_SEC,
+    h2: m2 > 0 ? m2 : DEFAULT_HALF_DURATION_SEC,
+  };
 }
+
+function quarterOf(ev: MatchEvent, d: { h1: number; h2: number }): number {
+  const duration = ev.half === 1 ? d.h1 : d.h2;
+  const q = Math.max(
+    0,
+    Math.min(Math.floor((ev.match_time_seconds / duration) * QUARTERS_PER_HALF), QUARTERS_PER_HALF - 1)
+  );
+  return ev.half === 1 ? q : QUARTERS_PER_HALF + q;
+}
+
+const quarterLabel = (q: number) =>
+  `MT${Math.floor(q / QUARTERS_PER_HALF) + 1} Q${(q % QUARTERS_PER_HALF) + 1}`;
 
 export type MatchMomentsViewProps = {
   matches: Match[];
@@ -69,245 +78,159 @@ export type MatchMomentsViewProps = {
   filteredMatchIds: Set<string>;
 };
 
-const getDefaultVisible = () =>
-  Object.fromEntries(EVENT_TYPES.map((e) => [e.key, true]));
+export function MatchMomentsView({ eventsByMatch, filteredMatchIds }: MatchMomentsViewProps) {
+  const { theme } = useTheme();
+  const c = theme.colors;
 
-export function MatchMomentsView({
-  matches,
-  eventsByMatch,
-  filteredMatchIds,
-}: MatchMomentsViewProps) {
-  const [chartWidth, setChartWidth] = useState(300);
-  const chartHeight = 220;
+  const [visible, setVisible] = useState<Set<SeriesKey>>(
+    () => new Set(EVENT_SERIES.filter((e) => !e.opponent).map((e) => e.key))
+  );
 
-  const [visibleTypes, setVisibleTypes] = useState<Record<string, boolean>>(getDefaultVisible);
-
-  const onChartLayout = useCallback((e: { nativeEvent: { layout: { width: number } } }) => {
-    const w = e.nativeEvent.layout.width;
-    if (w > 0) setChartWidth(w - 24);
+  const toggle = useCallback((key: SeriesKey) => {
+    haptics.select();
+    setVisible((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }, []);
 
-  const toggleType = useCallback((key: string) => {
-    setVisibleTypes((prev) => ({ ...prev, [key]: !prev[key] }));
-  }, []);
-
-  const { quartersData, totalEvents } = useMemo(() => {
-    const byQuarter: Record<number, { byType: Record<string, number>; total: number }> = {};
-    for (let q = 0; q < 8; q++) {
-      byQuarter[q] = { byType: {}, total: 0 };
-    }
+  const { byQuarter, totalEvents } = useMemo(() => {
+    const acc: Record<number, Record<string, number>> = {};
+    QUARTERS.forEach((q) => {
+      acc[q] = {};
+    });
 
     let total = 0;
     Object.entries(eventsByMatch).forEach(([matchId, events]) => {
       if (!filteredMatchIds.has(matchId)) return;
-      const durations = getHalfDurationsFromEvents(events);
+      const d = halfDurations(events);
       events.forEach((ev) => {
-        const q = getQuarterFromEvent(ev, durations);
+        const q = quarterOf(ev, d);
         if (q >= 0 && q < 8) {
-          byQuarter[q].byType[ev.event_type] = (byQuarter[q].byType[ev.event_type] ?? 0) + 1;
-          byQuarter[q].total++;
+          acc[q][ev.event_type] = (acc[q][ev.event_type] ?? 0) + 1;
           total++;
         }
       });
     });
 
-    // Le nombre de tirs est dérivé (tirs cadrés + tirs non cadrés), pas un type d'événement brut.
-    for (let q = 0; q < 8; q++) {
-      byQuarter[q].byType.total_shots =
-        (byQuarter[q].byType.shot ?? 0) + (byQuarter[q].byType.shot_on_target ?? 0);
-      byQuarter[q].byType.opponent_total_shots =
-        (byQuarter[q].byType.opponent_shot ?? 0) + (byQuarter[q].byType.opponent_shot_on_target ?? 0);
-    }
+    // Les tirs totaux sont dérivés, pas un type d'événement brut.
+    QUARTERS.forEach((q) => {
+      acc[q].total_shots = (acc[q].shot ?? 0) + (acc[q].shot_on_target ?? 0);
+      acc[q].opponent_total_shots =
+        (acc[q].opponent_shot ?? 0) + (acc[q].opponent_shot_on_target ?? 0);
+    });
 
-    return { quartersData: byQuarter, totalEvents: total };
+    return { byQuarter: acc, totalEvents: total };
   }, [eventsByMatch, filteredMatchIds]);
 
-  const chartData = useMemo(() => {
-    const labels = [0, 1, 2, 3, 4, 5, 6, 7].map((q) => formatQuarterLabel(q));
-    const datasets = EVENT_TYPES
-      .filter((e) => visibleTypes[e.key])
-      .map((e) => ({
-        data: [0, 1, 2, 3, 4, 5, 6, 7].map((q) => quartersData[q].byType[e.key] ?? 0),
-        color: (opacity = 1) => {
-          const hex = e.color.replace('#', '');
-          const r = parseInt(hex.slice(0, 2), 16);
-          const g = parseInt(hex.slice(2, 4), 16);
-          const b = parseInt(hex.slice(4, 6), 16);
-          return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-        },
-      }));
-    return { labels, datasets };
-  }, [quartersData, visibleTypes]);
+  const series: LineSeries[] = useMemo(
+    () =>
+      EVENT_SERIES.filter((e) => visible.has(e.key)).map((e) => ({
+        key: e.key,
+        label: e.label,
+        color: c.chartSeries[e.seriesIndex] ?? c.accent.default,
+        data: QUARTERS.map((q) => byQuarter[q][e.key] ?? 0),
+      })),
+    [byQuarter, visible, c]
+  );
 
-  const chartConfig = {
-    backgroundColor: '#fff',
-    backgroundGradientFrom: '#f8fafc',
-    backgroundGradientTo: '#f1f5f9',
-    decimalPlaces: 0,
-    color: (opacity = 1) => `rgba(100, 116, 139, ${opacity})`,
-    labelColor: (opacity = 1) => `rgba(100, 116, 139, ${opacity})`,
-    style: { borderRadius: 12 },
-    propsForLabels: { fontSize: 10 },
-    useShadowColorFromDataset: true,
-  };
+  const a11y = useMemo(
+    () =>
+      series
+        .map((s) => `${s.label} : ${s.data.map((v, i) => `${quarterLabel(i)} ${v}`).join(', ')}`)
+        .join('. '),
+    [series]
+  );
 
   if (filteredMatchIds.size === 0) {
     return (
-      <Text style={styles.emptyText}>Aucun match ne correspond aux filtres sélectionnés.</Text>
+      <EmptyState
+        icon="filter-outline"
+        title="Aucun match sélectionné"
+        description="Aucun match ne correspond aux filtres en cours."
+        compact
+      />
     );
   }
 
   if (totalEvents === 0) {
     return (
-      <Text style={styles.emptyText}>
-        Aucun événement enregistré pour les matchs sélectionnés.
-      </Text>
+      <EmptyState
+        icon="stats-chart-outline"
+        title="Aucun événement"
+        description="Les matchs sélectionnés n'ont pas d'événement enregistré."
+        compact
+      />
     );
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.legend}>
-        Répartition des événements par quart (4 quarts par mi-temps, 8 au total)
+    <ScrollView contentContainerStyle={[styles.content, { gap: theme.space.lg }]}>
+      <Text variant="callout" tone="secondary">
+        Répartition des événements par quart de match : quatre quarts par mi-temps, huit au total.
       </Text>
 
-      {chartData.datasets.length > 0 ? (
-        <View style={styles.chartCard} onLayout={onChartLayout}>
+      <Card variant="flat" padding="sm">
+        {series.length > 0 ? (
           <LineChart
-            data={chartData}
-            width={chartWidth}
-            height={chartHeight}
-            chartConfig={chartConfig}
-            style={styles.chart}
-            bezier
-            withDots
-            withInnerLines
+            labels={QUARTERS.map(quarterLabel)}
+            series={series}
+            height={180}
             fromZero
+            // Comptages par quart : le lissage inventerait des valeurs
+            // intermédiaires qui n'existent pas.
+            smooth={false}
+            accessibilityLabel={`Événements par quart. ${a11y}`}
           />
-        </View>
-      ) : (
-        <Text style={styles.noSeries}>Sélectionnez au moins un type d'événement</Text>
-      )}
+        ) : (
+          <EmptyState
+            icon="eye-off-outline"
+            title="Aucune courbe affichée"
+            description="Activez au moins un type d'événement ci-dessous."
+            compact
+          />
+        )}
+      </Card>
 
-      <View style={styles.legendSection}>
-        <Text style={styles.legendTitle}>Afficher / masquer les courbes</Text>
-        <View style={styles.legendChips}>
-          {EVENT_TYPES.map((e) => {
-            const isVisible = visibleTypes[e.key];
-            const hasData = [0, 1, 2, 3, 4, 5, 6, 7].some((q) => (quartersData[q].byType[e.key] ?? 0) > 0);
+      <View style={styles.legendBlock}>
+        <Text variant="callout" tone="secondary" weight="600">
+          Afficher ou masquer
+        </Text>
+        <View style={styles.chips}>
+          {EVENT_SERIES.map((e) => {
+            const hasData = QUARTERS.some((q) => (byQuarter[q][e.key] ?? 0) > 0);
             return (
-              <TouchableOpacity
+              <SeriesToggle
                 key={e.key}
-                style={[
-                  styles.legendChip,
-                  isVisible && styles.legendChipActive,
-                  !hasData && styles.legendChipInactive,
-                ]}
-                onPress={() => toggleType(e.key)}
-              >
-                <View style={[styles.legendDot, { backgroundColor: e.color }]} />
-                <Text style={[styles.legendChipText, isVisible && styles.legendChipTextActive]}>
-                  {e.label}
-                </Text>
-              </TouchableOpacity>
+                label={e.label}
+                color={c.chartSeries[e.seriesIndex] ?? c.accent.default}
+                active={visible.has(e.key)}
+                disabled={!hasData}
+                onPress={() => toggle(e.key)}
+              />
             );
           })}
         </View>
       </View>
 
-      <View style={styles.summaryRow}>
-        <Text style={styles.summaryLabel}>Total :</Text>
-        <Text style={styles.summaryValue}>{totalEvents} événements</Text>
-      </View>
+      <Card variant="flat" padding="sm" style={styles.totalRow}>
+        <Text variant="callout" tone="secondary" style={styles.flex}>
+          Total sur la sélection
+        </Text>
+        <Text variant="headline" numeric>
+          {totalEvents}
+        </Text>
+      </Card>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  content: { paddingBottom: 24, alignSelf: 'stretch' },
-  legend: {
-    fontSize: 13,
-    color: '#64748b',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  emptyText: {
-    fontSize: 14,
-    color: '#94a3b8',
-    fontStyle: 'italic',
-    textAlign: 'center',
-    marginVertical: 24,
-  },
-  noSeries: {
-    fontSize: 14,
-    color: '#94a3b8',
-    textAlign: 'center',
-    marginVertical: 16,
-  },
-  chartCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    overflow: 'hidden',
-    alignSelf: 'stretch',
-  },
-  chart: { borderRadius: 8 },
-  legendSection: {
-    marginBottom: 16,
-  },
-  legendTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#475569',
-    marginBottom: 10,
-  },
-  legendChips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  legendChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 20,
-    backgroundColor: '#f1f5f9',
-  },
-  legendChipActive: {
-    backgroundColor: '#eff6ff',
-    borderWidth: 1,
-    borderColor: '#3b82f6',
-  },
-  legendChipInactive: {
-    opacity: 0.6,
-  },
-  legendDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 6,
-  },
-  legendChipText: {
-    fontSize: 12,
-    color: '#64748b',
-    fontWeight: '500',
-  },
-  legendChipTextActive: {
-    color: '#1e293b',
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#e2e8f0',
-  },
-  summaryLabel: { fontSize: 14, color: '#64748b', marginRight: 8 },
-  summaryValue: { fontSize: 16, fontWeight: '700', color: '#1e293b' },
+  flex: { flex: 1 },
+  content: { paddingBottom: 24 },
+  legendBlock: { gap: 10 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  totalRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
 });

@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { View } from 'react-native';
+import { EmptyState } from '../../components/ui';
+import { SkeletonDetail } from '../../components/ui/Skeleton';
+import { makeStyles } from '../../contexts/ThemeContext';
 import { useAppRole } from '../../contexts/AppRoleContext';
 import { useActiveTeam } from '../../contexts/ActiveTeamContext';
 import { useActiveSeason } from '../../contexts/ActiveSeasonContext';
@@ -17,6 +20,7 @@ import type { PlayerEvent } from '../../types';
 import { PlayerDetailView, type TrainingSession, type PlayerStats } from '../../components/PlayerDetailView';
 
 export default function PlayerProfileScreen() {
+  const styles = useStyles();
   const { player } = useAppRole();
   const { teams: allTeams } = useActiveTeam();
   const { activeSeason } = useActiveSeason();
@@ -86,16 +90,18 @@ export default function PlayerProfileScreen() {
 
   if (!player) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.emptyText}>Profil joueur non disponible</Text>
-      </View>
+      <EmptyState
+        icon="person-circle-outline"
+        title="Ta fiche n’est pas disponible"
+        description="Demande à ton coach de relier ton compte à ta fiche joueur."
+      />
     );
   }
 
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#16a34a" />
+      <View style={styles.loadingWrap}>
+        <SkeletonDetail />
       </View>
     );
   }
@@ -123,7 +129,6 @@ export default function PlayerProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  centered:  { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  emptyText: { fontSize: 16, color: '#6b7280' },
-});
+const useStyles = makeStyles((t) => ({
+  loadingWrap: { flex: 1, padding: t.space.lg, backgroundColor: t.colors.bg.canvas },
+}));

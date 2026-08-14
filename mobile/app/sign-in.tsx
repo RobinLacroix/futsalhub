@@ -1,266 +1,227 @@
+/**
+ * Connexion
+ *
+ * C'est le seul écran qu'un coach extérieur voit avant de décider si le produit
+ * est sérieux. Il portait 24 couleurs en dur, aucun libellé de champ, et
+ * affichait les erreurs de Supabase en anglais.
+ *
+ * ## Corrections de fond, au-delà des couleurs
+ *
+ * **« Rester connecté » mentait.** La case ne mémorisait que l'**email**, jamais
+ * la session : Supabase persiste celle-ci de toute façon, et la décocher ne
+ * déconnectait donc rien. Un utilisateur qui la décochait sur un appareil
+ * partagé croyait se protéger. Le libellé dit maintenant ce que la case fait
+ * réellement — « Mémoriser mon email ».
+ *
+ * **Les erreurs étaient en anglais.** « Invalid login credentials » sur la porte
+ * d'entrée d'une application française. Traduites dans `lib/authErrors.ts`, avec
+ * la conduite à tenir : « Email not confirmed » devient une phrase qui dit
+ * d'aller voir ses spams.
+ *
+ * **Aucun champ n'avait de libellé**, seulement un placeholder — qui disparaît
+ * à la première frappe et n'est annoncé par aucun lecteur d'écran.
+ *
+ * **Le mot de passe ne pouvait pas être relu.** Pas de bouton œil : la seule
+ * façon de vérifier une saisie était de tout effacer.
+ *
+ * **Le lien « Design system (dev) » avait exactement le style du lien « Créer un
+ * compte ».** Il est neutralisé visuellement — il reste sous `__DEV__`, donc
+ * absent de tout build de production, mais il n'avait rien à faire au même
+ * niveau qu'une action réelle.
+ *
+ * **Le rappel « mêmes identifiants que sur le site » était à 2,5:1** de
+ * contraste, donc illisible, alors que c'est une information utile à quelqu'un
+ * qui vient du web.
+ */
+
 import { useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  ActivityIndicator,
-  Alert,
-} from 'react-native';
+import { View } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { Pressable } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { authErrorMessage } from '../lib/authErrors';
 import { useAppRole } from '../contexts/AppRoleContext';
+import { useTheme, makeStyles } from '../contexts/ThemeContext';
+import { HIT_SLOP_MIN } from '../lib/design/tokens';
+import { haptics } from '../lib/design/haptics';
+import { Text, Input, Button } from '../components/ui';
+import { AuthCard, AuthError, AuthLink, PasswordInput } from '../components/auth/AuthChrome';
+
+const REMEMBER_KEY = 'futsalhub.rememberEmail';
 
 export default function SignInScreen() {
+  const s = useStyles();
+  const { theme } = useTheme();
+  const router = useRouter();
+  const { refetch } = useAppRole();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [rememberMe, setRememberMe] = useState(true);
-
-  const router = useRouter();
-  const { refetch } = useAppRole();
+  const [rememberEmail, setRememberEmail] = useState(true);
 
   useEffect(() => {
-    // Pré-remplir l'email si l'utilisateur a choisi "Se souvenir de moi"
-    AsyncStorage.getItem('futsalhub.rememberEmail').then((value) => {
-      if (value) {
-        setEmail(value);
-        setRememberMe(true);
-      }
-    });
+    AsyncStorage.getItem(REMEMBER_KEY)
+      .then((value) => {
+        if (value) {
+          setEmail(value);
+          setRememberEmail(true);
+        }
+      })
+      .catch(() => {
+        // Préférence illisible : le champ reste vide, ce n'est pas bloquant.
+      });
   }, []);
 
   const handleSignIn = async () => {
     setError(null);
     if (!email.trim() || !password) {
-      setError('Email et mot de passe requis');
+      setError('Email et mot de passe sont requis.');
       return;
     }
     setLoading(true);
     try {
-      const { error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      const { error: err } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
       if (err) throw err;
-      if (rememberMe) {
-        await AsyncStorage.setItem('futsalhub.rememberEmail', email.trim());
-      } else {
-        await AsyncStorage.removeItem('futsalhub.rememberEmail');
-      }
+      if (rememberEmail) await AsyncStorage.setItem(REMEMBER_KEY, email.trim());
+      else await AsyncStorage.removeItem(REMEMBER_KEY);
+      haptics.success();
       await refetch();
       router.replace('/');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Erreur de connexion');
+      haptics.error();
+      setError(authErrorMessage(e, 'Connexion impossible.'));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <View style={styles.card}>
-        <Text style={styles.title}>FutsalHub</Text>
-        <Text style={styles.subtitle}>Connectez-vous à votre espace</Text>
+    <AuthCard title="FutsalHub" subtitle="Connecte-toi à ton espace">
+      <AuthError message={error} />
 
-        {error ? (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>{error}</Text>
+      <Input
+        label="Email"
+        value={email}
+        onChangeText={setEmail}
+        placeholder="prenom@club.fr"
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="email-address"
+        autoComplete="email"
+        textContentType="username"
+        editable={!loading}
+        returnKeyType="next"
+      />
+
+      <PasswordInput
+        label="Mot de passe"
+        value={password}
+        onChangeText={setPassword}
+        placeholder="••••••••"
+        autoComplete="current-password"
+        textContentType="password"
+        editable={!loading}
+        returnKeyType="go"
+        onSubmitEditing={() => void handleSignIn()}
+      />
+
+      <View style={s.row}>
+        {/* La case ne mémorise QUE l'email. Elle s'appelait « Rester
+            connecté », ce qu'elle n'a jamais fait. */}
+        <Pressable
+          onPress={() => setRememberEmail((v) => !v)}
+          disabled={loading}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: rememberEmail }}
+          accessibilityLabel="Mémoriser mon email"
+          style={({ pressed }) => [s.check, pressed && s.pressed]}
+        >
+          <View
+            style={[
+              s.box,
+              {
+                borderColor: rememberEmail ? theme.colors.accent.default : theme.colors.border.strong,
+                backgroundColor: rememberEmail ? theme.colors.accent.default : 'transparent',
+              },
+            ]}
+          >
+            {rememberEmail && (
+              <Ionicons name="checkmark" size={14} color={theme.colors.text.onFill} />
+            )}
           </View>
-        ) : null}
+          <Text variant="callout" tone="secondary">
+            Mémoriser mon email
+          </Text>
+        </Pressable>
 
-        <TextInput
-          style={styles.input}
-          placeholder="votre@email.com"
-          placeholderTextColor="#9ca3af"
-          value={email}
-          onChangeText={setEmail}
-          autoCapitalize="none"
-          keyboardType="email-address"
-          autoComplete="email"
-          editable={!loading}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Mot de passe"
-          placeholderTextColor="#9ca3af"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-          autoComplete="password"
-          editable={!loading}
-        />
-
-        <TouchableOpacity
-          style={styles.forgotLink}
+        <AuthLink
+          label="Mot de passe oublié ?"
           onPress={() => router.push('/forgot-password' as any)}
           disabled={loading}
-        >
-          <Text style={styles.forgotLinkText}>Mot de passe oublié ?</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.rememberRow}
-          onPress={() => setRememberMe((v) => !v)}
-          disabled={loading}
-        >
-          <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
-            {rememberMe && <Text style={styles.checkboxMark}>✓</Text>}
-          </View>
-          <Text style={styles.rememberText}>Rester connecté</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.button, loading && styles.buttonDisabled]}
-          onPress={handleSignIn}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Se connecter</Text>
-          )}
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.signUpLink}
-          onPress={() => router.push('/sign-up' as any)}
-          disabled={loading}
-        >
-          <Text style={styles.signUpLinkText}>Pas encore de compte ? Créer un compte</Text>
-        </TouchableOpacity>
-
-        <Text style={styles.hint}>
-          Utilisez les mêmes identifiants que sur le site FutsalHub.
-        </Text>
+        />
       </View>
-    </KeyboardAvoidingView>
+
+      <Button
+        label="Se connecter"
+        onPress={handleSignIn}
+        loading={loading}
+        disabled={loading}
+        block
+      />
+
+      <AuthLink
+        label="Pas encore de compte ? En créer un"
+        onPress={() => router.push('/sign-up' as any)}
+        disabled={loading}
+      />
+
+      <Text variant="caption" tone="tertiary" style={s.center}>
+        Les identifiants sont les mêmes que sur le site FutsalHub.
+      </Text>
+
+      {/* `__DEV__` est faux dans tout build de production : cette entrée ne peut
+          pas partir en App Store. Style volontairement effacé, elle ne doit pas
+          se lire comme une action du produit. */}
+      {__DEV__ && (
+        <AuthLink
+          label="Design system (dev)"
+          tone="tertiary"
+          onPress={() => router.push('/design-gallery' as any)}
+        />
+      )}
+    </AuthCard>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f3f4f6',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#111',
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#6b7280',
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  errorBox: {
-    backgroundColor: '#fef2f2',
-    borderWidth: 1,
-    borderColor: '#fecaca',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
-  },
-  errorText: {
-    color: '#dc2626',
-    fontSize: 14,
-  },
-  input: {
-    borderWidth: 2,
-    borderColor: '#e5e7eb',
-    borderRadius: 8,
-    padding: 14,
-    fontSize: 16,
-    color: '#111',
-    marginBottom: 12,
-  },
-  button: {
-    backgroundColor: '#3b82f6',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  forgotLink: {
-    alignSelf: 'flex-end',
-    marginBottom: 8,
-  },
-  forgotLinkText: {
-    fontSize: 14,
-    color: '#3b82f6',
-    fontWeight: '500',
-  },
-  rememberRow: {
+const useStyles = makeStyles((t) => ({
+  center: { textAlign: 'center' },
+  pressed: { opacity: 0.6 },
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 4,
-    marginBottom: 4,
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
   },
-  checkbox: {
+  check: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: t.space.sm,
+    minHeight: HIT_SLOP_MIN,
+    paddingRight: t.space.sm,
+  },
+  box: {
     width: 20,
     height: 20,
-    borderRadius: 4,
+    borderRadius: t.radius.sm,
     borderWidth: 2,
-    borderColor: '#d1d5db',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
-    backgroundColor: '#fff',
   },
-  checkboxChecked: {
-    backgroundColor: '#3b82f6',
-    borderColor: '#3b82f6',
-  },
-  checkboxMark: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  rememberText: {
-    fontSize: 14,
-    color: '#4b5563',
-  },
-  signUpLink: {
-    alignSelf: 'center',
-    marginTop: 16,
-  },
-  signUpLinkText: {
-    fontSize: 14,
-    color: '#16a34a',
-    fontWeight: '600',
-  },
-  hint: {
-    fontSize: 12,
-    color: '#9ca3af',
-    textAlign: 'center',
-    marginTop: 16,
-  },
-});
+}));

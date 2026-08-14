@@ -1,4 +1,5 @@
 import { supabase } from '../supabase';
+import { DEFAULT_TEAM_COLOR } from '../teamColors';
 
 export async function isClubAdmin(clubId: string): Promise<boolean> {
   const { data, error } = await supabase.rpc('is_club_admin', { p_club_id: clubId });
@@ -210,17 +211,18 @@ export async function createClubInvitation(
   const { data, error } = await supabase
     .from('club_invitations')
     .insert({ club_id: clubId, email, role, team_id: teamId ?? null, created_by: user.id })
-    .select('token')
+    .select('code')
     .single();
   if (error) throw error;
-  return (data as any).token as string;
+  return (data as { code: string }).code;
 }
 
-export async function acceptClubInvitation(token: string): Promise<string> {
+/** Rejoindre un club en tant que staff via le code court d'invitation (nominatif). */
+export async function acceptClubInvitationByCode(code: string): Promise<string> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Non connecté');
-  const { data, error } = await supabase.rpc('accept_club_invitation', {
-    p_token: token,
+  const { data, error } = await supabase.rpc('accept_club_invitation_by_code', {
+    p_code: code.trim().toUpperCase(),
     p_user_id: user.id,
   });
   if (error) throw error;
@@ -257,7 +259,11 @@ export async function createUserClub(input: CreateClubInput): Promise<{ clubId: 
         name: 'Équipe principale',
         category: 'Senior',
         level: 'A',
-        color: '#3b82f6',
+        // Catalogue partagé avec l'écran Équipes. C'était `#3b82f6` en dur,
+        // absent de la palette depuis sa révision : la première équipe de tout
+        // nouveau club portait donc une couleur que le sélecteur ne sait pas
+        // re-proposer.
+        color: DEFAULT_TEAM_COLOR,
       })
       .select('id')
       .single();

@@ -18,6 +18,12 @@ interface ActiveTeamContextValue {
   loading: boolean;
   changeActiveTeam: (teamId: string) => void;
   fetchTeams: () => Promise<void>;
+  /** Équipes que l'utilisateur peut modifier (admin => toutes ; coach => ses équipes). */
+  writableTeamIds: string[];
+  /** L'équipe active est-elle modifiable par l'utilisateur ? */
+  canEditActiveTeam: boolean;
+  /** Une équipe donnée est-elle modifiable par l'utilisateur ? */
+  canEditTeam: (teamId: string) => boolean;
 }
 
 const ActiveTeamContext = createContext<ActiveTeamContextValue | null>(null);
@@ -25,20 +31,23 @@ const ActiveTeamContext = createContext<ActiveTeamContextValue | null>(null);
 export function ActiveTeamProvider({ children }: { children: React.ReactNode }) {
   const [activeTeamId, setActiveTeamId] = useState<string>('');
   const [teams, setTeams] = useState<Team[]>([]);
+  const [writableTeamIds, setWritableTeamIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchTeams = useCallback(async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('teams')
-        .select('*')
-        .order('name');
-      if (error) throw error;
-      setTeams(data || []);
+      const [teamsRes, writableRes] = await Promise.all([
+        supabase.from('teams').select('*').order('name'),
+        supabase.rpc('get_my_writable_team_ids'),
+      ]);
+      if (teamsRes.error) throw teamsRes.error;
+      setTeams(teamsRes.data || []);
+      setWritableTeamIds((writableRes.data as string[] | null) || []);
     } catch (err) {
       console.error('ActiveTeamContext: erreur chargement équipes', err);
       setTeams([]);
+      setWritableTeamIds([]);
     } finally {
       setLoading(false);
     }
@@ -64,13 +73,22 @@ export function ActiveTeamProvider({ children }: { children: React.ReactNode }) 
 
   const activeTeam = teams.find((t) => t.id === activeTeamId);
 
+  const canEditTeam = useCallback(
+    (teamId: string) => writableTeamIds.includes(teamId),
+    [writableTeamIds],
+  );
+  const canEditActiveTeam = !!activeTeamId && writableTeamIds.includes(activeTeamId);
+
   const value: ActiveTeamContextValue = {
     activeTeamId,
     activeTeam,
     teams,
     loading,
     changeActiveTeam,
-    fetchTeams
+    fetchTeams,
+    writableTeamIds,
+    canEditActiveTeam,
+    canEditTeam,
   };
 
   return (

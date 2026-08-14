@@ -6,6 +6,7 @@ export interface ClubInvitationRow {
   role: string;
   team_id: string | null;
   token: string;
+  code: string;
   expires_at: string;
   status: string;
 }
@@ -114,15 +115,26 @@ export const clubsService = {
     role: string;
     teamId: string | null;
     createdBy: string;
-  }): Promise<void> {
-    const { error } = await supabase.from('club_invitations').insert({
+  }): Promise<{ code: string }> {
+    const { data, error } = await supabase.from('club_invitations').insert({
       club_id: input.clubId,
       email: input.email,
       role: input.role,
       team_id: input.teamId,
       created_by: input.createdBy,
+    }).select('code').single();
+    if (error) throw error;
+    return { code: (data as { code: string }).code };
+  },
+
+  /** Rejoindre un club en tant que staff via le code court d'invitation (nominatif). */
+  async acceptInvitationByCode(code: string, userId: string): Promise<string> {
+    const { data, error } = await supabase.rpc('accept_club_invitation_by_code', {
+      p_code: code,
+      p_user_id: userId,
     });
     if (error) throw error;
+    return data as string;
   },
 
   async updateMember(memberId: string, updates: { role: string; teamId: string | null }): Promise<void> {

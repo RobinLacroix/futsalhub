@@ -1,35 +1,66 @@
+/**
+ * Créer un club
+ *
+ * Premier écran d'un coach qui arrive seul dans FutsalHub, juste après la
+ * création de compte. C'est le point où il devient administrateur.
+ *
+ * ## Ce que la migration corrige, au-delà du remapping des couleurs
+ *
+ * - **Le bouton principal était bleu `#3b82f6`** alors que son voisin immédiat
+ *   dans le même parcours, « Rejoindre un club », était violet `#7c3aed`. Deux
+ *   options présentées côte à côte sur l'accueil, deux couleurs de marque
+ *   différentes une fois ouvertes, et aucune des deux n'était l'accent de
+ *   l'app. Même défaut que celui trouvé entre `sign-in` et `sign-up`.
+ * - **Les erreurs de saisie passaient par `Alert.alert`.** Un nom de club
+ *   manquant se corrige dans le champ : `Input` porte l'erreur sous le champ
+ *   concerné, où le regard est déjà.
+ * - **Le succès aussi était une `Alert.alert`** à valider avant d'entrer dans
+ *   l'app. Le club créé se constate — il est là, avec son équipe. La boîte de
+ *   dialogue ajoutait un tap et masquait le résultat.
+ * - **`placeholderTextColor` était figé à `#9ca3af`**, soit 1,9:1 sur le canvas
+ *   sombre : les deux placeholders étaient invisibles en thème sombre.
+ *
+ * ## Ce qui reste à arbitrer (hors migration)
+ *
+ * La première équipe est créée automatiquement sous le nom « Équipe
+ * principale », en catégorie Senior niveau A. Un coach qui gère les U15 doit
+ * donc renommer et reclasser son équipe juste après l'avoir reçue. Laisser
+ * nommer la première équipe ici est un changement de parcours, pas de style :
+ * il n'est pas fait dans ce lot.
+ */
+
 import { useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-} from 'react-native';
+import { View, KeyboardAvoidingView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useActiveTeam } from '../../contexts/ActiveTeamContext';
 import { createUserClub } from '../../lib/services/clubs';
+import { useTheme, makeStyles } from '../../contexts/ThemeContext';
+import { haptics } from '../../lib/design/haptics';
+import { Screen, Text, Button, Input } from '../../components/ui';
 
 export default function CreateClubScreen() {
   const router = useRouter();
+  const s = useStyles();
+  const { theme } = useTheme();
   const { refetchTeams, setActiveTeamId } = useActiveTeam();
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
     const trimmedName = name.trim();
     if (!trimmedName) {
-      Alert.alert('Champ requis', 'Le nom du club est obligatoire.');
+      haptics.error();
+      setNameError('Donnez un nom à votre club pour continuer.');
       return;
     }
 
     setSaving(true);
+    setNameError(null);
     setError(null);
     try {
       const { teamId } = await createUserClub({
@@ -39,103 +70,126 @@ export default function CreateClubScreen() {
       });
       await refetchTeams();
       if (teamId) await setActiveTeamId(teamId);
-      Alert.alert(
-        'Club créé',
-        'Votre club et votre première équipe ont été créés.',
-        [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
-      );
+      haptics.success();
+      router.replace('/(tabs)');
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Impossible de créer le club';
-      setError(msg);
-      Alert.alert('Erreur', msg);
+      haptics.error();
+      setError(e instanceof Error ? e.message : 'Impossible de créer le club.');
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>Créer un club</Text>
-        <Text style={styles.subtitle}>
-          Vous n'avez pas encore de club. Créez-en un pour gérer vos équipes et vos joueurs.
-        </Text>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>Nom du club *</Text>
-          <TextInput
-            style={styles.input}
-            value={name}
-            onChangeText={setName}
-            placeholder="ex: Club de Futsal"
-            placeholderTextColor="#9ca3af"
-          />
+    <KeyboardAvoidingView
+      style={s.flex}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <Screen contentContainerStyle={s.content}>
+        <View style={[s.icon, { backgroundColor: theme.colors.accent.subtle }]}>
+          <Ionicons name="add-circle" size={26} color={theme.colors.accent.default} />
         </View>
 
-        <View style={styles.field}>
-          <Text style={styles.label}>Description (optionnel)</Text>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            value={description}
-            onChangeText={setDescription}
-            placeholder="Quelques mots sur votre club..."
-            placeholderTextColor="#9ca3af"
-            multiline
-            numberOfLines={3}
-          />
-        </View>
-
-        <Text style={styles.hint}>
-          Une première équipe « Équipe principale » sera créée automatiquement.
+        <Text variant="title" style={s.center}>
+          Créer un club
+        </Text>
+        <Text variant="callout" tone="secondary" style={s.center}>
+          Vous en devenez administrateur : vous invitez votre staff, vous créez vos
+          équipes et vous gérez vos joueurs.
         </Text>
 
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        <Input
+          label="Nom du club"
+          value={name}
+          onChangeText={(t) => {
+            setNameError(null);
+            setName(t);
+          }}
+          placeholder="Ex. Paris XIV Futsal"
+          editable={!saving}
+          error={nameError ?? undefined}
+          containerStyle={s.field}
+          returnKeyType="next"
+        />
 
-        <TouchableOpacity
-          style={[styles.submitBtn, saving && styles.submitBtnDisabled]}
-          onPress={handleSubmit}
+        <Input
+          label="Description"
+          optional
+          value={description}
+          onChangeText={setDescription}
+          placeholder="Quelques mots sur votre club…"
+          editable={!saving}
+          multiline
+          inputStyle={s.textArea}
+          hint="Une première équipe « Équipe principale » sera créée automatiquement. Vous pourrez la renommer depuis l'écran Équipes."
+        />
+
+        {error ? (
+          <View
+            style={[
+              s.errorBox,
+              {
+                backgroundColor: theme.colors.negative.subtle,
+                borderColor: theme.colors.negative.default,
+              },
+            ]}
+            accessibilityRole="alert"
+            accessibilityLiveRegion="polite"
+          >
+            <Ionicons name="alert-circle" size={17} color={theme.colors.negative.default} />
+            <Text variant="callout" tone="negative" style={s.flex}>
+              {error}
+            </Text>
+          </View>
+        ) : null}
+
+        <Button
+          label="Créer le club"
+          onPress={() => void handleSubmit()}
+          loading={saving}
           disabled={saving}
-        >
-          <Text style={styles.submitBtnText}>{saving ? 'Création…' : 'Créer le club'}</Text>
-        </TouchableOpacity>
+          block
+          style={s.submit}
+        />
 
-        <TouchableOpacity style={styles.cancelBtn} onPress={() => router.back()} disabled={saving}>
-          <Text style={styles.cancelBtnText}>Annuler</Text>
-        </TouchableOpacity>
-      </ScrollView>
+        <Button
+          label="Annuler"
+          variant="ghost"
+          onPress={() => router.back()}
+          disabled={saving}
+          block
+        />
+      </Screen>
     </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f3f4f6' },
-  scroll: { flex: 1 },
-  content: { padding: 24, paddingBottom: 40 },
-  title: { fontSize: 22, fontWeight: '700', color: '#111', marginBottom: 8 },
-  subtitle: { fontSize: 15, color: '#6b7280', marginBottom: 24 },
-  field: { marginBottom: 20 },
-  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 8 },
-  input: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 14,
-    fontSize: 16,
-    color: '#111',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+const useStyles = makeStyles((t) => ({
+  flex: { flex: 1 },
+  center: { textAlign: 'center' },
+  content: {
+    gap: t.space.md,
+    paddingTop: t.space.xl,
+    maxWidth: 440,
   },
-  textArea: { minHeight: 80, textAlignVertical: 'top' },
-  hint: { fontSize: 13, color: '#9ca3af', marginBottom: 24 },
-  errorText: { fontSize: 14, color: '#dc2626', marginBottom: 16 },
-  submitBtn: {
-    backgroundColor: '#3b82f6',
-    borderRadius: 12,
-    padding: 16,
+  icon: {
+    alignSelf: 'center',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: 'center',
-    marginBottom: 12,
+    justifyContent: 'center',
+    marginBottom: t.space.xs,
   },
-  submitBtnDisabled: { opacity: 0.6 },
-  submitBtnText: { color: '#fff', fontWeight: '600', fontSize: 16 },
-  cancelBtn: { alignItems: 'center', padding: 12 },
-  cancelBtnText: { fontSize: 16, color: '#6b7280' },
-});
+  field: { marginTop: t.space.sm },
+  textArea: { minHeight: 88, paddingTop: t.space.md, textAlignVertical: 'top' },
+  errorBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: t.space.sm,
+    padding: t.space.md,
+    borderRadius: t.radius.sm,
+    borderWidth: 1,
+  },
+  submit: { marginTop: t.space.sm },
+}));

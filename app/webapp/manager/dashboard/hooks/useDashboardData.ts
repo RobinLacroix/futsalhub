@@ -5,6 +5,7 @@ import { useTrainings } from '../../../hooks/useTrainings';
 import { useActiveSeasonContext } from '../../../contexts/ActiveSeasonContext';
 import { playersService } from '@/lib/services';
 import { aggregateByField, calculateAverageByField } from '@/lib/utils/chartUtils';
+import { normalizeStrongFoot, strongFootLabel } from '@/lib/playerVocabulary';
 import type { Player, PlayerFilterState, PerformanceFilterState, ChartData } from '@/types';
 
 type CompetitionFilter = 'all' | 'Championnat' | 'Coupe' | 'Amical';
@@ -59,7 +60,13 @@ export function useDashboardData({ teamId, filters, performanceFilters, playerCo
   const filteredPlayers = useMemo(() => {
     let filtered = playersWithStats.filter(player => {
       if (filters.position && player.position !== filters.position) return false;
-      if (filters.strongFoot && player.strong_foot !== filters.strongFoot) return false;
+      // Normalisé des deux côtés : « Ambidextre » (web) et « Droit et gauche »
+      // (mobile) désignent la même chose et cohabitent en base.
+      if (
+        filters.strongFoot &&
+        normalizeStrongFoot(player.strong_foot) !== normalizeStrongFoot(filters.strongFoot)
+      )
+        return false;
       if (filters.status && player.status !== filters.status) return false;
       return true;
     });
@@ -101,7 +108,12 @@ export function useDashboardData({ teamId, filters, performanceFilters, playerCo
 
     return {
       statusDistribution: aggregateByField(filteredPlayers, 'status'),
-      footDistribution: aggregateByField(filteredPlayers, 'strong_foot'),
+      // Agrégé sur le libellé normalisé : sinon la même réalité compte dans
+      // deux parts du camembert selon l'écran par lequel le joueur a été créé.
+      footDistribution: aggregateByField(
+        filteredPlayers.map((p) => ({ ...p, strong_foot: strongFootLabel(p.strong_foot) })),
+        'strong_foot'
+      ),
       matchesByStatus: calculateAverageByField(filteredPlayers, 'status', 'matches_played'),
       goalsByStatus: calculateAverageByField(filteredPlayers, 'status', 'goals'),
       attendanceRadar,

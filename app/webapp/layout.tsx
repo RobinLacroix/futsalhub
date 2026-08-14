@@ -11,7 +11,7 @@ import {
   Home, Calendar, Users, BarChart3, Video, FileText,
   MessageSquare, Settings, LogOut, PieChart, Shield,
   Layout, UserCircle, Share2, ChevronDown, Menu, X,
-  ChevronRight,
+  ChevronRight, Timer, HeartPulse,
 } from 'lucide-react';
 
 // ─── FM Colour tokens ─────────────────────────────────────────────────────────
@@ -113,6 +113,8 @@ function Sidebar({
           { name: 'Effectif', href: '/webapp/manager/squad', icon: Users },
           { name: 'Dashboard', href: '/webapp/manager/dashboard', icon: PieChart },
           { name: 'Analytics', href: '/webapp/manager/analytics', icon: BarChart3 },
+          { name: 'Performance', href: '/webapp/manager/performance', icon: HeartPulse },
+          { name: 'Tests physiques', href: '/webapp/manager/tests', icon: Timer },
           { name: 'Équipes', href: '/webapp/manager/teams', icon: Shield },
         ],
       } as NavGroup,

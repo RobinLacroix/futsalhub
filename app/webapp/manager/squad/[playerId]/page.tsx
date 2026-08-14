@@ -32,12 +32,17 @@ import { useActiveSeasonContext } from '../../../contexts/ActiveSeasonContext';
 import { useUserClub } from '../../../hooks/useUserClub';
 import { playersService } from '@/lib/services/playersService';
 import type { PlayerRadarResult, RadarPerMatchStats } from '@/lib/services/playersService';
+import { matchesService } from '@/lib/services/matchesService';
+import { matchRatingsService } from '@/lib/services/matchRatingsService';
 import { trainingsService } from '@/lib/services/trainingsService';
 import { playerEventsService } from '@/lib/services/playerEventsService';
 import { getPlayerTrainingFeedback, type PlayerTrainingFeedbackRow } from '@/lib/services/trainingFeedbackService';
 import { createPlayerLinkCode } from '@/lib/services/playerConvocationsService';
+import { getPlayerPainReports } from '@/lib/services/painReportsService';
 import { teamsService } from '@/lib/services/teamsService';
-import type { Player, PlayerEvent, PlayerEventType, Team } from '@/types';
+import { INTENSITY_COLORS, INTENSITY_LABELS, zoneLabel } from '@/lib/painMap';
+import { strongFootLabel } from '@/lib/playerVocabulary';
+import type { Player, PlayerEvent, PlayerEventType, PainReportGroup, Team } from '@/types';
 import {
   LineChart,
   Line,
@@ -88,6 +93,15 @@ function calcAge(birthDate: string): number {
 
 function isGoalkeeper(position?: string): boolean {
   return (position ?? '').toLowerCase().startsWith('gardien');
+}
+
+// Couleur d'une note /10 : rouge sous 5, gris autour de 5, vert au-dessus.
+function ratingColor(rating: number): string {
+  if (rating >= 6.5) return '#059669';
+  if (rating >= 5.5) return '#16A34A';
+  if (rating > 4.5)  return '#697585';
+  if (rating > 3.5)  return '#F97316';
+  return '#DC2626';
 }
 
 function groupByMonth(sessions: { date: string; status: TrainingSessionStatus }[]) {
@@ -202,6 +216,7 @@ export default function PlayerProfilePage() {
   // All training sessions (ascending date) for the full-year calendar
   const [allSessions, setAllSessions] = useState<{ date: string; status: TrainingSessionStatus }[]>([]);
   const [events, setEvents] = useState<PlayerEvent[]>([]);
+  const [painReports, setPainReports] = useState<PainReportGroup[]>([]);
   const [showEventForm, setShowEventForm] = useState(false);
   const [eventFormType, setEventFormType] = useState<PlayerEventType>('interview');
   const [eventForm, setEventForm] = useState({
@@ -229,6 +244,12 @@ export default function PlayerProfilePage() {
 
   const [radarData, setRadarData] = useState<PlayerRadarResult | null>(null);
   const [radarLoading, setRadarLoading] = useState(false);
+
+  // Courbe d'évolution de la note data (Volet B) sur les matchs de la saison/filtre.
+  const [ratingSeries, setRatingSeries] = useState<{ date: string; rating: number }[]>([]);
+  const ratingAvg = ratingSeries.length > 0
+    ? ratingSeries.reduce((s, r) => s + r.rating, 0) / ratingSeries.length
+    : null;
 
   const [linkCode, setLinkCode] = useState<string | null>(null);
   const [linkCodeLoading, setLinkCodeLoading] = useState(false);
@@ -282,6 +303,12 @@ export default function PlayerProfilePage() {
         } catch {
           setFeedbackHistory([]);
         }
+
+        try {
+          setPainReports(await getPlayerPainReports(playerId));
+        } catch {
+          setPainReports([]);
+        }
       } catch (err) {
         console.error('Erreur chargement profil joueur:', err);
         setError(err instanceof Error ? err.message : 'Erreur lors du chargement');
@@ -323,6 +350,29 @@ export default function PlayerProfilePage() {
     };
     loadRadar();
   }, [playerId, activeTeam, matchTypeFilter, activeSeason]);
+
+  // ── Courbe note data (Volet B) ────────────────────────────────────────────
+  useEffect(() => {
+    const loadRatingSeries = async () => {
+      if (!playerId || !activeTeam) { setRatingSeries([]); return; }
+      try {
+        const teamMatches = await matchesService.getMatchesByTeam(activeTeam.id, activeSeason);
+        const scoped = matchTypeFilter === 'all'
+          ? teamMatches
+          : teamMatches.filter(m => m.competition === matchTypeFilter);
+        const ids = scoped.map(m => m.id);
+        const rows = await matchRatingsService.getRatingsForMatches(ids);
+        const series = rows
+          .filter(r => r.player_id === playerId)
+          .sort((a, b) => new Date(a.match_date).getTime() - new Date(b.match_date).getTime())
+          .map(r => ({ date: r.match_date, rating: r.rating }));
+        setRatingSeries(series);
+      } catch {
+        setRatingSeries([]);
+      }
+    };
+    loadRatingSeries();
+  }, [playerId, activeTeam, activeSeason, matchTypeFilter]);
 
   // ── Club teams ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -550,7 +600,7 @@ export default function PlayerProfilePage() {
               );
             })()}
             <p className="text-sm font-medium" style={{ color: 'rgba(255,255,255,0.7)' }}>
-              {player.birth_date ? `${calcAge(player.birth_date)} ans · ` : ''}{player.strong_foot || '—'}
+              {player.birth_date ? `${calcAge(player.birth_date)} ans · ` : ''}{strongFootLabel(player.strong_foot)}
             </p>
           </div>
         </div>
@@ -862,6 +912,57 @@ export default function PlayerProfilePage() {
         </div>
       </div>
 
+      {/* ── Note data — Évolution (Volet B) ────────────────────────────── */}
+      {!isGoalkeeper(player?.position) && (
+        <div className="rounded-xl overflow-hidden mb-6" style={{ background: T.cardBg, border: `1px solid ${T.border}`, boxShadow: '0 1px 4px rgba(0,0,0,0.07)' }}>
+          <div className="p-4 border-b flex flex-wrap items-center gap-3 justify-between" style={{ borderColor: T.border, background: '#F8F9FB' }}>
+            <h3 className="text-lg font-semibold" style={{ color: T.text }}>Note de match — Évolution</h3>
+            {ratingAvg != null && (
+              <span className="flex items-center gap-2 text-sm" style={{ color: T.textMuted }}>
+                Moyenne
+                <span
+                  className="inline-block px-2 py-0.5 rounded-md text-white font-bold tabular-nums"
+                  style={{ background: ratingColor(ratingAvg) }}
+                >
+                  {ratingAvg.toFixed(1)}
+                </span>
+                <span>· {ratingSeries.length} match{ratingSeries.length > 1 ? 's' : ''}</span>
+              </span>
+            )}
+          </div>
+          <div className="p-6">
+            {ratingSeries.length === 0 ? (
+              <p className="text-center py-12 text-sm" style={{ color: T.textMuted }}>
+                Aucune note de match sur la période
+              </p>
+            ) : (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart
+                    data={ratingSeries.map((r, i) => ({
+                      match: format(new Date(r.date), 'd MMM yy', { locale: fr }),
+                      index: i + 1,
+                      rating: r.rating,
+                    }))}
+                    margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
+                    <XAxis dataKey="match" tick={{ fontSize: 11, fill: T.textMuted }} />
+                    <YAxis domain={[0, 10]} tick={{ fontSize: 11, fill: T.textMuted }} allowDecimals={false} />
+                    <Tooltip
+                      formatter={(value: number) => [value.toFixed(1), 'Note']}
+                      labelFormatter={label => `Match : ${label}`}
+                      contentStyle={{ background: T.cardBg, border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12 }}
+                    />
+                    <Line type="monotone" dataKey="rating" stroke="#059669" strokeWidth={2} dot={{ r: 4 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── Feedback questionnaire line chart ──────────────────────────── */}
       <div className="rounded-xl overflow-hidden mb-6" style={{ background: T.cardBg, border: `1px solid ${T.border}`, boxShadow: '0 1px 4px rgba(0,0,0,0.07)' }}>
         <div className="p-4 border-b flex flex-wrap items-center gap-3" style={{ borderColor: T.border, background: '#F8F9FB' }}>
@@ -1081,6 +1182,70 @@ export default function PlayerProfilePage() {
                 {linkCodeLoading ? 'Génération...' : 'Générer un code de liaison'}
               </button>
             </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Suivi des douleurs ─────────────────────────────────────────── */}
+      <div className="rounded-xl overflow-hidden" style={{ background: T.cardBg, border: `1px solid ${T.border}`, boxShadow: '0 1px 4px rgba(0,0,0,0.07)' }}>
+        <div className="p-4 border-b flex items-center justify-between" style={{ borderColor: T.border, background: '#F8F9FB' }}>
+          <h3 className="text-lg font-semibold flex items-center gap-2" style={{ color: T.text }}>
+            <Activity className="h-5 w-5" style={{ color: '#dc2626' }} />
+            Suivi des douleurs
+            {painReports.length > 0 && (
+              <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: T.pageBg, color: T.textMuted }}>
+                {painReports.length}
+              </span>
+            )}
+          </h3>
+          {painReports.length > 0 && painReports[0].max_intensity >= 3 && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold" style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
+              <AlertTriangle className="h-3.5 w-3.5" />
+              Douleur intense récente
+            </span>
+          )}
+        </div>
+
+        <div className="p-4">
+          {painReports.length === 0 ? (
+            <p className="text-center py-8 text-sm" style={{ color: T.textMuted }}>
+              Aucune douleur signalée par le joueur.
+            </p>
+          ) : (
+            <ul className="space-y-3">
+              {painReports.map(g => (
+                <li key={g.report_group} className="p-3 rounded-lg" style={{ background: T.pageBg, border: `1px solid ${T.border}` }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold" style={{ color: T.text }}>
+                        {format(new Date(g.reported_at), 'd MMMM yyyy', { locale: fr })}
+                      </span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide" style={{ background: T.cardBg, color: T.textMuted, border: `1px solid ${T.border}` }}>
+                        {g.source === 'questionnaire' ? 'Fin de séance' : 'Spontané'}
+                      </span>
+                      {g.onset && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide" style={{ background: T.cardBg, color: T.textMuted, border: `1px solid ${T.border}` }}>
+                          {g.onset === 'aigu' ? 'Aigu' : 'Chronique'}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[11px] font-bold" style={{ color: INTENSITY_COLORS[g.max_intensity] }}>
+                      {INTENSITY_LABELS[g.max_intensity]}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {g.zones.map((z, i) => (
+                      <span key={i} className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold"
+                        style={{ background: `${INTENSITY_COLORS[z.intensity]}1a`, color: INTENSITY_COLORS[z.intensity], border: `1px solid ${INTENSITY_COLORS[z.intensity]}` }}>
+                        <span style={{ width: 7, height: 7, borderRadius: 99, background: INTENSITY_COLORS[z.intensity], display: 'inline-block' }} />
+                        {zoneLabel(z.zone)}
+                      </span>
+                    ))}
+                  </div>
+                  {g.note && <p className="text-sm mt-2" style={{ color: T.text }}>{g.note}</p>}
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       </div>

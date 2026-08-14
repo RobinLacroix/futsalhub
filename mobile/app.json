@@ -4,20 +4,17 @@
     "slug": "futsalhub",
     "scheme": "futsalhub",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.futsalhub.app",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
-      }
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "FutsalHub accède à vos photos lorsque vous choisissez d'importer une image ou un document depuis votre appareil."
+      },
+      "requireFullScreen": false
     },
     "android": {
       "package": "com.futsalhub.app",
@@ -48,6 +45,29 @@
         {
           "ios": {
             "newArchEnabled": false
+          }
+        }
+      ],
+      "expo-sharing",
+      "expo-asset",
+      "expo-document-picker",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "FutsalHub utilise le micro pour saisir les actions du match à la voix, sans quitter le terrain des yeux.",
+          "speechRecognitionPermission": "FutsalHub reconnaît vos commandes vocales pour enregistrer buts, tirs et changements pendant le match."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#F5F7FA",
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "resizeMode": "contain",
+            "backgroundColor": "#0E1116"
           }
         }
       ]

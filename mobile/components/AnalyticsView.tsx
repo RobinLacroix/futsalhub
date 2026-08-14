@@ -1,36 +1,35 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, RefreshControl,
-} from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { View, ScrollView, Pressable, RefreshControl } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+
+type IoniconName = keyof typeof Ionicons.glyphMap;
 import { useActiveTeam } from '../contexts/ActiveTeamContext';
-import { useActiveSeason } from '../contexts/ActiveSeasonContext';
-import { getMatchesByTeam } from '../lib/services/matches';
-import { getEventsByMatchId } from '../lib/services/matchEvents';
-import { getPlayersByTeam, getPlayersByClubWithTeams } from '../lib/services/players';
+import { useTheme, makeStyles } from '../contexts/ThemeContext';
+import { dataColor, deltaColor, type Theme, type ThemeColors } from '../lib/design/tokens';
+import { haptics } from '../lib/design/haptics';
+import { fmPalette } from './players/fmPalette';
+import { Text, Card, Stat, EmptyState, SkeletonStats } from './ui';
 import { MatchMomentsView } from './MatchMomentsView';
+import { PlayerStatsPanel } from './analytics/PlayerStatsPanel';
+import { abbrevName, fmtTime, type PlayerStats } from './analytics/playerStats';
+import { useMatchAnalytics } from './analytics/MatchAnalyticsContext';
+import { buildPlayerStats, totalShots } from './analytics/aggregate';
 import { useIsTablet } from '../hooks/useIsTablet';
-import type { Match, MatchEvent, Player } from '../types';
+import type { MatchEvent, Player } from '../types';
+
+/**
+ * Couleur d'une note /10. Le barème d'origine inventait cinq seuils et cinq
+ * teintes propres à cet écran (`#059669`, `#16a34a`, `#64748b`, `#ea580c`,
+ * `#dc2626`). `dataColor` est le point d'entrée unique pour toute mise en
+ * couleur de métrique : trois niveaux, sur la rampe du thème, autour de la base
+ * du barème (5) et d'une amplitude d'un point et demi.
+ */
+function ratingColor(theme: Theme, rating: number): string {
+  return dataColor(theme, rating, 5, 1.5);
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type PlayerStats = {
-  playerId: string;
-  playerName: string;
-  matchesPlayed: number;
-  goals: number;
-  shot_on_target: number;
-  shot: number;
-  ball_loss: number;
-  recovery: number;
-  assist: number;
-  yellow_cards: number;
-  red_cards: number;
-  plusMinusGoals: number;
-  plusMinusShots: number;
-  totalTimeSeconds: number;
-};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -55,17 +54,7 @@ function computePlayingTime(events: MatchEvent[]): Map<string, number> {
   return byPlayer;
 }
 
-function fmtTime(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
 
-function abbrevName(full: string): string {
-  const parts = full.trim().split(' ');
-  if (parts.length < 2) return full;
-  return `${parts[0][0]}. ${parts.slice(1).join(' ')}`;
-}
 
 const norm = (s: string) =>
   s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
@@ -73,7 +62,17 @@ const norm = (s: string) =>
 // ─── Coaching insights engine ─────────────────────────────────────────────────
 
 type InsightLevel = 'positive' | 'warning' | 'alert' | 'info';
-interface Insight { level: InsightLevel; icon: string; title: string; body: string; }
+/**
+ * Une analyse du coach adjoint.
+ *
+ * `icon` est un glyphe **Ionicons**, plus un emoji. Les emoji étaient rendus en
+ * tofu (carré vide) sur l'iPad de test : la police emoji n'est pas garantie
+ * dans le contexte de rendu de l'app, alors qu'Ionicons est embarquée avec le
+ * bundle et rend partout. Le niveau (`level`) reste ce qui porte le sens — il
+ * s'affiche en toutes lettres sur la carte (« Point fort », « Alerte »…), donc
+ * même une icône absente ne fait perdre aucune information.
+ */
+interface Insight { level: InsightLevel; icon: IoniconName; title: string; body: string; }
 
 function generateInsights(
   stats: PlayerStats[],
@@ -86,31 +85,31 @@ function generateInsights(
   if (ts.form.length >= 3) {
     const r = ts.form.slice(0, 3);
     if (r.filter(x => x === 'W').length >= 3)
-      out.push({ level: 'positive', icon: '🔥', title: 'Série de victoires', body: `3 victoires consécutives — momentum excellent. Profitez-en pour renforcer la rigueur défensive.` });
+      out.push({ level: 'positive', icon: 'flame-outline', title: 'Série de victoires', body: `3 victoires consécutives — momentum excellent. Profitez-en pour renforcer la rigueur défensive.` });
     else if (r.filter(x => x === 'L').length >= 3)
-      out.push({ level: 'alert', icon: '⚠️', title: 'Série difficile', body: `3 défaites consécutives. Recréez des situations de succès à l'entraînement pour restaurer la confiance.` });
+      out.push({ level: 'alert', icon: 'warning-outline', title: 'Série difficile', body: `3 défaites consécutives. Recréez des situations de succès à l'entraînement pour restaurer la confiance.` });
     else if (r.filter(x => x === 'W').length >= 2)
-      out.push({ level: 'positive', icon: '📈', title: 'Bonne dynamique', body: `2 victoires sur les 3 derniers matchs. Maintenez l'intensité à l'entraînement.` });
+      out.push({ level: 'positive', icon: 'trending-up-outline', title: 'Bonne dynamique', body: `2 victoires sur les 3 derniers matchs. Maintenez l'intensité à l'entraînement.` });
   }
 
   const avgFor = ts.goalsFor / ts.played;
   if (avgFor >= 3)
-    out.push({ level: 'positive', icon: '⚽', title: 'Attaque prolifique', body: `${avgFor.toFixed(1)} buts par match en moyenne. Veillez à ne pas négliger l'équilibre défensif.` });
+    out.push({ level: 'positive', icon: 'football-outline', title: 'Attaque prolifique', body: `${avgFor.toFixed(1)} buts par match en moyenne. Veillez à ne pas négliger l'équilibre défensif.` });
   else if (avgFor < 1 && ts.played >= 3)
-    out.push({ level: 'alert', icon: '🎯', title: 'Manque de réalisme', body: `Moins d'un but par match (${avgFor.toFixed(1)} moy.). Travaillez les situations de finition.` });
+    out.push({ level: 'alert', icon: 'locate-outline', title: 'Manque de réalisme', body: `Moins d'un but par match (${avgFor.toFixed(1)} moy.). Travaillez les situations de finition.` });
 
   const avgAgainst = ts.goalsAgainst / ts.played;
   if (avgAgainst >= 3)
-    out.push({ level: 'alert', icon: '🛡️', title: 'Défense à consolider', body: `${avgAgainst.toFixed(1)} buts encaissés/match. Analysez les transitions défensives et les CPA concédés.` });
+    out.push({ level: 'alert', icon: 'shield-outline', title: 'Défense à consolider', body: `${avgAgainst.toFixed(1)} buts encaissés/match. Analysez les transitions défensives et les CPA concédés.` });
   else if (ts.cleanSheets / ts.played >= 0.4)
-    out.push({ level: 'positive', icon: '🧱', title: 'Solidité défensive', body: `${ts.cleanSheets} clean sheet(s) sur ${ts.played} matchs (${Math.round(ts.cleanSheets / ts.played * 100)}%). La défense est le socle de l'équipe.` });
+    out.push({ level: 'positive', icon: 'shield-checkmark-outline', title: 'Solidité défensive', body: `${ts.cleanSheets} clean sheet(s) sur ${ts.played} matchs (${Math.round(ts.cleanSheets / ts.played * 100)}%). La défense est le socle de l'équipe.` });
 
   const withGoals = stats.filter(p => p.goals > 0);
   if (withGoals.length > 0 && ts.goalsFor >= 5) {
     const top = [...withGoals].sort((a, b) => b.goals - a.goals)[0];
     const share = Math.round((top.goals / ts.goalsFor) * 100);
     if (share >= 40)
-      out.push({ level: 'warning', icon: '⚡', title: `Dépendance à ${abbrevName(top.playerName)}`, body: `${top.playerName} représente ${share}% des buts. Impliquez d'autres profils dans la finition.` });
+      out.push({ level: 'warning', icon: 'flash-outline', title: `Dépendance à ${abbrevName(top.playerName)}`, body: `${top.playerName} représente ${share}% des buts. Impliquez d'autres profils dans la finition.` });
   }
 
   const active = stats.filter(p => p.matchesPlayed >= 2 && p.totalTimeSeconds > 0);
@@ -118,34 +117,40 @@ function generateInsights(
     const top = [...active].sort((a, b) => (b.recovery / b.matchesPlayed) - (a.recovery / a.matchesPlayed))[0];
     const rpm = top.recovery / top.matchesPlayed;
     if (rpm >= 2)
-      out.push({ level: 'info', icon: '🔄', title: `${abbrevName(top.playerName)}, moteur du pressing`, body: `${top.recovery} récupérations en ${top.matchesPlayed} matchs (${rpm.toFixed(1)}/match). Construisez votre pressing autour de son activité.` });
+      out.push({ level: 'info', icon: 'refresh-outline', title: `${abbrevName(top.playerName)}, moteur du pressing`, body: `${top.recovery} récupérations en ${top.matchesPlayed} matchs (${rpm.toFixed(1)}/match). Construisez votre pressing autour de son activité.` });
   }
 
   if (active.length > 0) {
     const top = [...active].sort((a, b) => (b.ball_loss / b.matchesPlayed) - (a.ball_loss / a.matchesPlayed))[0];
     const lpm = top.ball_loss / top.matchesPlayed;
     if (lpm >= 3)
-      out.push({ level: 'warning', icon: '📉', title: 'Pertes de balle à corriger', body: `${top.playerName} perd en moyenne ${lpm.toFixed(1)} ballons/match. Travaillez la conservation sous pression.` });
+      out.push({ level: 'warning', icon: 'trending-down-outline', title: 'Pertes de balle à corriger', body: `${top.playerName} perd en moyenne ${lpm.toFixed(1)} ballons/match. Travaillez la conservation sous pression.` });
   }
 
   const totalGoals = stats.reduce((s, p) => s + p.goals, 0);
-  const totalShots = stats.reduce((s, p) => s + p.shot + p.shot_on_target + p.goals, 0);
-  if (totalShots >= 10) {
-    const conv = Math.round((totalGoals / totalShots) * 100);
+  // Était `shot + shot_on_target + goals`, alors que le tableau juste en dessous
+  // affiche `shot + shot_on_target` : le texte citait un total de tirs supérieur
+  // à la somme de la colonne TT, et le taux de conversion s'en trouvait
+  // sous-estimé — donc l'alerte « conversion faible » déclenchée à tort. Un but
+  // écrit déjà son tir cadré (`PAIRED_EVENT`), il n'a pas à être recompté.
+  // Voir la mise en garde de `totalShots` sur les matchs saisis côté web.
+  const shotsTotal = stats.reduce((s, p) => s + totalShots(p), 0);
+  if (shotsTotal >= 10) {
+    const conv = Math.round((totalGoals / shotsTotal) * 100);
     if (conv >= 35)
-      out.push({ level: 'positive', icon: '🏹', title: 'Excellent taux de conversion', body: `${conv}% des tirs finissent au fond (${totalGoals}/${totalShots}). La finition est un point fort collectif.` });
+      out.push({ level: 'positive', icon: 'golf-outline', title: 'Excellent taux de conversion', body: `${conv}% des tirs finissent au fond (${totalGoals}/${shotsTotal}). La finition est un point fort collectif.` });
     else if (conv < 15)
-      out.push({ level: 'warning', icon: '😤', title: 'Taux de conversion faible', body: `${conv}% de conversion (${totalGoals}/${totalShots}). Priorisez la qualité des situations et le dernier geste.` });
+      out.push({ level: 'warning', icon: 'alert-circle-outline', title: 'Taux de conversion faible', body: `${conv}% de conversion (${totalGoals}/${shotsTotal}). Priorisez la qualité des situations et le dernier geste.` });
   }
 
   const worst = [...goalsByType].sort((a, b) => b.conceded - a.conceded)[0];
   if (worst?.conceded >= 2)
-    out.push({ level: 'warning', icon: '🔍', title: `Vulnérabilité en ${worst.label}`, body: `${worst.conceded} buts encaissés en ${worst.label.toLowerCase()}. Point défensif à travailler en priorité.` });
+    out.push({ level: 'warning', icon: 'search-outline', title: `Vulnérabilité en ${worst.label}`, body: `${worst.conceded} buts encaissés en ${worst.label.toLowerCase()}. Point défensif à travailler en priorité.` });
 
   const underused = stats.filter(p => p.plusMinusGoals >= 2 && p.matchesPlayed >= 2 && p.totalTimeSeconds < 600 * p.matchesPlayed);
   if (underused.length > 0) {
     const p = underused[0];
-    out.push({ level: 'info', icon: '💡', title: `${abbrevName(p.playerName)} à valoriser`, body: `+/- de +${p.plusMinusGoals} en ${p.matchesPlayed} matchs avec peu de temps de jeu. Sa présence sur le terrain est statistiquement bénéfique.` });
+    out.push({ level: 'info', icon: 'bulb-outline', title: `${abbrevName(p.playerName)} à valoriser`, body: `+/- de +${p.plusMinusGoals} en ${p.matchesPlayed} matchs avec peu de temps de jeu. Sa présence sur le terrain est statistiquement bénéfique.` });
   }
 
   return out;
@@ -259,7 +264,7 @@ function generateComboInsightCards(
       .filter(c => c.playerIds.length === size && c.sharedTimeSec >= MIN_COMBO_SEC)
       .sort((a, b) => b.pmGoalsPerMin - a.pmGoalsPerMin);
   const LABEL: Record<number, string> = { 2: 'Duo', 3: 'Trio', 4: 'Ligne' };
-  const ICON:  Record<number, string> = { 2: '⚡', 3: '🔺', 4: '🔗' };
+  const ICON:  Record<number, IoniconName> = { 2: 'flash-outline', 3: 'triangle-outline', 4: 'link-outline' };
   const out: Insight[] = [];
   for (const size of [4, 3, 2]) {
     const best = bySize(size)[0];
@@ -270,7 +275,7 @@ function generateComboInsightCards(
         title: `${LABEL[size]} efficace : ${fmt(best.playerIds)}`,
         body: `+/-B/min de +${best.pmGoalsPerMin.toFixed(2)}${shotNote} — ${fmtTime(best.sharedTimeSec)} ensemble. Privilégiez cette combinaison.` });
     } else if (best.pmShotsPerMin >= 0.2 && best.pmGoalsPerMin >= 0) {
-      out.push({ level: 'info', icon: '🎯',
+      out.push({ level: 'info', icon: 'locate-outline',
         title: `${LABEL[size]} dominant au tir : ${fmt(best.playerIds)}`,
         body: `+/-T/min de +${best.pmShotsPerMin.toFixed(2)} — ${fmtTime(best.sharedTimeSec)} ensemble. Beaucoup de danger, la conversion suivra.` });
     }
@@ -278,7 +283,7 @@ function generateComboInsightCards(
   const worst = Array.from(allStats.values())
     .filter(c => c.playerIds.length === 2 && c.sharedTimeSec >= MIN_COMBO_SEC && c.pmGoalsPerMin <= -0.1)
     .sort((a, b) => a.pmGoalsPerMin - b.pmGoalsPerMin)[0];
-  if (worst) out.push({ level: 'warning', icon: '⚠️',
+  if (worst) out.push({ level: 'warning', icon: 'warning-outline',
     title: `Duo à surveiller : ${fmt(worst.playerIds)}`,
     body: `+/-B/min de ${worst.pmGoalsPerMin.toFixed(2)} (${fmtTime(worst.sharedTimeSec)} partagées). Analysez les situations défensives.` });
   return out;
@@ -287,66 +292,39 @@ function generateComboInsightCards(
 const LOCATION_FILTERS    = ['all', 'Domicile', 'Extérieur'] as const;
 const COMPETITION_FILTERS = ['all', 'Championnat', 'Coupe', 'Amical']  as const;
 
-// Table columns — flex-based, no horizontal scroll
-const COLS = [
-  { key: 'playerName',       label: 'Joueur', flex: 2.2  },
-  { key: 'matchesPlayed',    label: 'M',      flex: 0.6  },
-  { key: 'totalTimeSeconds', label: 'Tps',    flex: 0.85 },
-  { key: 'goals',            label: 'B',      flex: 0.55 },
-  { key: 'plusMinusGoals',   label: '+/-B',   flex: 0.7  },
-  { key: 'shot_on_target',   label: 'TC',     flex: 0.55 },
-  { key: 'totalShots',       label: 'TT',     flex: 0.55 },
-  { key: 'recovery',         label: 'R',      flex: 0.6  },
-  { key: 'ball_loss',        label: 'PdB',    flex: 0.6  },
-  { key: 'assist',           label: 'Pdec',   flex: 0.6  },
-  { key: 'yellow_cards',     label: '🟡',     flex: 0.55 },
-  { key: 'red_cards',        label: '🔴',     flex: 0.55 },
-] as const;
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function AnalyticsView() {
+  const s = useStyles();
+  const { theme } = useTheme();
+  const c = theme.colors;
+  const bp = fmPalette(theme.colors, theme.scheme);
+  const series = c.chartSeries;
   const { activeTeamId, activeTeam } = useActiveTeam();
-  const { activeSeason } = useActiveSeason();
   const isTablet = useIsTablet();
 
-  const [loading,       setLoading]       = useState(true);
-  const [refreshing,    setRefreshing]    = useState(false);
-  const [matches,       setMatches]       = useState<Match[]>([]);
-  const [eventsByMatch, setEventsByMatch] = useState<Record<string, MatchEvent[]>>({});
-  const [allPlayers,    setAllPlayers]    = useState<Player[]>([]);
-  const [clubPlayerIds, setClubPlayerIds] = useState<Set<string>>(new Set());
-  const [sortCol,       setSortCol]       = useState('playerName');
-  const [sortDir,       setSortDir]       = useState<'asc' | 'desc'>('asc');
-  const [filterLoc,     setFilterLoc]     = useState('all');
-  const [filterComp,    setFilterComp]    = useState('all');
-  const [activeTab,     setActiveTab]     = useState<'overview' | 'stats' | 'coach'>('overview');
+  // ── Données ─────────────────────────────────────────────────────────────
+  //
+  // Le chargement vivait ici, à l'identique de celui de `TrackerAnalyticsView`
+  // — soit deux fois les mêmes requêtes, dont deux fois le N+1 sur les
+  // événements, puisque les deux segments de l'onglet sont montés ensemble.
+  // Il est remonté dans `MatchAnalyticsProvider`, qui charge une seule fois.
 
-  // ── Data loading ────────────────────────────────────────────────────────
+  const {
+    matches,
+    eventsByMatch,
+    clubPlayers: allPlayers,
+    clubPlayerIds,
+    ratingRows,
+    loading,
+    refreshing,
+    refresh: onRefresh,
+  } = useMatchAnalytics();
 
-  const load = useCallback(async () => {
-    if (!activeTeamId || !activeTeam?.club_id) {
-      setMatches([]); setEventsByMatch({}); setAllPlayers([]); setClubPlayerIds(new Set());
-      setLoading(false); setRefreshing(false);
-      return;
-    }
-    try {
-      const [matchData, , clubData] = await Promise.all([
-        getMatchesByTeam(activeTeamId, activeSeason),
-        getPlayersByTeam(activeTeamId),
-        getPlayersByClubWithTeams(activeTeam.club_id),
-      ]);
-      setMatches(matchData);
-      setAllPlayers(clubData.map(({ player }) => player));
-      setClubPlayerIds(new Set(clubData.map(({ player }) => player.id)));
-      const evMap: Record<string, MatchEvent[]> = {};
-      await Promise.all(matchData.map(async m => { evMap[m.id] = await getEventsByMatchId(m.id); }));
-      setEventsByMatch(evMap);
-    } catch { /* silent */ }
-    finally { setLoading(false); setRefreshing(false); }
-  }, [activeTeamId, activeTeam?.club_id, activeSeason]);
-
-  useEffect(() => { setLoading(true); load(); }, [load]);
+  const [filterLoc,  setFilterLoc]  = useState('all');
+  const [filterComp, setFilterComp] = useState('all');
+  const [activeTab,  setActiveTab]  = useState<'overview' | 'stats' | 'coach'>('overview');
 
   // ── Filters ─────────────────────────────────────────────────────────────
 
@@ -390,97 +368,43 @@ export function AnalyticsView() {
     return { played, wins, draws, losses, goalsFor, goalsAgainst, cleanSheets, winRate, form };
   }, [filteredMatches]);
 
+  // ── Note data moyenne par joueur (Volet B) ───────────────────────────────
+  const avgRatingByPlayer = useMemo(() => {
+    const acc = new Map<string, { sum: number; n: number }>();
+    ratingRows.forEach(r => {
+      if (!filteredMatchIds.has(r.match_id)) return;
+      const cur = acc.get(r.player_id) ?? { sum: 0, n: 0 };
+      cur.sum += r.rating;
+      cur.n += 1;
+      acc.set(r.player_id, cur);
+    });
+    const out = new Map<string, number>();
+    acc.forEach((v, k) => out.set(k, v.sum / v.n));
+    return out;
+  }, [ratingRows, filteredMatchIds]);
+
   // ── Player stats ────────────────────────────────────────────────────────
+  //
+  // Le calcul vivait ici, recopié à l'identique dans `TrackerAnalyticsView`.
+  // Une seule implémentation désormais, dans `analytics/aggregate.ts`.
 
-  const playerStatsList = useMemo(() => {
-    const map  = new Map<string, PlayerStats>();
-    const byId = new Map(allPlayers.map(p => [p.id, p]));
-
-    const ensure = (id: string): PlayerStats => {
-      if (!map.has(id)) {
-        const p = byId.get(id);
-        const full = p ? `${p.first_name} ${p.last_name}` : id.slice(0, 8);
-        map.set(id, {
-          playerId: id, playerName: full, matchesPlayed: 0,
-          goals: 0, shot_on_target: 0, shot: 0,
-          ball_loss: 0, recovery: 0, assist: 0,
-          yellow_cards: 0, red_cards: 0,
-          plusMinusGoals: 0, plusMinusShots: 0, totalTimeSeconds: 0,
-        });
-      }
-      return map.get(id)!;
-    };
-
-    // Event-based stats
-    Object.entries(eventsByMatch).forEach(([matchId, events]) => {
-      if (!filteredMatchIds.has(matchId)) return;
-      events.forEach(ev => {
-        if (ev.player_id) {
-          const cur = ensure(ev.player_id);
-          if (ev.event_type === 'goal')           cur.goals++;
-          if (ev.event_type === 'shot_on_target') cur.shot_on_target++;
-          if (ev.event_type === 'shot')           cur.shot++;
-          if (ev.event_type === 'ball_loss')      cur.ball_loss++;
-          if (ev.event_type === 'recovery')       cur.recovery++;
-          if (ev.event_type === 'assist')         cur.assist++;
-          if (ev.event_type === 'yellow_card')    cur.yellow_cards++;
-          if (ev.event_type === 'red_card')       cur.red_cards++;
-        }
-        if (Array.isArray(ev.players_on_field)) {
-          ev.players_on_field.forEach(pid => {
-            const cur = ensure(pid);
-            if (ev.event_type === 'goal')                         cur.plusMinusGoals++;
-            if (ev.event_type === 'opponent_goal')                cur.plusMinusGoals--;
-            if (ev.event_type === 'shot' || ev.event_type === 'shot_on_target')          cur.plusMinusShots++;
-            if (ev.event_type === 'opponent_shot' || ev.event_type === 'opponent_shot_on_target') cur.plusMinusShots--;
-          });
-        }
-      });
-    });
-
-    // Playing time + matchesPlayed
-    Object.entries(eventsByMatch).forEach(([matchId, events]) => {
-      if (!filteredMatchIds.has(matchId)) return;
-      const m = matches.find(x => x.id === matchId);
-      const mPlayers: any[] = (() => {
-        if (!m?.players) return [];
-        try { return Array.isArray(m.players) ? m.players : JSON.parse(m.players as any); }
-        catch { return []; }
-      })();
-      const fromMatch = new Map(
-        mPlayers.filter((p: any) => (p.time_played ?? 0) > 0)
-                .map((p: any) => [p.id, p.time_played as number])
-      );
-      const timeMap = fromMatch.size > 0 ? fromMatch : computePlayingTime(events);
-      timeMap.forEach((sec, pid) => {
-        if (!clubPlayerIds.has(pid)) return;
-        const cur = ensure(pid);
-        cur.totalTimeSeconds += sec;
-        cur.matchesPlayed++;
-      });
-    });
-
-    return Array.from(map.values()).filter(s => clubPlayerIds.has(s.playerId));
-  }, [eventsByMatch, matches, allPlayers, clubPlayerIds, filteredMatchIds]);
+  const playerStatsList = useMemo(
+    () =>
+      buildPlayerStats({
+        eventsByMatch,
+        matches,
+        filteredMatchIds,
+        players: allPlayers,
+        clubPlayerIds,
+        avgRatingByPlayer,
+      }),
+    [eventsByMatch, matches, filteredMatchIds, allPlayers, clubPlayerIds, avgRatingByPlayer]
+  );
 
   // ── Sorting ─────────────────────────────────────────────────────────────
 
-  const sortedStats = useMemo(() => {
-    const dir = sortDir === 'asc' ? 1 : -1;
-    return [...playerStatsList].sort((a, b) => {
-      if (sortCol === 'playerName') return dir * a.playerName.localeCompare(b.playerName);
-      const va = sortCol === 'totalShots' ? a.shot + a.shot_on_target : (a as any)[sortCol] ?? 0;
-      const vb = sortCol === 'totalShots' ? b.shot + b.shot_on_target : (b as any)[sortCol] ?? 0;
-      return dir * (va - vb);
-    });
-  }, [playerStatsList, sortCol, sortDir]);
-
-  const handleSort = useCallback((key: string) => {
-    setSortCol(prev => {
-      setSortDir(d => prev === key ? (d === 'asc' ? 'desc' : 'asc') : 'desc');
-      return key;
-    });
-  }, []);
+  // Le tri et la normalisation du classement joueurs vivent désormais dans
+  // `PlayerStatsPanel`, qui est seul responsable de cet affichage.
 
   // ── Top performers ──────────────────────────────────────────────────────
 
@@ -488,24 +412,31 @@ export function AnalyticsView() {
     const topN = (key: string, n = 3) =>
       [...playerStatsList]
         .sort((a, b) => {
-          const va = key === 'totalShots' ? a.shot + a.shot_on_target : (a as any)[key] ?? 0;
-          const vb = key === 'totalShots' ? b.shot + b.shot_on_target : (b as any)[key] ?? 0;
+          const va = key === 'totalShots' ? totalShots(a) : (a as any)[key] ?? 0;
+          const vb = key === 'totalShots' ? totalShots(b) : (b as any)[key] ?? 0;
           return vb - va;
         })
         .slice(0, n)
         .filter(p => {
-          const v = key === 'totalShots' ? p.shot + p.shot_on_target : (p as any)[key] ?? 0;
+          const v = key === 'totalShots' ? totalShots(p) : (p as any)[key] ?? 0;
           return v > 0;
         });
     // Efficacité au tir : goals / (shot + shot_on_target + goals) × 100
     const shooterEff = [...playerStatsList]
       .map(p => {
-        const totalShots = p.shot + p.shot_on_target + p.goals;
-        const eff = totalShots > 0 ? Math.round((p.goals / totalShots) * 100) : 0;
-        return { ...p, shotEff: eff, totalShotsAll: totalShots };
+        // Cinquième variante du total de tirs trouvée dans l'app, et la
+        // deuxième dans ce fichier : elle recomptait les buts, déjà présents
+        // dans `shot_on_target`. L'efficacité affichée était donc minorée.
+        const attempts = totalShots(p);
+        const eff = attempts > 0 ? Math.round((p.goals / attempts) * 100) : 0;
+        return { ...p, shotEff: eff, totalShotsAll: attempts };
       })
       .filter(p => p.totalShotsAll >= 3)   // au moins 3 tirs pour être pertinent
       .sort((a, b) => b.shotEff - a.shotEff)
+      .slice(0, 3);
+    const ratings = [...playerStatsList]
+      .filter(p => p.avgRating != null)
+      .sort((a, b) => (b.avgRating as number) - (a.avgRating as number))
       .slice(0, 3);
     return {
       scorers:    topN('goals'),
@@ -513,6 +444,7 @@ export function AnalyticsView() {
       recoveries: topN('recovery'),
       plusMinus:  topN('plusMinusGoals'),
       shooterEff,
+      ratings,
     };
   }, [playerStatsList]);
 
@@ -580,16 +512,18 @@ export function AnalyticsView() {
   if (!activeTeamId || !activeTeam) {
     return (
       <View style={s.centered}>
-        <Ionicons name="bar-chart-outline" size={44} color="#cbd5e1" />
-        <Text style={s.emptyTitle}>Aucune équipe sélectionnée</Text>
-        <Text style={s.emptyText}>Choisissez une équipe depuis l'accueil</Text>
+        <EmptyState
+          icon="bar-chart-outline"
+          title="Aucune équipe sélectionnée"
+          description="Choisissez une équipe depuis l'accueil."
+        />
       </View>
     );
   }
   if (loading) {
     return (
-      <View style={s.centered}>
-        <ActivityIndicator size="large" color="#2563eb" />
+      <View style={[s.root, { padding: theme.space.lg }]}>
+        <SkeletonStats />
       </View>
     );
   }
@@ -597,15 +531,19 @@ export function AnalyticsView() {
   // ─── KPI items ─────────────────────────────────────────────────────────────
 
   const kpiCols = isTablet ? 4 : 2;
+
+  // Six teintes décoratives couvraient les huit KPI, dont un violet et un cyan
+  // qui ne signifiaient rien. La couleur est réservée au signal : ce qui est
+  // bon pour l'équipe, ce qui ne l'est pas, et le reste en neutre.
   const KPI_ITEMS = [
-    { label: 'Matchs joués',   value: teamStats.played,        color: '#2563eb', icon: 'football-outline'         as const },
-    { label: 'Victoires',      value: teamStats.wins,          color: '#16a34a', icon: 'trophy-outline'           as const },
-    { label: 'Défaites',       value: teamStats.losses,        color: '#dc2626', icon: 'close-circle-outline'     as const },
-    { label: '% victoires',    value: `${teamStats.winRate}%`, color: '#f59e0b', icon: 'stats-chart-outline'      as const },
-    { label: 'Buts marqués',   value: teamStats.goalsFor,      color: '#16a34a', icon: 'trending-up-outline'      as const },
-    { label: 'Buts encaissés', value: teamStats.goalsAgainst,  color: '#dc2626', icon: 'trending-down-outline'    as const },
-    { label: 'Clean sheets',   value: teamStats.cleanSheets,   color: '#8b5cf6', icon: 'shield-checkmark-outline' as const },
-    { label: 'Tirs cadrés',    value: totals.onTarget,         color: '#06b6d4', icon: 'radio-button-on-outline'  as const },
+    { label: 'Matchs joués',   value: teamStats.played,        color: c.text.primary,      icon: 'football-outline'         as const },
+    { label: 'Victoires',      value: teamStats.wins,          color: c.positive.default,  icon: 'trophy-outline'           as const },
+    { label: 'Défaites',       value: teamStats.losses,        color: c.negative.default,  icon: 'close-circle-outline'     as const },
+    { label: '% victoires',    value: `${teamStats.winRate}%`, color: c.text.primary,      icon: 'stats-chart-outline'      as const },
+    { label: 'Buts marqués',   value: teamStats.goalsFor,      color: c.positive.default,  icon: 'trending-up-outline'      as const },
+    { label: 'Buts encaissés', value: teamStats.goalsAgainst,  color: c.negative.default,  icon: 'trending-down-outline'    as const },
+    { label: 'Clean sheets',   value: teamStats.cleanSheets,   color: c.text.primary,      icon: 'shield-checkmark-outline' as const },
+    { label: 'Tirs cadrés',    value: totals.onTarget,         color: c.text.primary,      icon: 'radio-button-on-outline'  as const },
   ];
 
   // ─── Render ────────────────────────────────────────────────────────────────
@@ -617,29 +555,52 @@ export function AnalyticsView() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => { setRefreshing(true); load(); }}
-            colors={['#2563eb']} tintColor="#2563eb"
+            onRefresh={onRefresh}
+            colors={[c.accent.default]}
+            tintColor={c.accent.default}
+            progressBackgroundColor={c.bg.surface}
           />
         }
       >
         {/* ── Hero header ── */}
-        <View style={s.hero}>
+        <View style={[s.hero, { backgroundColor: bp.brand }]}>
           <View style={s.heroTop}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.heroSub}>ANALYTICS</Text>
-              <Text style={s.heroTeam}>{activeTeam.name}</Text>
+            <View style={s.flex1}>
+              <Text variant="caption" color={bp.onBrandMuted}>
+                Analyse
+              </Text>
+              <Text variant="title" color={bp.onBrand}>
+                {activeTeam.name}
+              </Text>
             </View>
             {teamStats.form.length > 0 && (
               <View style={s.formBlock}>
-                <Text style={s.formLabel}>FORME</Text>
-                <View style={s.formRow}>
+                <Text variant="caption" color={bp.onBrandMuted}>
+                  Forme
+                </Text>
+                {/* Les cinq derniers résultats, du plus récent au plus ancien.
+                    La lettre porte l'information, la couleur ne fait que la
+                    doubler — un daltonien lit la série sans la couleur. */}
+                <View
+                  style={s.formRow}
+                  accessibilityLabel={`Forme sur les ${teamStats.form.length} derniers matchs : ${teamStats.form
+                    .map(r => (r === 'W' ? 'victoire' : r === 'D' ? 'nul' : 'défaite'))
+                    .join(', ')}`}
+                >
                   {teamStats.form.map((r, i) => (
-                    <View key={i} style={[s.formBadge,
-                      r === 'W' && s.formW,
-                      r === 'D' && s.formD,
-                      r === 'L' && s.formL,
-                    ]}>
-                      <Text style={s.formBadgeTxt}>{r}</Text>
+                    <View
+                      key={i}
+                      style={[
+                        s.formBadge,
+                        {
+                          backgroundColor:
+                            r === 'W' ? c.positive.fill : r === 'D' ? c.warning.fill : c.negative.fill,
+                        },
+                      ]}
+                    >
+                      <Text variant="caption" weight="700" color={c.text.onFill}>
+                        {r === 'W' ? 'V' : r === 'D' ? 'N' : 'D'}
+                      </Text>
                     </View>
                   ))}
                 </View>
@@ -649,34 +610,36 @@ export function AnalyticsView() {
 
           {/* W / D / L + buts */}
           <View style={s.recordBar}>
-            <RecordPill value={teamStats.wins}   label="Victoires" color="#16a34a" />
-            <View style={s.recordSep} />
-            <RecordPill value={teamStats.draws}  label="Nuls"      color="#f59e0b" />
-            <View style={s.recordSep} />
-            <RecordPill value={teamStats.losses} label="Défaites"  color="#dc2626" />
-            <View style={s.recordDivider} />
+            <RecordPill value={teamStats.wins}   label="Victoires" color={c.positive.default} labelColor={bp.onBrandMuted} />
+            <View style={[s.recordSep, { backgroundColor: bp.onBrandBorder }]} />
+            <RecordPill value={teamStats.draws}  label="Nuls"      color={c.warning.default} labelColor={bp.onBrandMuted} />
+            <View style={[s.recordSep, { backgroundColor: bp.onBrandBorder }]} />
+            <RecordPill value={teamStats.losses} label="Défaites"  color={c.negative.default} labelColor={bp.onBrandMuted} />
+            <View style={[s.recordSep, { backgroundColor: bp.onBrandBorder }]} />
             <View style={s.goalsBlock}>
-              <Text style={s.goalsText}>
-                <Text style={{ color: '#86efac' }}>{teamStats.goalsFor}</Text>
-                <Text style={{ color: 'rgba(255,255,255,0.4)' }}> – </Text>
-                <Text style={{ color: '#fca5a5' }}>{teamStats.goalsAgainst}</Text>
+              <Text variant="title" numeric>
+                <Text variant="title" color={c.positive.default}>{teamStats.goalsFor}</Text>
+                <Text variant="title" color={bp.onBrandMuted}> – </Text>
+                <Text variant="title" color={c.negative.default}>{teamStats.goalsAgainst}</Text>
               </Text>
-              <Text style={s.goalsLabel}>Buts P / C</Text>
+              <Text variant="caption" color={bp.onBrandMuted}>
+                Buts pour / contre
+              </Text>
             </View>
           </View>
         </View>
 
         {/* ── Filters ── */}
-        <View style={s.filtersBlock}>
+        <View style={[s.filtersBlock, { backgroundColor: c.bg.surface, borderBottomColor: c.border.subtle }]}>
           <FilterRow
-            label="LIEU"
+            label="Lieu"
             options={LOCATION_FILTERS as unknown as string[]}
             active={filterLoc}
             onSelect={setFilterLoc}
             allLabel="Tous"
           />
           <FilterRow
-            label="COMPÉT."
+            label="Compétition"
             options={COMPETITION_FILTERS as unknown as string[]}
             active={filterComp}
             onSelect={setFilterComp}
@@ -685,113 +648,165 @@ export function AnalyticsView() {
         </View>
 
         {matches.length === 0 ? (
-          <View style={s.emptyBlock}>
-            <Ionicons name="analytics-outline" size={40} color="#cbd5e1" />
-            <Text style={s.emptyTitle}>Aucun match enregistré</Text>
-            <Text style={s.emptyText}>Créez un match dans le Calendrier et utilisez le Tracker pour générer des statistiques.</Text>
+          <View style={[s.emptyBlock, { backgroundColor: c.bg.surface, borderColor: c.border.subtle }]}>
+            <EmptyState
+              icon="analytics-outline"
+              title="Aucun match enregistré"
+              description="Créez un match dans le Calendrier, puis suivez-le en direct pour générer des statistiques."
+              compact
+            />
           </View>
         ) : (
           <>
             {/* ── Main tabs ── */}
-            <View style={s.mainTabBar}>
-              <TouchableOpacity
-                style={[s.mainTabItem, activeTab === 'overview' && s.mainTabItemActive]}
-                onPress={() => setActiveTab('overview')}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="bar-chart-outline" size={14} color={activeTab === 'overview' ? '#2563eb' : '#64748b'} />
-                <Text style={[s.mainTabText, activeTab === 'overview' && s.mainTabTextActive]}>Vue d'ensemble</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.mainTabItem, activeTab === 'stats' && s.mainTabItemActive]}
-                onPress={() => setActiveTab('stats')}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="grid-outline" size={14} color={activeTab === 'stats' ? '#2563eb' : '#64748b'} />
-                <Text style={[s.mainTabText, activeTab === 'stats' && s.mainTabTextActive]}>Stats détaillées</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.mainTabItem, activeTab === 'coach' && s.mainTabItemActive]}
-                onPress={() => setActiveTab('coach')}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="sparkles-outline" size={14} color={activeTab === 'coach' ? '#2563eb' : '#64748b'} />
-                <Text style={[s.mainTabText, activeTab === 'coach' && s.mainTabTextActive]}>Coach IA</Text>
-              </TouchableOpacity>
+            <View
+              style={[s.mainTabBar, { backgroundColor: c.bg.sunken }]}
+              accessibilityRole="tablist"
+            >
+              {(
+                [
+                  { key: 'overview', label: "Vue d'ensemble", icon: 'bar-chart-outline' },
+                  { key: 'stats',    label: 'Stats détaillées', icon: 'grid-outline' },
+                  { key: 'coach',    label: 'Coach IA',         icon: 'sparkles-outline' },
+                ] as const
+              ).map(tab => {
+                const active = activeTab === tab.key;
+                return (
+                  <Pressable
+                    key={tab.key}
+                    onPress={() => {
+                      if (active) return;
+                      haptics.select();
+                      setActiveTab(tab.key);
+                    }}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={tab.label}
+                    style={[
+                      s.mainTabItem,
+                      active && { backgroundColor: c.bg.surface, borderColor: c.border.subtle },
+                    ]}
+                  >
+                    <Ionicons
+                      name={tab.icon}
+                      size={15}
+                      color={active ? c.accent.default : c.text.secondary}
+                    />
+                    <Text variant="caption" weight="600" tone={active ? 'accent' : 'secondary'}>
+                      {tab.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
 
             {/* ── Tab: Vue d'ensemble ── */}
             {activeTab === 'overview' && (
               <>
-                <SectionHeader label="VUE D'ENSEMBLE" />
+                <SectionHeader label="Vue d'ensemble" />
                 <View style={[s.kpiGrid, { paddingHorizontal: 14 }]}>
                   {KPI_ITEMS.map(k => (
-                    <View key={k.label} style={[s.kpiCard, { width: `${100 / kpiCols - 2}%` as any }]}>
-                      <View style={[s.kpiIconBox, { backgroundColor: k.color + '18' }]}>
-                        <Ionicons name={k.icon} size={14} color={k.color} />
+                    <Card
+                      key={k.label}
+                      padding="sm"
+                      style={[s.kpiCard, { width: `${100 / kpiCols - 2}%` as never }]}
+                    >
+                      <View style={[s.kpiIconBox, { backgroundColor: c.bg.sunken }]}>
+                        <Ionicons name={k.icon} size={15} color={k.color} />
                       </View>
-                      <Text style={[s.kpiValue, { color: k.color }]}>{k.value}</Text>
-                      <Text style={s.kpiLabel}>{k.label}</Text>
-                    </View>
+                      {/* `Stat` porte la règle « le chiffre est le héros » :
+                          valeur en grand, libellé en casse normale à 12 px.
+                          C'était l'inverse ici — libellé à 9 px en capitales. */}
+                      <Stat
+                        value={String(k.value)}
+                        label={k.label}
+                        size="compact"
+                        valueColor={k.color}
+                      />
+                    </Card>
                   ))}
                 </View>
 
                 {goalsByType.some(g => g.scored > 0 || g.conceded > 0) && (
                   <>
-                    <SectionHeader label="BUTS PAR TYPE" />
+                    <SectionHeader label="Buts par type" />
                     <View style={s.goalsTypeBlock}>
-                      <View style={s.goalsTypeCard}>
-                        <Text style={[s.goalsTypeCardTitle, { color: '#16a34a' }]}>Buts marqués</Text>
-                        {goalsByType.map(g => (
-                          <View key={g.key} style={s.goalsTypeRow}>
-                            <View style={s.goalsTypeRowTop}>
-                              <Text style={s.goalsTypeLabel}>{g.label}</Text>
-                              <Text style={[s.goalsTypeCount, { color: '#16a34a' }]}>{g.scored}</Text>
-                            </View>
-                            <View style={s.progressBg}>
-                              <View style={[s.progressFill, { width: `${(g.scored / maxGoalsByType) * 100}%` as any, backgroundColor: '#16a34a' }]} />
-                            </View>
-                          </View>
-                        ))}
-                      </View>
-                      <View style={s.goalsTypeCard}>
-                        <Text style={[s.goalsTypeCardTitle, { color: '#dc2626' }]}>Buts encaissés</Text>
-                        {goalsByType.map(g => (
-                          <View key={g.key} style={s.goalsTypeRow}>
-                            <View style={s.goalsTypeRowTop}>
-                              <Text style={s.goalsTypeLabel}>{g.label}</Text>
-                              <Text style={[s.goalsTypeCount, { color: '#dc2626' }]}>{g.conceded}</Text>
-                            </View>
-                            <View style={s.progressBg}>
-                              <View style={[s.progressFill, { width: `${(g.conceded / maxGoalsByType) * 100}%` as any, backgroundColor: '#dc2626' }]} />
-                            </View>
-                          </View>
-                        ))}
-                      </View>
+                      {(
+                        [
+                          { title: 'Buts marqués',   ramp: c.positive, pick: (g: typeof goalsByType[number]) => g.scored },
+                          { title: 'Buts encaissés', ramp: c.negative, pick: (g: typeof goalsByType[number]) => g.conceded },
+                        ] as const
+                      ).map(block => (
+                        <Card key={block.title} style={s.goalsTypeCard}>
+                          <Text variant="headline" color={block.ramp.default}>
+                            {block.title}
+                          </Text>
+                          {goalsByType.map(g => {
+                            const value = block.pick(g);
+                            return (
+                              <View
+                                key={g.key}
+                                style={s.goalsTypeRow}
+                                accessibilityLabel={`${g.label} : ${value}`}
+                              >
+                                <View style={s.goalsTypeRowTop}>
+                                  <Text variant="callout" tone="secondary">
+                                    {g.label}
+                                  </Text>
+                                  <Text variant="headline" color={block.ramp.default} numeric>
+                                    {value}
+                                  </Text>
+                                </View>
+                                <View style={[s.progressBg, { backgroundColor: c.bg.sunken }]}>
+                                  <View
+                                    style={[
+                                      s.progressFill,
+                                      {
+                                        width: `${(value / maxGoalsByType) * 100}%` as never,
+                                        backgroundColor: block.ramp.default,
+                                      },
+                                    ]}
+                                  />
+                                </View>
+                              </View>
+                            );
+                          })}
+                        </Card>
+                      ))}
                     </View>
                   </>
                 )}
 
                 {playerStatsList.length > 0 && (
                   <>
-                    <SectionHeader label="MEILLEURS JOUEURS" />
+                    <SectionHeader label="Meilleurs joueurs" />
                     <View style={[s.topsRow, isTablet && s.topsRowTablet]}>
+                      {tops.ratings.length > 0 && (
+                        <TopList
+                          title="Meilleures notes" icon="star" color={series[0]}
+                          items={tops.ratings.map(p => ({
+                            name: abbrevName(p.playerName),
+                            value: (p.avgRating as number).toFixed(1),
+                            valueColor: ratingColor(theme, p.avgRating as number),
+                          }))}
+                        />
+                      )}
                       <TopList
-                        title="Buteurs" icon="football" color="#16a34a"
+                        title="Buteurs" icon="football" color={series[1]}
                         items={tops.scorers.map(p => ({ name: abbrevName(p.playerName), value: String(p.goals) }))}
                       />
                       {tops.assists.length > 0 && (
                         <TopList
-                          title="Passes déc." icon="share-social" color="#0ea5e9"
+                          title="Passes déc." icon="share-social" color={series[2]}
                           items={tops.assists.map(p => ({ name: abbrevName(p.playerName), value: String(p.assist) }))}
                         />
                       )}
                       <TopList
-                        title="Récupérations" icon="refresh" color="#2563eb"
+                        title="Récupérations" icon="refresh" color={series[3]}
                         items={tops.recoveries.map(p => ({ name: abbrevName(p.playerName), value: String(p.recovery) }))}
                       />
                       <TopList
-                        title="+/- Buts" icon="trending-up" color="#8b5cf6"
+                        title="+/- Buts" icon="trending-up" color={series[4]}
                         items={tops.plusMinus.map(p => ({
                           name: abbrevName(p.playerName),
                           value: p.plusMinusGoals > 0 ? `+${p.plusMinusGoals}` : String(p.plusMinusGoals),
@@ -799,12 +814,17 @@ export function AnalyticsView() {
                       />
                       {tops.shooterEff.length > 0 && (
                         <TopList
-                          title="Efficacité au tir" icon="locate" color="#f59e0b"
+                          title="Efficacité au tir" icon="locate" color={series[5]}
                           items={tops.shooterEff.map(p => ({
                             name: abbrevName(p.playerName),
                             value: `${p.shotEff}%`,
                             sub: `${p.goals}B/${p.totalShotsAll}T`,
-                            valueColor: p.shotEff >= 40 ? '#16a34a' : p.shotEff >= 20 ? '#d97706' : '#dc2626',
+                            valueColor:
+                              p.shotEff >= 40
+                                ? c.positive.default
+                                : p.shotEff >= 20
+                                  ? c.warning.default
+                                  : c.negative.default,
                           }))}
                         />
                       )}
@@ -812,7 +832,7 @@ export function AnalyticsView() {
                   </>
                 )}
 
-                <SectionHeader label="MOMENTS DU MATCH" />
+                <SectionHeader label="Moments du match" />
                 <MatchMomentsView
                   matches={matches}
                   eventsByMatch={eventsByMatch}
@@ -824,28 +844,15 @@ export function AnalyticsView() {
             {/* ── Tab: Stats détaillées ── */}
             {activeTab === 'stats' && (
               <>
-                <SectionHeader label="STATISTIQUES JOUEURS" />
-                {playerStatsList.length > 0 ? (
-                  <>
-                    <StatsTable
-                      rows={sortedStats}
-                      sortCol={sortCol}
-                      sortDir={sortDir}
-                      onSort={handleSort}
-                    />
-                    <Text style={s.legend}>
-                      M = Matchs · Tps = Temps de jeu · B = Buts · +/-B = +/- buts · TC = Tirs cadrés · TT = Tirs totaux · R = Récup. · PdB = Pertes · Pdec = Passes déc.
-                    </Text>
-                  </>
-                ) : (
-                  <View style={s.emptyBlock}>
-                    <Text style={s.emptyText}>
-                      {filteredMatchIds.size === 0
-                        ? 'Aucun match ne correspond aux filtres.'
-                        : 'Aucun match enregistré avec le Tracker.'}
-                    </Text>
-                  </View>
-                )}
+                <SectionHeader label="Statistiques joueurs" />
+                <PlayerStatsPanel
+                  rows={playerStatsList}
+                  emptyDescription={
+                    filteredMatchIds.size === 0
+                      ? 'Aucun match ne correspond aux filtres.'
+                      : 'Aucun match enregistré avec le Tracker.'
+                  }
+                />
                 <ComboRankingTable allStats={allComboStats} playerById={playerByIdForRanking} />
               </>
             )}
@@ -855,11 +862,17 @@ export function AnalyticsView() {
               <>
                 {(insights.length > 0 || comboInsightCards.length > 0) ? (
                   <>
-                    <View style={s.coachHeader}>
-                      <View style={ss.secAccent} />
-                      <Text style={ss.secLabel}>ANALYSE DU COACH ADJOINT</Text>
-                      <View style={s.algoBadge}>
-                        <Text style={s.algoBadgeText}>ALGO</Text>
+                    <View style={s.coachHeader} accessibilityRole="header">
+                      <View style={[s.secAccent, { backgroundColor: c.accent.default }]} />
+                      <Text variant="caption" tone="secondary" weight="700">
+                        Analyse du coach adjoint
+                      </Text>
+                      <View
+                        style={[s.algoBadge, { backgroundColor: c.accent.subtle, borderColor: c.accent.border }]}
+                      >
+                        <Text variant="caption" weight="700" tone="accent">
+                          Algo
+                        </Text>
                       </View>
                     </View>
                     <View style={s.insightsBlock}>
@@ -870,9 +883,11 @@ export function AnalyticsView() {
                     {comboInsightCards.length > 0 && (
                       <>
                         <View style={s.comboDividerRow}>
-                          <View style={s.comboDividerLine} />
-                          <Text style={s.comboDividerLabel}>COMBINAISONS — RÉSUMÉ</Text>
-                          <View style={s.comboDividerLine} />
+                          <View style={[s.comboDividerLine, { backgroundColor: c.border.subtle }]} />
+                          <Text variant="caption" tone="accent" weight="700">
+                            Combinaisons — résumé
+                          </Text>
+                          <View style={[s.comboDividerLine, { backgroundColor: c.border.subtle }]} />
                         </View>
                         <View style={s.insightsBlock}>
                           {comboInsightCards.map((ins, i) => (
@@ -883,10 +898,13 @@ export function AnalyticsView() {
                     )}
                   </>
                 ) : (
-                  <View style={s.emptyBlock}>
-                    <Ionicons name="sparkles-outline" size={36} color="#cbd5e1" />
-                    <Text style={s.emptyTitle}>Pas assez de données</Text>
-                    <Text style={s.emptyText}>Enregistrez davantage de matchs avec le Tracker pour que le coach adjoint puisse générer des analyses.</Text>
+                  <View style={[s.emptyBlock, { backgroundColor: c.bg.surface, borderColor: c.border.subtle }]}>
+                    <EmptyState
+                      icon="sparkles-outline"
+                      title="Pas assez de données"
+                      description="Suivez davantage de matchs en direct pour que le coach adjoint puisse générer des analyses."
+                      compact
+                    />
                   </View>
                 )}
               </>
@@ -902,20 +920,40 @@ export function AnalyticsView() {
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
-function SectionHeader({ label }: { label: string }) {
+function SectionHeader({ label, tone = 'accent' }: { label: string; tone?: 'accent' | 'warning' }) {
+  const s = useStyles();
+  const { theme } = useTheme();
   return (
-    <View style={ss.secHeader}>
-      <View style={ss.secAccent} />
-      <Text style={ss.secLabel}>{label}</Text>
+    <View style={s.secHeader} accessibilityRole="header">
+      <View
+        style={[
+          s.secAccent,
+          { backgroundColor: tone === 'warning' ? theme.colors.warning.default : theme.colors.accent.default },
+        ]}
+      />
+      {/* Était en capitales espacées à 10 px. L'échelle typographique proscrit
+          les deux : la casse normale se lit plus vite, et 12 px est le plancher. */}
+      <Text variant="caption" tone="secondary" weight="700">
+        {label}
+      </Text>
     </View>
   );
 }
 
-function RecordPill({ value, label, color }: { value: number; label: string; color: string }) {
+function RecordPill({
+  value, label, color, labelColor,
+}: {
+  value: number; label: string; color: string; labelColor: string;
+}) {
+  const s = useStyles();
   return (
-    <View style={ss.recPill}>
-      <Text style={[ss.recValue, { color }]}>{value}</Text>
-      <Text style={ss.recLabel}>{label}</Text>
+    <View style={s.recPill} accessibilityLabel={`${value} ${label}`}>
+      <Text variant="display" color={color} numeric>
+        {value}
+      </Text>
+      <Text variant="caption" color={labelColor}>
+        {label}
+      </Text>
     </View>
   );
 }
@@ -926,25 +964,53 @@ function FilterRow({
   label: string; options: string[]; active: string;
   onSelect: (v: string) => void; allLabel: string;
 }) {
+  const s = useStyles();
+  const { theme } = useTheme();
+  const c = theme.colors;
   return (
-    <View style={ss.filterRow}>
-      <Text style={ss.filterTitle}>{label}</Text>
-      <View style={ss.filterChips}>
-        {options.map(v => (
-          <TouchableOpacity
-            key={v}
-            style={[ss.fChip, active === v && ss.fChipActive]}
-            onPress={() => onSelect(v)}
-            activeOpacity={0.7}
-          >
-            <Text style={[ss.fChipText, active === v && ss.fChipTextActive]}>
-              {v === 'all' ? allLabel : v}
-            </Text>
-          </TouchableOpacity>
-        ))}
+    <View style={s.filterRow} accessibilityRole="radiogroup" accessibilityLabel={`Filtrer par ${label}`}>
+      <Text variant="caption" tone="tertiary" weight="600" style={s.filterTitle}>
+        {label}
+      </Text>
+      <View style={s.filterChips}>
+        {options.map(v => {
+          const isActive = active === v;
+          const chipLabel = v === 'all' ? allLabel : v;
+          return (
+            <Pressable
+              key={v}
+              onPress={() => { haptics.select(); onSelect(v); }}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: isActive, checked: isActive }}
+              accessibilityLabel={chipLabel}
+              style={({ pressed }) => [
+                s.fChip,
+                {
+                  backgroundColor: isActive ? c.accent.subtle : c.bg.sunken,
+                  borderColor: isActive ? c.accent.default : c.border.subtle,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <Text variant="caption" tone={isActive ? 'accent' : 'secondary'} weight="600">
+                {chipLabel}
+              </Text>
+            </Pressable>
+          );
+        })}
       </View>
     </View>
   );
+}
+
+/**
+ * Couleur de rang. L'or / argent / bronze d'origine (`#f59e0b` / `#94a3b8` /
+ * `#b45309`) tenait 2,5:1 pour l'argent : illisible. Le rang se lit d'abord
+ * dans l'ordre des lignes — seul le premier est mis en avant, le reste est
+ * secondaire.
+ */
+function rankTone(index: number): 'warning' | 'tertiary' {
+  return index === 0 ? 'warning' : 'tertiary';
 }
 
 function TopList({
@@ -955,51 +1021,89 @@ function TopList({
   color: string;
   items: { name: string; value: string; sub?: string; valueColor?: string }[];
 }) {
-  const RANK_COLORS = ['#f59e0b', '#94a3b8', '#b45309'];
+  const s = useStyles();
+  const { theme } = useTheme();
   return (
-    <View style={ss.topCard}>
-      <View style={ss.topHeader}>
-        <View style={[ss.topIconBox, { backgroundColor: color + '18' }]}>
-          <Ionicons name={icon} size={12} color={color} />
+    <Card style={s.topCard}>
+      <View style={s.topHeader}>
+        <View style={[s.topIconBox, { backgroundColor: theme.colors.accent.subtle }]}>
+          <Ionicons name={icon} size={13} color={color} />
         </View>
-        <Text style={[ss.topTitle, { color }]}>{title}</Text>
+        <Text variant="caption" weight="700" color={color}>
+          {title}
+        </Text>
       </View>
       {items.length === 0 ? (
-        <Text style={ss.topEmpty}>Pas encore de données</Text>
+        <Text variant="caption" tone="tertiary" style={{ textAlign: 'center' }}>
+          Pas encore de données
+        </Text>
       ) : (
         items.map((item, i) => (
-          <View key={i} style={[ss.topRow, i === 0 && ss.topRowFirst]}>
-            <Text style={[ss.topRank, { color: RANK_COLORS[i] ?? '#94a3b8' }]}>{i + 1}</Text>
-            <Text style={ss.topName} numberOfLines={1}>{item.name}</Text>
-            {item.sub ? <Text style={ss.topSub} numberOfLines={1}>{item.sub}</Text> : null}
-            <Text style={[ss.topValue, { color: item.valueColor ?? color }]}>{item.value}</Text>
+          <View
+            key={i}
+            style={[s.topRow, { borderTopColor: theme.colors.border.subtle }, i === 0 && s.topRowFirst]}
+          >
+            <Text variant="caption" weight="700" tone={rankTone(i)} style={s.topRank} numeric>
+              {i + 1}
+            </Text>
+            <Text variant="callout" style={s.topName} numberOfLines={1}>
+              {item.name}
+            </Text>
+            {item.sub ? (
+              <Text variant="caption" tone="tertiary" numberOfLines={1}>
+                {item.sub}
+              </Text>
+            ) : null}
+            <Text variant="headline" color={item.valueColor ?? color} numeric>
+              {item.value}
+            </Text>
           </View>
         ))
       )}
-    </View>
+    </Card>
   );
 }
 
-const INSIGHT_STYLES: Record<InsightLevel, { bg: string; border: string; tag: string; tagColor: string }> = {
-  positive: { bg: '#f0fdf4', border: '#86efac', tag: 'Point fort',  tagColor: '#16a34a' },
-  warning:  { bg: '#fffbeb', border: '#fcd34d', tag: 'Attention',   tagColor: '#d97706' },
-  alert:    { bg: '#fef2f2', border: '#fca5a5', tag: 'Alerte',      tagColor: '#dc2626' },
-  info:     { bg: '#eff6ff', border: '#bfdbfe', tag: 'Observation', tagColor: '#2563eb' },
-};
+/**
+ * Habillage d'une carte d'analyse. Les quatre niveaux passent sur la rampe
+ * sémantique : le pôle positif était en vert `#16a34a`, que la deutéranopie
+ * confond avec le rouge d'alerte — soit précisément les deux niveaux qu'il faut
+ * distinguer. Le tag texte (« Point fort », « Alerte ») porte de toute façon
+ * l'information, la couleur ne fait que la doubler.
+ */
+function insightTone(level: InsightLevel, c: ThemeColors) {
+  switch (level) {
+    case 'positive': return { ramp: c.positive, tag: 'Point fort' as const };
+    case 'warning':  return { ramp: c.warning,  tag: 'Attention' as const };
+    case 'alert':    return { ramp: c.negative, tag: 'Alerte' as const };
+    default:         return { ramp: { default: c.accent.default, subtle: c.accent.subtle }, tag: 'Observation' as const };
+  }
+}
 
 function CoachInsightCard({ insight }: { insight: Insight }) {
-  const c = INSIGHT_STYLES[insight.level];
+  const s = useStyles();
+  const { theme } = useTheme();
+  const { ramp, tag } = insightTone(insight.level, theme.colors);
   return (
-    <View style={[css.insightCard, { backgroundColor: c.bg, borderColor: c.border }]}>
-      <Text style={css.insightIcon}>{insight.icon}</Text>
-      <View style={{ flex: 1 }}>
-        <View style={css.insightTagRow}>
-          <View style={[css.insightTag, { borderColor: c.border }]}>
-            <Text style={[css.insightTagText, { color: c.tagColor }]}>{c.tag}</Text>
+    <View
+      style={[s.insightCard, { backgroundColor: ramp.subtle, borderColor: ramp.default }]}
+      accessibilityLabel={`${tag}. ${insight.title}. ${insight.body}`}
+    >
+      <Ionicons name={insight.icon} size={20} color={ramp.default} style={s.insightIcon} />
+      <View style={s.flex1}>
+        <View style={s.insightTagRow}>
+          <View style={[s.insightTag, { borderColor: ramp.default }]}>
+            <Text variant="caption" weight="700" color={ramp.default}>
+              {tag}
+            </Text>
           </View>
-          <Text style={css.insightTitle} numberOfLines={2}>{insight.title}</Text>
+          <Text variant="callout" weight="700" style={s.flex1} numberOfLines={2}>
+            {insight.title}
+          </Text>
         </View>
-        <Text style={css.insightBody}>{insight.body}</Text>
+        <Text variant="callout" tone="secondary">
+          {insight.body}
+        </Text>
       </View>
     </View>
   );
@@ -1014,11 +1118,15 @@ function ComboRankingTable({
   allStats: Map<string, ComboStats>;
   playerById: Map<string, Player>;
 }) {
+  const s = useStyles();
+  const { theme } = useTheme();
+  const c = theme.colors;
   const [activeSize, setActiveSize] = useState<2 | 3 | 4>(3);
   const [sortKey, setSortKey]       = useState<ComboSortKey>('pmGoalsPerMin');
   const [sortDir, setSortDir]       = useState<'asc' | 'desc'>('desc');
 
   const handleSort = (key: ComboSortKey) => {
+    haptics.select();
     if (key === sortKey) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortKey(key); setSortDir('desc'); }
   };
@@ -1030,15 +1138,15 @@ function ComboRankingTable({
 
   const combosFor = (size: 2 | 3 | 4) =>
     Array.from(allStats.values())
-      .filter(c => c.playerIds.length === size && c.sharedTimeSec >= MIN_COMBO_SEC);
+      .filter(x => x.playerIds.length === size && x.sharedTimeSec >= MIN_COMBO_SEC);
 
-  const SIZES: { size: 2 | 3 | 4; label: string; icon: string }[] = [
-    { size: 4, label: 'Lignes', icon: '🔗' },
-    { size: 3, label: 'Trios',  icon: '🔺' },
-    { size: 2, label: 'Duos',   icon: '⚡' },
+  const SIZES: { size: 2 | 3 | 4; label: string }[] = [
+    { size: 4, label: 'Lignes' },
+    { size: 3, label: 'Trios' },
+    { size: 2, label: 'Duos' },
   ];
 
-  const hasAny = SIZES.some(s => combosFor(s.size).length > 0);
+  const hasAny = SIZES.some(x => combosFor(x.size).length > 0);
   if (!hasAny) return null;
 
   const dir  = sortDir === 'asc' ? 1 : -1;
@@ -1046,58 +1154,75 @@ function ComboRankingTable({
     .sort((a, b) => dir * ((a[sortKey] as number) - (b[sortKey] as number)))
     .slice(0, 10);
 
-  const RANK_COLORS = ['#f59e0b', '#94a3b8', '#b45309'];
-  const pmColor  = (v: number) => v > 0 ? '#16a34a' : v < 0 ? '#dc2626' : '#94a3b8';
-  const fmtPm    = (v: number) => `${v > 0 ? '+' : ''}${v}`;
+  const fmtPm     = (v: number) => `${v > 0 ? '+' : ''}${v}`;
   const fmtPerMin = (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(2)}`;
 
-  // Sortable header cell
   const SortTh = ({ label, sk, flex, left }: { label: string; sk?: ComboSortKey; flex?: number; left?: boolean }) => {
     const active = sk === sortKey;
     return (
-      <TouchableOpacity
-        style={[cr.thCell, flex ? { flex } : undefined]}
+      <Pressable
+        style={[s.crThCell, flex ? { flex } : undefined]}
         onPress={() => sk && handleSort(sk)}
-        activeOpacity={sk ? 0.6 : 1}
         disabled={!sk}
+        accessibilityRole={sk ? 'button' : undefined}
+        accessibilityLabel={
+          sk
+            ? active
+              ? `${label}, trié ${sortDir === 'asc' ? 'par ordre croissant' : 'par ordre décroissant'}`
+              : `${label}, trier`
+            : label
+        }
       >
-        <Text style={[cr.th, left && { textAlign: 'left' }, active && { color: '#2563eb' }]}>
+        <Text
+          variant="tableHeader"
+          tone={active ? 'accent' : 'tertiary'}
+          style={left ? undefined : { textAlign: 'center' }}
+        >
           {label}{active ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
         </Text>
-      </TouchableOpacity>
+      </Pressable>
     );
   };
 
   return (
     <>
-      <View style={cr.header}>
-        <View style={[ss.secAccent, { backgroundColor: '#f59e0b' }]} />
-        <Text style={ss.secLabel}>CLASSEMENT DES COMBINAISONS</Text>
-      </View>
+      <SectionHeader label="Classement des combinaisons" tone="warning" />
 
-      <View style={cr.card}>
-        {/* Tabs */}
-        <View style={cr.tabs}>
-          {SIZES.map(s => {
-            const count = combosFor(s.size).length;
-            const active = activeSize === s.size;
+      <View style={[s.crCard, { backgroundColor: c.bg.surface, borderColor: c.border.subtle }]}>
+        <View style={[s.crTabs, { borderBottomColor: c.border.subtle }]} accessibilityRole="tablist">
+          {SIZES.map(x => {
+            const count = combosFor(x.size).length;
+            const active = activeSize === x.size;
             return (
-              <TouchableOpacity key={s.size} style={[cr.tab, active && cr.tabActive]}
-                onPress={() => setActiveSize(s.size)} activeOpacity={0.7}>
-                <Text style={[cr.tabText, active && cr.tabTextActive]}>
-                  {s.icon} {s.label}{count > 0 ? ` (${count})` : ''}
+              <Pressable
+                key={x.size}
+                onPress={() => { haptics.select(); setActiveSize(x.size); }}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`${x.label}, ${count} combinaison${count > 1 ? 's' : ''}`}
+                style={[
+                  s.crTab,
+                  {
+                    backgroundColor: active ? c.accent.subtle : c.bg.sunken,
+                    borderColor: active ? c.accent.default : c.border.subtle,
+                  },
+                ]}
+              >
+                <Text variant="caption" weight="600" tone={active ? 'accent' : 'secondary'}>
+                  {x.label}{count > 0 ? ` (${count})` : ''}
                 </Text>
-              </TouchableOpacity>
+              </Pressable>
             );
           })}
         </View>
 
         {rows.length === 0 ? (
-          <Text style={cr.empty}>Pas assez de données — min. 5 min ensemble.</Text>
+          <Text variant="callout" tone="tertiary" style={s.crEmpty}>
+            Pas assez de données — min. 5 min ensemble.
+          </Text>
         ) : (
           <>
-            {/* Sortable column headers */}
-            <View style={cr.thead}>
+            <View style={[s.crThead, { backgroundColor: c.bg.sunken, borderBottomColor: c.border.subtle }]}>
               <View style={{ width: 20, marginRight: 4 }} />
               <SortTh label="Joueurs" flex={2} left />
               <SortTh label="Tps"    sk="sharedTimeSec" />
@@ -1107,23 +1232,48 @@ function ComboRankingTable({
               <SortTh label="T/min"  sk="pmShotsPerMin" />
             </View>
 
-            {rows.map((c, i) => (
-              <View key={c.playerIds.join('|')} style={[cr.row, i % 2 === 1 && cr.rowAlt]}>
-                <Text style={[cr.rank, { color: RANK_COLORS[i] ?? '#94a3b8', width: 16, textAlign: 'center' }]}>{i + 1}</Text>
-                <View style={cr.nameCol}>
-                  {c.playerIds.map(pid => (
-                    <Text key={pid} style={cr.nameLine} numberOfLines={1}>{getName(pid)}</Text>
+            {rows.map((combo, i) => (
+              <View
+                key={combo.playerIds.join('|')}
+                style={[
+                  s.crRow,
+                  { borderBottomColor: c.border.subtle },
+                  i % 2 === 1 && { backgroundColor: c.bg.stripe },
+                ]}
+              >
+                <Text variant="caption" weight="700" tone={rankTone(i)} style={s.crRank} numeric>
+                  {i + 1}
+                </Text>
+                <View style={s.crNameCol}>
+                  {combo.playerIds.map(pid => (
+                    <Text key={pid} variant="caption" numberOfLines={1}>
+                      {getName(pid)}
+                    </Text>
                   ))}
                 </View>
-                <Text style={[cr.cell, sortKey === 'sharedTimeSec' && cr.cellActive]}>{fmtTime(c.sharedTimeSec)}</Text>
-                <Text style={[cr.cell, { color: sortKey === 'pmGoals' ? '#2563eb' : pmColor(c.pmGoals), fontWeight: '700' }]}>{fmtPm(c.pmGoals)}</Text>
-                <Text style={[cr.cell, { color: sortKey === 'pmShots' ? '#2563eb' : pmColor(c.pmShots), fontWeight: '700' }]}>{fmtPm(c.pmShots)}</Text>
-                <Text style={[cr.cell, { color: sortKey === 'pmGoalsPerMin' ? '#2563eb' : pmColor(c.pmGoalsPerMin), fontWeight: '900', fontSize: 12 }]}>{fmtPerMin(c.pmGoalsPerMin)}</Text>
-                <Text style={[cr.cell, { color: sortKey === 'pmShotsPerMin' ? '#2563eb' : pmColor(c.pmShotsPerMin), fontWeight: '700' }]}>{fmtPerMin(c.pmShotsPerMin)}</Text>
+                <Text
+                  variant="tableCell"
+                  tone={sortKey === 'sharedTimeSec' ? 'accent' : 'secondary'}
+                  style={s.crCell}
+                >
+                  {fmtTime(combo.sharedTimeSec)}
+                </Text>
+                <Text variant="tableCell" color={deltaColor(theme, combo.pmGoals)} style={s.crCell}>
+                  {fmtPm(combo.pmGoals)}
+                </Text>
+                <Text variant="tableCell" color={deltaColor(theme, combo.pmShots)} style={s.crCell}>
+                  {fmtPm(combo.pmShots)}
+                </Text>
+                <Text variant="tableCell" color={deltaColor(theme, combo.pmGoalsPerMin)} style={s.crCell}>
+                  {fmtPerMin(combo.pmGoalsPerMin)}
+                </Text>
+                <Text variant="tableCell" color={deltaColor(theme, combo.pmShotsPerMin)} style={s.crCell}>
+                  {fmtPerMin(combo.pmShotsPerMin)}
+                </Text>
               </View>
             ))}
 
-            <Text style={cr.legend}>
+            <Text variant="caption" tone="tertiary" style={[s.crLegend, { borderTopColor: c.border.subtle }]}>
               B/min = buts par minute · T/min = tirs par minute · min. 5 min ensemble · gardien exclu
             </Text>
           </>
@@ -1133,361 +1283,245 @@ function ComboRankingTable({
   );
 }
 
-function StatsTable({
-  rows, sortCol, sortDir, onSort,
-}: {
-  rows: PlayerStats[];
-  sortCol: string;
-  sortDir: 'asc' | 'desc';
-  onSort: (k: string) => void;
-}) {
-  return (
-    <View style={ss.tableWrap}>
-      {/* Header */}
-      <View style={ss.tableHeader}>
-        {COLS.map(col => {
-          const active = sortCol === col.key;
-          const isName = col.key === 'playerName';
-          return (
-            <TouchableOpacity
-              key={col.key}
-              style={[ss.thCell, { flex: col.flex }]}
-              onPress={() => onSort(col.key)}
-              activeOpacity={0.7}
-            >
-              <Text style={[ss.thText, !isName && ss.thTextCenter, active && ss.thTextActive]}>
-                {col.label}
-              </Text>
-              {active && (
-                <Ionicons
-                  name={sortDir === 'asc' ? 'chevron-up' : 'chevron-down'}
-                  size={9}
-                  color="#2563eb"
-                />
-              )}
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {/* Rows */}
-      {rows.map((row, i) => {
-        const totalShots = row.shot + row.shot_on_target;
-        const isEven     = i % 2 === 0;
-        return (
-          <View key={row.playerId} style={[ss.tRow, isEven && ss.tRowAlt]}>
-            {COLS.map(col => {
-              const isName = col.key === 'playerName';
-              let content: string;
-              let cellColor: string | undefined;
-
-              switch (col.key) {
-                case 'playerName':
-                  content   = abbrevName(row.playerName);
-                  break;
-                case 'totalTimeSeconds':
-                  content   = fmtTime(row.totalTimeSeconds);
-                  break;
-                case 'totalShots':
-                  content   = String(totalShots);
-                  break;
-                case 'plusMinusGoals':
-                  content   = row.plusMinusGoals > 0 ? `+${row.plusMinusGoals}` : String(row.plusMinusGoals);
-                  cellColor = row.plusMinusGoals > 0 ? '#16a34a' : row.plusMinusGoals < 0 ? '#dc2626' : undefined;
-                  break;
-                case 'goals':
-                  content   = String(row.goals);
-                  cellColor = row.goals > 0 ? '#16a34a' : undefined;
-                  break;
-                case 'recovery':
-                  content   = String(row.recovery);
-                  cellColor = row.recovery > 0 ? '#2563eb' : undefined;
-                  break;
-                case 'ball_loss':
-                  content   = String(row.ball_loss);
-                  cellColor = row.ball_loss > 0 ? '#dc2626' : undefined;
-                  break;
-                case 'yellow_cards':
-                  content   = String(row.yellow_cards);
-                  cellColor = row.yellow_cards > 0 ? '#f59e0b' : undefined;
-                  break;
-                case 'red_cards':
-                  content   = String(row.red_cards);
-                  cellColor = row.red_cards > 0 ? '#dc2626' : undefined;
-                  break;
-                default:
-                  content   = String((row as any)[col.key] ?? 0);
-              }
-
-              return (
-                <Text
-                  key={col.key}
-                  numberOfLines={1}
-                  style={[
-                    isName ? ss.tdName : ss.td,
-                    { flex: col.flex },
-                    cellColor ? { color: cellColor, fontWeight: '700' } : undefined,
-                  ]}
-                >
-                  {content}
-                </Text>
-              );
-            })}
-          </View>
-        );
-      })}
-    </View>
-  );
-}
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
+//
+// Quatre `StyleSheet` figés cohabitaient ici (`s`, `cr`, `css`, `ss`), pour
+// 167 valeurs de couleur en dur. Ils sont ramenés à un seul `makeStyles`, donc
+// dérivé du thème.
+//
+// Trois problèmes de fond réglés au passage, au-delà du remapping :
+//
+// 1. **Le plancher typographique.** L'écran descendait à 8 px sur dix-huit
+//    styles distincts (libellés de KPI, en-têtes de colonne, légendes, tag des
+//    cartes d'analyse). L'échelle s'arrête à 12 px, et c'est le seul écran de
+//    l'app qui passait sous cette limite.
+// 2. **Le sixième bleu.** `#2563eb` servait d'accent local — onglets actifs,
+//    puces de filtre, colonne triée — sans être aucun des cinq autres bleus de
+//    l'inventaire, ni l'accent du système.
+// 3. **Seize clés mortes** (`tableWrap`, `thCell`, `td`, `viewTab`…), restes du
+//    tableau de statistiques parti dans `PlayerStatsPanel`. Supprimées.
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#f1f5f9' },
+const useStyles = makeStyles((t) => ({
+  flex1: { flex: 1 },
+  root: { flex: 1, backgroundColor: t.colors.bg.canvas },
 
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32, gap: 12 },
-  emptyTitle: { fontSize: 16, fontWeight: '700', color: '#334155', textAlign: 'center' },
-  emptyText:  { fontSize: 13, color: '#64748b',  textAlign: 'center', lineHeight: 18 },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: t.space.xxxl },
 
-  // Hero
+  // ── Bandeau de marque ────────────────────────────────────────────────────
+  // Même aplat que la fiche joueur (`fmPalette.brand`) : c'était un cinquième
+  // bleu nuit, proche mais distinct, sur deux écrans qui se ressemblent.
   hero: {
-    backgroundColor: '#1e3a5f',
-    paddingHorizontal: 18,
-    paddingTop: 20,
-    paddingBottom: 18,
-    gap: 14,
+    paddingHorizontal: t.space.xl,
+    paddingTop: t.space.xl,
+    paddingBottom: t.space.lg,
+    gap: t.space.lg,
   },
-  heroTop:  { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  heroSub:  { fontSize: 9, fontWeight: '800', color: 'rgba(255,255,255,0.45)', letterSpacing: 1.5, marginBottom: 4 },
-  heroTeam: { fontSize: 21, fontWeight: '800', color: '#fff', letterSpacing: -0.3 },
+  heroTop: { flexDirection: 'row', alignItems: 'flex-start', gap: t.space.md },
 
-  formBlock: { alignItems: 'flex-end', gap: 4 },
-  formLabel: { fontSize: 8, fontWeight: '700', color: 'rgba(255,255,255,0.4)', letterSpacing: 1 },
-  formRow:   { flexDirection: 'row', gap: 3 },
-  formBadge: { width: 20, height: 20, borderRadius: 3, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.15)' },
-  formW:     { backgroundColor: '#15803d' },
-  formD:     { backgroundColor: '#b45309' },
-  formL:     { backgroundColor: '#b91c1c' },
-  formBadgeTxt: { fontSize: 9, fontWeight: '800', color: '#fff' },
+  formBlock: { alignItems: 'flex-end', gap: t.space.xs },
+  formRow: { flexDirection: 'row', gap: 3 },
+  formBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: t.radius.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+  },
 
-  recordBar:     { flexDirection: 'row', alignItems: 'center' },
-  recordSep:     { width: 1, height: 24, backgroundColor: 'rgba(255,255,255,0.15)', marginHorizontal: 14 },
-  recordDivider: { width: 1, height: 24, backgroundColor: 'rgba(255,255,255,0.15)', marginHorizontal: 14 },
+  recordBar: { flexDirection: 'row', alignItems: 'center' },
+  recordSep: { width: 1, height: 24, marginHorizontal: t.space.lg },
 
   goalsBlock: { gap: 1 },
-  goalsText:  { fontSize: 18, fontWeight: '800' },
-  goalsLabel: { fontSize: 8, fontWeight: '600', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: 0.5 },
 
-  // Filters
+  // ── Filtres ──────────────────────────────────────────────────────────────
   filtersBlock: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e2e8f0',
-    gap: 6,
+    paddingHorizontal: t.space.lg,
+    paddingVertical: t.space.md,
+    borderBottomWidth: 1,
+    gap: t.space.sm,
   },
-
-  // KPI
-  kpiGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingVertical: 4,
-  },
-  kpiCard: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 12,
-    margin: '1%' as any,
+  filterRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.md },
+  filterTitle: { minWidth: 76 },
+  filterChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, flex: 1 },
+  fChip: {
+    minHeight: 32,
+    justifyContent: 'center',
+    paddingHorizontal: t.space.md,
+    paddingVertical: t.space.xs,
+    borderRadius: t.radius.sm,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
-    gap: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
   },
-  kpiIconBox: { width: 24, height: 24, borderRadius: 6, justifyContent: 'center', alignItems: 'center', marginBottom: 2 },
-  kpiValue:   { fontSize: 22, fontWeight: '800', lineHeight: 26 },
-  kpiLabel:   { fontSize: 9, color: '#64748b', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.4 },
 
-  // Top performers
-  topsRow:       { paddingHorizontal: 14, gap: 8 },
-  topsRowTablet: { flexDirection: 'row' },
-
-  // View tabs
-  mainTabBar:       { flexDirection: 'row', marginHorizontal: 14, marginTop: 6, marginBottom: 2, backgroundColor: '#f1f5f9', borderRadius: 12, padding: 3, gap: 2 },
-  mainTabItem:      { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 9, borderRadius: 9 },
-  mainTabItemActive: { backgroundColor: '#fff', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.07, shadowRadius: 3, elevation: 2 },
-  mainTabText:      { fontSize: 11, fontWeight: '600', color: '#64748b' },
-  mainTabTextActive: { color: '#2563eb' },
-  viewTabs: {
+  // ── Onglets ──────────────────────────────────────────────────────────────
+  mainTabBar: {
     flexDirection: 'row',
-    marginHorizontal: 14,
-    marginBottom: 10,
-    backgroundColor: '#e2e8f0',
-    borderRadius: 10,
+    marginHorizontal: t.space.lg,
+    marginTop: t.space.sm,
+    marginBottom: t.space.xs,
+    borderRadius: t.radius.md,
     padding: 3,
+    gap: 2,
   },
-  viewTab:           { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 8, borderRadius: 8 },
-  viewTabActive:     { backgroundColor: '#fff', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 2, elevation: 1 },
-  viewTabText:       { fontSize: 12, fontWeight: '600', color: '#64748b' },
-  viewTabTextActive: { color: '#1e293b' },
+  mainTabItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: t.space.xs,
+    minHeight: 40,
+    borderRadius: t.radius.sm,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+
+  // ── KPI ──────────────────────────────────────────────────────────────────
+  kpiGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingVertical: t.space.xs },
+  kpiCard: {
+    borderRadius: t.radius.md,
+    padding: t.space.md,
+    margin: '1%' as never,
+    gap: 3,
+  },
+  kpiIconBox: {
+    width: 26,
+    height: 26,
+    borderRadius: t.radius.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
 
   emptyBlock: {
-    margin: 16,
-    padding: 24,
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    margin: t.space.lg,
+    padding: t.space.xxl,
+    borderRadius: t.radius.md,
     alignItems: 'center',
-    gap: 8,
+    gap: t.space.sm,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
   },
 
-  legend: {
-    fontSize: 10,
-    color: '#94a3b8',
-    marginHorizontal: 14,
-    marginTop: 8,
-    lineHeight: 15,
-  },
-
-  // Coach insights
-  coachHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingTop: 18, paddingBottom: 10 },
-  algoBadge: { backgroundColor: '#ede9fe', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: '#c4b5fd' },
-  algoBadgeText: { fontSize: 8, fontWeight: '800', color: '#7c3aed', letterSpacing: 0.8, textTransform: 'uppercase' },
-  insightsBlock: { paddingHorizontal: 14, gap: 8 },
-
-  // Combo divider
-  comboDividerRow:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, marginTop: 14, marginBottom: 8, gap: 8 },
-  comboDividerLine:  { flex: 1, height: 1, backgroundColor: '#e2e8f0' },
-  comboDividerLabel: { fontSize: 8, fontWeight: '800', color: '#7c3aed', letterSpacing: 1, textTransform: 'uppercase' },
-
-  // Goals by type
-  goalsTypeBlock: { paddingHorizontal: 14, gap: 8 },
-  goalsTypeCard:  { backgroundColor: '#fff', borderRadius: 10, padding: 14, borderWidth: 1, borderColor: '#e2e8f0', gap: 10 },
-  goalsTypeCardTitle: { fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 },
-  goalsTypeRow:    { gap: 4 },
-  goalsTypeRowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  goalsTypeLabel:  { fontSize: 12, color: '#374151', fontWeight: '500' },
-  goalsTypeCount:  { fontSize: 13, fontWeight: '800' },
-  progressBg:      { height: 5, borderRadius: 3, backgroundColor: '#f1f5f9', overflow: 'hidden' },
-  progressFill:    { height: '100%', borderRadius: 3 },
-});
-
-const cr = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingTop: 18, paddingBottom: 10 },
-  card:   { marginHorizontal: 14, backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#e2e8f0', overflow: 'hidden', marginBottom: 8 },
-
-  tabs:        { flexDirection: 'row', padding: 10, gap: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e2e8f0' },
-  tab:         { flex: 1, paddingVertical: 6, borderRadius: 7, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#e2e8f0', alignItems: 'center' },
-  tabActive:   { backgroundColor: '#eff6ff', borderColor: '#2563eb' },
-  tabText:     { fontSize: 11, fontWeight: '600', color: '#64748b' },
-  tabTextActive: { color: '#2563eb' },
-
-  empty: { padding: 20, textAlign: 'center', color: '#94a3b8', fontSize: 12 },
-
-  thead:  { flexDirection: 'row', backgroundColor: '#f8fafc', paddingVertical: 7, paddingHorizontal: 10,
-    borderBottomWidth: 1, borderBottomColor: '#e2e8f0', alignItems: 'center' },
-  thCell: { flex: 1, alignItems: 'center' },
-  th:     { flex: 1, fontSize: 8, fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase',
-    letterSpacing: 0.3, textAlign: 'center' },
-
-  row:    { flexDirection: 'row', paddingVertical: 6, paddingHorizontal: 10, alignItems: 'flex-start',
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#f1f5f9' },
-  rowAlt: { backgroundColor: '#f8fafc' },
-
-  rank:    { fontSize: 11, fontWeight: '800', paddingTop: 2, marginRight: 4 },
-  nameCol: { flex: 2, paddingRight: 4, gap: 1 },
-  nameLine:{ fontSize: 9, color: '#1e293b', fontWeight: '500', lineHeight: 13 },
-  cell:       { flex: 1, fontSize: 10, color: '#475569', textAlign: 'center', fontWeight: '500', paddingTop: 2 },
-  cellActive: { color: '#2563eb', fontWeight: '700' },
-
-  legend: { fontSize: 9, color: '#94a3b8', padding: 8, paddingHorizontal: 10, lineHeight: 13, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e2e8f0' },
-});
-
-const css = StyleSheet.create({
-  insightCard: { flexDirection: 'row', gap: 10, borderRadius: 10, padding: 12, borderWidth: 1, marginBottom: 4 },
-  insightIcon: { fontSize: 18, lineHeight: 22, flexShrink: 0 },
-  insightTagRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' },
-  insightTag: { borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2, borderWidth: 1 },
-  insightTagText: { fontSize: 8, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8 },
-  insightTitle: { fontSize: 12, fontWeight: '700', color: '#1a2332', flex: 1 },
-  insightBody: { fontSize: 11, color: '#374151', lineHeight: 17 },
-});
-
-const ss = StyleSheet.create({
-  // Section header
-  secHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingTop: 18, paddingBottom: 10 },
-  secAccent: { width: 3, height: 12, backgroundColor: '#2563eb', borderRadius: 2 },
-  secLabel:  { fontSize: 10, fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: 1.2 },
-
-  // Record pills
-  recPill:  { alignItems: 'center', gap: 1 },
-  recValue: { fontSize: 22, fontWeight: '900', lineHeight: 24 },
-  recLabel: { fontSize: 8, fontWeight: '600', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: 0.5 },
-
-  // Filters
-  filterRow:   { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  filterTitle: { fontSize: 8, fontWeight: '800', color: '#94a3b8', letterSpacing: 0.8, textTransform: 'uppercase', minWidth: 48 },
-  filterChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, flex: 1 },
-  fChip:       { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#e2e8f0' },
-  fChipActive: { backgroundColor: '#eff6ff', borderColor: '#2563eb' },
-  fChipText:   { fontSize: 11, color: '#64748b', fontWeight: '600' },
-  fChipTextActive: { color: '#2563eb' },
-
-  // Top performers
-  topCard: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    marginBottom: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  topHeader:  { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
-  topIconBox: { width: 22, height: 22, borderRadius: 6, justifyContent: 'center', alignItems: 'center' },
-  topTitle:   { fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
-  topEmpty:   { fontSize: 12, color: '#94a3b8', textAlign: 'center', paddingVertical: 6, fontStyle: 'italic' },
-  topRow:     { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 5, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#f1f5f9' },
-  topRowFirst:{ borderTopWidth: 0 },
-  topRank:    { fontSize: 11, fontWeight: '800', width: 14, textAlign: 'center' },
-  topName:    { flex: 1, fontSize: 12, color: '#334155', fontWeight: '500' },
-  topSub:     { fontSize: 10, color: '#94a3b8', fontWeight: '600', marginRight: 6 },
-  topValue:   { fontSize: 14, fontWeight: '800' },
-
-  // Stats table — full width, no horizontal scroll
-  tableWrap: {
-    marginHorizontal: 0,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#e2e8f0',
-    backgroundColor: '#fff',
-    marginBottom: 8,
-  },
-  tableHeader: {
+  // ── Analyses du coach ────────────────────────────────────────────────────
+  coachHeader: {
     flexDirection: 'row',
-    backgroundColor: '#f8fafc',
-    paddingVertical: 8,
-    paddingHorizontal: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
+    alignItems: 'center',
+    gap: t.space.sm,
+    paddingHorizontal: t.space.lg,
+    paddingTop: t.space.lg,
+    paddingBottom: t.space.md,
   },
-  thCell:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 1, paddingHorizontal: 1 },
-  thText:        { fontSize: 8, fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.3 },
-  thTextCenter:  { textAlign: 'center' },
-  thTextActive:  { color: '#2563eb' },
+  algoBadge: {
+    borderRadius: t.radius.sm,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
+  },
+  insightsBlock: { paddingHorizontal: t.space.lg, gap: t.space.sm },
 
-  tRow:    { flexDirection: 'row', paddingVertical: 7, paddingHorizontal: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#f1f5f9' },
-  tRowAlt: { backgroundColor: '#f8fafc' },
+  comboDividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: t.space.lg,
+    marginTop: t.space.lg,
+    marginBottom: t.space.sm,
+    gap: t.space.sm,
+  },
+  comboDividerLine: { flex: 1, height: 1 },
 
-  tdName: { fontSize: 10, color: '#0f172a', fontWeight: '600', paddingRight: 2 },
-  td:     { fontSize: 10, color: '#475569', textAlign: 'center', fontWeight: '500' },
-});
+  // ── Buts par type ────────────────────────────────────────────────────────
+  goalsTypeBlock: { paddingHorizontal: t.space.lg, gap: t.space.sm },
+  goalsTypeCard: { gap: t.space.md },
+  goalsTypeRow: { gap: t.space.xs },
+  goalsTypeRowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  progressBg: { height: 6, borderRadius: 3, overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: 3 },
+
+  // ── Meilleurs joueurs ────────────────────────────────────────────────────
+  topsRow: { paddingHorizontal: t.space.lg, gap: t.space.sm },
+  topsRowTablet: { flexDirection: 'row' },
+  topCard: { flex: 1, gap: t.space.sm, marginBottom: t.space.xs },
+  topHeader: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm },
+  topIconBox: {
+    width: 24,
+    height: 24,
+    borderRadius: t.radius.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: t.space.sm,
+    minHeight: 32,
+    paddingVertical: 5,
+    borderTopWidth: 1,
+  },
+  topRowFirst: { borderTopWidth: 0 },
+  topRank: { width: 16, textAlign: 'center' },
+  topName: { flex: 1 },
+
+  // ── En-tête de section ───────────────────────────────────────────────────
+  secHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: t.space.sm,
+    paddingHorizontal: t.space.lg,
+    paddingTop: t.space.lg,
+    paddingBottom: t.space.md,
+  },
+  secAccent: { width: 3, height: 14, borderRadius: 2 },
+
+  recPill: { alignItems: 'center', gap: 1 },
+
+  // ── Carte d'analyse ──────────────────────────────────────────────────────
+  insightCard: {
+    flexDirection: 'row',
+    gap: t.space.md,
+    borderRadius: t.radius.md,
+    padding: t.space.md,
+    borderWidth: 1,
+    marginBottom: t.space.xs,
+  },
+  insightIcon: { fontSize: 18, lineHeight: 22, flexShrink: 0 },
+  insightTagRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: t.space.sm,
+    marginBottom: t.space.xs,
+    flexWrap: 'wrap',
+  },
+  insightTag: { borderRadius: t.radius.sm, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1 },
+
+  // ── Classement des combinaisons ──────────────────────────────────────────
+  crCard: { marginHorizontal: t.space.lg, borderRadius: t.radius.md, borderWidth: 1, overflow: 'hidden', marginBottom: t.space.sm },
+  crTabs: { flexDirection: 'row', padding: t.space.md, gap: 6, borderBottomWidth: 1 },
+  crTab: {
+    flex: 1,
+    minHeight: 36,
+    justifyContent: 'center',
+    borderRadius: t.radius.sm,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  crEmpty: { padding: t.space.xl, textAlign: 'center' },
+  crThead: {
+    flexDirection: 'row',
+    paddingVertical: t.space.sm,
+    paddingHorizontal: t.space.md,
+    borderBottomWidth: 1,
+    alignItems: 'center',
+  },
+  crThCell: { flex: 1, minHeight: 32, alignItems: 'center', justifyContent: 'center' },
+  crRow: {
+    flexDirection: 'row',
+    paddingVertical: 6,
+    paddingHorizontal: t.space.md,
+    alignItems: 'flex-start',
+    borderBottomWidth: 1,
+  },
+  crRank: { width: 16, textAlign: 'center', paddingTop: 2, marginRight: t.space.xs },
+  crNameCol: { flex: 2, paddingRight: t.space.xs, gap: 1 },
+  crCell: { flex: 1, textAlign: 'center', paddingTop: 2 },
+  crLegend: { padding: t.space.sm, paddingHorizontal: t.space.md, borderTopWidth: 1 },
+}));

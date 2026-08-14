@@ -1,13 +1,46 @@
+/**
+ * Navigation principale sur iPad
+ *
+ * ## Elle ne suivait pas le thème
+ *
+ * Défaut constaté au simulateur, pas déduit du code : en thème sombre, la
+ * sidebar restait un aplat blanc `#f8fafc` collé au canvas anthracite, sur
+ * **toute la hauteur de l'écran et sur tous les écrans**. C'est la navigation
+ * permanente de la tablette, l'appareil du bord de terrain — et le seul
+ * élément de l'app qui ne basculait pas.
+ *
+ * Elle portait aussi le **quatrième bleu** de l'inventaire d'audit (`#1d4ed8`
+ * en état actif, `#eff6ff` en fond de sélection), là où le reste de l'app est
+ * passé sur l'accent violet. L'onglet actif était donc d'une couleur de marque
+ * que plus aucun autre écran n'utilisait.
+ *
+ * ## Elle était muette pour VoiceOver
+ *
+ * Aucune des destinations n'avait de rôle ni d'état : un lecteur d'écran
+ * annonçait le nom sans dire que c'était un bouton, ni lequel était
+ * sélectionné. **Repliée, la sidebar n'affiche que des icônes** — sans
+ * `accessibilityLabel`, elle n'annonçait alors plus rien du tout, et c'est le
+ * seul moyen de naviguer. La pastille de notification était un chiffre à 9 px
+ * dans un rond rouge, sans équivalent textuel : le nombre de retours en attente
+ * n'existait pas pour un lecteur d'écran.
+ *
+ * `lib/navigation.ts` reste la source unique des destinations — c'est ce qui
+ * avait mis fin à la divergence entre la sidebar, la tab bar et l'écran « Plus ».
+ */
+
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Pressable } from 'react-native';
 import { useRouter, useSegments } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useIsTablet, LAYOUT } from '../hooks/useIsTablet';
 import { useAppRole } from '../contexts/AppRoleContext';
 import { useNotifications } from '../contexts/NotificationContext';
+import { useTheme, makeStyles } from '../contexts/ThemeContext';
 import { SeasonHeaderButton } from './SeasonHeaderButton';
+import { PRIMARY_DESTINATIONS, SECONDARY_DESTINATIONS } from '../lib/navigation';
 import { supabase } from '../lib/supabase';
 import { useMatchRecorderExitGuard, confirmLeaveMatchRecorder } from '../contexts/MatchRecorderExitGuardContext';
+import { Text } from './ui';
 
 export type TabletSidebarProps = {
   isExpanded: boolean;
@@ -19,42 +52,50 @@ type NavItem = {
   path: string;
   icon: keyof typeof Ionicons.glyphMap;
   iconFocused: keyof typeof Ionicons.glyphMap;
+  /** Segment de route correspondant, pour l'état actif. */
+  segment: string | null;
 };
 
+/**
+ * Dérivé de la source unique `lib/navigation.ts` (P0-5). La sidebar n'entretient
+ * plus sa propre liste : c'est ce qui l'avait fait diverger de la tab bar et de
+ * l'accueil. « Plus » n'a pas lieu d'être sur tablette, où la place ne manque
+ * pas : ses destinations sont listées directement.
+ */
 const NAV_ITEMS: NavItem[] = [
-  { name: 'Accueil', path: '/(tabs)', icon: 'home-outline', iconFocused: 'home' },
-  { name: 'Calendrier', path: '/(tabs)/calendar', icon: 'calendar-outline', iconFocused: 'calendar' },
-  { name: 'Effectif', path: '/(tabs)/squad', icon: 'people-outline', iconFocused: 'people' },
-  { name: 'Équipes', path: '/(tabs)/teams', icon: 'flag-outline', iconFocused: 'flag' },
-  { name: 'Dashboard', path: '/(tabs)/dashboard', icon: 'bar-chart-outline', iconFocused: 'bar-chart' },
-  { name: 'Tracker', path: '/(tabs)/tracker', icon: 'stats-chart-outline', iconFocused: 'stats-chart' },
-  { name: 'Analytics', path: '/(tabs)/analytics', icon: 'analytics-outline', iconFocused: 'analytics' },
-  { name: 'Partages', path: '/(tabs)/share', icon: 'share-social-outline', iconFocused: 'share-social' },
-  { name: 'Paramètres', path: '/(tabs)/settings', icon: 'settings-outline', iconFocused: 'settings' },
-];
+  ...PRIMARY_DESTINATIONS.filter((d) => d.key !== 'more'),
+  ...SECONDARY_DESTINATIONS,
+].map((d) => ({
+  name: d.label,
+  path: d.route,
+  icon: d.icon,
+  iconFocused: d.iconActive,
+  segment: d.route === '/(tabs)' ? null : d.route.replace('/(tabs)/', ''),
+}));
 
 function isActive(segments: string[], item: NavItem): boolean {
   const first = segments[1];
-  if (item.path === '/(tabs)') return first === undefined || first === 'index';
-  if (item.path === '/(tabs)/calendar') return first === 'calendar';
-  if (item.path === '/(tabs)/squad') return first === 'squad';
-  if (item.path === '/(tabs)/dashboard') return first === 'dashboard';
-  if (item.path === '/(tabs)/tracker') return first === 'tracker';
-  if (item.path === '/(tabs)/analytics') return first === 'analytics';
-  if (item.path === '/(tabs)/teams') return first === 'teams';
-  if (item.path === '/(tabs)/settings') return first === 'settings';
-  return false;
+  if (item.segment === null) return first === undefined || first === 'index';
+  if (item.segment === 'analyse') {
+    // Les anciennes routes restent atteignables : elles allument le même onglet.
+    return first === 'analyse' || first === 'dashboard' || first === 'analytics' || first === 'tracker';
+  }
+  return first === item.segment;
 }
 
 export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {
   const router = useRouter();
   const segments = useSegments();
   const isTablet = useIsTablet();
+  const s = useStyles();
+  const { theme } = useTheme();
   const { isPlayer, setAppRole } = useAppRole();
   const { counts, markRead } = useNotifications();
   const { isRecordingActive, setSuppressExitGuard } = useMatchRecorderExitGuard();
 
   if (!isTablet) return null;
+
+  const c = theme.colors;
 
   const handleSwitchToPlayer = async () => {
     await setAppRole('player');
@@ -68,30 +109,56 @@ export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {
 
   const sidebarWidth = isExpanded ? LAYOUT.SIDEBAR_WIDTH : LAYOUT.SIDEBAR_WIDTH_COLLAPSED;
 
+  /** Action de pied de sidebar. Repliée, seule l'icône reste : le libellé
+   *  d'accessibilité est donc obligatoire, pas optionnel. */
+  const footerAction = (
+    icon: keyof typeof Ionicons.glyphMap,
+    label: string,
+    onPress: () => void,
+    withLabel = true,
+  ) => (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [s.footerBtn, pressed && s.pressed]}
+    >
+      <Ionicons name={icon} size={20} color={c.text.secondary} />
+      {withLabel && (
+        <Text variant="callout" tone="secondary" weight="500">
+          {label}
+        </Text>
+      )}
+    </Pressable>
+  );
+
   return (
-    <View style={[styles.sidebar, { width: sidebarWidth }]}>
-      <View style={[styles.header, !isExpanded && styles.headerCollapsed]}>
+    <View style={[s.sidebar, { width: sidebarWidth }]}>
+      <View style={[s.header, !isExpanded && s.headerCollapsed]}>
         {isExpanded ? (
-          <Text style={styles.logo}>FutsalHub</Text>
+          <Text variant="title">FutsalHub</Text>
         ) : (
-          <View style={styles.logoIcon}>
-            <Text style={styles.logoIconText}>F</Text>
+          <View style={s.logoIcon} accessibilityLabel="FutsalHub">
+            <Text variant="headline" tone="onFill">
+              F
+            </Text>
           </View>
         )}
       </View>
-      <View style={styles.nav}>
+
+      <View style={s.nav} accessibilityRole="tablist">
         {NAV_ITEMS.map((item) => {
           const active = isActive(segments as string[], item);
-          const badge = item.path === '/(tabs)/calendar' ? counts.absence_report
-                      : item.path === '/(tabs)/squad'    ? counts.feedback_comment
+          const badge = item.path === '/(tabs)/calendar' ? counts.absence_report + counts.injury
+                      : item.path === '/(tabs)/squad'    ? counts.feedback_comment + counts.questionnaire_response
                       : 0;
           return (
-            <TouchableOpacity
+            <Pressable
               key={item.path}
               onPress={() => {
                 const go = () => {
-                  if (item.path === '/(tabs)/calendar') void markRead(['absence_report']);
-                  if (item.path === '/(tabs)/squad')    void markRead(['feedback_comment']);
+                  if (item.path === '/(tabs)/calendar') void markRead(['absence_report', 'injury']);
+                  if (item.path === '/(tabs)/squad')    void markRead(['feedback_comment', 'questionnaire_response']);
                   router.push(item.path as any);
                 };
                 if (isRecordingActive) {
@@ -100,147 +167,146 @@ export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {
                   go();
                 }
               }}
-              style={[
-                styles.navItem,
-                active && styles.navItemActive,
-                !isExpanded && styles.navItemCollapsed,
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              // Le compte de notifications n'existait pas pour un lecteur
+              // d'écran : la pastille était un chiffre dessiné, sans texte.
+              accessibilityLabel={
+                badge > 0 ? `${item.name}, ${badge} en attente` : item.name
+              }
+              style={({ pressed }) => [
+                s.navItem,
+                active && { backgroundColor: c.accent.subtle },
+                !isExpanded && s.navItemCollapsed,
+                pressed && s.pressed,
               ]}
-              activeOpacity={0.7}
             >
-              <View style={{ position: 'relative' }}>
+              <View style={s.iconWrap}>
                 <Ionicons
                   name={active ? item.iconFocused : item.icon}
                   size={24}
-                  color={active ? '#1d4ed8' : '#64748b'}
+                  color={active ? c.accent.default : c.text.secondary}
                 />
                 {badge > 0 && (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{badge > 99 ? '99+' : badge}</Text>
+                  <View style={[s.badge, { backgroundColor: c.negative.fill }]}>
+                    <Text variant="caption" tone="onFill" numeric>
+                      {badge > 99 ? '99+' : badge}
+                    </Text>
                   </View>
                 )}
               </View>
               {isExpanded && (
-                <Text style={[styles.navLabel, active && styles.navLabelActive]}>{item.name}</Text>
+                <Text
+                  variant="body"
+                  tone={active ? 'accent' : 'secondary'}
+                  weight={active ? '600' : '500'}
+                >
+                  {item.name}
+                </Text>
               )}
-            </TouchableOpacity>
+            </Pressable>
           );
         })}
       </View>
-      <View style={[styles.footer, !isExpanded && styles.footerCollapsed]}>
+
+      <View style={[s.footer, !isExpanded && s.footerCollapsed]}>
         {isExpanded && (
           <>
-            <SeasonHeaderButton variant="light" />
-            {isPlayer && (
-              <TouchableOpacity onPress={handleSwitchToPlayer} style={styles.footerBtn}>
-                <Text style={styles.footerBtnText}>Espace joueur</Text>
-              </TouchableOpacity>
+            <SeasonHeaderButton style={{ alignSelf: 'flex-start', marginBottom: 4 }} />
+            {/* Un coach est souvent aussi joueur. Tant qu'aucun profil n'est
+                lié, la sidebar propose la liaison — sans ça, l'écran n'était
+                atteignable que depuis un compte sans aucune équipe. */}
+            {isPlayer
+              ? footerAction('person-outline', 'Espace joueur', () => void handleSwitchToPlayer())
+              : footerAction('person-add-outline', 'Profil joueur', () =>
+                  router.push('/join-club' as never)
+                )}
+            {footerAction('swap-horizontal-outline', "Changer d'équipe", () =>
+              router.push('/(tabs)/choose-team')
             )}
-            <TouchableOpacity onPress={() => router.push('/(tabs)/choose-team')} style={styles.footerBtn}>
-              <Ionicons name="swap-horizontal-outline" size={20} color="#475569" />
-              <Text style={styles.footerBtnText}>Changer d'équipe</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={handleSignOut} style={styles.footerBtn}>
-              <Ionicons name="log-out-outline" size={20} color="#475569" />
-              <Text style={styles.footerBtnText}>Déconnexion</Text>
-            </TouchableOpacity>
+            {footerAction('log-out-outline', 'Déconnexion', () => void handleSignOut())}
           </>
         )}
-        {!isExpanded && (
-          <TouchableOpacity onPress={handleSignOut} style={styles.footerBtn}>
-            <Ionicons name="log-out-outline" size={22} color="#475569" />
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity
+        {!isExpanded &&
+          footerAction('log-out-outline', 'Déconnexion', () => void handleSignOut(), false)}
+
+        <Pressable
           onPress={onToggle}
-          style={styles.toggleBtn}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel={isExpanded ? 'Réduire le menu' : 'Déployer le menu'}
+          accessibilityState={{ expanded: isExpanded }}
+          style={({ pressed }) => [s.toggleBtn, pressed && s.pressed]}
         >
           <Ionicons
             name={isExpanded ? 'chevron-back' : 'chevron-forward'}
             size={22}
-            color="#64748b"
+            color={c.text.secondary}
           />
-        </TouchableOpacity>
+        </Pressable>
       </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
+  pressed: { opacity: 0.7 },
+  iconWrap: { position: 'relative' },
+
   sidebar: {
-    backgroundColor: '#f8fafc',
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderRightColor: '#e2e8f0',
-    paddingVertical: 16,
+    backgroundColor: t.colors.bg.surface,
+    borderRightWidth: 1,
+    borderRightColor: t.colors.border.subtle,
+    paddingVertical: t.space.lg,
     justifyContent: 'space-between',
   },
   header: {
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e2e8f0',
+    paddingHorizontal: t.space.xl,
+    paddingBottom: t.space.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: t.colors.border.subtle,
   },
   headerCollapsed: {
-    paddingHorizontal: 12,
+    paddingHorizontal: t.space.md,
     alignItems: 'center',
-  },
-  logo: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1e293b',
   },
   logoIcon: {
     width: 36,
     height: 36,
-    borderRadius: 8,
-    backgroundColor: '#3b82f6',
+    borderRadius: t.radius.sm,
+    backgroundColor: t.colors.accent.fill,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  logoIconText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
-  },
   nav: {
     flex: 1,
-    paddingTop: 16,
-    paddingHorizontal: 12,
+    paddingTop: t.space.lg,
+    paddingHorizontal: t.space.md,
   },
   navItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    marginBottom: 4,
-    gap: 12,
+    minHeight: 48,
+    paddingVertical: t.space.md,
+    paddingHorizontal: t.space.md,
+    borderRadius: t.radius.sm,
+    marginBottom: t.space.xs,
+    gap: t.space.md,
   },
   navItemCollapsed: {
     justifyContent: 'center',
     paddingHorizontal: 0,
-  },
-  navItemActive: {
-    backgroundColor: '#eff6ff',
-  },
-  navLabel: {
-    fontSize: 16,
-    color: '#64748b',
-    fontWeight: '500',
-  },
-  navLabelActive: {
-    color: '#1d4ed8',
   },
   footer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
     flexWrap: 'wrap',
-    paddingHorizontal: 12,
-    paddingTop: 16,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#e2e8f0',
-    gap: 8,
+    paddingHorizontal: t.space.md,
+    paddingTop: t.space.lg,
+    borderTopWidth: 1,
+    borderTopColor: t.colors.border.subtle,
+    gap: t.space.sm,
   },
   footerCollapsed: {
     justifyContent: 'center',
@@ -248,35 +314,28 @@ const styles = StyleSheet.create({
   footerBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
+    minHeight: 44,
+    paddingVertical: t.space.sm,
+    paddingHorizontal: t.space.md,
+    borderRadius: t.radius.sm,
     gap: 6,
   },
-  footerBtnText: {
-    fontSize: 14,
-    color: '#475569',
-    fontWeight: '500',
-  },
   toggleBtn: {
-    padding: 8,
-    marginTop: 8,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: t.space.sm,
   },
   badge: {
     position: 'absolute',
-    top: -5,
-    right: -7,
-    minWidth: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: '#dc2626',
+    top: -6,
+    right: -8,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 3,
+    paddingHorizontal: 4,
   },
-  badgeText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#fff',
-  },
-});
+}));

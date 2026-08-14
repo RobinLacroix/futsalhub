@@ -150,6 +150,9 @@ export default function WebApp() {
   const [linkCode, setLinkCode] = useState('');
   const [linkClaiming, setLinkClaiming] = useState(false);
   const [linkClaimError, setLinkClaimError] = useState<string | null>(null);
+  const [staffCode, setStaffCode] = useState('');
+  const [staffJoining, setStaffJoining] = useState(false);
+  const [staffJoinError, setStaffJoinError] = useState<string | null>(null);
 
   // Match & training data
   const [matches, setMatches] = useState<any[]>([]);
@@ -204,6 +207,25 @@ export default function WebApp() {
         result.error === 'already_linked_other' ? 'Votre compte est déjà lié à un autre joueur.' :
         result.error ?? 'Erreur';
       setLinkClaimError(msg);
+    }
+  };
+
+  const handleJoinStaff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = staffCode.trim().toUpperCase();
+    if (!code) return;
+    setStaffJoinError(null);
+    setStaffJoining(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setStaffJoinError('Vous devez être connecté.'); return; }
+      await clubsService.acceptInvitationByCode(code, user.id);
+      setStaffCode('');
+      window.location.reload();
+    } catch (err) {
+      setStaffJoinError(err instanceof Error ? err.message : 'Code invalide ou expiré.');
+    } finally {
+      setStaffJoining(false);
     }
   };
 
@@ -292,7 +314,43 @@ export default function WebApp() {
           </div>
         </Card>
 
-        {/* Join club */}
+        {/* Join as staff (invitation code) */}
+        <Card>
+          <div className="p-6 flex gap-4">
+            <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ backgroundColor: '#EEF2FF' }}>
+              <Shield size={22} style={{ color: C.navy }} />
+            </div>
+            <div className="flex-1">
+              <h2 style={{ fontWeight: 700, color: C.text, fontSize: '1rem', marginBottom: 6 }}>Rejoindre en tant que staff</h2>
+              <p style={{ color: C.muted, fontSize: '0.875rem', marginBottom: 14 }}>
+                Un admin vous a invité comme entraîneur ou lecteur ? Entrez le code d&apos;invitation.
+              </p>
+              <form onSubmit={handleJoinStaff} className="flex gap-2">
+                <input
+                  type="text"
+                  value={staffCode}
+                  onChange={e => setStaffCode(e.target.value.replace(/\s/g, '').toUpperCase())}
+                  placeholder="ABC12XYZ"
+                  maxLength={12}
+                  className="flex-1 px-3 py-2 rounded-lg font-mono tracking-wider text-sm"
+                  style={{ border: `2px solid ${C.border}`, color: C.text, background: '#F8FAFC' }}
+                />
+                <button
+                  type="submit"
+                  disabled={staffJoining || !staffCode.trim()}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
+                  style={{ backgroundColor: C.navy, color: '#fff' }}
+                >
+                  {staffJoining ? '…' : 'Rejoindre'}
+                </button>
+              </form>
+              {staffJoinError && <p className="mt-2 text-sm" style={{ color: C.red }}>{staffJoinError}</p>}
+            </div>
+          </div>
+        </Card>
+
+        {/* Link player profile */}
         <Card>
           <div className="p-6 flex gap-4">
             <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -300,9 +358,9 @@ export default function WebApp() {
               <UserCircle size={22} style={{ color: C.green }} />
             </div>
             <div className="flex-1">
-              <h2 style={{ fontWeight: 700, color: C.text, fontSize: '1rem', marginBottom: 6 }}>Rejoindre un club</h2>
+              <h2 style={{ fontWeight: 700, color: C.text, fontSize: '1rem', marginBottom: 6 }}>Lier mon profil joueur</h2>
               <p style={{ color: C.muted, fontSize: '0.875rem', marginBottom: 14 }}>
-                Votre coach vous a donné un code d&apos;invitation ?
+                Votre coach vous a donné un code de liaison joueur ?
               </p>
               <form onSubmit={handleClaimCode} className="flex gap-2">
                 <input

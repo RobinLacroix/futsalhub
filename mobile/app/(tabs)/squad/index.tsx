@@ -1,19 +1,10 @@
 import { useCallback, useState, useEffect, useMemo } from 'react';
-import { useFocusEffect } from 'expo-router';
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  ActivityIndicator,
-  RefreshControl,
-  TouchableOpacity,
-  ScrollView,
-  Alert,
-} from 'react-native';
+import { View, StyleSheet, FlatList, RefreshControl, ScrollView, Alert, Pressable } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useIsTablet } from '../../../hooks/useIsTablet';
+import { useTheme } from '../../../contexts/ThemeContext';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 import { useActiveSeason } from '../../../contexts/ActiveSeasonContext';
 import {
@@ -23,90 +14,70 @@ import {
   type MatchTypeFilter,
   type PlayerSquadStat,
 } from '../../../lib/services/players';
-import type { Player } from '../../../types';
 import { getFeedbackPlayerIds, markPlayerFeedbackRead } from '../../../lib/services/notifications';
+import { haptics } from '../../../lib/design/haptics';
+import { Text, Button, ChipGroup, EmptyState, SkeletonTable, type ChipOption } from '../../../components/ui';
+import { positionRank, positionStyle } from '../../../components/players/positions';
+import type { Player } from '../../../types';
 
-// ─── Types ─────────────────────────────────────────────────────────────────
+// ─── Modèle de tri ────────────────────────────────────────────────────────────
 
 type SortKey = 'name' | 'position' | 'seances' | 'matches' | 'goals';
 type SortDir = 'asc' | 'desc';
 
-// ─── Constants ─────────────────────────────────────────────────────────────
-
-const FILTERS: { label: string; value: MatchTypeFilter }[] = [
-  { label: 'Tous',         value: 'all' },
-  { label: 'Championnat', value: 'Championnat' },
-  { label: 'Coupe',       value: 'Coupe' },
-  { label: 'Amical',      value: 'Amical' },
+const FILTERS: readonly ChipOption<MatchTypeFilter>[] = [
+  { value: 'all', label: 'Tous' },
+  { value: 'Championnat', label: 'Championnat' },
+  { value: 'Coupe', label: 'Coupe' },
+  { value: 'Amical', label: 'Amical' },
 ];
 
-// Abréviations et couleurs FM
-const POSITION_MAP: Record<string, { abbr: string; color: string; bg: string }> = {
-  Gardien:   { abbr: 'GB',  color: '#d97706', bg: 'rgba(217,119,6,0.12)'   },
-  Ailier:    { abbr: 'AIL', color: '#2563eb', bg: 'rgba(37,99,235,0.10)'   },
-  Meneur:    { abbr: 'MEN', color: '#059669', bg: 'rgba(5,150,105,0.10)'   },
-  Pivot:     { abbr: 'PIV', color: '#ea580c', bg: 'rgba(234,88,12,0.10)'   },
-};
+/** Colonnes chiffrées du tableau. `label` reste court : la largeur est de 52 pt. */
+const STAT_COLUMNS: { key: Extract<SortKey, 'seances' | 'matches' | 'goals'>; label: string; full: string }[] = [
+  { key: 'seances', label: 'SÉA', full: 'séances' },
+  { key: 'matches', label: 'MAT', full: 'matchs' },
+  { key: 'goals', label: 'BUT', full: 'buts' },
+];
 
-// Ordre tactique des postes pour le tri (Gardien → Meneur → Ailier → Pivot).
-const POSITION_ORDER: Record<string, number> = { Gardien: 0, Meneur: 1, Ailier: 2, Pivot: 3 };
-function positionRank(position?: string): number {
-  if (!position) return 99;
-  const key = Object.keys(POSITION_ORDER).find(k =>
-    position.toLowerCase().startsWith(k.toLowerCase())
-  );
-  return key ? POSITION_ORDER[key] : 98;
-}
-
-function getPosition(position?: string) {
-  if (!position) return { abbr: '—', color: '#475569', bg: 'rgba(71,85,105,0.15)' };
-  const key = Object.keys(POSITION_MAP).find(k =>
-    position.toLowerCase().startsWith(k.toLowerCase())
-  );
-  return key ? POSITION_MAP[key] : { abbr: position.slice(0, 3).toUpperCase(), color: '#475569', bg: 'rgba(71,85,105,0.15)' };
-}
-
-// Couleurs thème clair
-const C = {
-  bg:        '#f1f5f9',
-  rowEven:   '#ffffff',
-  rowOdd:    '#f8fafc',
-  header:    '#ffffff',
-  border:    '#e2e8f0',
-  accent:    '#2563eb',
-  text:      '#0f172a',
-  textMuted: '#64748b',
-  textDim:   '#94a3b8',
-};
-
-// ─── Main Screen ────────────────────────────────────────────────────────────
+const COL_NUM = 38;
+const COL_POS = 54;
+const COL_STAT = 52;
+const ROW_HEIGHT = 56;
 
 export default function SquadScreen() {
-  const router   = useRouter();
+  const router = useRouter();
   const isTablet = useIsTablet();
-  const { activeTeamId } = useActiveTeam();
+  const { theme } = useTheme();
+  const c = theme.colors;
+  const { activeTeamId, canEditActiveTeam } = useActiveTeam();
   const { activeSeason } = useActiveSeason();
 
-  const [players, setPlayers]           = useState<Player[]>([]);
-  const [stats, setStats]               = useState<Record<string, PlayerSquadStat>>({});
-  const [filter, setFilter]             = useState<MatchTypeFilter>('all');
-  const [sortKey, setSortKey]           = useState<SortKey>('name');
-  const [sortDir, setSortDir]           = useState<SortDir>('asc');
-  const [loading, setLoading]               = useState(true);
-  const [statsLoading, setStatsLoading]     = useState(false);
-  const [refreshing, setRefreshing]         = useState(false);
-  const [error, setError]                   = useState<string | null>(null);
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [stats, setStats] = useState<Record<string, PlayerSquadStat>>({});
+  const [filter, setFilter] = useState<MatchTypeFilter>('all');
+  const [sortKey, setSortKey] = useState<SortKey>('name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [loading, setLoading] = useState(true);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [feedbackPlayerIds, setFeedbackPlayerIds] = useState<Set<string>>(new Set());
 
+  // ── Chargement ────────────────────────────────────────────────────────────
+
   const loadPlayers = useCallback(async () => {
-    if (!activeTeamId) { setPlayers([]); setLoading(false); return; }
+    if (!activeTeamId) {
+      setPlayers([]);
+      setLoading(false);
+      return;
+    }
     try {
       setError(null);
-      // Exclure les joueurs partis (statut 'left') de l'effectif affiché.
       const roster = await getPlayersByTeam(activeTeamId);
+      // Les joueurs partis quittent l'effectif affiché mais gardent leur historique.
       setPlayers(roster.filter((p) => p.status !== 'left'));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Erreur chargement');
+      setError(e instanceof Error ? e.message : 'Erreur de chargement');
       setPlayers([]);
     } finally {
       setLoading(false);
@@ -117,17 +88,29 @@ export default function SquadScreen() {
   const loadStats = useCallback(async () => {
     if (!activeTeamId) return;
     setStatsLoading(true);
-    try { setStats(await getSquadBulkStats(activeTeamId, filter, activeSeason)); }
-    catch { /* non-critical */ }
-    finally { setStatsLoading(false); }
+    try {
+      setStats(await getSquadBulkStats(activeTeamId, filter, activeSeason));
+    } catch {
+      /* non bloquant : le tableau reste lisible sans les stats */
+    } finally {
+      setStatsLoading(false);
+    }
   }, [activeTeamId, filter, activeSeason]);
 
-  useEffect(() => { setLoading(true); loadPlayers(); }, [loadPlayers]);
-  useEffect(() => { loadStats(); }, [loadStats]);
+  useEffect(() => {
+    setLoading(true);
+    loadPlayers();
+  }, [loadPlayers]);
 
-  useFocusEffect(useCallback(() => {
-    getFeedbackPlayerIds().then(ids => setFeedbackPlayerIds(new Set(ids)));
-  }, []));
+  useEffect(() => {
+    loadStats();
+  }, [loadStats]);
+
+  useFocusEffect(
+    useCallback(() => {
+      getFeedbackPlayerIds().then((ids) => setFeedbackPlayerIds(new Set(ids)));
+    }, [])
+  );
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -135,340 +118,440 @@ export default function SquadScreen() {
     loadStats();
   }, [loadPlayers, loadStats]);
 
-  const handleDeletePlayer = useCallback((player: Player, close: () => void) => {
-    Alert.alert(
-      'Retirer ce joueur ?',
-      `${player.first_name} ${player.last_name} sera marqué « Parti (quitte le club) » et retiré de l'effectif actif.\n\n` +
-      `Ne supprimez pas définitivement un joueur : cela ferait perdre ses données collectives (buts, présences, historique de matchs). ` +
-      `Le passer en « Parti » est la bonne pratique — il quitte l'effectif mais tout son historique est conservé.`,
-      [
-        { text: 'Annuler', style: 'cancel', onPress: close },
-        {
-          text: 'Marquer « Parti »', style: 'destructive',
-          onPress: async () => {
-            try {
-              await deletePlayer(player.id);
-              setPlayers(prev => prev.filter(p => p.id !== player.id));
-              close();
-            } catch (e) {
-              setError(e instanceof Error ? e.message : 'Erreur');
-            }
-          },
-        },
-      ]
-    );
-  }, []);
+  // ── Tri ───────────────────────────────────────────────────────────────────
 
-  const handleSort = (key: SortKey) => {
-    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortKey(key); setSortDir(key === 'name' || key === 'position' ? 'asc' : 'desc'); }
+  const toggleSort = (key: SortKey) => {
+    haptics.select();
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      // Un nom se lit de A à Z, une performance du meilleur au moins bon.
+      setSortDir(key === 'name' || key === 'position' ? 'asc' : 'desc');
+    }
   };
 
   const sortedPlayers = useMemo(() => {
+    const empty: PlayerSquadStat = { seances: 0, matches: 0, goals: 0 };
     return [...players].sort((a, b) => {
-      const sA = stats[a.id] ?? { seances: 0, matches: 0, goals: 0 };
-      const sB = stats[b.id] ?? { seances: 0, matches: 0, goals: 0 };
-      let va: number | string, vb: number | string;
-      switch (sortKey) {
-        case 'position': va = positionRank(a.position); vb = positionRank(b.position); break;
-        case 'seances': va = sA.seances; vb = sB.seances; break;
-        case 'matches': va = sA.matches; vb = sB.matches; break;
-        case 'goals':   va = sA.goals;   vb = sB.goals;   break;
-        default:
-          va = `${a.last_name} ${a.first_name}`;
-          vb = `${b.last_name} ${b.first_name}`;
+      const sA = stats[a.id] ?? empty;
+      const sB = stats[b.id] ?? empty;
+      if (sortKey === 'name') {
+        const va = `${a.last_name} ${a.first_name}`;
+        const vb = `${b.last_name} ${b.first_name}`;
+        return sortDir === 'asc' ? va.localeCompare(vb, 'fr') : vb.localeCompare(va, 'fr');
       }
-      if (typeof va === 'string')
-        return sortDir === 'asc' ? va.localeCompare(vb as string, 'fr') : (vb as string).localeCompare(va, 'fr');
-      return sortDir === 'asc' ? (va as number) - (vb as number) : (vb as number) - (va as number);
+      const va =
+        sortKey === 'position' ? positionRank(a.position) : sA[sortKey as keyof PlayerSquadStat];
+      const vb =
+        sortKey === 'position' ? positionRank(b.position) : sB[sortKey as keyof PlayerSquadStat];
+      return sortDir === 'asc' ? va - vb : vb - va;
     });
   }, [players, stats, sortKey, sortDir]);
 
-  // ── États d'erreur ──────────────────────────────────────────────────────
+  const removePlayer = useCallback(
+    (player: Player, close: () => void) => {
+      if (!canEditActiveTeam) {
+        close();
+        return;
+      }
+      Alert.alert(
+        'Retirer ce joueur ?',
+        `${player.first_name} ${player.last_name} passera en « Parti » et quittera l'effectif actif.\n\n` +
+          `Son historique est conservé : buts, présences et matchs restent dans les statistiques collectives. ` +
+          `C'est la bonne pratique — une suppression définitive ferait perdre ces données.`,
+        [
+          { text: 'Annuler', style: 'cancel', onPress: close },
+          {
+            text: 'Marquer « Parti »',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await deletePlayer(player.id);
+                setPlayers((prev) => prev.filter((p) => p.id !== player.id));
+                haptics.success();
+                close();
+              } catch (e) {
+                haptics.error();
+                setError(e instanceof Error ? e.message : 'Erreur');
+              }
+            },
+          },
+        ]
+      );
+    },
+    [canEditActiveTeam]
+  );
+
+  // ── États non nominaux ────────────────────────────────────────────────────
 
   if (!activeTeamId) {
     return (
-      <View style={[styles.centered, { backgroundColor: C.bg }]}>
-        <Text style={styles.emptyText}>Choisissez une équipe dans l'onglet Accueil</Text>
+      <View style={[styles.root, { backgroundColor: c.bg.canvas }]}>
+        <EmptyState
+          icon="people-outline"
+          title="Aucune équipe sélectionnée"
+          description="Choisissez une équipe depuis l'accueil pour voir son effectif."
+          action={{ label: "Aller à l'accueil", onPress: () => router.push('/(tabs)/') }}
+        />
       </View>
     );
   }
-  if (loading && players.length === 0) {
-    return <View style={[styles.centered, { backgroundColor: C.bg }]}><ActivityIndicator size="large" color={C.accent} /></View>;
-  }
+
   if (error) {
-    return <View style={[styles.centered, { backgroundColor: C.bg }]}><Text style={styles.errorText}>{error}</Text></View>;
+    return (
+      <View style={[styles.root, { backgroundColor: c.bg.canvas }]}>
+        <EmptyState
+          icon="alert-circle-outline"
+          tone="negative"
+          title="Effectif indisponible"
+          description={error}
+          action={{ label: 'Réessayer', onPress: onRefresh }}
+        />
+      </View>
+    );
   }
 
-  // ── Render ──────────────────────────────────────────────────────────────
+  // ── En-tête de colonne triable ────────────────────────────────────────────
+
+  const sortHeader = (
+    key: SortKey,
+    label: string,
+    fullLabel: string,
+    width: number | 'flex',
+    align: 'left' | 'center'
+  ) => {
+    const active = sortKey === key;
+    return (
+      <Pressable
+        key={key}
+        onPress={() => toggleSort(key)}
+        accessibilityRole="button"
+        accessibilityState={{ selected: active }}
+        accessibilityLabel={`Trier par ${fullLabel}${
+          active ? `, actuellement ${sortDir === 'asc' ? 'croissant' : 'décroissant'}` : ''
+        }`}
+        hitSlop={{ top: 10, bottom: 10 }}
+        style={[
+          styles.headCell,
+          width === 'flex' ? styles.flex : { width },
+          align === 'center' ? styles.center : null,
+        ]}
+      >
+        <Text variant="tableHeader" tone={active ? 'accent' : 'tertiary'}>
+          {label}
+        </Text>
+        {active && (
+          <Ionicons
+            name={sortDir === 'asc' ? 'arrow-up' : 'arrow-down'}
+            size={11}
+            color={c.accent.default}
+          />
+        )}
+      </Pressable>
+    );
+  };
+
+  // ── Rendu ─────────────────────────────────────────────────────────────────
 
   return (
-    <View style={styles.container}>
-
-      {/* ── Barre tablette ── */}
+    <View style={[styles.root, { backgroundColor: c.bg.canvas }]}>
+      {/* Barre d'actions iPad : le Stack ne rend pas de header sur tablette,
+          ces actions n'ont donc pas d'autre emplacement possible. */}
       {isTablet && (
-        <View style={styles.tabletBar}>
-          <Text style={styles.tabletTitle}>Effectif</Text>
-          <Text style={styles.tabletCount}>{players.length} joueurs</Text>
-          <TouchableOpacity style={styles.tabletBtn} onPress={() => router.push('/(tabs)/squad/season-planning')} activeOpacity={0.8}>
-            <Text style={styles.tabletBtnText}>Planification</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.tabletBtnPrimary} onPress={() => router.push('/(tabs)/squad/new-player')} activeOpacity={0.8}>
-            <Text style={styles.tabletBtnPrimaryText}>+ Joueur</Text>
-          </TouchableOpacity>
+        <View
+          style={[
+            styles.tabletBar,
+            { backgroundColor: c.bg.surface, borderBottomColor: c.border.subtle, gap: theme.space.md },
+          ]}
+        >
+          <Text variant="title" style={styles.flex}>
+            Effectif
+          </Text>
+          {/* La planification de saison est une fonction des équipes, pas de
+              l'effectif (arbitré le 2026-08-03). Son accès vit dans l'écran
+              Équipes, et uniquement là : le raccourci qui existait ici était
+              le seul point où iPhone et iPad divergeaient. */}
+          {canEditActiveTeam && (
+            <>
+              <Button
+                label="Importer"
+                icon="cloud-upload-outline"
+                variant="secondary"
+                size="sm"
+                onPress={() => router.push('/(tabs)/squad/import-players')}
+              />
+              <Button
+                label="Joueur"
+                icon="add"
+                size="sm"
+                onPress={() => router.push('/(tabs)/squad/new-player')}
+              />
+            </>
+          )}
         </View>
       )}
 
-      {/* ── Filtre type de match ── */}
-      <View style={styles.filterBar}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-          {FILTERS.map(f => (
-            <TouchableOpacity
-              key={f.value}
-              style={[styles.chip, filter === f.value && styles.chipActive]}
-              onPress={() => setFilter(f.value)}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.chipText, filter === f.value && styles.chipTextActive]}>{f.label}</Text>
-            </TouchableOpacity>
-          ))}
+      {/* Filtre de compétition */}
+      <View
+        style={[
+          styles.filterBar,
+          { backgroundColor: c.bg.surface, borderBottomColor: c.border.subtle },
+        ]}
+      >
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterRow}
+        >
+          <ChipGroup
+            label="Filtrer par compétition"
+            options={FILTERS}
+            value={filter}
+            onChange={setFilter}
+          />
         </ScrollView>
-        <View style={styles.filterRight}>
-          {statsLoading
-            ? <ActivityIndicator size="small" color={C.accent} />
-            : <Text style={styles.playerCount}>{players.length} joueurs</Text>
-          }
-        </View>
-      </View>
-
-      {/* ── En-tête tableau ── */}
-      <View style={styles.tableHead}>
-        <View style={styles.colNum}>
-          <Text style={styles.headText}>N°</Text>
-        </View>
-        <TouchableOpacity style={styles.colPos} onPress={() => handleSort('position')} activeOpacity={0.7}>
-          <Text style={[styles.headText, sortKey === 'position' && styles.headTextActive]}>
-            POS {sortKey === 'position' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.colName} onPress={() => handleSort('name')} activeOpacity={0.7}>
-          <Text style={[styles.headText, sortKey === 'name' && styles.headTextActive]}>
-            NOM {sortKey === 'name' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
-          </Text>
-        </TouchableOpacity>
-
-        {(['seances', 'matches', 'goals'] as SortKey[]).map(key => (
-          <TouchableOpacity key={key} style={styles.colStat} onPress={() => handleSort(key)} activeOpacity={0.7}>
-            <Text style={[styles.headText, styles.headTextRight, sortKey === key && styles.headTextActive]}>
-              {key === 'seances' ? 'SÉA' : key === 'matches' ? 'MAT' : 'BUT'}
-              {sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+        <View style={styles.countCell}>
+          {statsLoading ? (
+            <Ionicons name="sync" size={13} color={c.text.tertiary} />
+          ) : (
+            <Text variant="caption" tone="tertiary" numeric>
+              {players.length}
             </Text>
-          </TouchableOpacity>
-        ))}
+          )}
+        </View>
       </View>
 
-      {/* ── Liste ── */}
-      <FlatList
-        data={sortedPlayers}
-        keyExtractor={item => item.id}
-        contentContainerStyle={{ paddingBottom: 40 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.accent} />}
-        ListEmptyComponent={
-          <View style={[styles.centered, { paddingVertical: 60 }]}>
-            <Text style={styles.emptyText}>Aucun joueur dans cette équipe</Text>
-          </View>
-        }
-        renderItem={({ item, index }) => {
-          const s   = stats[item.id] ?? { seances: 0, matches: 0, goals: 0 };
-          const pos = getPosition(item.position);
-          const isEven = index % 2 === 0;
+      {/* En-tête du tableau */}
+      <View
+        style={[
+          styles.tableHead,
+          { backgroundColor: c.bg.surface, borderBottomColor: c.border.strong },
+        ]}
+      >
+        <View style={[styles.headCell, { width: COL_NUM }, styles.center]}>
+          <Text variant="tableHeader" tone="tertiary">
+            N°
+          </Text>
+        </View>
+        {sortHeader('position', 'POS', 'poste', COL_POS, 'center')}
+        {sortHeader('name', 'NOM', 'nom', 'flex', 'left')}
+        {STAT_COLUMNS.map((col) => sortHeader(col.key, col.label, col.full, COL_STAT, 'center'))}
+      </View>
 
-          const renderRightActions = (_p: unknown, _d: unknown, swipeable: { close: () => void }) => (
-            <TouchableOpacity
-              style={styles.deleteBtn}
-              onPress={() => handleDeletePlayer(item, () => swipeable.close())}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.deleteBtnText}>Retirer</Text>
-            </TouchableOpacity>
-          );
+      {loading && players.length === 0 ? (
+        <SkeletonTable rows={8} />
+      ) : (
+        <FlatList
+          data={sortedPlayers}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={c.accent.default}
+              colors={[c.accent.default]}
+            />
+          }
+          ListEmptyComponent={
+            <EmptyState
+              icon="people-outline"
+              title="Effectif vide"
+              description={
+                canEditActiveTeam
+                  ? 'Ajoutez un joueur, ou importez un effectif depuis un fichier Excel.'
+                  : "Cette équipe n'a pas encore de joueurs."
+              }
+              action={
+                canEditActiveTeam
+                  ? {
+                      label: 'Ajouter un joueur',
+                      onPress: () => router.push('/(tabs)/squad/new-player'),
+                    }
+                  : undefined
+              }
+            />
+          }
+          renderItem={({ item, index }) => {
+            const s = stats[item.id] ?? { seances: 0, matches: 0, goals: 0 };
+            const pos = positionStyle(item.position, c);
+            const hasFeedback = feedbackPlayerIds.has(item.id);
 
-          const hasFeedbackBadge = feedbackPlayerIds.has(item.id);
+            const a11y = [
+              `${item.first_name} ${item.last_name}`,
+              item.number != null ? `numéro ${item.number}` : undefined,
+              pos.label,
+              `${s.seances} séances, ${s.matches} matchs, ${s.goals} buts`,
+              hasFeedback ? 'nouveau retour à lire' : undefined,
+            ]
+              .filter(Boolean)
+              .join(', ');
 
-          return (
-            <Swipeable renderRightActions={renderRightActions} overshootRight={false}>
-              <TouchableOpacity
-                style={[styles.row, { backgroundColor: isEven ? C.rowEven : C.rowOdd }]}
-                onPress={() => {
-                  if (hasFeedbackBadge) {
-                    markPlayerFeedbackRead(item.id).then(() =>
-                      setFeedbackPlayerIds(prev => { const n = new Set(prev); n.delete(item.id); return n; })
-                    );
-                  }
-                  router.push(`/(tabs)/squad/${item.id}`);
-                }}
-                activeOpacity={0.6}
+            return (
+              <Swipeable
+                overshootRight={false}
+                renderRightActions={
+                  canEditActiveTeam
+                    ? (_p, _d, swipeable) => (
+                        <Pressable
+                          onPress={() => removePlayer(item, () => swipeable.close())}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Retirer ${item.first_name} ${item.last_name} de l'effectif`}
+                          style={[styles.deleteAction, { backgroundColor: c.negative.fill }]}
+                        >
+                          <Ionicons name="person-remove-outline" size={18} color={c.text.onFill} />
+                          <Text variant="caption" tone="onFill" weight="700">
+                            Retirer
+                          </Text>
+                        </Pressable>
+                      )
+                    : undefined
+                }
               >
-                {/* Filet de couleur position */}
-                <View style={[styles.posStripe, { backgroundColor: pos.color }]} />
+                <Pressable
+                  onPress={() => {
+                    if (hasFeedback) {
+                      markPlayerFeedbackRead(item.id).then(() =>
+                        setFeedbackPlayerIds((prev) => {
+                          const n = new Set(prev);
+                          n.delete(item.id);
+                          return n;
+                        })
+                      );
+                    }
+                    router.push(`/(tabs)/squad/${item.id}` as never);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={a11y}
+                  style={({ pressed }) => [
+                    styles.row,
+                    {
+                      // Le zébrage vient du thème : `bg.stripe` est calibré pour
+                      // rester lisible en clair comme en sombre.
+                      backgroundColor: pressed
+                        ? c.accent.subtle
+                        : index % 2 === 0
+                          ? c.bg.surface
+                          : c.bg.stripe,
+                      borderBottomColor: c.border.subtle,
+                    },
+                  ]}
+                >
+                  <View style={[styles.posStripe, { backgroundColor: pos.color }]} />
 
-                {/* Numéro */}
-                <View style={styles.colNum}>
-                  <Text style={styles.numText}>
-                    {item.number != null ? item.number : '—'}
-                  </Text>
-                </View>
-
-                {/* Badge position */}
-                <View style={styles.colPos}>
-                  <View style={[styles.posBadge, { backgroundColor: pos.bg }]}>
-                    <Text style={[styles.posAbbr, { color: pos.color }]}>{pos.abbr}</Text>
-                  </View>
-                </View>
-
-                {/* Nom */}
-                <View style={styles.colName}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={styles.playerName} numberOfLines={1}>
-                      {item.last_name.toUpperCase()}
+                  <View style={[styles.cell, { width: COL_NUM }, styles.center]}>
+                    <Text variant="tableCell" tone="secondary" numeric>
+                      {item.number ?? '—'}
                     </Text>
-                    {hasFeedbackBadge && <View style={styles.feedbackBadge} />}
                   </View>
-                  <Text style={styles.playerFirst} numberOfLines={1}>
-                    {item.first_name}
-                  </Text>
-                </View>
 
-                {/* Séances */}
-                <View style={styles.colStat}>
-                  <Text style={[styles.statNum, sortKey === 'seances' && styles.statNumActive]}>
-                    {s.seances}
-                  </Text>
-                </View>
+                  <View style={[styles.cell, { width: COL_POS }, styles.center]}>
+                    <View
+                      style={[
+                        styles.posBadge,
+                        { borderColor: pos.color, borderRadius: theme.radius.sm },
+                      ]}
+                    >
+                      <Text variant="caption" color={pos.color} weight="700">
+                        {pos.abbr}
+                      </Text>
+                    </View>
+                  </View>
 
-                {/* Matchs */}
-                <View style={styles.colStat}>
-                  <Text style={[styles.statNum, sortKey === 'matches' && styles.statNumActive]}>
-                    {s.matches}
-                  </Text>
-                </View>
+                  <View style={[styles.cell, styles.flex, styles.nameCell]}>
+                    <View style={styles.nameRow}>
+                      <Text variant="body" weight="700" numberOfLines={1} style={styles.flex}>
+                        {item.last_name.toUpperCase()}
+                      </Text>
+                      {hasFeedback && (
+                        <View style={[styles.dot, { backgroundColor: c.negative.default }]} />
+                      )}
+                    </View>
+                    <Text variant="caption" tone="tertiary" numberOfLines={1}>
+                      {item.first_name}
+                    </Text>
+                  </View>
 
-                {/* Buts */}
-                <View style={styles.colStat}>
-                  <Text style={[
-                    styles.statNum,
-                    sortKey === 'goals' && styles.statNumActive,
-                    s.goals > 0 && sortKey !== 'goals' && styles.statNumGoal,
-                  ]}>
-                    {s.goals}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            </Swipeable>
-          );
-        }}
-      />
+                  {STAT_COLUMNS.map((col) => {
+                    const value = s[col.key];
+                    const isSorted = sortKey === col.key;
+                    return (
+                      <View key={col.key} style={[styles.cell, { width: COL_STAT }, styles.center]}>
+                        <Text
+                          variant="tableCell"
+                          tone={isSorted ? 'accent' : value > 0 ? 'primary' : 'tertiary'}
+                          weight={isSorted ? '700' : '500'}
+                          numeric
+                        >
+                          {value}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </Pressable>
+              </Swipeable>
+            );
+          }}
+        />
+      )}
     </View>
   );
 }
 
-// ─── Styles ─────────────────────────────────────────────────────────────────
-
-const COL_NUM  = 36;
-const COL_POS  = 52;
-const COL_STAT = 48;
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
-  centered:  { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  emptyText: { fontSize: 14, color: C.textMuted, textAlign: 'center' },
-  errorText: { fontSize: 13, color: '#ef4444', textAlign: 'center' },
+  root: { flex: 1 },
+  flex: { flex: 1 },
+  center: { alignItems: 'center', justifyContent: 'center' },
+  listContent: { paddingBottom: 40, flexGrow: 1 },
 
-  // Tablette
   tabletBar: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 16, paddingVertical: 10,
-    backgroundColor: C.header,
-    borderBottomWidth: 1, borderBottomColor: C.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  tabletTitle:        { fontSize: 17, fontWeight: '700', color: C.text, flex: 1 },
-  tabletCount:        { fontSize: 12, color: C.textMuted },
-  tabletBtn:          { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: C.border },
-  tabletBtnText:      { color: C.textMuted, fontSize: 13, fontWeight: '600' },
-  tabletBtnPrimary:   { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: C.accent },
-  tabletBtnPrimaryText: { color: '#fff', fontSize: 13, fontWeight: '700' },
 
-  // Filtres
   filterBar: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: C.header,
-    borderBottomWidth: 1, borderBottomColor: C.border,
-    paddingRight: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  filterRow:   { paddingHorizontal: 12, paddingVertical: 9, gap: 6, flexDirection: 'row' },
-  filterRight: { marginLeft: 'auto' },
-  playerCount: { fontSize: 11, color: C.textMuted, fontWeight: '600' },
-  feedbackBadge: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444' },
+  filterRow: { paddingHorizontal: 12, paddingVertical: 8 },
+  countCell: { paddingHorizontal: 14, minWidth: 44, alignItems: 'flex-end' },
 
-  chip: {
-    paddingHorizontal: 11, paddingVertical: 4,
-    borderRadius: 4,
-    backgroundColor: '#f1f5f9',
-    borderWidth: 1, borderColor: C.border,
-  },
-  chipActive:     { backgroundColor: C.accent, borderColor: C.accent },
-  chipText:       { fontSize: 12, fontWeight: '600', color: C.textMuted },
-  chipTextActive: { color: '#fff' },
-
-  // En-tête tableau
   tableHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: C.header,
-    paddingVertical: 7,
-    paddingRight: 4,
-    borderBottomWidth: 1, borderBottomColor: C.border,
-    paddingLeft: 4, // posStripe width
+    paddingVertical: 9,
+    paddingLeft: 3, // largeur du filet de poste
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  headText:        { fontSize: 10, fontWeight: '700', color: C.textMuted, letterSpacing: 0.6, textTransform: 'uppercase' },
-  headTextRight:   { textAlign: 'center' },
-  headTextActive:  { color: C.accent },
+  headCell: { flexDirection: 'row', alignItems: 'center', gap: 3 },
 
-  // Colonnes partagées header + row
-  colNum:  { width: COL_NUM,  alignItems: 'center' },
-  colPos:  { width: COL_POS,  alignItems: 'center' },
-  colName: { flex: 1,         justifyContent: 'center', paddingRight: 8 },
-  colStat: { width: COL_STAT, alignItems: 'center' },
-
-  // Ligne joueur
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 50,
+    height: ROW_HEIGHT,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: C.border,
   },
-
   posStripe: { width: 3, alignSelf: 'stretch' },
-
-  numText: { fontSize: 13, fontWeight: '600', color: C.textMuted, textAlign: 'center' },
-
-  posBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 3 },
-  posAbbr:  { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
-
-  playerName:  { fontSize: 13, fontWeight: '700', color: C.text, letterSpacing: 0.2 },
-  playerFirst: { fontSize: 11, color: C.textMuted, marginTop: 1 },
-
-  statNum:       { fontSize: 14, fontWeight: '700', color: C.textMuted, textAlign: 'center' },
-  statNumActive: { color: C.accent },
-  statNumGoal:   { color: '#f59e0b' },
-
-  // Supprimer
-  deleteBtn: {
-    width: 100, alignSelf: 'stretch',
-    backgroundColor: '#ef4444',
-    justifyContent: 'center', alignItems: 'center',
+  cell: { justifyContent: 'center' },
+  nameCell: { paddingRight: 8, gap: 1 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  posBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
   },
-  deleteBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+
+  deleteAction: {
+    width: 88,
+    alignSelf: 'stretch',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 4,
+  },
 });

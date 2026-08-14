@@ -17,9 +17,13 @@ import {
   ChevronsUpDown,
   LayoutGrid,
   List,
+  Lock,
+  Upload,
 } from 'lucide-react';
+import { STRONG_FOOT_OPTIONS } from '@/lib/playerVocabulary';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
 import { useActiveSeasonContext } from '../../contexts/ActiveSeasonContext';
+import ImportPlayersModal from './ImportPlayersModal';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const T = {
@@ -35,7 +39,7 @@ const T = {
 
 // ─── Player Card component ────────────────────────────────────────────────────
 function PlayerCard({
-  player, pos, st, attPct, onOpen, onEdit, onDelete,
+  player, pos, st, attPct, onOpen, onEdit, onDelete, canEdit,
 }: {
   player: any;
   pos: { abbr: string; color: string; bg: string };
@@ -44,6 +48,7 @@ function PlayerCard({
   onOpen: () => void;
   onEdit: (e: React.MouseEvent) => void;
   onDelete: (e: React.MouseEvent) => void;
+  canEdit: boolean;
 }) {
   const [hov, setHov] = useState(false);
   const goals = player.goals ?? 0;
@@ -137,7 +142,7 @@ function PlayerCard({
       </div>
 
       {/* Hover actions */}
-      {hov && (
+      {hov && canEdit && (
         <div
           style={{
             position: 'absolute', top: 10, right: 10,
@@ -270,7 +275,7 @@ function SortIcon({ col, sortKey, sortDir }: { col: SortKey; sortKey: SortKey; s
 // ─── Page component ───────────────────────────────────────────────────────────
 export default function SquadPage() {
   const router = useRouter();
-  const { activeTeam, teams } = useActiveTeam();
+  const { activeTeam, teams, canEditActiveTeam } = useActiveTeam();
   const { activeSeason } = useActiveSeasonContext();
 
   // Data state
@@ -282,6 +287,7 @@ export default function SquadPage() {
 
   // Modal state
   const [isModalOpen, setIsModalOpen]   = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const [isEditing, setIsEditing]       = useState(false);
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
   const [formData, setFormData]         = useState<PlayerFormData>(initialFormData);
@@ -438,6 +444,7 @@ export default function SquadPage() {
       setError('Aucune équipe active sélectionnée.');
       return;
     }
+    if (!canEditActiveTeam) return; // lecture seule : équipe non rattachée
     if (player) {
       setIsEditing(true);
       setCurrentPlayer(player);
@@ -504,6 +511,7 @@ export default function SquadPage() {
   };
 
   const handleDelete = async (playerId: string) => {
+    if (!canEditActiveTeam) return; // lecture seule : équipe non rattachée
     const player = players.find(p => p.id === playerId);
     const name = player ? `${player.first_name} ${player.last_name}` : 'ce joueur';
     if (!confirm(
@@ -684,20 +692,45 @@ export default function SquadPage() {
           </button>
         </div>
 
-        {/* New player */}
-        <button
-          onClick={() => handleOpenModal()}
-          disabled={!activeTeam}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50"
-          style={{
-            backgroundColor: activeTeam ? T.accentAmber : '#CBD5E1',
-            color: activeTeam ? '#1A0A00' : '#94A3B8',
-            border: 'none',
-            cursor: activeTeam ? 'pointer' : 'not-allowed',
-          }}
-        >
-          <Plus size={15} /> Nouveau joueur
-        </button>
+        {/* New player + import Excel — masqués en lecture seule (équipe non rattachée) */}
+        {canEditActiveTeam ? (
+          <>
+            <button
+              onClick={() => setIsImportOpen(true)}
+              disabled={!activeTeam}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50"
+              style={{
+                backgroundColor: T.cardBg,
+                color: activeTeam ? T.text : '#94A3B8',
+                border: `1px solid ${T.border}`,
+                cursor: activeTeam ? 'pointer' : 'not-allowed',
+              }}
+            >
+              <Upload size={15} /> Importer un effectif
+            </button>
+            <button
+              onClick={() => handleOpenModal()}
+              disabled={!activeTeam}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50"
+              style={{
+                backgroundColor: activeTeam ? T.accentAmber : '#CBD5E1',
+                color: activeTeam ? '#1A0A00' : '#94A3B8',
+                border: 'none',
+                cursor: activeTeam ? 'pointer' : 'not-allowed',
+              }}
+            >
+              <Plus size={15} /> Nouveau joueur
+            </button>
+          </>
+        ) : (
+          <span
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold"
+            style={{ backgroundColor: '#F1F5F9', color: '#64748B', border: '1px solid #E2E8F0' }}
+            title="Vous n'êtes pas rattaché à cette équipe : consultation uniquement."
+          >
+            <Lock size={13} /> Lecture seule
+          </span>
+        )}
       </div>
 
       {/* ── Card grid view ──────────────────────────────────────────────────── */}
@@ -722,6 +755,7 @@ export default function SquadPage() {
                     pos={pos}
                     st={st}
                     attPct={attPct}
+                    canEdit={canEditActiveTeam}
                     onOpen={() => router.push(`/webapp/manager/squad/${player.id}`)}
                     onEdit={e => { e.stopPropagation(); handleOpenModal(player); }}
                     onDelete={e => { e.stopPropagation(); handleDelete(player.id); }}
@@ -817,14 +851,16 @@ export default function SquadPage() {
                         {player.goals ?? 0}
                       </td>
                       <td style={{ padding: '10px 20px 10px 8px', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }} onClick={e => e.stopPropagation()}>
-                          <button onClick={() => handleOpenModal(player)} style={{ padding: 4, border: 'none', background: 'none', cursor: 'pointer', color: T.accent, borderRadius: 4 }} title="Modifier">
-                            <Pencil size={15} />
-                          </button>
-                          <button onClick={() => handleDelete(player.id)} style={{ padding: 4, border: 'none', background: 'none', cursor: 'pointer', color: '#EF4444', borderRadius: 4 }} title="Supprimer">
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
+                        {canEditActiveTeam && (
+                          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }} onClick={e => e.stopPropagation()}>
+                            <button onClick={() => handleOpenModal(player)} style={{ padding: 4, border: 'none', background: 'none', cursor: 'pointer', color: T.accent, borderRadius: 4 }} title="Modifier">
+                              <Pencil size={15} />
+                            </button>
+                            <button onClick={() => handleDelete(player.id)} style={{ padding: 4, border: 'none', background: 'none', cursor: 'pointer', color: '#EF4444', borderRadius: 4 }} title="Supprimer">
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
@@ -898,14 +934,23 @@ export default function SquadPage() {
                     <label className="fm-label">Pied fort *</label>
                     <select required value={formData.strong_foot} onChange={e => setFormData({ ...formData, strong_foot: e.target.value })} className="fm-select">
                       <option value="">Sélectionner</option>
-                      <option value="Droit">Droit</option>
-                      <option value="Gauche">Gauche</option>
-                      <option value="Ambidextre">Ambidextre</option>
+                      {/* Écrivait « Ambidextre » là où le mobile écrit
+                          « Droit et gauche » : le même joueur changeait de
+                          valeur en base selon l'écran de saisie, et les filtres
+                          « pied fort » du web en cachaient toujours une part. */}
+                      {STRONG_FOOT_OPTIONS.map(f => (
+                        <option key={f.value} value={f.value}>{f.label}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
 
-                {/* Statut */}
+                {/* Statut administratif — PAS la disponibilité.
+                    « Blessé » et « Suspendu » ont été retirés le 2026-08-13 : la
+                    disponibilité vit dans `player_availability`, historisée, avec
+                    date de retour et zone. Les garder ici créait deux vérités
+                    concurrentes, et surtout écrasait définitivement le statut de
+                    mutation FFF du joueur, qui est la vraie donnée de ce champ. */}
                 <div>
                   <label className="fm-label">Statut *</label>
                   <select required value={formData.status} onChange={e => setFormData({ ...formData, status: e.target.value })} className="fm-select">
@@ -913,10 +958,12 @@ export default function SquadPage() {
                     <option value="Non-muté">Non-Muté</option>
                     <option value="Muté">Muté</option>
                     <option value="Muté HP">Muté HP</option>
-                    <option value="Blessé">Blessé</option>
-                    <option value="Suspendu">Suspendu</option>
                     <option value="left">Parti (quitte le club)</option>
                   </select>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Statut de mutation. Pour une blessure ou une suspension, passez par le Pôle
+                    Performance.
+                  </p>
                 </div>
 
                 {/* Limite séquence */}
@@ -977,6 +1024,16 @@ export default function SquadPage() {
             </form>
           </div>
         </div>
+      )}
+
+      {isImportOpen && activeTeam && (
+        <ImportPlayersModal
+          teamId={activeTeam.id}
+          teamName={activeTeam.name}
+          existingPlayers={players.map(p => ({ first_name: p.first_name, last_name: p.last_name }))}
+          onClose={() => setIsImportOpen(false)}
+          onImported={fetchPlayers}
+        />
       )}
     </div>
   );

@@ -1,18 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  ActivityIndicator,
-  Alert,
-  Modal,
-  TextInput,
-  RefreshControl,
-} from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, RefreshControl, Pressable } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
+import { useTheme } from '../../../contexts/ThemeContext';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 import {
   getUserClubId,
@@ -28,16 +18,27 @@ import {
   deleteTeam,
   type TeamFormData,
 } from '../../../lib/services/teams';
+import { haptics } from '../../../lib/design/haptics';
+import {
+  Text,
+  Card,
+  Button,
+  Badge,
+  Field,
+  Input,
+  Sheet,
+  EmptyState,
+  SkeletonList,
+} from '../../../components/ui';
 import type { Team } from '../../../types';
+import { TEAM_COLORS, DEFAULT_TEAM_COLOR } from '../../../lib/teamColors';
 
 const DEFAULT_FORM: TeamFormData = {
   name: '',
   category: 'Senior',
   level: 'A',
-  color: '#3b82f6',
+  color: DEFAULT_TEAM_COLOR,
 };
-
-const COLOR_OPTIONS = ['#3b82f6', '#16a34a', '#ea580c', '#dc2626', '#7c3aed', '#0891b2'];
 
 function memberLabel(m: ClubMemberWithUser): string {
   const name = [m.first_name, m.last_name].filter(Boolean).join(' ').trim();
@@ -46,13 +47,16 @@ function memberLabel(m: ClubMemberWithUser): string {
 
 export default function TeamsScreen() {
   const router = useRouter();
-  const { teams: activeTeamList, activeTeamId, setActiveTeamId, refetchTeams } = useActiveTeam();
+  const { theme } = useTheme();
+  const c = theme.colors;
+  const { activeTeamId, setActiveTeamId, refetchTeams, canEditTeam } = useActiveTeam();
+
   const [clubId, setClubId] = useState<string | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [modalVisible, setModalVisible] = useState(false);
+  const [sheetVisible, setSheetVisible] = useState(false);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
   const [form, setForm] = useState<TeamFormData>(DEFAULT_FORM);
   const [saving, setSaving] = useState(false);
@@ -60,6 +64,8 @@ export default function TeamsScreen() {
   const [clubMembers, setClubMembers] = useState<ClubMemberWithUser[]>([]);
   const [mainCoachUserId, setMainCoachUserId] = useState<string | null>(null);
   const [teamCoaches, setTeamCoaches] = useState<Record<string, string>>({});
+
+  // ── Chargement ────────────────────────────────────────────────────────────
 
   const load = useCallback(async () => {
     try {
@@ -78,14 +84,13 @@ export default function TeamsScreen() {
       await Promise.all(
         data.map(async (t) => {
           const coach = await getTeamMainCoach(t.id);
-          if (coach?.label) {
-            coaches[t.id] = coach.label;
-          }
+          const label = coach?.label;
+          if (label) coaches[t.id] = label;
         })
       );
       setTeamCoaches(coaches);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Erreur chargement');
+      setError(e instanceof Error ? e.message : 'Erreur de chargement');
       setTeams([]);
     } finally {
       setLoading(false);
@@ -103,23 +108,26 @@ export default function TeamsScreen() {
     load().then(() => refetchTeams());
   }, [load, refetchTeams]);
 
+  // ── Formulaire ────────────────────────────────────────────────────────────
+
   const openCreate = useCallback(() => {
     setEditingTeam(null);
     setForm(DEFAULT_FORM);
     setMainCoachUserId(null);
-    setModalVisible(true);
+    setSheetVisible(true);
   }, []);
 
-  const openEdit = useCallback(async (team: Team) => {
-    setEditingTeam(team);
-    setForm({
-      name: team.name,
-      category: team.category || 'Senior',
-      level: team.level || 'A',
-      color: team.color || '#3b82f6',
-    });
-    setModalVisible(true);
-    if (clubId) {
+  const openEdit = useCallback(
+    async (team: Team) => {
+      setEditingTeam(team);
+      setForm({
+        name: team.name,
+        category: team.category || 'Senior',
+        level: team.level || 'A',
+        color: team.color || DEFAULT_TEAM_COLOR,
+      });
+      setSheetVisible(true);
+      if (!clubId) return;
       const [adminRes, membersRes, coachRes] = await Promise.all([
         isClubAdmin(clubId),
         getClubMembersWithProfiles(clubId),
@@ -127,25 +135,27 @@ export default function TeamsScreen() {
       ]);
       setIsAdmin(adminRes);
       setClubMembers(membersRes);
-      const coachId = coachRes?.user_id ?? membersRes.find((m) => m.role === 'admin')?.user_id ?? null;
-      setMainCoachUserId(coachId);
-    }
-  }, [clubId]);
+      setMainCoachUserId(
+        coachRes?.user_id ?? membersRes.find((m) => m.role === 'admin')?.user_id ?? null
+      );
+    },
+    [clubId]
+  );
 
-  const closeModal = useCallback(() => {
-    setModalVisible(false);
+  const closeSheet = useCallback(() => {
+    setSheetVisible(false);
     setEditingTeam(null);
     setForm(DEFAULT_FORM);
     setMainCoachUserId(null);
   }, []);
 
-  const handleSave = useCallback(async () => {
+  const save = useCallback(async () => {
     if (!form.name.trim()) {
-      Alert.alert('Champ requis', "Nom de l'équipe obligatoire.");
+      Alert.alert('Champ requis', "Le nom de l'équipe est obligatoire.");
       return;
     }
     if (!clubId && !editingTeam) {
-      Alert.alert('Erreur', "Aucun club associé. Créez un club d'abord.");
+      Alert.alert('Aucun club', "Créez un club avant d'ajouter une équipe.");
       return;
     }
     setSaving(true);
@@ -154,39 +164,35 @@ export default function TeamsScreen() {
         const updateData = { ...form };
         if (isAdmin && mainCoachUserId) updateData.mainCoachUserId = mainCoachUserId;
         await updateTeam(editingTeam.id, updateData);
-        setTeams((prev) =>
-          prev.map((t) => (t.id === editingTeam.id ? { ...t, ...form } : t))
-        );
+        setTeams((prev) => prev.map((t) => (t.id === editingTeam.id ? { ...t, ...form } : t)));
         if (isAdmin && mainCoachUserId) {
           const m = clubMembers.find((cm) => cm.user_id === mainCoachUserId);
-          if (m) {
-            setTeamCoaches((prev) => ({ ...prev, [editingTeam.id]: memberLabel(m) }));
-          }
+          if (m) setTeamCoaches((prev) => ({ ...prev, [editingTeam.id]: memberLabel(m) }));
         }
       } else if (clubId) {
         const createData = { ...form };
         if (isAdmin && mainCoachUserId) createData.mainCoachUserId = mainCoachUserId;
         const created = await createTeam(clubId, createData);
         setTeams((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
-        const coach = await getTeamMainCoach(created.id);
-        if (coach?.label) {
-          setTeamCoaches((prev) => ({ ...prev, [created.id]: coach.label }));
-        }
+        const label = (await getTeamMainCoach(created.id))?.label;
+        if (label) setTeamCoaches((prev) => ({ ...prev, [created.id]: label }));
       }
+      haptics.success();
       refetchTeams();
-      closeModal();
+      closeSheet();
     } catch (e) {
+      haptics.error();
       Alert.alert('Erreur', e instanceof Error ? e.message : "Impossible d'enregistrer");
     } finally {
       setSaving(false);
     }
-  }, [form, clubId, editingTeam, closeModal, refetchTeams, isAdmin, mainCoachUserId, clubMembers]);
+  }, [form, clubId, editingTeam, closeSheet, refetchTeams, isAdmin, mainCoachUserId, clubMembers]);
 
-  const handleDelete = useCallback(
+  const remove = useCallback(
     (team: Team) => {
       Alert.alert(
         "Supprimer l'équipe",
-        `Supprimer « ${team.name} » ? Les joueurs ne seront pas supprimés.`,
+        `Supprimer « ${team.name} » ? Les joueurs ne sont pas supprimés, ils quittent simplement cette équipe.`,
         [
           { text: 'Annuler', style: 'cancel' },
           {
@@ -200,8 +206,10 @@ export default function TeamsScreen() {
                   const rest = teams.filter((t) => t.id !== team.id);
                   if (rest.length > 0) await setActiveTeamId(rest[0].id);
                 }
+                haptics.success();
                 refetchTeams();
               } catch (e) {
+                haptics.error();
                 Alert.alert('Erreur', e instanceof Error ? e.message : 'Impossible de supprimer');
               }
             },
@@ -212,412 +220,308 @@ export default function TeamsScreen() {
     [activeTeamId, teams, setActiveTeamId, refetchTeams]
   );
 
+  // ── États non nominaux ────────────────────────────────────────────────────
+
   if (loading && teams.length === 0) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3b82f6" />
+      <View style={[styles.root, { backgroundColor: c.bg.canvas }]}>
+        <SkeletonList rows={4} />
       </View>
     );
   }
 
   if (!clubId) {
     return (
-      <View style={styles.centered}>
-        <Ionicons name="trophy-outline" size={48} color="#94a3b8" />
-        <Text style={styles.noClubTitle}>Aucun club</Text>
-        <Text style={styles.noClubText}>
-          Créez un club depuis l'accueil pour gérer vos équipes.
-        </Text>
+      <View style={[styles.root, { backgroundColor: c.bg.canvas }]}>
+        <EmptyState
+          icon="trophy-outline"
+          title="Aucun club"
+          description="Créez un club depuis l'accueil pour gérer vos équipes."
+          action={{ label: "Aller à l'accueil", onPress: () => router.replace('/(tabs)') }}
+        />
       </View>
     );
   }
 
+  // ── Rendu ─────────────────────────────────────────────────────────────────
+
   return (
-    <>
+    <View style={[styles.root, { backgroundColor: c.bg.canvas }]}>
       <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { gap: theme.space.md }]}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#3b82f6']} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={c.accent.default}
+            colors={[c.accent.default]}
+          />
         }
       >
         {error && (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
+          <Card variant="flat" padding="sm" style={[styles.errorBox, { backgroundColor: c.negative.subtle }]}>
+            <Ionicons name="alert-circle" size={18} color={c.negative.default} />
+            <Text variant="callout" tone="negative" style={styles.flex}>
+              {error}
+            </Text>
+          </Card>
         )}
 
-        <View style={styles.header}>
-          <Text style={styles.title}>Équipes du club</Text>
-          <View style={styles.headerActions}>
-            <TouchableOpacity
-              style={styles.planBtn}
-              onPress={() => router.push('/(tabs)/squad/season-planning' as any)}
-            >
-              <Ionicons name="layers-outline" size={16} color="#7c3aed" />
-              <Text style={styles.planBtnText}>Planif. saison</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.addBtn} onPress={openCreate}>
-              <Ionicons name="add" size={22} color="#fff" />
-              <Text style={styles.addBtnText}>Ajouter</Text>
-            </TouchableOpacity>
-          </View>
+        <View style={[styles.header, { gap: theme.space.sm }]}>
+          <Text variant="title" style={styles.flex}>
+            Équipes du club
+          </Text>
+          {/* La planification de saison est une fonction des équipes (arbitré le
+              2026-08-03). C'est son unique point d'entrée. */}
+          <Button
+            label="Planification"
+            icon="layers-outline"
+            variant="secondary"
+            size="sm"
+            onPress={() => router.push('/(tabs)/squad/season-planning' as never)}
+          />
+          <Button label="Ajouter" icon="add" size="sm" onPress={openCreate} />
         </View>
 
         {teams.length === 0 ? (
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>Aucune équipe.</Text>
-            <TouchableOpacity style={styles.emptyBtn} onPress={openCreate}>
-              <Text style={styles.emptyBtnText}>Créer une équipe</Text>
-            </TouchableOpacity>
-          </View>
+          <EmptyState
+            icon="trophy-outline"
+            title="Aucune équipe"
+            description="Créez votre première équipe pour commencer à gérer un effectif."
+            action={{ label: 'Créer une équipe', onPress: openCreate }}
+          />
         ) : (
-          <View style={styles.list}>
-            {teams.map((team) => (
-              <View
+          teams.map((team) => {
+            const isActive = activeTeamId === team.id;
+            const color = team.color || DEFAULT_TEAM_COLOR;
+            return (
+              <Card
                 key={team.id}
-                style={[
-                  styles.card,
-                  activeTeamId === team.id && styles.cardActive,
-                ]}
+                variant={isActive ? 'accent' : 'raised'}
+                padding="none"
+                style={styles.card}
               >
-                <View style={[styles.cardStrip, { backgroundColor: team.color || '#3b82f6' }]} />
-                <View style={styles.cardBody}>
+                <View style={[styles.strip, { backgroundColor: color }]} />
+                <View style={[styles.cardBody, { gap: theme.space.md }]}>
                   <View style={styles.cardMain}>
-                    <Text style={styles.teamName}>{team.name}</Text>
-                    <Text style={styles.teamMeta}>
-                      {team.category} – Niveau {team.level}
+                    <View style={styles.nameRow}>
+                      <Text variant="headline" numberOfLines={1} style={styles.flex}>
+                        {team.name}
+                      </Text>
+                      {isActive && <Badge label="Active" tone="accent" size="sm" />}
+                    </View>
+                    <Text variant="callout" tone="secondary">
+                      {team.category} · niveau {team.level}
                     </Text>
                     {teamCoaches[team.id] && (
-                      <Text style={styles.coachLabel}>Entraîneur : {teamCoaches[team.id]}</Text>
-                    )}
-                    {activeTeamId === team.id && (
-                      <View style={styles.activeBadge}>
-                        <Text style={styles.activeBadgeText}>Équipe active</Text>
+                      <View style={styles.coachRow}>
+                        <Ionicons name="person-outline" size={12} color={c.text.tertiary} />
+                        <Text variant="caption" tone="tertiary" numberOfLines={1}>
+                          {teamCoaches[team.id]}
+                        </Text>
                       </View>
                     )}
                   </View>
-                  <View style={styles.cardActions}>
-                    <TouchableOpacity
-                      style={styles.iconBtn}
-                      onPress={() => openEdit(team)}
-                    >
-                      <Ionicons name="pencil-outline" size={22} color="#475569" />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.iconBtn}
-                      onPress={() => handleDelete(team)}
-                    >
-                      <Ionicons name="trash-outline" size={22} color="#dc2626" />
-                    </TouchableOpacity>
-                    {activeTeamId !== team.id && (
-                      <TouchableOpacity
-                        style={styles.setActiveBtn}
-                        onPress={() => setActiveTeamId(team.id)}
-                      >
-                        <Text style={styles.setActiveBtnText}>Définir active</Text>
-                      </TouchableOpacity>
+
+                  <View style={styles.actions}>
+                    {!isActive && (
+                      <Button
+                        label="Activer"
+                        variant="secondary"
+                        size="sm"
+                        onPress={() => {
+                          haptics.select();
+                          setActiveTeamId(team.id);
+                        }}
+                      />
+                    )}
+                    {/* Depuis que la lecture de `teams` est club-scopée
+                        (migration `20260804120000`), un coach voit les équipes
+                        des autres. Il ne peut pas les modifier : l'écriture
+                        reste gardée par `has_team_write_access`. Sans ce test,
+                        les deux boutons s'afficheraient et échoueraient EN
+                        SILENCE — un `.update()` qui ne matche aucune ligne ne
+                        lève pas d'erreur. `canEditTeam` lit la même vérité que
+                        la base, via `get_my_writable_team_ids`. */}
+                    {canEditTeam(team.id) ? (
+                      <>
+                        <Pressable
+                          onPress={() => openEdit(team)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Modifier l'équipe ${team.name}`}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          style={styles.iconBtn}
+                        >
+                          <Ionicons name="pencil-outline" size={20} color={c.text.secondary} />
+                        </Pressable>
+                        <Pressable
+                          onPress={() => remove(team)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Supprimer l'équipe ${team.name}`}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          style={styles.iconBtn}
+                        >
+                          <Ionicons name="trash-outline" size={20} color={c.negative.default} />
+                        </Pressable>
+                      </>
+                    ) : (
+                      <Badge label="Lecture seule" tone="neutral" size="sm" />
                     )}
                   </View>
                 </View>
-              </View>
-            ))}
-          </View>
+              </Card>
+            );
+          })
         )}
       </ScrollView>
 
-      <Modal visible={modalVisible} transparent animationType="fade">
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={closeModal}
-        >
-          <View style={styles.modalBox} onStartShouldSetResponder={() => true}>
-            <Text style={styles.modalTitle}>
-              {editingTeam ? "Modifier l'équipe" : 'Nouvelle équipe'}
-            </Text>
-
-            <Text style={styles.label}>Nom</Text>
-            <TextInput
-              style={styles.input}
-              value={form.name}
-              onChangeText={(t) => setForm((f) => ({ ...f, name: t }))}
-              placeholder="Ex. U18"
-              placeholderTextColor="#94a3b8"
-            />
-
-            <Text style={styles.label}>Catégorie</Text>
-            <TextInput
-              style={styles.input}
+      <Sheet
+        visible={sheetVisible}
+        onClose={closeSheet}
+        title={editingTeam ? "Modifier l'équipe" : 'Nouvelle équipe'}
+      >
+        <View style={{ gap: theme.space.lg }}>
+          <Input
+            label="Nom"
+            value={form.name}
+            onChangeText={(t) => setForm((f) => ({ ...f, name: t }))}
+            placeholder="ex : Séniors A"
+            autoCapitalize="words"
+          />
+          <View style={styles.row}>
+            <Input
+              label="Catégorie"
               value={form.category}
               onChangeText={(t) => setForm((f) => ({ ...f, category: t }))}
               placeholder="Senior"
-              placeholderTextColor="#94a3b8"
+              containerStyle={styles.flex}
             />
-
-            <Text style={styles.label}>Niveau</Text>
-            <TextInput
-              style={styles.input}
+            <Input
+              label="Niveau"
               value={form.level}
               onChangeText={(t) => setForm((f) => ({ ...f, level: t }))}
               placeholder="A"
-              placeholderTextColor="#94a3b8"
+              containerStyle={styles.levelField}
             />
+          </View>
 
-            <Text style={styles.label}>Couleur</Text>
+          <Field label="Couleur" hint="Sert à reconnaître l'équipe partout dans l'application.">
             <View style={styles.colorRow}>
-              {COLOR_OPTIONS.map((c) => (
-                <TouchableOpacity
-                  key={c}
-                  style={[
-                    styles.colorDot,
-                    { backgroundColor: c },
-                    form.color === c && styles.colorDotSelected,
-                  ]}
-                  onPress={() => setForm((f) => ({ ...f, color: c }))}
-                />
-              ))}
+              {TEAM_COLORS.map((value) => {
+                const selected = form.color === value;
+                return (
+                  <Pressable
+                    key={value}
+                    onPress={() => setForm((f) => ({ ...f, color: value }))}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected, checked: selected }}
+                    accessibilityLabel={`Couleur ${TEAM_COLORS.indexOf(value) + 1} sur ${TEAM_COLORS.length}`}
+                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                    style={[
+                      styles.colorDot,
+                      { backgroundColor: value, borderColor: selected ? c.text.primary : 'transparent' },
+                    ]}
+                  >
+                    {/* La sélection ne peut pas reposer sur la seule couleur :
+                        ce sont six pastilles de couleurs pures, et l'anneau
+                        seul est trop discret sur certaines teintes. */}
+                    {selected && <Ionicons name="checkmark" size={18} color="#FFFFFF" />}
+                  </Pressable>
+                );
+              })}
             </View>
+          </Field>
 
-            {editingTeam && isAdmin && clubMembers.length > 0 && (
-              <>
-                <Text style={styles.label}>Entraîneur principal</Text>
-                <ScrollView style={styles.coachPicker} nestedScrollEnabled>
-                  {clubMembers.map((m) => (
-                    <TouchableOpacity
+          {editingTeam && isAdmin && clubMembers.length > 0 && (
+            <Field label="Entraîneur principal">
+              <ScrollView
+                style={[styles.coachPicker, { borderColor: c.border.subtle, borderRadius: theme.radius.sm }]}
+                nestedScrollEnabled
+              >
+                {clubMembers.map((m) => {
+                  const selected = mainCoachUserId === m.user_id;
+                  return (
+                    <Pressable
                       key={m.id}
+                      onPress={() => setMainCoachUserId(m.user_id)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected, checked: selected }}
+                      accessibilityLabel={memberLabel(m)}
                       style={[
                         styles.coachOption,
-                        mainCoachUserId === m.user_id && styles.coachOptionActive,
+                        {
+                          borderBottomColor: c.border.subtle,
+                          backgroundColor: selected ? c.accent.subtle : 'transparent',
+                        },
                       ]}
-                      onPress={() => setMainCoachUserId(m.user_id)}
                     >
-                      <Text style={styles.coachOptionText}>{memberLabel(m)}</Text>
-                      {m.role === 'admin' && (
-                        <Text style={styles.coachOptionBadge}>Admin</Text>
-                      )}
-                      {mainCoachUserId === m.user_id && (
-                        <Ionicons name="checkmark-circle" size={20} color="#3b82f6" />
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </>
-            )}
+                      <Text variant="body" weight="500" numberOfLines={1} style={styles.flex}>
+                        {memberLabel(m)}
+                      </Text>
+                      {m.role === 'admin' && <Badge label="Admin" size="sm" />}
+                      <Ionicons
+                        name={selected ? 'checkmark-circle' : 'ellipse-outline'}
+                        size={20}
+                        color={selected ? c.accent.default : c.text.tertiary}
+                      />
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </Field>
+          )}
 
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={closeModal}>
-                <Text style={styles.cancelBtnText}>Annuler</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
-                onPress={handleSave}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.saveBtnText}>Enregistrer</Text>
-                )}
-              </TouchableOpacity>
-            </View>
+          <View style={[styles.sheetActions, { gap: theme.space.md }]}>
+            <Button label="Annuler" variant="ghost" onPress={closeSheet} style={styles.flex} />
+            <Button
+              label={saving ? 'Enregistrement…' : 'Enregistrer'}
+              onPress={save}
+              loading={saving}
+              disabled={saving}
+              style={styles.flex}
+            />
           </View>
-        </TouchableOpacity>
-      </Modal>
-    </>
+        </View>
+      </Sheet>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  container: { flex: 1 },
-  content: { padding: 16, paddingBottom: 32 },
-  errorBox: {
-    backgroundColor: '#fef2f2',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-  },
-  errorText: { color: '#dc2626', fontSize: 14 },
-  noClubTitle: { fontSize: 18, fontWeight: '600', color: '#334155', marginTop: 12 },
-  noClubText: { fontSize: 14, color: '#64748b', textAlign: 'center', marginTop: 8 },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  title: { fontSize: 20, fontWeight: '700', color: '#1e293b' },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  planBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderColor: '#7c3aed',
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderRadius: 8,
-  },
-  planBtnText: { color: '#7c3aed', fontWeight: '600', fontSize: 14 },
-  addBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#3b82f6',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  addBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
-  empty: {
-    alignItems: 'center',
-    paddingVertical: 48,
-  },
-  emptyText: { fontSize: 15, color: '#64748b', marginBottom: 16 },
-  emptyBtn: {
-    backgroundColor: '#3b82f6',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  emptyBtnText: { color: '#fff', fontWeight: '600' },
-  list: { gap: 12 },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    overflow: 'hidden',
-  },
-  cardActive: {
-    borderColor: '#3b82f6',
-    borderWidth: 2,
-  },
-  cardStrip: { height: 4 },
-  cardBody: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 14,
-  },
-  cardMain: { flex: 1 },
-  teamName: { fontSize: 17, fontWeight: '600', color: '#1e293b' },
-  teamMeta: { fontSize: 13, color: '#64748b', marginTop: 2 },
-  coachLabel: { fontSize: 12, color: '#64748b', marginTop: 4 },
-  activeBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#dbeafe',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    marginTop: 6,
-  },
-  activeBadgeText: { fontSize: 12, fontWeight: '600', color: '#1d4ed8' },
-  cardActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  iconBtn: { padding: 8 },
-  setActiveBtn: {
-    backgroundColor: '#f1f5f9',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  setActiveBtnText: { fontSize: 13, fontWeight: '600', color: '#475569' },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  modalBox: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 24,
-    width: '100%',
-    maxWidth: 400,
-  },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: '#1e293b', marginBottom: 16 },
-  label: { fontSize: 14, fontWeight: '500', color: '#475569', marginBottom: 6 },
-  input: {
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 16,
-    marginBottom: 14,
-  },
-  colorRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginBottom: 20,
-  },
+  root: { flex: 1 },
+  flex: { flex: 1 },
+  content: { padding: 16, paddingBottom: 40 },
+  errorBox: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  header: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
+
+  card: { overflow: 'hidden' },
+  strip: { height: 4 },
+  cardBody: { flexDirection: 'row', alignItems: 'center', padding: 14 },
+  cardMain: { flex: 1, gap: 3 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  coachRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  iconBtn: { padding: 6 },
+
+  row: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  levelField: { width: 96 },
+  colorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   colorDot: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  colorDotSelected: {
-    borderColor: '#1e293b',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     borderWidth: 3,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  coachPicker: {
-    maxHeight: 140,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 8,
-  },
+  coachPicker: { maxHeight: 180, borderWidth: StyleSheet.hairlineWidth },
   coachOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
+    gap: 10,
+    minHeight: 52,
     paddingHorizontal: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e2e8f0',
-    gap: 8,
   },
-  coachOptionActive: {
-    backgroundColor: '#eff6ff',
-  },
-  coachOptionText: {
-    flex: 1,
-    fontSize: 15,
-    color: '#1e293b',
-    fontWeight: '500',
-  },
-  coachOptionBadge: {
-    fontSize: 11,
-    color: '#64748b',
-    backgroundColor: '#f1f5f9',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 12,
-  },
-  cancelBtn: { paddingVertical: 10, paddingHorizontal: 16 },
-  cancelBtnText: { fontSize: 15, color: '#64748b', fontWeight: '500' },
-  saveBtn: {
-    backgroundColor: '#3b82f6',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    minWidth: 120,
-    alignItems: 'center',
-  },
-  saveBtnDisabled: { opacity: 0.7 },
-  saveBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
+  sheetActions: { flexDirection: 'row', marginTop: 4 },
 });
