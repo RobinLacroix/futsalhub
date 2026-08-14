@@ -31,6 +31,33 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { PRIMARY_DESTINATIONS } from '../../lib/navigation';
 
+/**
+ * Titre de barre de navigation des routes hors tab bar.
+ *
+ * Sans `title`, React Navigation retombe sur le **nom de route** : l'écran de
+ * création de club s'annonçait donc « create-club » en haut de l'écran, et
+ * « join-club-staff » juste après — sur les deux premiers écrans que traverse un
+ * coach extérieur qui arrive dans FutsalHub. Les routes absentes de cette table
+ * portent leur titre elles-mêmes (piles `calendar` et `squad`, qui ont leur
+ * propre layout) ou n'affichent pas de barre.
+ */
+const HIDDEN_ROUTE_TITLES: Record<string, string> = {
+  'choose-team': 'Choisir une équipe',
+  'create-club': 'Créer un club',
+  'join-club-staff': 'Rejoindre un club',
+  performance: 'Performance',
+  teams: 'Équipes',
+  settings: 'Paramètres',
+  share: 'Partage',
+};
+
+/**
+ * Routes où le sélecteur de saison n'a rien à sélectionner : on n'a pas encore
+ * de club, donc pas de saison. Il s'affichait quand même, l'app n'ayant qu'une
+ * seule action de barre pour tout le groupe.
+ */
+const NO_SEASON_ROUTES = new Set(['create-club', 'join-club-staff']);
+
 /** Routes hors tab bar : accessibles par navigation, jamais listées. */
 const HIDDEN_ROUTES = [
   'dashboard/index',
@@ -49,6 +76,7 @@ const HIDDEN_ROUTES = [
   'squad/season-planning',
   'choose-team',
   'create-club',
+  'performance',
   'teams',
   'settings',
   'share',
@@ -134,7 +162,15 @@ function TabsLayoutContent() {
       ))}
 
       {HIDDEN_ROUTES.map((name) => (
-        <Tabs.Screen key={name} name={name} options={{ href: null }} />
+        <Tabs.Screen
+          key={name}
+          name={name}
+          options={{
+            href: null,
+            title: HIDDEN_ROUTE_TITLES[name],
+            headerRight: NO_SEASON_ROUTES.has(name) ? () => null : undefined,
+          }}
+        />
       ))}
     </Tabs>
   );

@@ -23,6 +23,7 @@ import { Text } from '../../components/ui';
 import { TeamDashboardView } from '../../components/TeamDashboardView';
 import { AnalyticsView } from '../../components/AnalyticsView';
 import { TrackerAnalyticsView } from '../../components/TrackerAnalyticsView';
+import { MatchAnalyticsProvider } from '../../components/analytics/MatchAnalyticsContext';
 
 type Segment = 'equipe' | 'joueurs' | 'matchs';
 
@@ -74,13 +75,21 @@ export default function AnalyseScreen() {
         })}
       </View>
 
-      {/* Les trois vues restent montées : changer de segment ne recharge rien. */}
+      {/*
+        Les trois vues restent montées : changer de segment ne recharge rien.
+        Corollaire : elles chargent toutes au montage. « Joueurs » et « Matchs »
+        lisaient les mêmes matchs et les mêmes événements, chacune de son côté —
+        soit deux fois le même N+1 à chaque ouverture de l'onglet. Le provider
+        charge une fois pour les deux.
+      */}
       <View style={{ flex: 1 }}>
         <Pane visible={segment === 'equipe'}><TeamDashboardView /></Pane>
-        <Pane visible={segment === 'joueurs'}><AnalyticsView /></Pane>
-        <Pane visible={segment === 'matchs'}>
-          <TrackerAnalyticsView title="Matchs enregistrés" showRecordButton />
-        </Pane>
+        <MatchAnalyticsProvider>
+          <Pane visible={segment === 'joueurs'}><AnalyticsView /></Pane>
+          <Pane visible={segment === 'matchs'}>
+            <TrackerAnalyticsView title="Matchs enregistrés" showRecordButton />
+          </Pane>
+        </MatchAnalyticsProvider>
       </View>
     </View>
   );

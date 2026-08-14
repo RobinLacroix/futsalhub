@@ -72,7 +72,11 @@ export function SubstitutionSheet({
               onPress={() => outgoing && onSubstitute(outgoing.id, p.id)}
               style={({ pressed }) => [s.row, pressed && s.pressed]}
               accessibilityRole="button"
-              accessibilityLabel={`Faire entrer ${p.first_name} ${p.last_name}, ${formatSeconds(st?.totalTime ?? 0)} joué`}
+              accessibilityLabel={
+                `Faire entrer ${p.first_name} ${p.last_name}, ` +
+                `${formatSeconds(st?.totalTime ?? 0)} joué, ` +
+                `${formatSeconds(st?.benchTime ?? 0)} d'attente`
+              }
             >
               <View style={s.rowMain}>
                 <View style={s.rowTitle}>
@@ -83,6 +87,9 @@ export function SubstitutionSheet({
                 </View>
                 <Text variant="caption" tone="secondary" numeric>
                   {formatSeconds(st?.totalTime ?? 0)} de jeu
+                  {(st?.benchTime ?? 0) > 0
+                    ? ` · ${formatSeconds(st?.benchTime ?? 0)} d'attente`
+                    : ''}
                 </Text>
               </View>
               <Ionicons name="swap-horizontal" size={22} color={theme.colors.accent.default} />

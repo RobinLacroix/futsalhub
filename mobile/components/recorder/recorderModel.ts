@@ -18,7 +18,7 @@
  * résultat nul d'une tentative.
  */
 
-import type { MatchEventType } from '../../types';
+import type { MatchEventType, RatingWeights } from '../../types';
 import type { ThemeColors } from '../../lib/design/tokens';
 import type { GoalType } from '../../lib/services/matchEvents';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -191,11 +191,13 @@ export interface StatColumn {
   key: string;
   label: string;
   short: string;
-  kind: 'count' | 'time' | 'plusminus';
+  kind: 'count' | 'time' | 'plusminus' | 'delta';
   tone: (c: ThemeColors) => string;
 }
 
 export const STAT_COLUMNS: StatColumn[] = [
+  // Note : la colonne de note live (`ratingDelta`) n'est PAS ici. Elle est
+  // tablette seulement, donc opt-in explicite via `TABLET_STAT_KEYS`.
   { key: 'goals', label: 'Buts', short: 'B', kind: 'count', tone: (c) => c.chartSeries[0] ?? c.accent.default },
   { key: 'shotsOnTarget', label: 'Tirs cadrés', short: 'T.cad', kind: 'count', tone: (c) => c.chartSeries[4] ?? c.accent.default },
   { key: 'totalShots', label: 'Tirs totaux', short: 'T.tot', kind: 'count', tone: (c) => c.neutralData },
@@ -206,11 +208,42 @@ export const STAT_COLUMNS: StatColumn[] = [
   { key: 'totalTime', label: 'Temps de jeu', short: 'Tps', kind: 'time', tone: (c) => c.text.secondary },
 ];
 
+/**
+ * Colonne de note live. Séparée de {@link STAT_COLUMNS} pour rester tablette
+ * seulement : le téléphone rend le même tableau et sa largeur est déjà saturée.
+ */
+export const RATING_DELTA_COLUMN: StatColumn = {
+  key: 'ratingDelta',
+  label: 'Note, écart depuis le début',
+  short: 'Note',
+  kind: 'delta',
+  tone: (c) => c.text.secondary,
+};
+
+/** Toutes les colonnes résolvables par clé, y compris celles hors défaut. */
+export const ALL_STAT_COLUMNS: StatColumn[] = [...STAT_COLUMNS, RATING_DELTA_COLUMN];
+
+/** Colonnes du bilan tablette : le jeu complet plus la note live. */
+export const TABLET_STAT_KEYS = [...STAT_COLUMNS.map((c) => c.key), RATING_DELTA_COLUMN.key];
+
 export interface PlayerState {
   id: string;
   totalTime: number;
   currentSequenceTime: number;
   sequenceTimeLimit: number;
+  /**
+   * Temps passé sur le banc depuis la dernière sortie, ou depuis le coup
+   * d'envoi pour qui n'est pas encore entré. Symétrique de
+   * `currentSequenceTime`, et comme lui il ne court que chrono lancé : une
+   * mi-temps ou un temps mort ne sont pas de l'attente.
+   *
+   * Volontairement NON remis à zéro à la mi-temps, contrairement aux séquences
+   * de terrain. `resetSequences` remet tout le monde à égalité sur le terrain
+   * parce que la pause coupe l'effort ; sur le banc elle effacerait justement
+   * l'information qu'on cherche, à savoir que ce joueur n'a pas joué de la
+   * première période.
+   */
+  benchTime: number;
   yellowCards: number;
   redCards: number;
   stats: Record<string, number>;
@@ -232,6 +265,8 @@ export interface StatRow {
   plusMinus: number;
   yellowCards: number;
   redCards: number;
+  /** Écart de note live, `null` si gardien ou sous {@link RATING_MIN_EVENTS}. */
+  ratingDelta: number | null;
 }
 
 /** Correspondance événement → clé de stat, pour rejouer l'historique au chargement. */
@@ -254,15 +289,129 @@ export const PAIRED_EVENT: Partial<Record<MatchEventType, MatchEventType>> = {
   opponent_goal: 'opponent_shot_on_target',
 };
 
+/**
+ * Terme collectif de la note : quels compteurs un événement incrémente chez
+ * CHAQUE joueur présent sur le terrain à cet instant.
+ *
+ * Ces quatre compteurs vivent dans `PlayerState.stats` et non dans un état à
+ * part, pour une raison précise : `stats` est déjà persisté par
+ * `saveRecorderState` et restauré au redémarrage. Un état séparé (comme
+ * `plusMinusByPlayer`) ne l'est pas et se reconstruit depuis la base — donc
+ * faux quand des événements sont encore dans l'outbox, ce qui est le cas normal
+ * en gymnase.
+ *
+ * Les quatre poids sont distincts (`cw_goal` ≠ -`cw_opponent_goal` si le club a
+ * personnalisé son échelle), donc on compte séparément le pour et le contre au
+ * lieu de réutiliser le +/- qui est un solde.
+ */
+export const COLLECTIVE_STAT: Partial<Record<MatchEventType, string>> = {
+  goal: 'collGoalsFor',
+  shot: 'collShotsFor',
+  shot_on_target: 'collShotsFor',
+  opponent_goal: 'collGoalsAgainst',
+  opponent_shot: 'collShotsAgainst',
+  opponent_shot_on_target: 'collShotsAgainst',
+};
+
+/**
+ * Nombre d'actions individuelles en dessous duquel la note n'est pas affichée.
+ *
+ * Tout le monde part de la même base : après cinq minutes, l'écart tient dans
+ * le bruit et le terme collectif est presque identique pour deux joueurs entrés
+ * ensemble (cf. spec §8). Afficher une décimale sur si peu de matière lui donne
+ * une autorité qu'elle n'a pas, et pousse à coacher le chiffre.
+ *
+ * Le seuil porte sur les actions du joueur, pas sur celles qu'il a subies : un
+ * joueur qui n'a rien fait mais qui était sur le terrain sur deux buts encaissés
+ * afficherait un écart négatif qui ne dit rien de lui.
+ */
+export const RATING_MIN_EVENTS = 3;
+
+/** Actions saisies au nom du joueur. Un but compte double (but + tir cadré). */
+export function individualEventCount(st: PlayerState | undefined): number {
+  if (!st) return 0;
+  const s = st.stats;
+  return (
+    (s.goals ?? 0) +
+    (s.assists ?? 0) +
+    (s.shotsOnTarget ?? 0) +
+    (s.shotsOffTarget ?? 0) +
+    (s.ballRecovery ?? 0) +
+    (s.ballLoss ?? 0) +
+    st.yellowCards +
+    st.redCards
+  );
+}
+
+/**
+ * Écart de note depuis le début du match, avec l'échelle du club.
+ *
+ * Reproduit `get_match_player_ratings` (spec §11.3) moins la base de 5.0 : la
+ * RPC reste la référence, celle-ci n'existe que parce que les événements du
+ * match en cours ne sont pas tous en base tant que l'outbox n'a pas été vidée.
+ * Les poids viennent du serveur, seule l'arithmétique est locale.
+ *
+ * Borné à ±5 comme la note l'est à [0 ; 10] (D3), pour que l'écart affiché en
+ * direct corresponde toujours à celui que donnera le bilan.
+ */
+export function ratingDelta(st: PlayerState | undefined, w: RatingWeights): number {
+  if (!st) return 0;
+  const s = st.stats;
+
+  /**
+   * Somme en millièmes entiers, et pas en flottants.
+   *
+   * La RPC calcule en `numeric`, donc en décimal exact. En `number`, un total
+   * qui vaut 0.35 sort à 0.34999999999999997 une fois sur deux selon l'ordre
+   * d'accumulation, et l'arrondi au dixième bascule alors du mauvais côté : la
+   * note live affichait +0.3 là où le bilan affiche +0.4. Vérifié sur un match
+   * simulé, deux joueurs sur cinq touchés.
+   */
+  const milli = (count: number, weight: number) => Math.round(count * weight * 1000);
+
+  const total =
+    milli(s.goals ?? 0, w.w_goal) +
+    milli(s.assists ?? 0, w.w_assist) +
+    milli(s.ballRecovery ?? 0, w.w_recovery) +
+    milli(s.shotsOnTarget ?? 0, w.w_shot_on_target) +
+    milli(s.shotsOffTarget ?? 0, w.w_shot) +
+    milli(s.ballLoss ?? 0, w.w_ball_loss) +
+    milli(st.yellowCards, w.w_yellow_card) +
+    milli(st.redCards, w.w_red_card) +
+    milli(s.collGoalsFor ?? 0, w.cw_goal) +
+    milli(s.collShotsFor ?? 0, w.cw_shot) +
+    milli(s.collShotsAgainst ?? 0, w.cw_opponent_shot) +
+    milli(s.collGoalsAgainst ?? 0, w.cw_opponent_goal);
+
+  // `Math.round` arrondit -2.5 vers -2, là où le `ROUND(numeric)` de Postgres
+  // s'éloigne de zéro et donne -0.3. Sans ça, une note négative pile au demi
+  // dixième afficherait un dixième d'écart avec le bilan, sur le seul cas où le
+  // coach irait vérifier.
+  const clamped = Math.min(5000, Math.max(-5000, total));
+  return (Math.sign(clamped) * Math.round(Math.abs(clamped) / 100)) / 10;
+}
+
 export function emptyPlayerState(id: string, limit: number, totalTime: number): PlayerState {
   return {
     id,
     totalTime,
     currentSequenceTime: 0,
     sequenceTimeLimit: limit,
+    benchTime: 0,
     yellowCards: 0,
     redCards: 0,
-    stats: { shotsOnTarget: 0, shotsOffTarget: 0, goals: 0, ballLoss: 0, ballRecovery: 0, assists: 0 },
+    stats: {
+      shotsOnTarget: 0,
+      shotsOffTarget: 0,
+      goals: 0,
+      ballLoss: 0,
+      ballRecovery: 0,
+      assists: 0,
+      collGoalsFor: 0,
+      collGoalsAgainst: 0,
+      collShotsFor: 0,
+      collShotsAgainst: 0,
+    },
   };
 }
 

@@ -601,8 +601,12 @@ const useStyles = makeStyles((t) => ({
     paddingHorizontal: t.space.xl,
     paddingVertical: t.space.lg,
     borderRadius: t.radius.lg,
-    backgroundColor: 'rgba(10,12,18,0.92)',
+    // `floating` porte un fond propre à chaque thème (blanc en clair) : il doit
+    // être écrasé APRÈS le spread. Déclaré avant, il était annulé et la pastille
+    // sortait blanche avec un texte blanc — donc vide à l'écran en thème clair.
     ...t.elevation.floating,
+    backgroundColor: 'rgba(10,12,18,0.92)',
+    borderColor: 'rgba(255,255,255,0.14)',
   },
   toastText: { color: '#FFFFFF', flexShrink: 1 },
 }));

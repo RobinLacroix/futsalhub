@@ -1,13 +1,63 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+/**
+ * Planification de saison — migration vers les tokens
+ *
+ * Dernier gros écran du chantier UI : 235 couleurs figées, calibrées pour un
+ * fond blanc, dans un fichier qui n'avait aucune notion de thème. En sombre,
+ * l'écran restait entièrement clair.
+ *
+ * ## Ce qui change au-delà des teintes
+ *
+ * - **La table des postes disparaît.** `POSITION_COLORS` était la **sixième**
+ *   copie trouvée dans le dépôt, après `squad/index`, `PlayerDetailView`,
+ *   `TeamDashboardView`, la feuille de présence et l'importeur. Le catalogue
+ *   unique est `components/players/positions.ts` — il donne aussi la liste des
+ *   postes, ce qui retire les deux tableaux `['Gardien', 'Meneur', …]` écrits
+ *   en dur dans les modales de recrue.
+ * - **Les niveaux de hiérarchie ne sont plus notés.** `H_COLORS` allait du vert
+ *   (H1) au gris (H5) : ça se lisait comme un barème « bons / mauvais joueurs ».
+ *   Or le coach renomme lui-même ces niveaux (`hierarchyNames`) — ce sont des
+ *   groupes, pas un classement de valeur. Les passer sur `chartSeries` ne
+ *   règle rien : cette rampe contient les teintes sémantiques du thème, et H1
+ *   ressortait en teal, H3 en rouge — le même jugement, avec une caution
+ *   « catégorielle ». Un niveau ne porte donc plus **aucune** teinte propre :
+ *   il est identifié par son numéro et son nom, et le liseré de la section
+ *   prend la couleur d'identité de l'équipe. Cette couleur vient de
+ *   `TEAM_COLORS`, calibrée pour la reconnaissance et non pour le contraste de
+ *   texte : elle ne sert qu'en bordure, jamais sous un libellé.
+ * - **La feuille modale roulée à la main disparaît.** Le `BottomSheet` local
+ *   (`Animated`, `KeyboardAvoidingView`, poignée décorative, aucun geste de
+ *   fermeture) est remplacé par la primitive `Sheet`, qui apporte le glissement,
+ *   la safe area et le retour haptique.
+ *
+ * ## Règle du bandeau
+ *
+ * Le bandeau est une surface de marque, sombre dans les deux thèmes
+ * (`fmPalette`). Tout ce qui est posé dessus se limite donc à :
+ * - texte : `onBrand` / `onBrandMuted` ;
+ * - pastilles : `onBrandFill` + `onBrandBorder` ;
+ * - aplats d'action : les variantes `.fill` (`accent`, `warning`), **identiques
+ *   dans les deux thèmes** et donc les seules sûres sur un fond fixe.
+ *
+ * Ne jamais y poser un `positive.default` ou un `text.*` : ils basculent avec le
+ * thème et deviennent illisibles sur le navy en clair. C'est exactement le
+ * défaut corrigé sur `TeamDashboardView`.
+ */
+
+import { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, TextInput, Alert, ActionSheetIOS, Platform,
-  Modal, Animated, Dimensions, KeyboardAvoidingView,
+  View, ScrollView, TouchableOpacity, ActivityIndicator, TextInput,
+  Alert, ActionSheetIOS, Platform, Modal, useWindowDimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 import { useActiveSeason } from '../../../contexts/ActiveSeasonContext';
+import { useTheme, makeStyles } from '../../../contexts/ThemeContext';
+import { fmPalette } from '../../../components/players/fmPalette';
+import { POSITIONS, positionStyle } from '../../../components/players/positions';
+import { DEFAULT_TEAM_COLOR } from '../../../lib/teamColors';
+import { Text, EmptyState, Sheet } from '../../../components/ui';
 import { advanceClubSeason } from '../../../lib/services/clubs';
 import { getPlayersByClubWithTeams } from '../../../lib/services/players';
 import {
@@ -17,8 +67,6 @@ import {
 } from '../../../lib/services/seasonPlanning';
 import type { Player, Team } from '../../../types';
 
-const { height: SCREEN_H } = Dimensions.get('window');
-
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 function currentSeason(): string {
@@ -27,23 +75,6 @@ function currentSeason(): string {
 }
 
 function deepClone<T>(o: T): T { return JSON.parse(JSON.stringify(o)); }
-
-const POSITION_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-  Gardien: { bg: '#fef9c3', text: '#a16207', border: '#fde68a' },
-  Meneur:  { bg: '#dbeafe', text: '#1d4ed8', border: '#93c5fd' },
-  Ailier:  { bg: '#dcfce7', text: '#15803d', border: '#86efac' },
-  Pivot:   { bg: '#fee2e2', text: '#b91c1c', border: '#fca5a5' },
-};
-const posColor = (p: string) => POSITION_COLORS[p] ?? { bg: '#f3f4f6', text: '#374151', border: '#e5e7eb' };
-
-const H_COLORS = [
-  { border: '#6ee7b7', bg: '#f0fdf4', badge: '#10b981', light: '#ecfdf5' },
-  { border: '#93c5fd', bg: '#eff6ff', badge: '#3b82f6', light: '#eff6ff' },
-  { border: '#fcd34d', bg: '#fffbeb', badge: '#f59e0b', light: '#fffbeb' },
-  { border: '#fdba74', bg: '#fff7ed', badge: '#f97316', light: '#fff7ed' },
-  { border: '#d1d5db', bg: '#f9fafb', badge: '#9ca3af', light: '#f9fafb' },
-];
-const hColor = (h: number) => H_COLORS[Math.min(h - 1, 4)];
 
 const DEFAULT_H_NAMES: Record<number, string> = {
   1: 'Titulaires', 2: 'Rotation', 3: 'Développement',
@@ -81,71 +112,20 @@ function addToZone(data: PlanningData, cardId: string, zone: Zone): PlanningData
   return n;
 }
 
-// ── Bottom Sheet component ────────────────────────────────────────────────────
-
 type SheetMode =
   | { kind: 'place'; playerId: string }
   | { kind: 'pick'; teamId: string; h: number };
 
-interface BottomSheetProps {
-  visible: boolean;
-  onClose: () => void;
-  children: React.ReactNode;
-  title: string;
-}
-
-function BottomSheet({ visible, onClose, children, title }: BottomSheetProps) {
-  const anim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.spring(anim, {
-      toValue: visible ? 1 : 0,
-      useNativeDriver: true,
-      tension: 80,
-      friction: 12,
-    }).start();
-  }, [visible]);
-
-  if (!visible) return null;
-
-  const translateY = anim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [SCREEN_H * 0.7, 0],
-  });
-
-  return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <TouchableOpacity
-          style={styles.sheetOverlay}
-          activeOpacity={1}
-          onPress={onClose}
-        />
-        <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
-          {/* Handle */}
-          <View style={styles.sheetHandle} />
-          {/* Header */}
-          <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>{title}</Text>
-            <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="close" size={20} color="#9ca3af" />
-            </TouchableOpacity>
-          </View>
-          {children}
-        </Animated.View>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
 // ── Position badge ────────────────────────────────────────────────────────────
 
 function PosBadge({ position }: { position: string }) {
+  const s = useStyles();
+  const { theme } = useTheme();
   if (!position) return null;
-  const pc = posColor(position);
+  const p = positionStyle(position, theme.colors);
   return (
-    <View style={[styles.posBadge, { backgroundColor: pc.bg, borderColor: pc.border }]}>
-      <Text style={[styles.posText, { color: pc.text }]}>{position.substring(0, 3).toUpperCase()}</Text>
+    <View style={[s.posBadge, { backgroundColor: p.color + '1A', borderColor: p.color + '55' }]}>
+      <Text variant="caption" weight="800" color={p.color}>{p.abbr}</Text>
     </View>
   );
 }
@@ -162,6 +142,9 @@ interface PoolRowProps {
 }
 
 function PoolRow({ cardId, player, recruit, selected, onPress, onLongPress }: PoolRowProps) {
+  const s = useStyles();
+  const { theme } = useTheme();
+  const c = theme.colors;
   const name = player ? `${player.first_name} ${player.last_name}` : recruit?.name ?? '—';
   const pos  = player?.position ?? recruit?.position ?? '';
   const num  = player?.number;
@@ -172,27 +155,27 @@ function PoolRow({ cardId, player, recruit, selected, onPress, onLongPress }: Po
       onPress={onPress}
       onLongPress={onLongPress}
       activeOpacity={0.7}
-      style={[styles.poolRow, selected && styles.poolRowSelected]}
+      style={[s.poolRow, selected && s.poolRowSelected]}
     >
-      <View style={styles.poolRowLeft}>
+      <View style={s.poolRowLeft}>
         {num != null && (
-          <Text style={styles.poolNum}>#{num}</Text>
+          <Text variant="caption" tone="tertiary" numeric weight="700" style={s.poolNum}>#{num}</Text>
         )}
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[styles.poolName, selected && styles.poolNameSelected]} numberOfLines={1}>
+        <View style={s.flexMin}>
+          <Text variant="body" weight="600" tone={selected ? 'accent' : 'primary'} numberOfLines={1}>
             {name}
           </Text>
           {isRec && (
-            <Text style={styles.recrueLabel}>Recrue</Text>
+            <Text variant="caption" weight="600" color={c.chartSeries[5]}>Recrue</Text>
           )}
         </View>
       </View>
-      <View style={styles.poolRowRight}>
+      <View style={s.poolRowRight}>
         <PosBadge position={pos} />
         <Ionicons
           name={selected ? 'checkmark-circle' : 'chevron-forward'}
           size={18}
-          color={selected ? '#3b82f6' : '#cbd5e1'}
+          color={selected ? c.accent.default : c.text.tertiary}
         />
       </View>
     </TouchableOpacity>
@@ -211,6 +194,9 @@ interface SlotChipProps {
 }
 
 function SlotChip({ cardId, player, recruit, confirmed, onLongPress, onConfirmToggle }: SlotChipProps) {
+  const s = useStyles();
+  const { theme } = useTheme();
+  const c = theme.colors;
   const name = player ? `${player.first_name} ${player.last_name}` : recruit?.name ?? '—';
   const pos  = player?.position ?? recruit?.position ?? '';
   const num  = player?.number;
@@ -220,19 +206,22 @@ function SlotChip({ cardId, player, recruit, confirmed, onLongPress, onConfirmTo
     <TouchableOpacity
       onLongPress={onLongPress}
       activeOpacity={0.75}
-      style={[styles.chip, confirmed && styles.chipConfirmed]}
+      style={[s.chip, confirmed && s.chipConfirmed]}
     >
       <TouchableOpacity
         onPress={onConfirmToggle}
-        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-        style={[styles.chipDot, confirmed && styles.chipDotOn]}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: confirmed }}
+        accessibilityLabel={`Valider ${name}`}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        style={[s.chipDot, confirmed && s.chipDotOn]}
       />
-      {num != null && <Text style={styles.chipNum}>{num}</Text>}
-      <Text style={styles.chipName} numberOfLines={1}>{name}</Text>
+      {num != null && <Text variant="caption" tone="tertiary" numeric weight="700">{num}</Text>}
+      <Text variant="caption" weight="600" numberOfLines={1} style={s.chipName}>{name}</Text>
       {pos ? <PosBadge position={pos} /> : null}
       {isRec && (
-        <View style={styles.recBadge}>
-          <Text style={styles.recText}>R</Text>
+        <View style={[s.recBadge, { backgroundColor: (c.chartSeries[5] ?? c.accent.default) + '26' }]}>
+          <Text variant="caption" weight="800" color={c.chartSeries[5]}>R</Text>
         </View>
       )}
     </TouchableOpacity>
@@ -242,7 +231,8 @@ function SlotChip({ cardId, player, recruit, confirmed, onLongPress, onConfirmTo
 // ── Hierarchy slot section ────────────────────────────────────────────────────
 
 interface HierSectionProps {
-  teamId: string;
+  /** Couleur d'identité de l'équipe. Liseré uniquement, jamais sous un texte. */
+  tint: string;
   h: number;
   label: string;
   cards: string[];
@@ -255,23 +245,26 @@ interface HierSectionProps {
   onLabelEdit: () => void;
 }
 
-function HierSection({ teamId, h, label, cards, confirmed, getPlayer, getRecruit, onAddFromPool, onLongPress, onConfirmToggle, onLabelEdit }: HierSectionProps) {
-  const hc = hColor(h);
+function HierSection({ tint, h, label, cards, confirmed, getPlayer, getRecruit, onAddFromPool, onLongPress, onConfirmToggle, onLabelEdit }: HierSectionProps) {
+  const s = useStyles();
+  const { theme } = useTheme();
+  const c = theme.colors;
+
   return (
-    <View style={[styles.hierSection, { borderLeftColor: hc.badge }]}>
-      {/* Header */}
-      <TouchableOpacity onPress={onLabelEdit} style={styles.hierSectionHeader} activeOpacity={0.7}>
-        <View style={[styles.hBadge, { backgroundColor: hc.badge }]}>
-          <Text style={styles.hBadgeText}>{h}</Text>
+    <View style={[s.hierSection, { borderLeftColor: tint }]}>
+      <TouchableOpacity onPress={onLabelEdit} style={s.hierSectionHeader} activeOpacity={0.7}>
+        <View style={s.hBadge}>
+          <Text variant="caption" weight="800" numeric>{h}</Text>
         </View>
-        <Text style={styles.hierSectionLabel}>{label}</Text>
-        <Text style={styles.hierSectionCount}>{cards.length} joueur{cards.length !== 1 ? 's' : ''}</Text>
-        <Ionicons name="pencil-outline" size={12} color="#9ca3af" />
+        <Text variant="callout" weight="700" style={s.flex}>{label}</Text>
+        <Text variant="caption" tone="tertiary">
+          {cards.length} joueur{cards.length !== 1 ? 's' : ''}
+        </Text>
+        <Ionicons name="pencil-outline" size={13} color={c.text.tertiary} />
       </TouchableOpacity>
 
-      {/* Chips */}
       {cards.length > 0 && (
-        <View style={styles.chipsWrap}>
+        <View style={s.chipsWrap}>
           {cards.map(id => (
             <SlotChip
               key={id}
@@ -286,10 +279,9 @@ function HierSection({ teamId, h, label, cards, confirmed, getPlayer, getRecruit
         </View>
       )}
 
-      {/* Add button */}
-      <TouchableOpacity onPress={onAddFromPool} style={styles.addFromPool} activeOpacity={0.7}>
-        <Ionicons name="add-circle-outline" size={15} color="#3b82f6" />
-        <Text style={styles.addFromPoolText}>Ajouter depuis le pool</Text>
+      <TouchableOpacity onPress={onAddFromPool} style={s.addFromPool} activeOpacity={0.7}>
+        <Ionicons name="add-circle-outline" size={16} color={c.accent.default} />
+        <Text variant="callout" tone="accent" weight="600">Ajouter depuis le pool</Text>
       </TouchableOpacity>
     </View>
   );
@@ -300,6 +292,12 @@ function HierSection({ teamId, h, label, cards, confirmed, getPlayer, getRecruit
 type Tab = 'pool' | string | 'departures';
 
 export default function SeasonPlanningScreen() {
+  const s = useStyles();
+  const { theme } = useTheme();
+  const c = theme.colors;
+  const brand = fmPalette(c, theme.scheme);
+  const insets = useSafeAreaInsets();
+  const { height: screenH } = useWindowDimensions();
   const router = useRouter();
   const { teams, activeTeam } = useActiveTeam();
   const { clubSeason, refresh: refreshSeason } = useActiveSeason();
@@ -328,13 +326,13 @@ export default function SeasonPlanningScreen() {
   // modals
   const [recruitModal, setRecruitModal]   = useState(false);
   const [recruitName, setRecruitName]     = useState('');
-  const [recruitPos, setRecruitPos]       = useState('Meneur');
+  const [recruitPos, setRecruitPos]       = useState<string>(POSITIONS[1].key);
   const [seasonModal, setSeasonModal]     = useState(false);
   const [editLabelModal, setEditLabelModal] = useState<{ teamId: string; h: number; current: string } | null>(null);
   const [editLabelValue, setEditLabelValue] = useState('');
   const [editRecruitModal, setEditRecruitModal] = useState<{ id: string; name: string; position: string } | null>(null);
   const [editRecruitName, setEditRecruitName] = useState('');
-  const [editRecruitPos, setEditRecruitPos] = useState('Meneur');
+  const [editRecruitPos, setEditRecruitPos] = useState<string>(POSITIONS[1].key);
 
   // apply / revert
   type ApplyModalMode = 'apply' | 'revert' | null;
@@ -524,8 +522,8 @@ export default function SeasonPlanningScreen() {
     const r = planning?.recruits[cardId];
     if (!r) return;
     setEditRecruitName(r.name);
-    setEditRecruitPos(r.position ?? 'Meneur');
-    setEditRecruitModal({ id: cardId, name: r.name, position: r.position ?? 'Meneur' });
+    setEditRecruitPos(r.position ?? POSITIONS[1].key);
+    setEditRecruitModal({ id: cardId, name: r.name, position: r.position ?? POSITIONS[1].key });
   };
 
   const handleDeleteRecruit = (cardId: string) => {
@@ -664,9 +662,9 @@ export default function SeasonPlanningScreen() {
   // ── render ─────────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3b82f6" />
-        <Text style={styles.loadingText}>Chargement…</Text>
+      <View style={s.centered}>
+        <ActivityIndicator size="large" color={c.accent.default} />
+        <Text variant="callout" tone="secondary">Chargement…</Text>
       </View>
     );
   }
@@ -676,31 +674,42 @@ export default function SeasonPlanningScreen() {
   const activeTeamState = activeTeamObj ? planning.teams[activeTeamObj.id] : null;
 
   return (
-    <View style={styles.root}>
+    <View style={s.root}>
 
       {/* ── Top bar ── */}
-      <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <Ionicons name="chevron-back" size={22} color="#fff" />
+      <View style={[s.topBar, { backgroundColor: brand.brand, paddingTop: insets.top + theme.space.sm }]}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={s.backBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Retour"
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="chevron-back" size={22} color={brand.onBrand} />
         </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.topTitle}>Planification de saison</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <TouchableOpacity onPress={() => setSeasonModal(true)} style={styles.seasonRow}>
-              <Text style={styles.seasonText}>{season}</Text>
-              <Ionicons name="chevron-down" size={12} color="rgba(255,255,255,0.7)" />
+        <View style={s.flex}>
+          <Text variant="callout" weight="700" color={brand.onBrand}>Planification de saison</Text>
+          <View style={s.topMetaRow}>
+            <TouchableOpacity
+              onPress={() => setSeasonModal(true)}
+              style={s.seasonRow}
+              accessibilityRole="button"
+              accessibilityLabel={`Saison ${season}, changer`}
+            >
+              <Text variant="caption" color={brand.onBrandMuted}>{season}</Text>
+              <Ionicons name="chevron-down" size={12} color={brand.onBrandMuted} />
             </TouchableOpacity>
             {clubSeason === season ? (
-              <View style={styles.seasonActiveBadge}>
-                <Text style={styles.seasonActiveBadgeText}>active</Text>
+              <View style={[s.brandPill, { backgroundColor: brand.onBrandFill, borderColor: brand.onBrandBorder }]}>
+                <Text variant="caption" weight="700" color={brand.onBrand}>active</Text>
               </View>
             ) : (
               <TouchableOpacity
                 onPress={handleActivateSeason}
                 disabled={activating}
-                style={[styles.seasonActivateBtn, activating && { opacity: 0.6 }]}
+                style={[s.brandAction, { backgroundColor: c.accent.fill }, activating && s.dimmed]}
               >
-                <Text style={styles.seasonActivateBtnText}>
+                <Text variant="caption" weight="700" tone="onFill">
                   {activating ? '…' : 'Passer à cette saison'}
                 </Text>
               </TouchableOpacity>
@@ -708,36 +717,38 @@ export default function SeasonPlanningScreen() {
           </View>
         </View>
         {savedAt && (
-          <Text style={styles.savedHint}>{savedAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</Text>
+          <Text variant="caption" color={brand.onBrandMuted} numeric>
+            {savedAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+          </Text>
         )}
-        {/* Apply / applied button */}
+        {/* Apply / revert */}
         {planning?.appliedAt ? (
           <TouchableOpacity
             onPress={() => setApplyModal('revert')}
-            style={[styles.applyBtn, { backgroundColor: '#f97316' }]}
+            style={[s.brandAction, s.brandActionRow, { backgroundColor: c.warning.fill }]}
           >
-            <Ionicons name="arrow-undo" size={15} color="#fff" />
-            <Text style={styles.applyBtnText}>Annuler</Text>
+            <Ionicons name="arrow-undo" size={14} color={c.text.onFill} />
+            <Text variant="caption" weight="700" tone="onFill">Annuler</Text>
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
             onPress={() => setApplyModal('apply')}
-            style={styles.applyBtn}
+            style={[s.brandAction, s.brandActionRow, { backgroundColor: c.accent.fill }]}
           >
-            <Ionicons name="play-circle-outline" size={16} color="#fff" />
-            <Text style={styles.applyBtnText}>Appliquer</Text>
+            <Ionicons name="play-circle-outline" size={15} color={c.text.onFill} />
+            <Text variant="caption" weight="700" tone="onFill">Appliquer</Text>
           </TouchableOpacity>
         )}
         <TouchableOpacity
           onPress={handleSave}
           disabled={saving}
-          style={[styles.saveBtn, saving && { opacity: 0.6 }]}
+          style={[s.brandAction, s.brandActionRow, { backgroundColor: brand.onBrandFill, borderColor: brand.onBrandBorder, borderWidth: 1 }, saving && s.dimmed]}
         >
           {saving
-            ? <ActivityIndicator size="small" color="#fff" />
-            : <Ionicons name="checkmark-done" size={18} color="#fff" />
+            ? <ActivityIndicator size="small" color={brand.onBrand} />
+            : <Ionicons name="checkmark-done" size={16} color={brand.onBrand} />
           }
-          <Text style={styles.saveBtnText}>{saving ? '…' : 'Sauv.'}</Text>
+          <Text variant="caption" weight="700" color={brand.onBrand}>{saving ? '…' : 'Sauv.'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -745,33 +756,50 @@ export default function SeasonPlanningScreen() {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        style={styles.tabBar}
-        contentContainerStyle={styles.tabBarContent}
+        style={s.tabBar}
+        contentContainerStyle={s.tabBarContent}
       >
         {tabs.map(tab => {
           const isActive = activeTab === tab.key;
           const isDep = tab.key === 'departures';
+          const activeTint = isDep ? c.negative.default : c.accent.default;
           return (
             <TouchableOpacity
               key={String(tab.key)}
               onPress={() => setActiveTab(tab.key)}
-              style={[styles.tab, isActive && styles.tabActive, isDep && styles.tabDep, isActive && isDep && styles.tabDepActive]}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: isActive }}
+              style={[
+                s.tab,
+                isActive && {
+                  backgroundColor: isDep ? c.negative.subtle : c.accent.subtle,
+                  borderColor: isDep ? c.negative.default + '55' : c.accent.border,
+                },
+              ]}
               activeOpacity={0.7}
             >
               {tab.icon && (
                 <Ionicons
                   name={tab.icon as any}
-                  size={13}
-                  color={isActive ? (isDep ? '#dc2626' : '#3b82f6') : '#94a3b8'}
-                  style={{ marginRight: 4 }}
+                  size={14}
+                  color={isActive ? activeTint : c.text.tertiary}
                 />
               )}
-              <Text style={[styles.tabText, isActive && styles.tabTextActive, isActive && isDep && { color: '#dc2626' }]}>
+              <Text
+                variant="caption"
+                weight={isActive ? '700' : '500'}
+                color={isActive ? activeTint : c.text.secondary}
+              >
                 {tab.label}
               </Text>
               {tab.count !== undefined && (
-                <View style={[styles.tabBadge, isActive && styles.tabBadgeActive, isActive && isDep && { backgroundColor: '#fef2f2' }]}>
-                  <Text style={[styles.tabBadgeText, isActive && styles.tabBadgeTextActive, isActive && isDep && { color: '#dc2626' }]}>
+                <View style={[s.tabBadge, isActive && { backgroundColor: activeTint + '26' }]}>
+                  <Text
+                    variant="caption"
+                    weight="600"
+                    numeric
+                    color={isActive ? activeTint : c.text.tertiary}
+                  >
                     {tab.count}
                   </Text>
                 </View>
@@ -783,46 +811,55 @@ export default function SeasonPlanningScreen() {
 
       {/* ── Pool Tab ── */}
       {activeTab === 'pool' && (
-        <View style={{ flex: 1 }}>
+        <View style={s.flex}>
           {/* Search + add recruit */}
-          <View style={styles.poolTop}>
-            <View style={styles.searchBar}>
-              <Ionicons name="search-outline" size={16} color="#9ca3af" />
+          <View style={s.poolTop}>
+            <View style={s.searchBar}>
+              <Ionicons name="search-outline" size={16} color={c.text.tertiary} />
               <TextInput
-                style={styles.searchInput}
+                style={s.searchInput}
                 placeholder="Rechercher un joueur…"
+                accessibilityLabel="Rechercher un joueur"
                 value={search}
                 onChangeText={setSearch}
-                placeholderTextColor="#9ca3af"
+                placeholderTextColor={c.text.tertiary}
                 clearButtonMode="while-editing"
               />
             </View>
-            <TouchableOpacity onPress={() => setRecruitModal(true)} style={styles.addRecruitBtn}>
-              <Ionicons name="person-add-outline" size={17} color="#7c3aed" />
+            <TouchableOpacity
+              onPress={() => setRecruitModal(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Ajouter une recrue"
+              style={[s.addRecruitBtn, {
+                backgroundColor: (c.chartSeries[5] ?? c.accent.default) + '1A',
+                borderColor: (c.chartSeries[5] ?? c.accent.default) + '55',
+              }]}
+            >
+              <Ionicons name="person-add-outline" size={18} color={c.chartSeries[5] ?? c.accent.default} />
             </TouchableOpacity>
           </View>
 
           {/* Position filter chips */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll} contentContainerStyle={styles.filterContent}>
-            {[
-              { pos: '', label: 'Tous' },
-              { pos: 'Gardien', label: 'GK' },
-              { pos: 'Meneur',  label: 'MEN' },
-              { pos: 'Ailier',  label: 'AIL' },
-              { pos: 'Pivot',   label: 'PIV' },
-            ].map(({ pos, label }) => {
-              const isActive = filterPos === pos;
-              const pc = pos ? posColor(pos) : null;
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.filterScroll} contentContainerStyle={s.filterContent}>
+            {[{ key: '', label: 'Tous' }, ...POSITIONS.map(p => ({ key: p.key as string, label: p.abbr }))].map(({ key, label }) => {
+              const isActive = filterPos === key;
+              const tint = key ? positionStyle(key, c).color : c.accent.default;
               return (
                 <TouchableOpacity
-                  key={pos || 'all'}
-                  onPress={() => setFilterPos(pos === filterPos ? '' : pos)}
+                  key={key || 'all'}
+                  onPress={() => setFilterPos(key === filterPos ? '' : key)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isActive }}
                   style={[
-                    styles.filterChip,
-                    isActive && (pc ? { backgroundColor: pc.bg, borderColor: pc.border } : styles.filterChipAll),
+                    s.filterChip,
+                    isActive && { backgroundColor: tint + '1A', borderColor: tint + '55' },
                   ]}
                 >
-                  <Text style={[styles.filterChipText, isActive && (pc ? { color: pc.text } : { color: '#3b82f6' })]}>
+                  <Text
+                    variant="caption"
+                    weight="600"
+                    color={isActive ? tint : c.text.secondary}
+                  >
                     {label}
                   </Text>
                 </TouchableOpacity>
@@ -831,21 +868,21 @@ export default function SeasonPlanningScreen() {
           </ScrollView>
 
           {/* Pool count */}
-          <View style={styles.poolMeta}>
-            <Text style={styles.poolMetaText}>
+          <View style={s.poolMeta}>
+            <Text variant="caption" tone="tertiary">
               {filteredPool.length} / {planning.unassigned.length} joueur{planning.unassigned.length !== 1 ? 's' : ''} non assignés
             </Text>
           </View>
 
           {/* Player list */}
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
+          <ScrollView style={s.flex} contentContainerStyle={s.listPad} keyboardShouldPersistTaps="handled">
             {filteredPool.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Ionicons name="checkmark-circle-outline" size={40} color="#d1d5db" />
-                <Text style={styles.emptyText}>
-                  {planning.unassigned.length === 0 ? 'Tous les joueurs sont placés !' : 'Aucun résultat'}
-                </Text>
-              </View>
+              <EmptyState
+                icon="checkmark-circle-outline"
+                title={planning.unassigned.length === 0 ? 'Tous les joueurs sont placés' : 'Aucun résultat'}
+                description={planning.unassigned.length === 0 ? undefined : 'Essayez un autre nom ou un autre poste.'}
+                compact
+              />
             ) : (
               filteredPool.map(id => (
                 <PoolRow
@@ -869,34 +906,55 @@ export default function SeasonPlanningScreen() {
 
           {/* Selected player floating bar */}
           {sheet?.kind === 'place' && (
-            <View style={styles.floatBar}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.floatName} numberOfLines={1}>
-                  👤 {getCardName(sheet.playerId)}
+            <View style={s.floatBar}>
+              <View style={s.flex}>
+                <View style={s.floatNameRow}>
+                  <Ionicons name="person-circle-outline" size={18} color={c.text.secondary} />
+                  <Text variant="callout" weight="700" numberOfLines={1} style={s.flex}>
+                    {getCardName(sheet.playerId)}
+                  </Text>
+                </View>
+                <Text variant="caption" tone="tertiary" style={s.floatHint}>
+                  Choisissez une équipe et un niveau
                 </Text>
-                <Text style={styles.floatHint}>Choisissez une équipe et un niveau</Text>
               </View>
-              <TouchableOpacity onPress={() => setSheet(null)} style={styles.floatClose}>
-                <Ionicons name="close" size={18} color="#6b7280" />
+              <TouchableOpacity
+                onPress={() => setSheet(null)}
+                accessibilityRole="button"
+                accessibilityLabel="Désélectionner"
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                style={s.floatClose}
+              >
+                <Ionicons name="close" size={18} color={c.text.secondary} />
               </TouchableOpacity>
               {/* Quick team buttons */}
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingLeft: 8 }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.floatScroll}>
                 {teamList.map(team => {
+                  const tint = team.color || DEFAULT_TEAM_COLOR;
                   const ts = planning.teams[team.id];
                   return (
-                    <View key={team.id} style={{ gap: 4 }}>
-                      <Text style={[styles.floatTeamLabel, { color: team.color || '#6366f1' }]}>{team.name}</Text>
-                      <View style={{ flexDirection: 'row', gap: 4 }}>
+                    <View key={team.id} style={s.floatCol}>
+                      {/* La couleur d'équipe passe par la pastille, pas par le
+                          libellé : `TEAM_COLORS` n'est pas calibrée pour porter
+                          du texte. */}
+                      <View style={s.floatTeamRow}>
+                        <View style={[s.floatTeamDot, { backgroundColor: tint }]} />
+                        <Text variant="caption" weight="700" style={s.floatTeamLabel}>
+                          {team.name}
+                        </Text>
+                      </View>
+                      <View style={s.floatRow}>
                         {Array.from({ length: ts.hierarchyCount }, (_, i) => i + 1).map(h => {
-                          const hc = hColor(h);
                           const label = ts.hierarchyNames?.[h] ?? DEFAULT_H_NAMES[h];
                           return (
                             <TouchableOpacity
                               key={h}
                               onPress={() => assignToSlot(sheet.playerId, team.id, h)}
-                              style={[styles.floatSlotBtn, { backgroundColor: hc.bg, borderColor: hc.border }]}
+                              accessibilityRole="button"
+                              accessibilityLabel={`${team.name}, ${label}`}
+                              style={[s.floatSlotBtn, { borderColor: tint }]}
                             >
-                              <Text style={[styles.floatSlotBtnText, { color: hc.badge }]}>H{h}</Text>
+                              <Text variant="caption" weight="800">H{h}</Text>
                             </TouchableOpacity>
                           );
                         })}
@@ -904,13 +962,15 @@ export default function SeasonPlanningScreen() {
                     </View>
                   );
                 })}
-                <View style={{ gap: 4 }}>
-                  <Text style={[styles.floatTeamLabel, { color: '#dc2626' }]}>Départs</Text>
+                <View style={s.floatCol}>
+                  <Text variant="caption" weight="700" tone="negative" style={s.floatTeamLabel}>Départs</Text>
                   <TouchableOpacity
                     onPress={() => { moveToDepartures(sheet.playerId); setSheet(null); }}
-                    style={[styles.floatSlotBtn, { backgroundColor: '#fef2f2', borderColor: '#fca5a5' }]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Marquer comme départ du club"
+                    style={[s.floatSlotBtn, { backgroundColor: c.negative.subtle, borderColor: c.negative.default }]}
                   >
-                    <Ionicons name="exit-outline" size={14} color="#dc2626" />
+                    <Ionicons name="exit-outline" size={14} color={c.negative.default} />
                   </TouchableOpacity>
                 </View>
               </ScrollView>
@@ -921,31 +981,36 @@ export default function SeasonPlanningScreen() {
 
       {/* ── Team Tab ── */}
       {activeTeamObj && activeTeamState && (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 32 }}>
+        <ScrollView style={s.flex} contentContainerStyle={s.teamPad}>
           {/* Team header */}
-          <View style={[styles.teamHeader, { borderLeftColor: activeTeamObj.color || '#6366f1' }]}>
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <View style={[styles.teamDot, { backgroundColor: activeTeamObj.color || '#6366f1' }]} />
-                <Text style={styles.teamName}>{activeTeamObj.name}</Text>
-                {activeTeamObj.category && <Text style={styles.teamCat}>{activeTeamObj.category}</Text>}
+          <View style={[s.teamHeader, { borderLeftColor: activeTeamObj.color || DEFAULT_TEAM_COLOR }]}>
+            <View style={s.flex}>
+              <View style={s.teamTitleRow}>
+                <View style={[s.teamDot, { backgroundColor: activeTeamObj.color || DEFAULT_TEAM_COLOR }]} />
+                <Text variant="headline" weight="700">{activeTeamObj.name}</Text>
+                {activeTeamObj.category && (
+                  <Text variant="caption" tone="tertiary">{activeTeamObj.category}</Text>
+                )}
               </View>
               {/* Stats */}
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+              <View style={s.statRow}>
                 {(() => {
                   const all = Object.values(activeTeamState.slots).flat();
+                  const gkTint = positionStyle('Gardien', c).color;
                   const gk  = all.filter(id => getCardPos(id) === 'Gardien').length;
                   const field = all.length - gk;
                   return (
                     <>
-                      <View style={styles.statBadge}>
-                        <Text style={styles.statText}>{field} joueur{field !== 1 ? 's' : ''} de champ</Text>
+                      <View style={s.statBadge}>
+                        <Text variant="caption" weight="600" tone="secondary">
+                          {field} joueur{field !== 1 ? 's' : ''} de champ
+                        </Text>
                       </View>
-                      <View style={[styles.statBadge, { backgroundColor: '#fef9c3', borderColor: '#fde68a' }]}>
-                        <Text style={[styles.statText, { color: '#a16207' }]}>{gk} GK</Text>
+                      <View style={[s.statBadge, { backgroundColor: gkTint + '1A', borderColor: gkTint + '55' }]}>
+                        <Text variant="caption" weight="600" color={gkTint}>{gk} GB</Text>
                       </View>
-                      <View style={[styles.statBadge, { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' }]}>
-                        <Text style={[styles.statText, { color: '#1d4ed8' }]}>{all.length} total</Text>
+                      <View style={[s.statBadge, { backgroundColor: c.accent.subtle, borderColor: c.accent.border }]}>
+                        <Text variant="caption" weight="600" tone="accent">{all.length} total</Text>
                       </View>
                     </>
                   );
@@ -953,37 +1018,43 @@ export default function SeasonPlanningScreen() {
               </View>
             </View>
             {/* Hierarchy controls */}
-            <View style={styles.hierControls}>
-              <Text style={styles.hierControlLabel}>Niveaux</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+            <View style={s.hierControls}>
+              <Text variant="caption" weight="700" tone="tertiary">Niveaux</Text>
+              <View style={s.hierControlsRow}>
                 <TouchableOpacity
                   onPress={() => changeHierarchy(activeTeamObj.id, -1)}
                   disabled={activeTeamState.hierarchyCount <= 1}
-                  style={[styles.hierBtn, activeTeamState.hierarchyCount <= 1 && { opacity: 0.3 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retirer un niveau"
+                  style={[s.hierBtn, activeTeamState.hierarchyCount <= 1 && s.disabled]}
                 >
-                  <Ionicons name="remove" size={16} color="#374151" />
+                  <Ionicons name="remove" size={16} color={c.text.primary} />
                 </TouchableOpacity>
-                <Text style={styles.hierCount}>{activeTeamState.hierarchyCount}</Text>
+                <Text variant="headline" weight="800" numeric style={s.hierCount}>
+                  {activeTeamState.hierarchyCount}
+                </Text>
                 <TouchableOpacity
                   onPress={() => changeHierarchy(activeTeamObj.id, +1)}
                   disabled={activeTeamState.hierarchyCount >= 5}
-                  style={[styles.hierBtn, activeTeamState.hierarchyCount >= 5 && { opacity: 0.3 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Ajouter un niveau"
+                  style={[s.hierBtn, activeTeamState.hierarchyCount >= 5 && s.disabled]}
                 >
-                  <Ionicons name="add" size={16} color="#374151" />
+                  <Ionicons name="add" size={16} color={c.text.primary} />
                 </TouchableOpacity>
               </View>
             </View>
           </View>
 
           {/* Hierarchy sections */}
-          <View style={{ paddingHorizontal: 14, paddingTop: 10, gap: 10 }}>
+          <View style={s.hierList}>
             {Array.from({ length: activeTeamState.hierarchyCount }, (_, i) => i + 1).map(h => {
               const label = activeTeamState.hierarchyNames?.[h] ?? DEFAULT_H_NAMES[h];
               const cards = activeTeamState.slots[h] ?? [];
               return (
                 <HierSection
                   key={h}
-                  teamId={activeTeamObj.id}
+                  tint={activeTeamObj.color || DEFAULT_TEAM_COLOR}
                   h={h}
                   label={label}
                   cards={cards}
@@ -1009,21 +1080,23 @@ export default function SeasonPlanningScreen() {
 
       {/* ── Departures Tab ── */}
       {activeTab === 'departures' && (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 14, paddingBottom: 32 }}>
-          <View style={styles.departCard}>
+        <ScrollView style={s.flex} contentContainerStyle={s.departPad}>
+          <View style={s.departCard}>
             {/* Header */}
-            <View style={styles.departHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <View style={[styles.hBadge, { backgroundColor: '#dc2626' }]}>
-                  <Ionicons name="exit-outline" size={10} color="#fff" />
+            <View style={s.departHeader}>
+              <View style={s.departHeaderLeft}>
+                <View style={[s.hBadge, { backgroundColor: c.negative.default, borderColor: c.negative.default }]}>
+                  <Ionicons name="exit-outline" size={11} color={c.text.onFill} />
                 </View>
-                <Text style={styles.departTitle}>Départs du club</Text>
+                <Text variant="callout" weight="700" tone="negative">Départs du club</Text>
               </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={styles.departCount}>{planning.departures.length} joueur{planning.departures.length !== 1 ? 's' : ''}</Text>
+              <View style={s.departHeaderRight}>
+                <Text variant="caption" tone="secondary">
+                  {planning.departures.length} joueur{planning.departures.length !== 1 ? 's' : ''}
+                </Text>
                 {planning.appliedAt && planning.departures.length > 0 && (
-                  <View style={styles.appliedBadge}>
-                    <Text style={styles.appliedBadgeText}>status: left ✓</Text>
+                  <View style={[s.appliedBadge, { backgroundColor: c.positive.subtle, borderColor: c.positive.default + '55' }]}>
+                    <Text variant="caption" weight="700" tone="positive">status: left ✓</Text>
                   </View>
                 )}
               </View>
@@ -1031,26 +1104,29 @@ export default function SeasonPlanningScreen() {
 
             {/* Players */}
             {planning.departures.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Ionicons name="people-outline" size={32} color="#fca5a5" />
-                <Text style={[styles.emptyText, { color: '#fca5a5' }]}>Aucun départ enregistré</Text>
-                <Text style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', marginTop: 4 }}>
-                  Depuis le pool, sélectionnez un joueur et choisissez "Départs"
-                </Text>
-              </View>
+              <EmptyState
+                icon="people-outline"
+                title="Aucun départ enregistré"
+                description={'Depuis le pool, sélectionnez un joueur et choisissez « Départs ».'}
+                compact
+              />
             ) : (
-              <View style={{ gap: 1 }}>
+              <View>
                 {planning.departures.map(id => (
-                  <View key={id} style={styles.departRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.departName}>{getCardName(id)}</Text>
-                      <PosBadge position={getCardPos(id)} />
+                  <View key={id} style={s.departRow}>
+                    <View style={s.flex}>
+                      <Text variant="callout" weight="600">{getCardName(id)}</Text>
+                      <View style={s.departBadgeRow}>
+                        <PosBadge position={getCardPos(id)} />
+                      </View>
                     </View>
                     <TouchableOpacity
                       onPress={() => handleCardLongPress(id)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Actions sur ${getCardName(id)}`}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
-                      <Ionicons name="ellipsis-horizontal" size={18} color="#9ca3af" />
+                      <Ionicons name="ellipsis-horizontal" size={18} color={c.text.secondary} />
                     </TouchableOpacity>
                   </View>
                 ))}
@@ -1060,34 +1136,46 @@ export default function SeasonPlanningScreen() {
         </ScrollView>
       )}
 
-      {/* ── Assignment bottom sheet (pick from pool) ── */}
-      <BottomSheet
+      {/* ── Assignment sheet (pick from pool) ── */}
+      <Sheet
         visible={sheet?.kind === 'pick'}
         onClose={() => { setSheet(null); setPickSearch(''); }}
         title={sheet?.kind === 'pick'
-          ? `Ajouter → ${teamList.find(t => t.id === (sheet as any).teamId)?.name ?? ''} · H${(sheet as any).h}`
+          ? `${teamList.find(t => t.id === sheet.teamId)?.name ?? ''} · H${sheet.h}`
           : ''}
+        subtitle="Ajouter un joueur depuis le pool"
+        scrollable={false}
       >
         {sheet?.kind === 'pick' && (
-          <View style={{ maxHeight: SCREEN_H * 0.55 }}>
-            <View style={[styles.searchBar, { marginHorizontal: 16, marginBottom: 10 }]}>
-              <Ionicons name="search-outline" size={16} color="#9ca3af" />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Filtrer…"
-                value={pickSearch}
-                onChangeText={setPickSearch}
-                placeholderTextColor="#9ca3af"
-                clearButtonMode="while-editing"
-              />
+          // Le corps de `Sheet` applique un retrait horizontal ; on l'annule
+          // pour que les lignes de joueur restent pleine largeur, comme dans le
+          // pool — leur séparateur doit filer d'un bord à l'autre.
+          <View style={s.sheetBleed}>
+            {/* `searchBar` porte `flex: 1`, pensé pour la rangée du pool. Posé
+                tel quel dans la colonne de la feuille, ce `flexBasis: 0` lui
+                prend sa hauteur et le champ s'écrase à quelques points. Il lui
+                faut donc sa propre rangée. */}
+            <View style={s.sheetSearchRow}>
+              <View style={[s.searchBar, s.sheetSearch]}>
+                <Ionicons name="search-outline" size={16} color={c.text.tertiary} />
+                <TextInput
+                  style={s.searchInput}
+                  placeholder="Filtrer…"
+                  accessibilityLabel="Filtrer les joueurs du pool"
+                  value={pickSearch}
+                  onChangeText={setPickSearch}
+                  placeholderTextColor={c.text.tertiary}
+                  clearButtonMode="while-editing"
+                />
+              </View>
             </View>
-            <ScrollView contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
+            <ScrollView style={{ maxHeight: screenH * 0.5 }} keyboardShouldPersistTaps="handled">
               {filteredPickPool.length === 0 ? (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyText}>
-                    {planning.unassigned.length === 0 ? 'Aucun joueur dans le pool' : 'Aucun résultat'}
-                  </Text>
-                </View>
+                <EmptyState
+                  icon="people-outline"
+                  title={planning.unassigned.length === 0 ? 'Aucun joueur dans le pool' : 'Aucun résultat'}
+                  compact
+                />
               ) : (
                 filteredPickPool.map(id => (
                   <PoolRow
@@ -1096,7 +1184,7 @@ export default function SeasonPlanningScreen() {
                     player={getPlayer(id)}
                     recruit={getRecruit(id)}
                     selected={false}
-                    onPress={() => assignToSlot(id, (sheet as any).teamId, (sheet as any).h)}
+                    onPress={() => assignToSlot(id, sheet.teamId, sheet.h)}
                     onLongPress={() => {}}
                   />
                 ))
@@ -1104,61 +1192,69 @@ export default function SeasonPlanningScreen() {
             </ScrollView>
           </View>
         )}
-      </BottomSheet>
+      </Sheet>
 
       {/* ── Apply modal ── */}
       <Modal visible={applyModal === 'apply'} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <View style={styles.applyModalHeader}>
-              <View style={[styles.applyIconWrap, { backgroundColor: '#dbeafe' }]}>
-                <Ionicons name="play-circle-outline" size={24} color="#2563eb" />
+        <View style={s.modalOverlay}>
+          <View style={s.modalBox}>
+            <View style={s.applyModalHeader}>
+              <View style={[s.applyIconWrap, { backgroundColor: c.accent.subtle }]}>
+                <Ionicons name="play-circle-outline" size={24} color={c.accent.default} />
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.modalTitle}>Appliquer la saison {season}</Text>
-                <Text style={styles.applyModalSub}>Cette action modifie les données réelles des joueurs.</Text>
+              <View style={s.flex}>
+                <Text variant="title">Appliquer la saison {season}</Text>
+                <Text variant="caption" tone="secondary" style={s.modalSub}>
+                  Cette action modifie les données réelles des joueurs.
+                </Text>
               </View>
             </View>
 
             {planSummary && (
-              <View style={styles.summaryRow}>
-                <View style={[styles.summaryCell, { backgroundColor: '#fef2f2', borderColor: '#fecaca' }]}>
-                  <Text style={[styles.summaryNum, { color: '#dc2626' }]}>{planSummary.departureCount}</Text>
-                  <Text style={[styles.summaryLabel, { color: '#dc2626' }]}>Départ{planSummary.departureCount !== 1 ? 's' : ''}</Text>
-                  <Text style={styles.summaryHint}>status → left</Text>
+              <View style={s.summaryRow}>
+                <View style={[s.summaryCell, { backgroundColor: c.negative.subtle, borderColor: c.negative.default + '55' }]}>
+                  <Text variant="display" numeric tone="negative">{planSummary.departureCount}</Text>
+                  <Text variant="caption" weight="700" tone="negative">
+                    Départ{planSummary.departureCount !== 1 ? 's' : ''}
+                  </Text>
+                  <Text variant="caption" tone="tertiary">status → left</Text>
                 </View>
-                <View style={[styles.summaryCell, { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' }]}>
-                  <Text style={[styles.summaryNum, { color: '#2563eb' }]}>{planSummary.assignedCount}</Text>
-                  <Text style={[styles.summaryLabel, { color: '#2563eb' }]}>Réassign.</Text>
-                  <Text style={styles.summaryHint}>teams MAJ</Text>
+                <View style={[s.summaryCell, { backgroundColor: c.accent.subtle, borderColor: c.accent.border }]}>
+                  <Text variant="display" numeric tone="accent">{planSummary.assignedCount}</Text>
+                  <Text variant="caption" weight="700" tone="accent">Réassign.</Text>
+                  <Text variant="caption" tone="tertiary">teams MAJ</Text>
                 </View>
-                <View style={[styles.summaryCell, { backgroundColor: '#f8fafc', borderColor: '#e2e8f0' }]}>
-                  <Text style={[styles.summaryNum, { color: '#64748b' }]}>{planSummary.unassignedCount}</Text>
-                  <Text style={[styles.summaryLabel, { color: '#64748b' }]}>Pool</Text>
-                  <Text style={styles.summaryHint}>non touchés</Text>
+                <View style={[s.summaryCell, s.summaryCellNeutral]}>
+                  <Text variant="display" numeric tone="secondary">{planSummary.unassignedCount}</Text>
+                  <Text variant="caption" weight="700" tone="secondary">Pool</Text>
+                  <Text variant="caption" tone="tertiary">non touchés</Text>
                 </View>
               </View>
             )}
 
-            <View style={styles.applyWarning}>
-              <Ionicons name="warning-outline" size={15} color="#92400e" />
-              <Text style={styles.applyWarningText}>Un snapshot sera créé — tu pourras annuler l&apos;opération.</Text>
+            <View style={s.warningBox}>
+              <Ionicons name="warning-outline" size={15} color={c.warning.default} />
+              <Text variant="caption" tone="warning" style={s.flex}>
+                Un snapshot sera créé — tu pourras annuler l&apos;opération.
+              </Text>
             </View>
 
-            <View style={styles.modalActions}>
-              <TouchableOpacity onPress={() => setApplyModal(null)} disabled={applying} style={styles.modalCancel}>
-                <Text style={styles.modalCancelText}>Annuler</Text>
+            <View style={s.modalActions}>
+              <TouchableOpacity onPress={() => setApplyModal(null)} disabled={applying} style={s.modalCancel}>
+                <Text variant="callout" tone="secondary">Annuler</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={handleApply}
                 disabled={applying}
-                style={[styles.modalConfirm, { backgroundColor: '#16a34a' }, applying && { opacity: 0.6 }]}
+                style={[s.modalConfirm, { backgroundColor: c.positive.fill }, applying && s.dimmed]}
               >
                 {applying
-                  ? <ActivityIndicator size="small" color="#fff" />
-                  : <Ionicons name="play-circle-outline" size={16} color="#fff" style={{ marginRight: 4 }} />
+                  ? <ActivityIndicator size="small" color={c.text.onFill} />
+                  : <Ionicons name="play-circle-outline" size={16} color={c.text.onFill} />
                 }
-                <Text style={styles.modalConfirmText}>{applying ? 'Application…' : 'Appliquer'}</Text>
+                <Text variant="callout" weight="700" tone="onFill">
+                  {applying ? 'Application…' : 'Appliquer'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1167,47 +1263,54 @@ export default function SeasonPlanningScreen() {
 
       {/* ── Revert modal ── */}
       <Modal visible={applyModal === 'revert'} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <View style={styles.applyModalHeader}>
-              <View style={[styles.applyIconWrap, { backgroundColor: '#ffedd5' }]}>
-                <Ionicons name="arrow-undo" size={24} color="#ea580c" />
+        <View style={s.modalOverlay}>
+          <View style={s.modalBox}>
+            <View style={s.applyModalHeader}>
+              <View style={[s.applyIconWrap, { backgroundColor: c.warning.subtle }]}>
+                <Ionicons name="arrow-undo" size={24} color={c.warning.default} />
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.modalTitle}>Annuler l&apos;application</Text>
-                <Text style={styles.applyModalSub}>Remet les joueurs dans leur état d&apos;avant.</Text>
+              <View style={s.flex}>
+                <Text variant="title">Annuler l&apos;application</Text>
+                <Text variant="caption" tone="secondary" style={s.modalSub}>
+                  Remet les joueurs dans leur état d&apos;avant.
+                </Text>
               </View>
             </View>
 
-            <Text style={{ fontSize: 13, color: '#374151', lineHeight: 20, marginBottom: 12 }}>
-              Les statuts et appartenances d&apos;équipe seront restaurés depuis le snapshot de sécurité. Le plan de planification sera conservé.
+            <Text variant="callout" tone="secondary" style={s.modalBody}>
+              Les statuts et appartenances d&apos;équipe seront restaurés depuis le snapshot de
+              sécurité. Le plan de planification sera conservé.
             </Text>
 
             {planning?.appliedAt && (
-              <Text style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginBottom: 12 }}>
+              <Text variant="caption" tone="tertiary" style={s.modalCentered}>
                 Appliqué le {new Date(planning.appliedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}
               </Text>
             )}
 
-            <View style={[styles.applyWarning, { backgroundColor: '#fff7ed', borderColor: '#fed7aa' }]}>
-              <Ionicons name="warning-outline" size={15} color="#c2410c" />
-              <Text style={[styles.applyWarningText, { color: '#9a3412' }]}>Le plan de planification restera intact, seules les données réelles sont restaurées.</Text>
+            <View style={s.warningBox}>
+              <Ionicons name="warning-outline" size={15} color={c.warning.default} />
+              <Text variant="caption" tone="warning" style={s.flex}>
+                Le plan de planification restera intact, seules les données réelles sont restaurées.
+              </Text>
             </View>
 
-            <View style={styles.modalActions}>
-              <TouchableOpacity onPress={() => setApplyModal(null)} disabled={applying} style={styles.modalCancel}>
-                <Text style={styles.modalCancelText}>Garder</Text>
+            <View style={s.modalActions}>
+              <TouchableOpacity onPress={() => setApplyModal(null)} disabled={applying} style={s.modalCancel}>
+                <Text variant="callout" tone="secondary">Garder</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={handleRevert}
                 disabled={applying}
-                style={[styles.modalConfirm, { backgroundColor: '#ea580c' }, applying && { opacity: 0.6 }]}
+                style={[s.modalConfirm, { backgroundColor: c.warning.fill }, applying && s.dimmed]}
               >
                 {applying
-                  ? <ActivityIndicator size="small" color="#fff" />
-                  : <Ionicons name="arrow-undo" size={16} color="#fff" style={{ marginRight: 4 }} />
+                  ? <ActivityIndicator size="small" color={c.text.onFill} />
+                  : <Ionicons name="arrow-undo" size={16} color={c.text.onFill} />
                 }
-                <Text style={styles.modalConfirmText}>{applying ? 'Restauration…' : 'Restaurer'}</Text>
+                <Text variant="callout" weight="700" tone="onFill">
+                  {applying ? 'Restauration…' : 'Restaurer'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1216,39 +1319,48 @@ export default function SeasonPlanningScreen() {
 
       {/* ── Recruit modal ── */}
       <Modal visible={recruitModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Nouvelle recrue</Text>
+        <View style={s.modalOverlay}>
+          <View style={s.modalBox}>
+            <Text variant="title">Nouvelle recrue</Text>
             <TextInput
-              style={styles.modalInput}
+              style={s.modalInput}
               placeholder="Nom prénom"
+              accessibilityLabel="Nom et prénom de la recrue"
               value={recruitName}
               onChangeText={setRecruitName}
               autoFocus
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={c.text.tertiary}
             />
-            <Text style={styles.modalLabel}>Poste</Text>
-            <View style={styles.posOptions}>
-              {['Gardien', 'Meneur', 'Ailier', 'Pivot'].map(pos => {
-                const pc = posColor(pos);
-                const active = recruitPos === pos;
+            <Text variant="callout" weight="600" style={s.modalLabel}>Poste</Text>
+            <View style={s.posOptions}>
+              {POSITIONS.map(p => {
+                const tint = positionStyle(p.key, c).color;
+                const active = recruitPos === p.key;
                 return (
                   <TouchableOpacity
-                    key={pos}
-                    onPress={() => setRecruitPos(pos)}
-                    style={[styles.posOption, active && { backgroundColor: pc.bg, borderColor: pc.border }]}
+                    key={p.key}
+                    onPress={() => setRecruitPos(p.key)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    style={[s.posOption, active && { backgroundColor: tint + '1A', borderColor: tint }]}
                   >
-                    <Text style={[styles.posOptionText, active && { color: pc.text, fontWeight: '700' }]}>{pos}</Text>
+                    <Text
+                      variant="callout"
+                      weight={active ? '700' : '400'}
+                      color={active ? tint : c.text.secondary}
+                    >
+                      {p.label}
+                    </Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
-            <View style={styles.modalActions}>
-              <TouchableOpacity onPress={() => setRecruitModal(false)} style={styles.modalCancel}>
-                <Text style={styles.modalCancelText}>Annuler</Text>
+            <View style={s.modalActions}>
+              <TouchableOpacity onPress={() => setRecruitModal(false)} style={s.modalCancel}>
+                <Text variant="callout" tone="secondary">Annuler</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={handleCreateRecruit} style={styles.modalConfirm}>
-                <Text style={styles.modalConfirmText}>Ajouter</Text>
+              <TouchableOpacity onPress={handleCreateRecruit} style={s.modalConfirm}>
+                <Text variant="callout" weight="700" tone="onFill">Ajouter</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1257,20 +1369,21 @@ export default function SeasonPlanningScreen() {
 
       {/* ── Edit label modal ── */}
       <Modal visible={!!editLabelModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Renommer le niveau</Text>
+        <View style={s.modalOverlay}>
+          <View style={s.modalBox}>
+            <Text variant="title">Renommer le niveau</Text>
             <TextInput
-              style={styles.modalInput}
+              style={s.modalInput}
               value={editLabelValue}
+              accessibilityLabel="Nom du niveau"
               onChangeText={setEditLabelValue}
               autoFocus
               selectTextOnFocus
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={c.text.tertiary}
             />
-            <View style={styles.modalActions}>
-              <TouchableOpacity onPress={() => setEditLabelModal(null)} style={styles.modalCancel}>
-                <Text style={styles.modalCancelText}>Annuler</Text>
+            <View style={s.modalActions}>
+              <TouchableOpacity onPress={() => setEditLabelModal(null)} style={s.modalCancel}>
+                <Text variant="callout" tone="secondary">Annuler</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => {
@@ -1285,9 +1398,9 @@ export default function SeasonPlanningScreen() {
                   });
                   setEditLabelModal(null);
                 }}
-                style={styles.modalConfirm}
+                style={s.modalConfirm}
               >
-                <Text style={styles.modalConfirmText}>Confirmer</Text>
+                <Text variant="callout" weight="700" tone="onFill">Confirmer</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1296,40 +1409,49 @@ export default function SeasonPlanningScreen() {
 
       {/* ── Edit recruit modal ── */}
       <Modal visible={!!editRecruitModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Modifier la recrue</Text>
+        <View style={s.modalOverlay}>
+          <View style={s.modalBox}>
+            <Text variant="title">Modifier la recrue</Text>
             <TextInput
-              style={styles.modalInput}
+              style={s.modalInput}
               placeholder="Nom prénom"
+              accessibilityLabel="Nom et prénom de la recrue"
               value={editRecruitName}
               onChangeText={setEditRecruitName}
               autoFocus
               selectTextOnFocus
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={c.text.tertiary}
             />
-            <Text style={styles.modalLabel}>Poste</Text>
-            <View style={styles.posOptions}>
-              {['Gardien', 'Meneur', 'Ailier', 'Pivot'].map(pos => {
-                const pc = posColor(pos);
-                const active = editRecruitPos === pos;
+            <Text variant="callout" weight="600" style={s.modalLabel}>Poste</Text>
+            <View style={s.posOptions}>
+              {POSITIONS.map(p => {
+                const tint = positionStyle(p.key, c).color;
+                const active = editRecruitPos === p.key;
                 return (
                   <TouchableOpacity
-                    key={pos}
-                    onPress={() => setEditRecruitPos(pos)}
-                    style={[styles.posOption, active && { backgroundColor: pc.bg, borderColor: pc.border }]}
+                    key={p.key}
+                    onPress={() => setEditRecruitPos(p.key)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    style={[s.posOption, active && { backgroundColor: tint + '1A', borderColor: tint }]}
                   >
-                    <Text style={[styles.posOptionText, active && { color: pc.text, fontWeight: '700' }]}>{pos}</Text>
+                    <Text
+                      variant="callout"
+                      weight={active ? '700' : '400'}
+                      color={active ? tint : c.text.secondary}
+                    >
+                      {p.label}
+                    </Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
-            <View style={styles.modalActions}>
-              <TouchableOpacity onPress={() => setEditRecruitModal(null)} style={styles.modalCancel}>
-                <Text style={styles.modalCancelText}>Annuler</Text>
+            <View style={s.modalActions}>
+              <TouchableOpacity onPress={() => setEditRecruitModal(null)} style={s.modalCancel}>
+                <Text variant="callout" tone="secondary">Annuler</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={handleUpdateRecruit} style={styles.modalConfirm}>
-                <Text style={styles.modalConfirmText}>Enregistrer</Text>
+              <TouchableOpacity onPress={handleUpdateRecruit} style={s.modalConfirm}>
+                <Text variant="callout" weight="700" tone="onFill">Enregistrer</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1338,18 +1460,27 @@ export default function SeasonPlanningScreen() {
 
       {/* ── Season picker ── */}
       <Modal visible={seasonModal} transparent animationType="fade">
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setSeasonModal(false)}>
-          <View style={[styles.modalBox, { maxHeight: 360 }]}>
-            <Text style={styles.modalTitle}>Choisir une saison</Text>
+        <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setSeasonModal(false)}>
+          <View style={[s.modalBox, s.seasonBox]}>
+            <Text variant="title">Choisir une saison</Text>
             <ScrollView>
-              {seasons.map(s => (
+              {seasons.map(item => (
                 <TouchableOpacity
-                  key={s}
-                  onPress={() => { setSeason(s); setSeasonModal(false); }}
-                  style={[styles.seasonOption, s === season && styles.seasonOptionActive]}
+                  key={item}
+                  onPress={() => { setSeason(item); setSeasonModal(false); }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: item === season }}
+                  style={[s.seasonOption, item === season && { backgroundColor: c.accent.subtle }]}
                 >
-                  <Text style={[styles.seasonOptionText, s === season && { color: '#3b82f6', fontWeight: '700' }]}>{s}</Text>
-                  {s === season && <Ionicons name="checkmark" size={16} color="#3b82f6" />}
+                  <Text
+                    variant="callout"
+                    weight={item === season ? '700' : '400'}
+                    tone={item === season ? 'accent' : 'primary'}
+                    numeric
+                  >
+                    {item}
+                  </Text>
+                  {item === season && <Ionicons name="checkmark" size={16} color={c.accent.default} />}
                 </TouchableOpacity>
               ))}
               <TouchableOpacity
@@ -1360,9 +1491,9 @@ export default function SeasonPlanningScreen() {
                   setSeason(next);
                   setSeasonModal(false);
                 }}
-                style={styles.seasonOption}
+                style={s.seasonOption}
               >
-                <Text style={[styles.seasonOptionText, { color: '#3b82f6' }]}>+ Saison suivante</Text>
+                <Text variant="callout" tone="accent" weight="600">+ Saison suivante</Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -1374,248 +1505,322 @@ export default function SeasonPlanningScreen() {
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
-  root:           { flex: 1, backgroundColor: '#f1f5f9' },
-  centered:       { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  loadingText:    { fontSize: 14, color: '#94a3b8' },
+const useStyles = makeStyles((t) => ({
+  flex:     { flex: 1 },
+  flexMin:  { flex: 1, minWidth: 0 },
+  dimmed:   { opacity: 0.6 },
+  disabled: { opacity: 0.3 },
 
-  // ── Top bar
-  topBar:         {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: '#1e3a5f',
-    paddingHorizontal: 14, paddingTop: Platform.OS === 'ios' ? 52 : 16, paddingBottom: 14,
+  root:     { flex: 1, backgroundColor: t.colors.bg.canvas },
+  centered: {
+    flex: 1, justifyContent: 'center', alignItems: 'center',
+    gap: t.space.md, backgroundColor: t.colors.bg.canvas,
   },
-  backBtn:        { padding: 2 },
-  topTitle:       { fontSize: 15, fontWeight: '700', color: '#fff', lineHeight: 20 },
-  seasonRow:      { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 1 },
-  seasonText:     { fontSize: 12, color: 'rgba(255,255,255,0.65)', fontWeight: '500' },
-  seasonActiveBadge:     { backgroundColor: 'rgba(52,211,153,0.2)', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  seasonActiveBadgeText: { fontSize: 10, color: '#34d399', fontWeight: '700' },
-  seasonActivateBtn:     { backgroundColor: '#3b82f6', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  seasonActivateBtnText: { fontSize: 10, color: '#fff', fontWeight: '700' },
-  savedHint:      { fontSize: 11, color: 'rgba(255,255,255,0.45)' },
-  saveBtn:        {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: '#16a34a',
-    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
+
+  // ── Top bar (surface de marque : voir l'en-tête du fichier)
+  topBar: {
+    flexDirection: 'row', alignItems: 'center', gap: t.space.sm,
+    paddingHorizontal: t.space.lg, paddingBottom: t.space.md,
   },
-  saveBtnText:    { color: '#fff', fontSize: 13, fontWeight: '700' },
+  backBtn:      { padding: 2 },
+  topMetaRow:   { flexDirection: 'row', alignItems: 'center', gap: t.space.sm, marginTop: 2 },
+  seasonRow:    { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  brandPill: {
+    borderRadius: t.radius.sm, borderWidth: 1,
+    paddingHorizontal: t.space.sm, paddingVertical: 2,
+  },
+  brandAction: {
+    borderRadius: t.radius.sm,
+    paddingHorizontal: t.space.sm, paddingVertical: t.space.xs,
+  },
+  brandActionRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.xs },
 
   // ── Tab bar
-  tabBar:         { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0', maxHeight: 48 },
-  tabBarContent:  { paddingHorizontal: 12, gap: 4, alignItems: 'center', paddingVertical: 6 },
-  tab:            {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 12, paddingVertical: 6,
-    borderRadius: 20, borderWidth: 1, borderColor: 'transparent',
+  tabBar: {
+    backgroundColor: t.colors.bg.surface,
+    borderBottomWidth: 1, borderBottomColor: t.colors.border.subtle,
+    maxHeight: 50,
   },
-  tabActive:      { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' },
-  tabDep:         {},
-  tabDepActive:   { backgroundColor: '#fef2f2', borderColor: '#fecaca' },
-  tabText:        { fontSize: 13, color: '#94a3b8', fontWeight: '500' },
-  tabTextActive:  { color: '#3b82f6', fontWeight: '700' },
-  tabBadge:       { backgroundColor: '#f1f5f9', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1 },
-  tabBadgeActive: { backgroundColor: '#dbeafe' },
-  tabBadgeText:   { fontSize: 10, fontWeight: '600', color: '#94a3b8' },
-  tabBadgeTextActive: { color: '#3b82f6' },
+  tabBarContent: {
+    paddingHorizontal: t.space.md, gap: t.space.xs,
+    alignItems: 'center', paddingVertical: t.space.sm,
+  },
+  tab: {
+    flexDirection: 'row', alignItems: 'center', gap: t.space.xs,
+    paddingHorizontal: t.space.md, paddingVertical: t.space.xs,
+    borderRadius: t.radius.pill, borderWidth: 1, borderColor: 'transparent',
+  },
+  tabBadge: {
+    backgroundColor: t.colors.bg.sunken, borderRadius: t.radius.sm,
+    paddingHorizontal: t.space.xs, paddingVertical: 1,
+  },
 
   // ── Pool
-  poolTop:        { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8 },
-  searchBar:      {
-    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: '#f8fafc', borderRadius: 12, borderWidth: 1, borderColor: '#e2e8f0',
-    paddingHorizontal: 12, height: 42,
+  poolTop: {
+    flexDirection: 'row', alignItems: 'center', gap: t.space.sm,
+    paddingHorizontal: t.space.lg, paddingTop: t.space.md, paddingBottom: t.space.sm,
   },
-  searchInput:    { flex: 1, fontSize: 14, color: '#0f172a' },
-  addRecruitBtn:  {
-    width: 42, height: 42, borderRadius: 12, backgroundColor: '#faf5ff',
-    borderWidth: 1, borderColor: '#e9d5ff',
+  searchBar: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: t.space.sm,
+    backgroundColor: t.colors.bg.surface, borderRadius: t.radius.md,
+    borderWidth: 1, borderColor: t.colors.border.subtle,
+    paddingHorizontal: t.space.md, height: 44,
+  },
+  searchInput: { flex: 1, ...t.typography.body, color: t.colors.text.primary },
+  addRecruitBtn: {
+    width: 44, height: 44, borderRadius: t.radius.md, borderWidth: 1,
     justifyContent: 'center', alignItems: 'center',
   },
-  filterScroll:   { maxHeight: 40 },
-  filterContent:  { paddingHorizontal: 14, gap: 6, alignItems: 'center' },
-  filterChip:     {
-    paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20,
-    borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#f8fafc',
+  filterScroll:  { maxHeight: 42 },
+  filterContent: { paddingHorizontal: t.space.lg, gap: t.space.xs, alignItems: 'center' },
+  filterChip: {
+    paddingHorizontal: t.space.md, paddingVertical: t.space.xs + 1,
+    borderRadius: t.radius.pill, borderWidth: 1,
+    borderColor: t.colors.border.subtle, backgroundColor: t.colors.bg.surface,
   },
-  filterChipAll:  { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' },
-  filterChipText: { fontSize: 12, fontWeight: '600', color: '#94a3b8' },
-  poolMeta:       { paddingHorizontal: 14, paddingVertical: 6 },
-  poolMetaText:   { fontSize: 11, color: '#94a3b8', fontWeight: '500' },
+  poolMeta: { paddingHorizontal: t.space.lg, paddingVertical: t.space.xs },
+  listPad:  { paddingBottom: t.space.xxl },
 
   // ── Pool row
-  poolRow:        {
+  poolRow: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 14, paddingVertical: 13,
-    borderBottomWidth: 1, borderBottomColor: '#f1f5f9',
-    backgroundColor: '#fff',
+    paddingHorizontal: t.space.lg, paddingVertical: t.space.md,
+    borderBottomWidth: 1, borderBottomColor: t.colors.border.subtle,
+    backgroundColor: t.colors.bg.surface,
   },
-  poolRowSelected: { backgroundColor: '#eff6ff', borderBottomColor: '#bfdbfe' },
-  poolRowLeft:    { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 },
-  poolNum:        { fontSize: 12, fontWeight: '700', color: '#cbd5e1', minWidth: 28 },
-  poolName:       { fontSize: 15, fontWeight: '600', color: '#1e293b' },
-  poolNameSelected: { color: '#1d4ed8' },
-  recrueLabel:    { fontSize: 11, color: '#7c3aed', fontWeight: '600', marginTop: 1 },
-  poolRowRight:   { flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: 8 },
+  poolRowSelected: {
+    backgroundColor: t.colors.accent.subtle,
+    borderBottomColor: t.colors.accent.border,
+  },
+  poolRowLeft:  { flex: 1, flexDirection: 'row', alignItems: 'center', gap: t.space.sm, minWidth: 0 },
+  poolNum:      { minWidth: 28 },
+  poolRowRight: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm, marginLeft: t.space.sm },
 
   // ── Floating bar
-  floatBar:       {
-    backgroundColor: '#fff',
-    borderTopWidth: 1, borderTopColor: '#e2e8f0',
-    paddingHorizontal: 14, paddingVertical: 12,
-    shadowColor: '#000', shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.08, shadowRadius: 12,
-    elevation: 10,
+  floatBar: {
+    backgroundColor: t.colors.bg.elevated,
+    borderTopWidth: 1, borderTopColor: t.colors.border.subtle,
+    paddingHorizontal: t.space.lg, paddingVertical: t.space.md,
+    ...t.elevation.floating,
   },
-  floatName:      { fontSize: 14, fontWeight: '700', color: '#1e293b' },
-  floatHint:      { fontSize: 11, color: '#94a3b8', marginTop: 2, marginBottom: 8 },
-  floatClose:     { position: 'absolute', top: 12, right: 14 },
-  floatTeamLabel: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  floatSlotBtn:   {
-    paddingHorizontal: 10, paddingVertical: 6,
-    borderRadius: 8, borderWidth: 1.5,
-    minWidth: 36, alignItems: 'center', justifyContent: 'center',
+  floatNameRow:   { flexDirection: 'row', alignItems: 'center', gap: t.space.xs },
+  floatHint:      { marginTop: 2, marginBottom: t.space.sm },
+  floatClose:     { position: 'absolute', top: t.space.md, right: t.space.lg },
+  floatScroll:    { gap: t.space.sm, paddingLeft: t.space.sm },
+  floatCol:       { gap: t.space.xs },
+  floatRow:       { flexDirection: 'row', gap: t.space.xs },
+  floatTeamRow:   { flexDirection: 'row', alignItems: 'center', gap: t.space.xs },
+  floatTeamDot:   { width: 7, height: 7, borderRadius: 4 },
+  floatTeamLabel: { textTransform: 'uppercase', letterSpacing: 0.5 },
+  floatSlotBtn: {
+    paddingHorizontal: t.space.sm + 2, paddingVertical: t.space.xs + 2,
+    borderRadius: t.radius.sm, borderWidth: 1.5,
+    backgroundColor: t.colors.bg.surface,
+    minWidth: 38, alignItems: 'center', justifyContent: 'center',
   },
-  floatSlotBtnText: { fontSize: 11, fontWeight: '800' },
 
   // ── Team header
-  teamHeader:     {
-    margin: 14, marginBottom: 4,
-    backgroundColor: '#fff', borderRadius: 14,
-    borderWidth: 1, borderColor: '#e5e7eb',
+  teamPad:   { paddingBottom: t.space.xxxl },
+  teamHeader: {
+    margin: t.space.lg, marginBottom: t.space.xs,
+    backgroundColor: t.colors.bg.surface, borderRadius: t.radius.lg,
+    borderWidth: 1, borderColor: t.colors.border.subtle,
     borderLeftWidth: 4,
-    padding: 14,
-    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+    padding: t.space.lg,
+    flexDirection: 'row', alignItems: 'flex-start', gap: t.space.md,
   },
-  teamDot:        { width: 10, height: 10, borderRadius: 5, marginTop: 2 },
-  teamName:       { fontSize: 16, fontWeight: '800', color: '#111' },
-  teamCat:        { fontSize: 12, color: '#9ca3af', fontWeight: '500' },
-  statBadge:      { paddingHorizontal: 8, paddingVertical: 3, backgroundColor: '#f3f4f6', borderRadius: 10, borderWidth: 1, borderColor: '#e5e7eb' },
-  statText:       { fontSize: 11, color: '#374151', fontWeight: '600' },
-  hierControls:   { alignItems: 'center' },
-  hierControlLabel: { fontSize: 10, color: '#9ca3af', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  hierBtn:        { width: 28, height: 28, borderRadius: 14, backgroundColor: '#f3f4f6', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#e5e7eb' },
-  hierCount:      { fontSize: 18, fontWeight: '800', color: '#374151', minWidth: 24, textAlign: 'center' },
+  teamTitleRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm },
+  teamDot:      { width: 10, height: 10, borderRadius: 5 },
+  statRow:      { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.sm, marginTop: t.space.sm },
+  statBadge: {
+    paddingHorizontal: t.space.sm, paddingVertical: 3,
+    backgroundColor: t.colors.bg.sunken, borderRadius: t.radius.sm,
+    borderWidth: 1, borderColor: t.colors.border.subtle,
+  },
+  hierControls:     { alignItems: 'center' },
+  hierControlsRow:  { flexDirection: 'row', alignItems: 'center', gap: t.space.sm, marginTop: t.space.xs },
+  hierBtn: {
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: t.colors.bg.sunken,
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 1, borderColor: t.colors.border.subtle,
+  },
+  hierCount: { minWidth: 24, textAlign: 'center' },
 
   // ── Hierarchy section
-  hierSection:    {
-    backgroundColor: '#fff', borderRadius: 12,
-    borderWidth: 1, borderColor: '#e5e7eb',
+  hierList: { paddingHorizontal: t.space.lg, paddingTop: t.space.sm, gap: t.space.sm },
+  hierSection: {
+    backgroundColor: t.colors.bg.surface, borderRadius: t.radius.md,
+    borderWidth: 1, borderColor: t.colors.border.subtle,
     borderLeftWidth: 3,
     overflow: 'hidden',
   },
   hierSectionHeader: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 12, paddingVertical: 10,
-    borderBottomWidth: 1, borderBottomColor: '#f3f4f6',
+    flexDirection: 'row', alignItems: 'center', gap: t.space.sm,
+    paddingHorizontal: t.space.md, paddingVertical: t.space.sm + 2,
+    borderBottomWidth: 1, borderBottomColor: t.colors.border.subtle,
   },
-  hBadge:         { width: 20, height: 20, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  hBadgeText:     { color: '#fff', fontSize: 10, fontWeight: '800' },
-  hierSectionLabel: { flex: 1, fontSize: 13, fontWeight: '700', color: '#374151' },
-  hierSectionCount: { fontSize: 11, color: '#9ca3af', marginRight: 2 },
-
-  // ── Chips wrap
-  chipsWrap:      { flexDirection: 'row', flexWrap: 'wrap', gap: 6, padding: 10 },
-
-  // ── Slot chip
-  chip:           {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0',
-    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 6,
+  hBadge: {
+    width: 22, height: 22, borderRadius: 11,
+    justifyContent: 'center', alignItems: 'center',
+    backgroundColor: t.colors.bg.sunken,
+    borderWidth: 1, borderColor: t.colors.border.subtle,
   },
-  chipConfirmed:  { borderLeftWidth: 3, borderLeftColor: '#10b981', backgroundColor: '#f0fdf4', borderColor: '#6ee7b7' },
-  chipDot:        { width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: '#d1d5db' },
-  chipDotOn:      { backgroundColor: '#10b981', borderColor: '#10b981' },
-  chipNum:        { fontSize: 10, fontWeight: '700', color: '#9ca3af' },
-  chipName:       { fontSize: 12, fontWeight: '600', color: '#1e293b', maxWidth: 100 },
-  recBadge:       { width: 16, height: 16, borderRadius: 8, backgroundColor: '#f3e8ff', justifyContent: 'center', alignItems: 'center' },
-  recText:        { fontSize: 8, fontWeight: '800', color: '#7c3aed' },
 
-  // ── Add from pool button
-  addFromPool:    {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 12, paddingVertical: 10,
-    borderTopWidth: 1, borderTopColor: '#f3f4f6',
+  // ── Chips
+  chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.xs + 2, padding: t.space.sm + 2 },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: t.space.xs + 1,
+    backgroundColor: t.colors.bg.sunken,
+    borderWidth: 1, borderColor: t.colors.border.subtle,
+    borderRadius: t.radius.pill,
+    paddingHorizontal: t.space.sm + 2, paddingVertical: t.space.xs + 2,
   },
-  addFromPoolText: { fontSize: 13, color: '#3b82f6', fontWeight: '600' },
+  chipConfirmed: {
+    borderLeftWidth: 3, borderLeftColor: t.colors.positive.default,
+    backgroundColor: t.colors.positive.subtle,
+    borderColor: t.colors.positive.default + '55',
+  },
+  chipDot: {
+    width: 12, height: 12, borderRadius: 6,
+    borderWidth: 1.5, borderColor: t.colors.border.strong,
+  },
+  chipDotOn: {
+    backgroundColor: t.colors.positive.default,
+    borderColor: t.colors.positive.default,
+  },
+  chipName:  { maxWidth: 110 },
+  recBadge:  { width: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center' },
+
+  // ── Add from pool
+  addFromPool: {
+    flexDirection: 'row', alignItems: 'center', gap: t.space.xs + 2,
+    paddingHorizontal: t.space.md, paddingVertical: t.space.sm + 2,
+    borderTopWidth: 1, borderTopColor: t.colors.border.subtle,
+  },
 
   // ── Departures
-  departCard:     { backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#fecaca', overflow: 'hidden' },
-  departHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#fef2f2' },
-  departTitle:    { fontSize: 14, fontWeight: '700', color: '#dc2626' },
-  departCount:    { fontSize: 12, color: '#fca5a5', fontWeight: '600' },
-  departRow:      { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#fef2f2' },
-  departName:     { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 4 },
-
-  // ── Empty state
-  emptyState:     { alignItems: 'center', paddingVertical: 40, gap: 10 },
-  emptyText:      { fontSize: 14, color: '#9ca3af', textAlign: 'center', fontWeight: '500' },
-
-  // ── Bottom sheet
-  sheetOverlay:   { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)' },
-  sheet:          {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    paddingBottom: Platform.OS === 'ios' ? 34 : 16,
-    shadowColor: '#000', shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.12, shadowRadius: 16, elevation: 20,
+  departPad: { padding: t.space.lg, paddingBottom: t.space.xxxl },
+  departCard: {
+    backgroundColor: t.colors.bg.surface, borderRadius: t.radius.lg,
+    borderWidth: 1, borderColor: t.colors.negative.default + '40',
+    overflow: 'hidden',
   },
-  sheetHandle:    { width: 36, height: 4, borderRadius: 2, backgroundColor: '#e2e8f0', alignSelf: 'center', marginTop: 10, marginBottom: 4 },
-  sheetHeader:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  sheetTitle:     { fontSize: 15, fontWeight: '700', color: '#1e293b', flex: 1, marginRight: 12 },
+  departHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: t.space.lg, paddingVertical: t.space.md,
+    borderBottomWidth: 1, borderBottomColor: t.colors.border.subtle,
+    backgroundColor: t.colors.negative.subtle,
+  },
+  departHeaderLeft:  { flexDirection: 'row', alignItems: 'center', gap: t.space.sm },
+  departHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm },
+  departRow: {
+    flexDirection: 'row', alignItems: 'center', gap: t.space.sm,
+    paddingHorizontal: t.space.lg, paddingVertical: t.space.md,
+    borderBottomWidth: 1, borderBottomColor: t.colors.border.subtle,
+  },
+  departBadgeRow: { flexDirection: 'row', marginTop: t.space.xs },
+  appliedBadge: {
+    borderRadius: t.radius.sm, borderWidth: 1,
+    paddingHorizontal: t.space.sm, paddingVertical: 2,
+  },
+
+  // ── Sheet
+  sheetBleed: { marginHorizontal: -t.space.xl },
+  /**
+   * Le champ hérite de `searchBar`, qui est en `bg.surface` : posé sur le
+   * canvas il ressort, mais la feuille est en `bg.elevated`, plus clair — le
+   * champ y perdait tout bord lisible en thème sombre. Il descend donc d'un
+   * cran, avec un liseré franc.
+   */
+  sheetSearchRow: {
+    flexDirection: 'row',
+    marginHorizontal: t.space.xl, marginBottom: t.space.sm,
+  },
+  sheetSearch: {
+    backgroundColor: t.colors.bg.sunken, borderColor: t.colors.border.strong,
+  },
 
   // ── Position badge
-  posBadge:       { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, borderWidth: 1 },
-  posText:        { fontSize: 10, fontWeight: '800' },
+  posBadge: {
+    paddingHorizontal: t.space.sm - 1, paddingVertical: 2,
+    borderRadius: t.radius.sm, borderWidth: 1,
+    alignSelf: 'flex-start',
+  },
 
   // ── Modals
-  modalOverlay:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center' },
-  modalBox:       { backgroundColor: '#fff', borderRadius: 18, padding: 22, width: '88%' },
-  modalTitle:     { fontSize: 17, fontWeight: '800', color: '#111', marginBottom: 14 },
-  modalLabel:     { fontSize: 13, fontWeight: '600', color: '#374151', marginTop: 12, marginBottom: 8 },
-  modalInput:     { borderWidth: 1.5, borderColor: '#e2e8f0', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, color: '#111' },
-  posOptions:     { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  posOption:      { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1.5, borderColor: '#e2e8f0' },
-  posOptionText:  { fontSize: 13, color: '#374151' },
-  modalActions:   { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 18 },
-  modalCancel:    { paddingHorizontal: 14, paddingVertical: 10 },
-  modalCancelText: { fontSize: 14, color: '#6b7280' },
-  modalConfirm:   { paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#1e3a5f', borderRadius: 10 },
-  modalConfirmText: { fontSize: 14, color: '#fff', fontWeight: '700' },
-  seasonOption:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  seasonOptionActive: { backgroundColor: '#eff6ff' },
-  seasonOptionText: { fontSize: 14, color: '#374151' },
-
-  // ── Apply button (top bar)
-  applyBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: '#16a34a',
-    paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10,
+  modalOverlay: {
+    flex: 1, backgroundColor: t.colors.overlay,
+    justifyContent: 'center', alignItems: 'center',
   },
-  applyBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  modalBox: {
+    backgroundColor: t.colors.bg.elevated, borderRadius: t.radius.xl,
+    padding: t.space.xxl, width: '88%',
+    borderWidth: 1, borderColor: t.colors.border.subtle,
+  },
+  modalSub:      { marginTop: 2 },
+  modalBody:     { marginBottom: t.space.md },
+  modalCentered: { textAlign: 'center', marginBottom: t.space.md },
+  modalLabel:    { marginTop: t.space.md, marginBottom: t.space.sm },
+  modalInput: {
+    borderWidth: 1.5, borderColor: t.colors.border.subtle,
+    borderRadius: t.radius.sm,
+    paddingHorizontal: t.space.md, paddingVertical: t.space.sm + 2,
+    marginTop: t.space.md,
+    ...t.typography.body,
+    color: t.colors.text.primary,
+    backgroundColor: t.colors.bg.surface,
+  },
+  posOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.sm },
+  posOption: {
+    paddingHorizontal: t.space.lg, paddingVertical: t.space.sm,
+    borderRadius: t.radius.sm, borderWidth: 1.5,
+    borderColor: t.colors.border.subtle,
+  },
+  modalActions: {
+    flexDirection: 'row', justifyContent: 'flex-end',
+    gap: t.space.sm, marginTop: t.space.lg,
+  },
+  modalCancel: { paddingHorizontal: t.space.lg, paddingVertical: t.space.sm + 2 },
+  modalConfirm: {
+    flexDirection: 'row', alignItems: 'center', gap: t.space.xs,
+    paddingHorizontal: t.space.xl, paddingVertical: t.space.sm + 2,
+    backgroundColor: t.colors.accent.fill, borderRadius: t.radius.sm,
+  },
+  seasonBox:    { maxHeight: 380 },
+  seasonOption: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: t.space.md, paddingVertical: t.space.md,
+    borderRadius: t.radius.sm,
+    borderBottomWidth: 1, borderBottomColor: t.colors.border.subtle,
+  },
 
   // ── Apply modal
-  applyModalHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 16 },
-  applyIconWrap:    { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
-  applyModalSub:    { fontSize: 12, color: '#6b7280', marginTop: 2, lineHeight: 16 },
+  applyModalHeader: {
+    flexDirection: 'row', alignItems: 'flex-start',
+    gap: t.space.md, marginBottom: t.space.lg,
+  },
+  applyIconWrap: {
+    width: 44, height: 44, borderRadius: 22,
+    justifyContent: 'center', alignItems: 'center',
+  },
 
-  // ── Summary row
-  summaryRow:  { flexDirection: 'row', gap: 8, marginBottom: 14 },
-  summaryCell: { flex: 1, borderWidth: 1, borderRadius: 12, padding: 10, alignItems: 'center' },
-  summaryNum:  { fontSize: 22, fontWeight: '900', lineHeight: 26 },
-  summaryLabel:{ fontSize: 11, fontWeight: '700', marginTop: 2 },
-  summaryHint: { fontSize: 9, color: '#9ca3af', marginTop: 2 },
+  // ── Summary
+  summaryRow:  { flexDirection: 'row', gap: t.space.sm, marginBottom: t.space.md },
+  summaryCell: {
+    flex: 1, borderWidth: 1, borderRadius: t.radius.md,
+    padding: t.space.sm + 2, alignItems: 'center',
+  },
+  summaryCellNeutral: {
+    backgroundColor: t.colors.bg.sunken,
+    borderColor: t.colors.border.subtle,
+  },
 
   // ── Warning box
-  applyWarning: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
-    backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a',
-    borderRadius: 10, padding: 10, marginBottom: 4,
+  warningBox: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: t.space.sm,
+    backgroundColor: t.colors.warning.subtle,
+    borderWidth: 1, borderColor: t.colors.warning.default + '55',
+    borderRadius: t.radius.sm, padding: t.space.sm + 2,
   },
-  applyWarningText: { flex: 1, fontSize: 12, color: '#92400e', lineHeight: 17 },
-
-  // ── Applied badge (departures)
-  appliedBadge:     { backgroundColor: '#dcfce7', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderColor: '#86efac' },
-  appliedBadgeText: { fontSize: 10, fontWeight: '700', color: '#15803d' },
-});
+}));

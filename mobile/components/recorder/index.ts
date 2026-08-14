@@ -18,9 +18,16 @@ export {
   PLAYER_ACTIONS,
   OPPONENT_ACTIONS,
   STAT_COLUMNS,
+  ALL_STAT_COLUMNS,
+  RATING_DELTA_COLUMN,
+  TABLET_STAT_KEYS,
+  RATING_MIN_EVENTS,
   EVENT_TO_STAT,
   PAIRED_EVENT,
+  COLLECTIVE_STAT,
   emptyPlayerState,
+  individualEventCount,
+  ratingDelta,
   isGoalkeeper,
   playerDisplayName,
   playerShortName,
@@ -43,9 +50,11 @@ export {
   VoiceOverlay,
 } from './RecorderChrome';
 export { PlayerFieldCard } from './PlayerFieldCard';
-export { PlayerActionCard, BenchCard } from './PlayerActionCard';
+export { PlayerActionCard, BenchCard, RatingDeltaChip } from './PlayerActionCard';
 export { TabletControlBar } from './TabletControlBar';
 export { ActionPad } from './ActionPad';
 export { SubstitutionSheet, GoalTypeSheet, ScoreSheet, PlayerPicker } from './RecorderSheets';
 export { StatsTable, ScrollableStatsTable } from './StatsTable';
+export { MatchStatsPanel } from './MatchStatsPanel';
+export type { MatchStatsPanelProps, TeamStatsShape } from './MatchStatsPanel';
 export { MatchPicker } from './MatchPicker';

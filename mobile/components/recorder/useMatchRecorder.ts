@@ -53,6 +53,7 @@ import {
   type GoalType,
 } from '../../lib/services/matchEvents';
 import { getPlayersByTeam } from '../../lib/services/players';
+import { getRatingWeights } from '../../lib/services/matchRatings';
 import { getOutboxLength } from '../../lib/offline/matchRecorderOutbox';
 import {
   saveRecorderState,
@@ -61,15 +62,21 @@ import {
 } from '../../lib/offline/matchRecorderState';
 import { parseMatchPlayers } from '../../utils/matchUtils';
 import { haptics } from '../../lib/design/haptics';
-import type { Match, MatchEventType, Player } from '../../types';
+import { DEFAULT_RATING_WEIGHTS } from '../../types';
+import type { Match, MatchEventType, Player, RatingWeights } from '../../types';
 import {
+  COLLECTIVE_STAT,
   DEFAULT_SEQUENCE_LIMIT,
   EVENT_TO_STAT,
   FIELD_SIZE,
   OPPONENT_ACTIONS,
   PAIRED_EVENT,
   PLAYER_ACTIONS,
+  RATING_MIN_EVENTS,
   emptyPlayerState,
+  individualEventCount,
+  isGoalkeeper,
+  ratingDelta,
   type PlayerState,
   type StatRow,
 } from './recorderModel';
@@ -150,6 +157,11 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
   const [goalsByType, setGoalsByType] = useState<GoalTypeTally>(EMPTY_TALLY);
   const [concededByType, setConcededByType] = useState<GoalTypeTally>(EMPTY_TALLY);
 
+  // Échelle de notation du club, pour la note live. Les défauts servent de
+  // repli : au coup d'envoi le gymnase est souvent hors réseau, et une note
+  // calculée avec l'échelle standard vaut mieux que pas de note du tout.
+  const [ratingWeights, setRatingWeights] = useState<RatingWeights>(DEFAULT_RATING_WEIGHTS);
+
   const [timeoutUs, setTimeoutUs] = useState(false);
   const [timeoutOpponent, setTimeoutOpponent] = useState(false);
   const [outboxLength, setOutboxLength] = useState(0);
@@ -194,6 +206,25 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
     return { onTarget, offTarget, total: onTarget + offTarget, recoveries, ballLoss };
   }, [playerStates]);
 
+  /**
+   * Écart de note depuis le début du match, par joueur.
+   *
+   * `null` veut dire « ne pas afficher », et couvre deux cas distincts : le
+   * gardien, hors barème pour cette version (spec §3.1), et le joueur qui n'a
+   * pas encore assez d'actions pour que le chiffre veuille dire quelque chose.
+   */
+  const ratingDeltaByPlayer = useMemo(() => {
+    const out: Record<string, number | null> = {};
+    convoquedPlayers.forEach((p) => {
+      const st = playerStates[p.id];
+      out[p.id] =
+        isGoalkeeper(p.position) || individualEventCount(st) < RATING_MIN_EVENTS
+          ? null
+          : ratingDelta(st, ratingWeights);
+    });
+    return out;
+  }, [convoquedPlayers, playerStates, ratingWeights]);
+
   const statRows: StatRow[] = useMemo(
     () =>
       convoquedPlayers.map((p) => {
@@ -216,9 +247,10 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
           plusMinus: plusMinusByPlayer[p.id] ?? 0,
           yellowCards: st?.yellowCards ?? 0,
           redCards: st?.redCards ?? 0,
+          ratingDelta: ratingDeltaByPlayer[p.id] ?? null,
         };
       }),
-    [convoquedPlayers, playerStates, plusMinusByPlayer]
+    [convoquedPlayers, playerStates, plusMinusByPlayer, ratingDeltaByPlayer]
   );
 
   // ── Chargement ────────────────────────────────────────────────────────────
@@ -242,6 +274,23 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
     setLoading(true);
     loadMatches();
   }, [loadMatches]);
+
+  // L'échelle du club est lue une fois, à l'entrée dans le match : elle ne
+  // change pas en cours de rencontre, et le réseau peut disparaître ensuite.
+  useEffect(() => {
+    if (step !== 'record') return;
+    let cancelled = false;
+    getRatingWeights()
+      .then((w) => {
+        if (!cancelled && w) setRatingWeights(w);
+      })
+      .catch(() => {
+        // Hors ligne au coup d'envoi : on garde l'échelle par défaut.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [step]);
 
   useEffect(() => {
     if (initialMatchId && matches.some((m) => m.id === initialMatchId)) {
@@ -307,6 +356,21 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
         setPlayerStates((prev) => {
           const next = { ...prev };
           events.forEach((ev) => {
+            // Terme collectif d'abord : il s'applique à tous les joueurs
+            // présents, y compris sur les événements adverses qui n'ont pas de
+            // `player_id` et sortaient donc de la boucle avant de l'atteindre.
+            const collKey = COLLECTIVE_STAT[ev.event_type as MatchEventType];
+            if (collKey && Array.isArray(ev.players_on_field)) {
+              ev.players_on_field.forEach((pid) => {
+                const cst = next[pid];
+                if (!cst) return;
+                next[pid] = {
+                  ...cst,
+                  stats: { ...cst.stats, [collKey]: (cst.stats[collKey] ?? 0) + 1 },
+                };
+              });
+            }
+
             if (!ev.player_id || !next[ev.player_id]) return;
             const st = next[ev.player_id];
             if (ev.event_type === 'yellow_card') {
@@ -395,15 +459,19 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
     setSeconds((s) => s + delta);
     setPlayerStates((prev) => {
       const next = { ...prev };
-      fieldRef.current.forEach((id) => {
+      const onField = new Set(fieldRef.current);
+      // `prev` ne contient que les convoqués : tout ce qui n'est pas sur le
+      // terrain est donc sur le banc, y compris ceux qui ne sont jamais entrés.
+      Object.keys(next).forEach((id) => {
         const st = next[id];
-        if (st) {
-          next[id] = {
-            ...st,
-            totalTime: st.totalTime + delta,
-            currentSequenceTime: st.currentSequenceTime + delta,
-          };
-        }
+        if (!st) return;
+        next[id] = onField.has(id)
+          ? {
+              ...st,
+              totalTime: st.totalTime + delta,
+              currentSequenceTime: st.currentSequenceTime + delta,
+            }
+          : { ...st, benchTime: st.benchTime + delta };
       });
       return next;
     });
@@ -520,6 +588,47 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
 
   // ── Enregistrement d'un événement ─────────────────────────────────────────
 
+  /**
+   * Applique le terme collectif d'un événement aux joueurs présents.
+   *
+   * L'événement apparié est traité comme les autres, et il le faut : un but
+   * écrit `goal` ET `shot_on_target`, donc la RPC du bilan compte le poids de
+   * but plus celui de tir cadré. L'oublier ici ferait diverger la note live de
+   * celle du rapport de match, sur l'événement le plus fréquent qui soit.
+   *
+   * Limite assumée, identique à celle du +/- juste en dessous : l'annulation
+   * retire le poids aux joueurs présents MAINTENANT, pas à ceux qui l'étaient à
+   * la saisie. Un changement glissé entre les deux décale donc l'écart d'un
+   * joueur. On annule dans la seconde qui suit, et le bilan, lui, repart des
+   * événements réels.
+   */
+  const applyCollective = useCallback(
+    (eventType: MatchEventType, field: string[], sign: 1 | -1) => {
+      const types: MatchEventType[] = [eventType];
+      const paired = PAIRED_EVENT[eventType];
+      if (paired) types.push(paired);
+      const keys = types
+        .map((t) => COLLECTIVE_STAT[t])
+        .filter((k): k is string => !!k);
+      if (keys.length === 0) return;
+
+      setPlayerStates((prev) => {
+        const next = { ...prev };
+        field.forEach((pid) => {
+          const st = next[pid];
+          if (!st) return;
+          const stats = { ...st.stats };
+          keys.forEach((k) => {
+            stats[k] = Math.max(0, (stats[k] ?? 0) + sign);
+          });
+          next[pid] = { ...st, stats };
+        });
+        return next;
+      });
+    },
+    []
+  );
+
   const recordEvent = useCallback(
     async (
       eventType: MatchEventType,
@@ -542,22 +651,32 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
       const pid = playerId ?? null;
 
       try {
+        // Le tir cadré apparié au but est écrit par la RPC, dans la même
+        // transaction que le but (`20260812110000_insert_match_event_pair.sql`).
+        //
+        // Il était écrit ici, par un second `await createMatchEvent()`. Deux
+        // conséquences, l'une et l'autre constatées en base :
+        //
+        //   • le recorder **web** appelle la même RPC mais n'avait pas ce
+        //     second appel — 110 buts de la saison 25/26 se sont retrouvés sans
+        //     tir cadré, soit 69 % du total, faussant tirs et +/-T ;
+        //   • les deux appels n'étaient **pas atomiques** — ils vivaient dans le
+        //     même `try` mais pas dans la même transaction, et un échec du
+        //     second se contentait d'afficher une alerte. Deux buts ont perdu
+        //     leur tir de cette façon.
+        //
+        // La règle est désormais un invariant de la base, que ni l'un ni
+        // l'autre des clients ne peut contourner.
         await createMatchEvent({
           ...base,
           event_type: eventType,
           player_id: pid,
           goal_type:
             eventType === 'goal' || eventType === 'opponent_goal' ? goalType ?? null : undefined,
+          write_pair: PAIRED_EVENT[eventType] !== undefined,
         });
 
-        const paired = PAIRED_EVENT[eventType];
-        if (paired) {
-          await createMatchEvent({
-            ...base,
-            event_type: paired,
-            player_id: eventType === 'goal' ? pid : null,
-          });
-        }
+        applyCollective(eventType, playersOnField, 1);
 
         if (eventType === 'goal') {
           setScoreUs((n) => n + 1);
@@ -630,7 +749,7 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
         Alert.alert('Erreur', e instanceof Error ? e.message : "Impossible d'enregistrer l'action");
       }
     },
-    [matchId, seconds, half, playersOnField]
+    [matchId, seconds, half, playersOnField, applyCollective]
   );
 
   // ── Annulation ────────────────────────────────────────────────────────────
@@ -658,6 +777,8 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
           return { ...prev, [playerId]: next };
         });
       }
+
+      applyCollective(eventType, playersOnField, -1);
 
       if (eventType === 'goal') {
         setScoreUs((n) => Math.max(0, n - 1));
@@ -702,7 +823,7 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
         // un retour arrière visuel sur un échec réseau serait pire.
       }
     },
-    [matchId, playersOnField]
+    [matchId, playersOnField, applyCollective]
   );
 
   /** Annule la dernière saisie, quelle qu'elle soit. */
@@ -723,8 +844,10 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
       setPlayersOnField(next);
       setPlayerStates((prev) => {
         const copy = { ...prev };
+        // Les deux compteurs repartent de zéro pour les deux joueurs : celui qui
+        // entre commence sa séquence, celui qui sort commence son attente.
         [outId, inId].forEach((id) => {
-          if (copy[id]) copy[id] = { ...copy[id], currentSequenceTime: 0 };
+          if (copy[id]) copy[id] = { ...copy[id], currentSequenceTime: 0, benchTime: 0 };
         });
         return copy;
       });
@@ -839,6 +962,8 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
     statRows,
     teamStats,
     plusMinusByPlayer,
+    ratingDeltaByPlayer,
+    ratingWeights,
     goalsByType,
     concededByType,
     outboxLength,

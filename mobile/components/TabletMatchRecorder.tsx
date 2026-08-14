@@ -39,7 +39,7 @@ import {
 import { useVoiceCommand } from '../hooks/useVoiceCommand';
 import { haptics } from '../lib/design/haptics';
 import { HIT_SLOP_MIN } from '../lib/design/tokens';
-import { Text, Card, Button, Stat, EmptyState } from './ui';
+import { Text, Card, Button, EmptyState } from './ui';
 import {
   useMatchRecorder,
   MatchPicker,
@@ -52,6 +52,8 @@ import {
   GoalTypeSheet,
   ScoreSheet,
   StatsTable,
+  MatchStatsPanel,
+  TABLET_STAT_KEYS,
   isGoalkeeper,
   playerShortName,
   PLAYER_ACTIONS,
@@ -490,6 +492,7 @@ export default function TabletMatchRecorder({
                     isDragging={dragging === p.id}
                     isDropTarget={dropTarget === p.id}
                     incomingName={draggedName}
+                    ratingDelta={r.ratingDeltaByPlayer[p.id] ?? null}
                   />
                 </View>
               </GestureDetector>
@@ -527,6 +530,7 @@ export default function TabletMatchRecorder({
                       isDragging={dragging === p.id}
                       isDropTarget={dropTarget === p.id}
                       outgoingName={draggedName}
+                      ratingDelta={r.ratingDeltaByPlayer[p.id] ?? null}
                     />
                   </View>
                 </GestureDetector>
@@ -536,47 +540,18 @@ export default function TabletMatchRecorder({
         </ScrollView>
       ) : (
         <ScrollView style={s.flex} contentContainerStyle={s.body}>
-          <View style={s.bilanRow}>
-            <Card variant="flat" padding="lg" style={s.bilanCard}>
-              <Text variant="headline">Notre équipe</Text>
-              <View style={s.statGrid}>
-                <Stat label="Tirs" value={String(r.teamStats.total)} />
-                <Stat
-                  label="Tirs cadrés"
-                  value={String(r.teamStats.onTarget)}
-                  valueColor={c.positive.default}
-                />
-                <Stat
-                  label="Récupérations"
-                  value={String(r.teamStats.recoveries)}
-                  valueColor={c.positive.default}
-                />
-                <Stat
-                  label="Pertes de balle"
-                  value={String(r.teamStats.ballLoss)}
-                  valueColor={c.negative.default}
-                />
-              </View>
-            </Card>
-
-            <Card variant="flat" padding="lg" style={s.bilanCard}>
-              <Text variant="headline">Adversaire</Text>
-              <View style={s.statGrid}>
-                <Stat label="Tirs concédés" value={String(r.opponentShotsTotal)} />
-                <Stat
-                  label="Tirs cadrés concédés"
-                  value={String(r.opponentShotsOnTarget)}
-                  valueColor={c.warning.default}
-                />
-              </View>
-            </Card>
-          </View>
+          <MatchStatsPanel
+            teamStats={r.teamStats}
+            opponentShotsTotal={r.opponentShotsTotal}
+            opponentShotsOnTarget={r.opponentShotsOnTarget}
+            opponentName={r.match?.opponent_team}
+          />
 
           <Card variant="flat" padding="md">
             <Text variant="headline" style={s.tableTitle}>
               Joueurs convoqués
             </Text>
-            <StatsTable rows={r.statRows} />
+            <StatsTable rows={r.statRows} columns={TABLET_STAT_KEYS} />
           </Card>
         </ScrollView>
       )}
@@ -766,8 +741,5 @@ const useStyles = makeStyles((t) => ({
   benchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.xs },
   benchCell: { flexGrow: 1, flexBasis: 130, maxWidth: 200 },
 
-  bilanRow: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.md },
-  bilanCard: { flexGrow: 1, flexBasis: 320, gap: t.space.md },
-  statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.lg },
   tableTitle: { marginBottom: t.space.sm },
 }));

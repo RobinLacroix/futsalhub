@@ -1,82 +1,48 @@
-import { useCallback, useEffect, useState, useMemo } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  ActivityIndicator,
-  RefreshControl,
-} from 'react-native';
+/**
+ * Analyse → Matchs
+ *
+ * Liste des matchs suivis au recorder, tableau de statistiques joueur triable,
+ * et vue « Moments du match ».
+ *
+ * ## Ce que cette version change
+ *
+ * **Le calcul est parti.** L'écran reconstruisait lui-même les statistiques
+ * joueur à partir des événements — ~180 lignes strictement identiques à celles
+ * d'`AnalyticsView`, le segment voisin du même onglet. Tout vit désormais dans
+ * `analytics/aggregate.ts`, et les données dans `MatchAnalyticsContext`, qui
+ * charge une seule fois pour les deux segments au lieu de deux.
+ *
+ * **Les couleurs aussi.** L'écran portait trois couleurs de marque à lui seul :
+ * un bleu `#3b82f6` pour les filtres actifs, les scores et les flèches de tri,
+ * un vert `#16a34a` pour le bouton principal — alors que l'action principale de
+ * tout le reste de l'app est sur l'accent — et un rouge/vert pour les `+/-`.
+ * Cette dernière paire est celle que la deutéranopie détruit : la rampe
+ * sémantique (`deltaColor`) la remplace, pôle haut en teal.
+ *
+ * **Le tableau était muet.** Les en-têtes de colonne sont des boutons de tri,
+ * sans rôle ni état d'accessibilité : un lecteur d'écran annonçait « TC »
+ * sans dire que c'était actionnable, ni dans quel sens la colonne était triée.
+ * Les libellés courts sont maintenant développés à l'annonce — « Tirs cadrés »
+ * plutôt que « TC », que rien ne permettait de deviner sans lire la légende en
+ * bas d'écran.
+ */
+
+import { useCallback, useMemo, useState } from 'react';
+import { View, ScrollView, Pressable } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useActiveTeam } from '../contexts/ActiveTeamContext';
-import { useActiveSeason } from '../contexts/ActiveSeasonContext';
-import { getMatchesByTeam } from '../lib/services/matches';
-import { getEventsByMatchId } from '../lib/services/matchEvents';
-import { getPlayersByTeam, getPlayersByClubWithTeams } from '../lib/services/players';
+import { useTheme, makeStyles } from '../contexts/ThemeContext';
+import { deltaColor } from '../lib/design/tokens';
+import { haptics } from '../lib/design/haptics';
 import { MatchMomentsView } from './MatchMomentsView';
-import type { Match, MatchEvent, Player } from '../types';
-
-type PlayerStatsFromEvents = {
-  playerId: string;
-  playerName: string;
-  goals: number;
-  shot_on_target: number;
-  shot: number;
-  ball_loss: number;
-  recovery: number;
-  assist: number;
-  yellow_cards: number;
-  red_cards: number;
-  plusMinusGoals: number;
-  plusMinusShots: number;
-  totalTimeSeconds: number;
-};
-
-/** Calcule le temps de jeu (en secondes) par joueur à partir des événements.
- * Entre deux événements, les joueurs de players_on_field sont sur le terrain.
- */
-function computePlayingTimeByPlayer(events: MatchEvent[]): Map<string, number> {
-  const byPlayer = new Map<string, number>();
-  const half1 = events.filter((e) => e.half === 1).sort((a, b) => a.match_time_seconds - b.match_time_seconds);
-  const half2 = events.filter((e) => e.half === 2).sort((a, b) => a.match_time_seconds - b.match_time_seconds);
-
-  const processHalf = (evs: MatchEvent[]) => {
-    if (evs.length === 0) return;
-    const maxT = Math.max(...evs.map((e) => e.match_time_seconds));
-    for (let i = 0; i < evs.length; i++) {
-      const ev = evs[i];
-      const nextT = i + 1 < evs.length ? evs[i + 1].match_time_seconds : maxT;
-      const duration = nextT - ev.match_time_seconds;
-      if (duration <= 0) continue;
-      const onField = ev.players_on_field;
-      if (Array.isArray(onField)) {
-        onField.forEach((pid) => {
-          byPlayer.set(pid, (byPlayer.get(pid) ?? 0) + duration);
-        });
-      }
-    }
-    const first = evs[0];
-    if (first.match_time_seconds > 0 && Array.isArray(first.players_on_field)) {
-      first.players_on_field.forEach((pid) => {
-        byPlayer.set(pid, (byPlayer.get(pid) ?? 0) + first.match_time_seconds);
-      });
-    }
-  };
-  processHalf(half1);
-  processHalf(half2);
-  return byPlayer;
-}
-
-function formatPlayingTime(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-}
+import { useMatchAnalytics } from './analytics/MatchAnalyticsContext';
+import { buildPlayerStats, totalShots } from './analytics/aggregate';
+import type { PlayerStats } from './analytics/playerStats';
+import { Screen, Text, Card, Button, EmptyState, SkeletonTable } from './ui';
 
 const normalizeForCompare = (s: string) =>
-  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 
 const LOCATION_FILTERS = ['all', 'Domicile', 'Extérieur'] as const;
 const COMPETITION_FILTERS = ['all', 'Championnat', 'Coupe', 'Amical'] as const;
@@ -86,18 +52,45 @@ const COL_FLEX_NAME = 3;
 const COL_FLEX_TIME = 1.2;
 const COL_FLEX_STAT = 1;
 
-const STATS_COLUMNS: { key: string; label: string; flex: number }[] = [
-  { key: 'playerName', label: 'Joueur', flex: COL_FLEX_NAME },
-  { key: 'totalTimeSeconds', label: 'Temps', flex: COL_FLEX_TIME },
-  { key: 'goals', label: 'B', flex: COL_FLEX_STAT },
-  { key: 'plusMinusGoals', label: '+/-B', flex: COL_FLEX_STAT },
-  { key: 'shot_on_target', label: 'TC', flex: COL_FLEX_STAT },
-  { key: 'totalShots', label: 'TT', flex: COL_FLEX_STAT },
-  { key: 'plusMinusShots', label: '+/-T', flex: COL_FLEX_STAT },
-  { key: 'recovery', label: 'R', flex: COL_FLEX_STAT },
-  { key: 'ball_loss', label: 'PdB', flex: COL_FLEX_STAT },
-  { key: 'assist', label: 'Pdec', flex: COL_FLEX_STAT },
+/** Clé de tri : un champ de `PlayerStats`, ou le total de tirs qui se dérive. */
+type SortKey =
+  | 'playerName'
+  | 'totalTimeSeconds'
+  | 'goals'
+  | 'plusMinusGoals'
+  | 'shot_on_target'
+  | 'totalShots'
+  | 'plusMinusShots'
+  | 'recovery'
+  | 'ball_loss'
+  | 'assist';
+
+/**
+ * Colonnes du tableau. `long` n'est jamais affiché : il sert à l'annonce
+ * VoiceOver, pour qu'un lecteur d'écran ne bute pas sur « PdB ».
+ */
+const STATS_COLUMNS: { key: SortKey; label: string; long: string; flex: number }[] = [
+  { key: 'playerName',       label: 'Joueur', long: 'Joueur',            flex: COL_FLEX_NAME },
+  { key: 'totalTimeSeconds', label: 'Temps',  long: 'Temps de jeu',      flex: COL_FLEX_TIME },
+  { key: 'goals',            label: 'B',      long: 'Buts',              flex: COL_FLEX_STAT },
+  { key: 'plusMinusGoals',   label: '+/-B',   long: 'Plus-minus buts',   flex: COL_FLEX_STAT },
+  { key: 'shot_on_target',   label: 'TC',     long: 'Tirs cadrés',       flex: COL_FLEX_STAT },
+  { key: 'totalShots',       label: 'TT',     long: 'Tirs totaux',       flex: COL_FLEX_STAT },
+  { key: 'plusMinusShots',   label: '+/-T',   long: 'Plus-minus tirs',   flex: COL_FLEX_STAT },
+  { key: 'recovery',         label: 'R',      long: 'Récupérations',     flex: COL_FLEX_STAT },
+  { key: 'ball_loss',        label: 'PdB',    long: 'Pertes de balle',   flex: COL_FLEX_STAT },
+  { key: 'assist',           label: 'Pdec',   long: 'Passes décisives',  flex: COL_FLEX_STAT },
 ];
+
+function sortValue(row: PlayerStats, key: SortKey): number {
+  return key === 'totalShots' ? totalShots(row) : (row[key] as number);
+}
+
+function formatPlayingTime(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
 
 export type TrackerAnalyticsViewProps = {
   title: string;
@@ -105,19 +98,21 @@ export type TrackerAnalyticsViewProps = {
   showMatchList?: boolean;
 };
 
-export function TrackerAnalyticsView({ title, showRecordButton = true, showMatchList = true }: TrackerAnalyticsViewProps) {
+export function TrackerAnalyticsView({
+  title,
+  showRecordButton = true,
+  showMatchList = true,
+}: TrackerAnalyticsViewProps) {
   const router = useRouter();
+  const s = useStyles();
+  const { theme } = useTheme();
+  const c = theme.colors;
   const { activeTeamId, activeTeam } = useActiveTeam();
-  const { activeSeason } = useActiveSeason();
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [eventsByMatch, setEventsByMatch] = useState<Record<string, MatchEvent[]>>({});
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [allClubPlayers, setAllClubPlayers] = useState<Player[]>([]);
-  const [clubPlayerIds, setClubPlayerIds] = useState<Set<string>>(new Set());
-  const [statsSortBy, setStatsSortBy] = useState<string>('playerName');
-  const [statsSortDir, setStatsSortDir] = useState<'asc' | 'desc'>('asc');
+  const { matches, eventsByMatch, clubPlayers, clubPlayerIds, loading, refreshing, refresh } =
+    useMatchAnalytics();
+
+  const [sortBy, setSortBy] = useState<SortKey>('playerName');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [filterLocation, setFilterLocation] = useState<string>('all');
   const [filterCompetition, setFilterCompetition] = useState<string>('all');
   const [analyticsView, setAnalyticsView] = useState<'stats' | 'moments'>('stats');
@@ -126,284 +121,177 @@ export function TrackerAnalyticsView({ title, showRecordButton = true, showMatch
   const filteredMatchIds = useMemo(() => {
     const ids = new Set<string>();
     matches.forEach((m) => {
-      const matchLoc = normalizeForCompare(m.location || '');
-      const matchComp = normalizeForCompare(m.competition || '');
-      const locOk = filterLocation === 'all' || matchLoc === normalizeForCompare(filterLocation);
-      const compOk = filterCompetition === 'all' || matchComp === normalizeForCompare(filterCompetition);
+      const locOk =
+        filterLocation === 'all' ||
+        normalizeForCompare(m.location || '') === normalizeForCompare(filterLocation);
+      const compOk =
+        filterCompetition === 'all' ||
+        normalizeForCompare(m.competition || '') === normalizeForCompare(filterCompetition);
       if (locOk && compOk) ids.add(m.id);
     });
     return ids;
   }, [matches, filterLocation, filterCompetition]);
 
-  const load = useCallback(async () => {
-    if (!activeTeamId || !activeTeam?.club_id) {
-      setMatches([]);
-      setEventsByMatch({});
-      setPlayers([]);
-      setAllClubPlayers([]);
-      setClubPlayerIds(new Set());
-      setLoading(false);
-      setRefreshing(false);
-      return;
-    }
-    try {
-      const [matchesData, playersData, clubData] = await Promise.all([
-        getMatchesByTeam(activeTeamId, activeSeason),
-        getPlayersByTeam(activeTeamId),
-        getPlayersByClubWithTeams(activeTeam.club_id),
-      ]);
-      setMatches(matchesData);
-      setPlayers(playersData);
-      setAllClubPlayers(clubData.map(({ player }) => player));
-      setClubPlayerIds(new Set(clubData.map(({ player }) => player.id)));
-
-      const matchIds = matchesData.map((m) => m.id);
-      const eventsMap: Record<string, MatchEvent[]> = {};
-      await Promise.all(
-        matchIds.map(async (matchId) => {
-          const events = await getEventsByMatchId(matchId);
-          eventsMap[matchId] = events;
-        })
-      );
-      setEventsByMatch(eventsMap);
-    } catch {
-      setMatches([]);
-      setEventsByMatch({});
-      setAllClubPlayers([]);
-      setClubPlayerIds(new Set());
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [activeTeamId, activeTeam?.club_id, activeSeason]);
-
-  useEffect(() => {
-    setLoading(true);
-    load();
-  }, [load]);
-
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    load();
-  }, [load]);
-
-  const playerStatsList = useMemo(() => {
-    const map = new Map<string, PlayerStatsFromEvents>();
-    const playerById = new Map(allClubPlayers.map((p) => [p.id, p]));
-
-    const ensurePlayer = (id: string) => {
-      let cur = map.get(id);
-      if (!cur) {
-        cur = {
-          playerId: id,
-          playerName: playerById.get(id)?.first_name && playerById.get(id)?.last_name
-            ? `${playerById.get(id)!.first_name} ${playerById.get(id)!.last_name}`
-            : id.slice(0, 8),
-          goals: 0,
-          shot_on_target: 0,
-          shot: 0,
-          ball_loss: 0,
-          recovery: 0,
-          assist: 0,
-          yellow_cards: 0,
-          red_cards: 0,
-          plusMinusGoals: 0,
-          plusMinusShots: 0,
-          totalTimeSeconds: 0,
-        };
-        map.set(id, cur);
-      }
-      return cur;
-    };
-
-    Object.entries(eventsByMatch).forEach(([matchId, events]) => {
-      if (!filteredMatchIds.has(matchId)) return;
-      events.forEach((ev) => {
-        // Stats individuelles (player_id = auteur de l'action)
-        if (ev.player_id) {
-          const cur = ensurePlayer(ev.player_id);
-          switch (ev.event_type) {
-            case 'goal':
-              cur.goals++;
-              break;
-            case 'shot_on_target':
-              cur.shot_on_target++;
-              break;
-            case 'shot':
-              cur.shot++;
-              break;
-            case 'ball_loss':
-              cur.ball_loss++;
-              break;
-            case 'recovery':
-              cur.recovery++;
-              break;
-            case 'assist':
-              cur.assist++;
-              break;
-            case 'yellow_card':
-              cur.yellow_cards++;
-              break;
-            case 'red_card':
-              cur.red_cards++;
-              break;
-            default:
-              break;
-          }
-        }
-        // +/- basé sur players_on_field (tous les joueurs sur le terrain au moment de l'événement)
-        const onField = ev.players_on_field;
-        if (Array.isArray(onField) && onField.length > 0) {
-          onField.forEach((pid) => {
-            const cur = ensurePlayer(pid);
-            if (ev.event_type === 'goal') cur.plusMinusGoals += 1;
-            else if (ev.event_type === 'opponent_goal') cur.plusMinusGoals -= 1;
-            else if (ev.event_type === 'shot' || ev.event_type === 'shot_on_target') cur.plusMinusShots += 1;
-            else if (ev.event_type === 'opponent_shot' || ev.event_type === 'opponent_shot_on_target') cur.plusMinusShots -= 1;
-          });
-        }
-      });
-    });
-
-    // Cumuler le temps de jeu par match : match.players.time_played si > 0, sinon depuis events (players_on_field)
-    const parseMatchPlayersList = (m: Match) => {
-      if (!m.players) return [];
-      const raw = m.players;
-      if (Array.isArray(raw)) return raw;
-      try {
-        const arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        return Array.isArray(arr) ? arr : [];
-      } catch {
-        return [];
-      }
-    };
-
-    Object.entries(eventsByMatch).forEach(([matchId, events]) => {
-      if (!filteredMatchIds.has(matchId)) return;
-      const match = matches.find((m) => m.id === matchId);
-      const matchPlayers = match ? parseMatchPlayersList(match) : [];
-      const timeFromMatch = new Map(
-        matchPlayers
-          .filter((p: { time_played?: number }) => (p.time_played ?? 0) > 0)
-          .map((p: { id: string; time_played?: number }) => [p.id, p.time_played!])
-      );
-
-      if (timeFromMatch.size > 0) {
-        timeFromMatch.forEach((sec, pid) => {
-          const cur = ensurePlayer(pid);
-          cur.totalTimeSeconds += sec;
-        });
-      } else {
-        const timeByPlayer = computePlayingTimeByPlayer(events);
-        timeByPlayer.forEach((sec, pid) => {
-          const cur = ensurePlayer(pid);
-          cur.totalTimeSeconds += sec;
-        });
-      }
-    });
-
-    return Array.from(map.values()).filter((s) => clubPlayerIds.has(s.playerId));
-  }, [eventsByMatch, matches, allClubPlayers, clubPlayerIds, filteredMatchIds]);
+  const playerStatsList = useMemo(
+    () =>
+      buildPlayerStats({
+        eventsByMatch,
+        matches,
+        filteredMatchIds,
+        players: clubPlayers,
+        clubPlayerIds,
+      }),
+    [eventsByMatch, matches, filteredMatchIds, clubPlayers, clubPlayerIds]
+  );
 
   const sortedPlayerStatsList = useMemo(() => {
-    const list = [...playerStatsList];
-    const key = statsSortBy;
-    const dir = statsSortDir === 'asc' ? 1 : -1;
-    return list.sort((a, b) => {
-      if (key === 'playerName') {
-        return dir * a.playerName.localeCompare(b.playerName);
-      }
-      const valA = key === 'totalShots' ? a.shot + a.shot_on_target : (a as any)[key];
-      const valB = key === 'totalShots' ? b.shot + b.shot_on_target : (b as any)[key];
-      const na = typeof valA === 'number' ? valA : 0;
-      const nb = typeof valB === 'number' ? valB : 0;
-      return dir * (na - nb);
-    });
-  }, [playerStatsList, statsSortBy, statsSortDir]);
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...playerStatsList].sort((a, b) =>
+      sortBy === 'playerName'
+        ? dir * a.playerName.localeCompare(b.playerName)
+        : dir * (sortValue(a, sortBy) - sortValue(b, sortBy))
+    );
+  }, [playerStatsList, sortBy, sortDir]);
 
-  const handleStatsSort = useCallback((colKey: string) => {
-    setStatsSortBy((prev) => {
-      setStatsSortDir((prevDir) => (prev === colKey ? (prevDir === 'asc' ? 'desc' : 'asc') : 'desc'));
-      return colKey;
+  const handleSort = useCallback((key: SortKey) => {
+    haptics.select();
+    setSortBy((prev) => {
+      setSortDir((prevDir) => (prev === key ? (prevDir === 'asc' ? 'desc' : 'asc') : 'desc'));
+      return key;
     });
   }, []);
 
-  const matchesWithEventCount = useMemo(() => {
-    return matches.map((m) => ({
-      ...m,
-      eventCount: (eventsByMatch[m.id] ?? []).length,
-    }));
-  }, [matches, eventsByMatch]);
+  const matchesWithEventCount = useMemo(
+    () => matches.map((m) => ({ ...m, eventCount: (eventsByMatch[m.id] ?? []).length })),
+    [matches, eventsByMatch]
+  );
+
+  // ── États non nominaux ────────────────────────────────────────────────────
 
   if (!activeTeamId || !activeTeam) {
     return (
-      <View style={styles.centered}>
-        <Ionicons name="bar-chart-outline" size={48} color="#94a3b8" />
-        <Text style={styles.noTeamTitle}>Aucune équipe sélectionnée</Text>
-        <Text style={styles.noTeamText}>
-          Choisissez une équipe pour accéder aux statistiques.
-        </Text>
-      </View>
+      <Screen scroll={false}>
+        <EmptyState
+          icon="bar-chart-outline"
+          title="Aucune équipe sélectionnée"
+          description="Choisissez une équipe pour accéder aux statistiques."
+        />
+      </Screen>
     );
   }
 
   if (loading && matches.length === 0) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3b82f6" />
-      </View>
+      <Screen>
+        <SkeletonTable />
+      </Screen>
     );
   }
 
-  return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#3b82f6']} />
-      }
+  // ── Rendu ─────────────────────────────────────────────────────────────────
+
+  const renderFilterRow = (
+    label: string,
+    values: readonly string[],
+    value: string,
+    onChange: (v: string) => void,
+    allLabel: string
+  ) => (
+    <View
+      style={s.filtersRow}
+      accessibilityRole="radiogroup"
+      accessibilityLabel={`Filtrer par ${label.toLowerCase()}`}
     >
-      <Text style={styles.title}>{title}</Text>
-      <Text style={styles.subtitle}>{activeTeam.name}</Text>
+      <Text variant="callout" tone="secondary">
+        {label}
+      </Text>
+      <View style={s.filterChips}>
+        {values.map((v) => {
+          const active = value === v;
+          const chipLabel = v === 'all' ? allLabel : v;
+          return (
+            <Pressable
+              key={v}
+              onPress={() => {
+                haptics.select();
+                onChange(v);
+              }}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: active, checked: active }}
+              accessibilityLabel={chipLabel}
+              style={({ pressed }) => [
+                s.filterChip,
+                {
+                  backgroundColor: active ? c.accent.fill : c.bg.sunken,
+                  borderColor: active ? c.accent.fill : c.border.subtle,
+                },
+                pressed && s.pressed,
+              ]}
+            >
+              <Text variant="caption" tone={active ? 'onFill' : 'secondary'} weight="600">
+                {chipLabel}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+
+  return (
+    <Screen onRefresh={refresh} refreshing={refreshing}>
+      <Text variant="title">{title}</Text>
+      <Text variant="callout" tone="secondary" style={s.subtitle}>
+        {activeTeam.name}
+      </Text>
 
       {showRecordButton && (
-        <TouchableOpacity
-          style={styles.recordBtn}
+        <Button
+          label="Enregistrer un match"
+          icon="videocam"
           onPress={() => router.push('/(tabs)/tracker/record')}
-        >
-          <Ionicons name="videocam" size={24} color="#fff" />
-          <Text style={styles.recordBtnText}>Enregistrer un match</Text>
-        </TouchableOpacity>
+          block
+          style={s.recordBtn}
+        />
       )}
 
       {showMatchList && (
         <>
-          <Text style={styles.sectionTitle}>Matchs suivis</Text>
+          <Text variant="title" style={s.sectionTitle}>
+            Matchs suivis
+          </Text>
           {matchesWithEventCount.length === 0 ? (
-            <View style={styles.empty}>
-              <Text style={styles.emptyText}>Aucun match. Créez un match dans le Calendrier.</Text>
-            </View>
+            <EmptyState
+              icon="videocam-outline"
+              title="Aucun match"
+              description="Créez un match dans le Calendrier pour pouvoir le suivre en direct."
+              compact
+            />
           ) : (
-            <View style={styles.matchList}>
+            <View style={s.matchList}>
               {matchesWithEventCount.slice(0, 15).map((m) => (
-                <TouchableOpacity
+                <Pressable
                   key={m.id}
-                  style={styles.matchCard}
                   onPress={() => router.push(`/(tabs)/tracker/record?matchId=${m.id}`)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${m.title || m.opponent_team || 'Match'}, ${m.score_team} à ${m.score_opponent}`}
+                  style={({ pressed }) => [pressed && s.pressed]}
                 >
-                  <View style={styles.matchMain}>
-                    <Text style={styles.matchTitle} numberOfLines={1}>
-                      {m.title || m.opponent_team || 'Match'}
+                  <Card style={s.matchCard}>
+                    <View style={s.flex}>
+                      <Text variant="headline" numberOfLines={1}>
+                        {m.title || m.opponent_team || 'Match'}
+                      </Text>
+                      <Text variant="caption" tone="tertiary">
+                        {m.competition} · {m.eventCount} événement{m.eventCount !== 1 ? 's' : ''}
+                      </Text>
+                    </View>
+                    <Text variant="headline" tone="accent" numeric style={s.matchScore}>
+                      {m.score_team} - {m.score_opponent}
                     </Text>
-                    <Text style={styles.matchMeta}>
-                      {m.competition} · {m.eventCount} événement{m.eventCount !== 1 ? 's' : ''}
-                    </Text>
-                  </View>
-                  <Text style={styles.matchScore}>
-                    {m.score_team} - {m.score_opponent}
-                  </Text>
-                  <Ionicons name="chevron-forward" size={20} color="#94a3b8" />
-                </TouchableOpacity>
+                    <Ionicons name="chevron-forward" size={20} color={c.text.tertiary} />
+                  </Card>
+                </Pressable>
               ))}
             </View>
           )}
@@ -412,124 +300,163 @@ export function TrackerAnalyticsView({ title, showRecordButton = true, showMatch
 
       {matches.length > 0 && (
         <>
-          <View style={styles.viewTabs}>
-            <TouchableOpacity
-              style={[styles.viewTab, analyticsView === 'stats' && styles.viewTabActive]}
-              onPress={() => setAnalyticsView('stats')}
-            >
-              <Text style={[styles.viewTabText, analyticsView === 'stats' && styles.viewTabTextActive]}>
-                Stats joueurs
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.viewTab, analyticsView === 'moments' && styles.viewTabActive]}
-              onPress={() => setAnalyticsView('moments')}
-            >
-              <Text style={[styles.viewTabText, analyticsView === 'moments' && styles.viewTabTextActive]}>
-                Moments du match
-              </Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.filtersRow}>
-            <Text style={styles.filterLabel}>Lieu :</Text>
-            <View style={styles.filterChips}>
-              {LOCATION_FILTERS.map((v) => (
-                <TouchableOpacity
-                  key={v}
-                  style={[styles.filterChip, filterLocation === v && styles.filterChipActive]}
-                  onPress={() => setFilterLocation(v)}
+          <View style={[s.viewTabs, { backgroundColor: c.bg.sunken }]} accessibilityRole="tablist">
+            {(
+              [
+                { key: 'stats', label: 'Stats joueurs' },
+                { key: 'moments', label: 'Moments du match' },
+              ] as const
+            ).map((tab) => {
+              const active = analyticsView === tab.key;
+              return (
+                <Pressable
+                  key={tab.key}
+                  onPress={() => {
+                    if (active) return;
+                    haptics.select();
+                    setAnalyticsView(tab.key);
+                  }}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={tab.label}
+                  style={[
+                    s.viewTab,
+                    active && { backgroundColor: c.bg.surface, borderColor: c.border.subtle },
+                  ]}
                 >
-                  <Text style={[styles.filterChipText, filterLocation === v && styles.filterChipTextActive]}>
-                    {v === 'all' ? 'Tous' : v}
+                  <Text
+                    variant="callout"
+                    weight="600"
+                    tone={active ? 'primary' : 'secondary'}
+                  >
+                    {tab.label}
                   </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+                </Pressable>
+              );
+            })}
           </View>
-          <View style={styles.filtersRow}>
-            <Text style={styles.filterLabel}>Compétition :</Text>
-            <View style={styles.filterChips}>
-              {COMPETITION_FILTERS.map((v) => (
-                <TouchableOpacity
-                  key={v}
-                  style={[styles.filterChip, filterCompetition === v && styles.filterChipActive]}
-                  onPress={() => setFilterCompetition(v)}
-                >
-                  <Text style={[styles.filterChipText, filterCompetition === v && styles.filterChipTextActive]}>
-                    {v === 'all' ? 'Toutes' : v}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
+
+          {renderFilterRow('Lieu', LOCATION_FILTERS, filterLocation, setFilterLocation, 'Tous')}
+          {renderFilterRow(
+            'Compétition',
+            COMPETITION_FILTERS,
+            filterCompetition,
+            setFilterCompetition,
+            'Toutes'
+          )}
+
           {analyticsView === 'stats' ? (
-          playerStatsList.length > 0 ? (
-          <View
-            style={styles.statsCard}
-            onLayout={(e) => setTableWidth(e.nativeEvent.layout.width)}
-          >
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={true}
-              contentContainerStyle={styles.statsTableScrollContent}
-              style={styles.statsTableScroll}
-            >
-            <View style={[
-              styles.statsTableInner,
-              { width: Math.max(tableWidth || 0, MIN_TABLE_WIDTH), minWidth: MIN_TABLE_WIDTH },
-            ]}>
-            <View style={styles.statsHeader}>
-              {STATS_COLUMNS.map((col) => (
-                <TouchableOpacity
-                  key={col.key}
-                  style={[col.key === 'playerName' ? styles.statsHeaderNameTouch : styles.statsHeaderCellTouch, { flex: col.flex }]}
-                  onPress={() => handleStatsSort(col.key)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={col.key === 'playerName' ? styles.statsHeaderName : styles.statsHeaderCell}>
-                    {col.label}
-                  </Text>
-                  <View style={styles.statsSortIcons}>
-                    <Ionicons
-                      name="chevron-up"
-                      size={10}
-                      color={statsSortBy === col.key && statsSortDir === 'asc' ? '#3b82f6' : '#94a3b8'}
-                    />
-                    <Ionicons
-                      name="chevron-down"
-                      size={10}
-                      color={statsSortBy === col.key && statsSortDir === 'desc' ? '#3b82f6' : '#94a3b8'}
-                    />
+            playerStatsList.length > 0 ? (
+              <Card
+                padding="none"
+                style={s.statsCard}
+                onLayout={(e) => setTableWidth(e.nativeEvent.layout.width)}
+              >
+                <ScrollView horizontal showsHorizontalScrollIndicator>
+                  <View
+                    style={[
+                      s.statsTableInner,
+                      { width: Math.max(tableWidth || 0, MIN_TABLE_WIDTH), minWidth: MIN_TABLE_WIDTH },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        s.statsHeader,
+                        { backgroundColor: c.bg.sunken, borderBottomColor: c.border.subtle },
+                      ]}
+                    >
+                      {STATS_COLUMNS.map((col) => {
+                        const sorted = sortBy === col.key;
+                        return (
+                          <Pressable
+                            key={col.key}
+                            onPress={() => handleSort(col.key)}
+                            accessibilityRole="button"
+                            accessibilityLabel={
+                              sorted
+                                ? `${col.long}, trié ${sortDir === 'asc' ? 'par ordre croissant' : 'par ordre décroissant'}`
+                                : `${col.long}, trier`
+                            }
+                            style={({ pressed }) => [
+                              col.key === 'playerName' ? s.headerNameCell : s.headerStatCell,
+                              { flex: col.flex },
+                              pressed && s.pressed,
+                            ]}
+                          >
+                            <Text
+                              variant="tableHeader"
+                              tone={sorted ? 'accent' : 'secondary'}
+                              style={col.key === 'playerName' ? undefined : s.center}
+                            >
+                              {col.label}
+                            </Text>
+                            <View style={s.sortIcons}>
+                              <Ionicons
+                                name="chevron-up"
+                                size={10}
+                                color={sorted && sortDir === 'asc' ? c.accent.default : c.text.tertiary}
+                              />
+                              <Ionicons
+                                name="chevron-down"
+                                size={10}
+                                color={sorted && sortDir === 'desc' ? c.accent.default : c.text.tertiary}
+                              />
+                            </View>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+
+                    {sortedPlayerStatsList.map((row, i) => (
+                      <View
+                        key={row.playerId}
+                        style={[
+                          s.statsRow,
+                          {
+                            borderBottomColor: c.border.subtle,
+                            backgroundColor: i % 2 === 1 ? c.bg.stripe : 'transparent',
+                          },
+                        ]}
+                      >
+                        <View style={[s.nameCell, { flex: COL_FLEX_NAME }]}>
+                          <Text variant="tableCell" numberOfLines={1} ellipsizeMode="tail">
+                            {row.playerName}
+                          </Text>
+                        </View>
+                        <Cell flex={COL_FLEX_TIME}>{formatPlayingTime(row.totalTimeSeconds)}</Cell>
+                        <Cell flex={COL_FLEX_STAT}>{row.goals}</Cell>
+                        <Cell flex={COL_FLEX_STAT} color={deltaColor(theme, row.plusMinusGoals)}>
+                          {row.plusMinusGoals}
+                        </Cell>
+                        <Cell flex={COL_FLEX_STAT}>{row.shot_on_target}</Cell>
+                        <Cell flex={COL_FLEX_STAT}>{totalShots(row)}</Cell>
+                        <Cell flex={COL_FLEX_STAT} color={deltaColor(theme, row.plusMinusShots)}>
+                          {row.plusMinusShots}
+                        </Cell>
+                        <Cell flex={COL_FLEX_STAT}>{row.recovery}</Cell>
+                        <Cell flex={COL_FLEX_STAT}>{row.ball_loss}</Cell>
+                        <Cell flex={COL_FLEX_STAT}>{row.assist}</Cell>
+                      </View>
+                    ))}
                   </View>
-                </TouchableOpacity>
-              ))}
-            </View>
-            {sortedPlayerStatsList.map((s) => (
-              <View key={s.playerId} style={styles.statsRow}>
-                <View style={[styles.statsNameCell, { flex: COL_FLEX_NAME }]}>
-                  <Text style={styles.statsName} numberOfLines={1} ellipsizeMode="tail">{s.playerName}</Text>
-                </View>
-                <Text style={[styles.statsCell, { flex: COL_FLEX_TIME }]}>{formatPlayingTime(s.totalTimeSeconds)}</Text>
-                <Text style={[styles.statsCell, { flex: COL_FLEX_STAT }]}>{s.goals}</Text>
-                <Text style={[styles.statsCell, { flex: COL_FLEX_STAT }, s.plusMinusGoals < 0 && styles.statsCellNeg, s.plusMinusGoals > 0 && styles.statsCellPos]}>{s.plusMinusGoals}</Text>
-                <Text style={[styles.statsCell, { flex: COL_FLEX_STAT }]}>{s.shot_on_target}</Text>
-                <Text style={[styles.statsCell, { flex: COL_FLEX_STAT }]}>{s.shot + s.shot_on_target}</Text>
-                <Text style={[styles.statsCell, { flex: COL_FLEX_STAT }, s.plusMinusShots < 0 && styles.statsCellNeg, s.plusMinusShots > 0 && styles.statsCellPos]}>{s.plusMinusShots}</Text>
-                <Text style={[styles.statsCell, { flex: COL_FLEX_STAT }]}>{s.recovery}</Text>
-                <Text style={[styles.statsCell, { flex: COL_FLEX_STAT }]}>{s.ball_loss}</Text>
-                <Text style={[styles.statsCell, { flex: COL_FLEX_STAT }]}>{s.assist}</Text>
-              </View>
-            ))}
-            </View>
-            </ScrollView>
-          </View>
-          ) : (
-            <Text style={styles.filterEmpty}>
-              {filteredMatchIds.size === 0
-                ? 'Aucun match ne correspond aux filtres sélectionnés.'
-                : 'Aucun match enregistré avec le match recorder.'}
-            </Text>
-          )
+                </ScrollView>
+              </Card>
+            ) : (
+              <EmptyState
+                icon="stats-chart-outline"
+                title={
+                  filteredMatchIds.size === 0
+                    ? 'Aucun match ne correspond aux filtres'
+                    : 'Aucun match enregistré au recorder'
+                }
+                description={
+                  filteredMatchIds.size === 0
+                    ? 'Élargissez le filtre de lieu ou de compétition.'
+                    : 'Suivez un match en direct pour voir apparaître les statistiques joueur.'
+                }
+                compact
+              />
+            )
           ) : (
             <MatchMomentsView
               matches={matches}
@@ -537,120 +464,123 @@ export function TrackerAnalyticsView({ title, showRecordButton = true, showMatch
               filteredMatchIds={filteredMatchIds}
             />
           )}
-          {playerStatsList.length > 0 && (
-            <Text style={styles.legend}>B = Buts, +/-B = +/- buts, TC = Tirs cadrés, TT = Tirs totaux, +/-T = +/- tirs, R = Récupérations, PdB = Pertes de balle, Pdec = Passes déc., Temps = temps de jeu cumulé</Text>
+
+          {playerStatsList.length > 0 && analyticsView === 'stats' && (
+            <Text variant="caption" tone="tertiary" style={s.legend}>
+              B = buts · +/-B = plus-minus buts · TC = tirs cadrés · TT = tirs totaux ·
+              +/-T = plus-minus tirs · R = récupérations · PdB = pertes de balle ·
+              Pdec = passes décisives · Temps = temps de jeu cumulé
+            </Text>
           )}
         </>
       )}
-    </ScrollView>
+    </Screen>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  content: { padding: 16, paddingBottom: 32 },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  noTeamTitle: { fontSize: 18, fontWeight: '600', color: '#334155', marginTop: 12 },
-  noTeamText: { fontSize: 14, color: '#64748b', textAlign: 'center', marginTop: 8 },
-  title: { fontSize: 22, fontWeight: '700', color: '#1e293b' },
-  subtitle: { fontSize: 14, color: '#64748b', marginTop: 4, marginBottom: 20 },
-  recordBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    backgroundColor: '#16a34a',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    marginBottom: 24,
-  },
-  recordBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  sectionTitle: { fontSize: 18, fontWeight: '700', color: '#1e293b', marginBottom: 12 },
+/** Cellule numérique. `color` n'est passé que pour les valeurs signées. */
+function Cell({
+  flex,
+  color,
+  children,
+}: {
+  flex: number;
+  color?: string;
+  children: React.ReactNode;
+}) {
+  const s = useStyles();
+  return (
+    <Text
+      variant="tableCell"
+      tone="secondary"
+      color={color}
+      numeric
+      style={[s.center, { flex }]}
+    >
+      {children}
+    </Text>
+  );
+}
+
+const useStyles = makeStyles((t) => ({
+  flex: { flex: 1 },
+  center: { textAlign: 'center' },
+  pressed: { opacity: 0.7 },
+
+  subtitle: { marginTop: 2, marginBottom: t.space.xl },
+  recordBtn: { marginBottom: t.space.xxl },
+  sectionTitle: { marginBottom: t.space.md },
+
+  matchList: { gap: t.space.sm, marginBottom: t.space.xxl },
+  matchCard: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm },
+  matchScore: { marginRight: t.space.sm },
+
   viewTabs: {
     flexDirection: 'row',
-    marginBottom: 12,
-    backgroundColor: '#e2e8f0',
-    borderRadius: 10,
-    padding: 4,
+    marginBottom: t.space.md,
+    borderRadius: t.radius.md,
+    padding: t.space.xs,
+    gap: t.space.xs,
   },
   viewTab: {
     flex: 1,
-    paddingVertical: 10,
+    minHeight: 40,
     alignItems: 'center',
-    borderRadius: 8,
+    justifyContent: 'center',
+    borderRadius: t.radius.sm,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
-  viewTabActive: { backgroundColor: '#fff', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 2, elevation: 2 },
-  viewTabText: { fontSize: 14, fontWeight: '600', color: '#64748b' },
-  viewTabTextActive: { color: '#1e293b' },
-  filtersRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 },
-  filterLabel: { fontSize: 14, color: '#64748b', marginRight: 4 },
-  filterChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  filterChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    backgroundColor: '#e2e8f0',
-  },
-  filterChipActive: { backgroundColor: '#3b82f6' },
-  filterChipText: { fontSize: 13, color: '#64748b', fontWeight: '500' },
-  filterChipTextActive: { color: '#fff' },
-  filterEmpty: { fontSize: 14, color: '#94a3b8', fontStyle: 'italic', marginVertical: 16 },
-  empty: { paddingVertical: 24, alignItems: 'center' },
-  emptyText: { fontSize: 15, color: '#64748b' },
-  matchList: { gap: 8, marginBottom: 24 },
-  matchCard: {
+
+  filtersRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    padding: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    marginBottom: t.space.sm,
+    flexWrap: 'wrap',
+    gap: t.space.sm,
   },
-  matchMain: { flex: 1 },
-  matchTitle: { fontSize: 16, fontWeight: '600', color: '#1e293b' },
-  matchMeta: { fontSize: 13, color: '#64748b', marginTop: 2 },
-  matchScore: { fontSize: 16, fontWeight: '700', color: '#3b82f6', marginRight: 8 },
-  statsCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
+  filterChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  filterChip: {
+    minHeight: 32,
+    justifyContent: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: t.space.md,
+    borderRadius: t.radius.pill,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
-    overflow: 'hidden',
   },
-  statsTableScroll: {},
-  statsTableScrollContent: {},
+
+  statsCard: { overflow: 'hidden' },
   statsTableInner: { flexDirection: 'column', alignSelf: 'stretch' },
   statsHeader: {
     flexDirection: 'row',
-    backgroundColor: '#f1f5f9',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    paddingHorizontal: t.space.md,
     borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
   },
-  statsHeaderName: { fontSize: 12, fontWeight: '700', color: '#475569' },
-  statsHeaderNameTouch: { paddingVertical: 10, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', gap: 2 },
-  statsHeaderCell: { fontSize: 12, fontWeight: '700', color: '#475569', textAlign: 'center' },
-  statsHeaderCellTouch: { paddingVertical: 10, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 2 },
-  statsSortIcons: { flexDirection: 'row' },
+  headerNameCell: {
+    minHeight: 44,
+    paddingHorizontal: t.space.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  headerStatCell: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 2,
+  },
+  sortIcons: { flexDirection: 'row' },
+
   statsRow: {
     flexDirection: 'row',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e2e8f0',
+    alignItems: 'center',
+    minHeight: 40,
+    paddingVertical: t.space.sm,
+    paddingHorizontal: t.space.md,
+    borderBottomWidth: 1,
   },
-  statsNameCell: { paddingHorizontal: 8, justifyContent: 'center', flexShrink: 0, overflow: 'hidden' },
-  statsName: { fontSize: 14, color: '#334155' },
-  statsCell: { fontSize: 14, color: '#64748b', textAlign: 'center', minWidth: 0 },
-  statsCellNeg: { color: '#dc2626', fontWeight: '600' },
-  statsCellPos: { color: '#16a34a', fontWeight: '600' },
-  legend: { fontSize: 12, color: '#94a3b8', marginTop: 8 },
-});
+  nameCell: { paddingHorizontal: t.space.sm, justifyContent: 'center', flexShrink: 0, overflow: 'hidden' },
+
+  legend: { marginTop: t.space.sm },
+}));

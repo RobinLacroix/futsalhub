@@ -24,7 +24,7 @@ import { useTheme, makeStyles } from '../../contexts/ThemeContext';
 import { haptics } from '../../lib/design/haptics';
 import { Text } from '../ui';
 import { formatSeconds } from '../../utils/matchUtils';
-import { STAT_COLUMNS, type StatColumn, type StatRow } from './recorderModel';
+import { ALL_STAT_COLUMNS, STAT_COLUMNS, type StatColumn, type StatRow } from './recorderModel';
 
 export interface StatsTableProps {
   rows: StatRow[];
@@ -45,7 +45,9 @@ export function StatsTable({ rows, columns }: StatsTableProps) {
   const shown: StatColumn[] = useMemo(
     () =>
       columns
-        ? (columns.map((k) => STAT_COLUMNS.find((col) => col.key === k)).filter(Boolean) as StatColumn[])
+        ? (columns
+            .map((k) => ALL_STAT_COLUMNS.find((col) => col.key === k))
+            .filter(Boolean) as StatColumn[])
         : STAT_COLUMNS,
     [columns]
   );
@@ -152,6 +154,34 @@ export function StatsTable({ rows, columns }: StatsTableProps) {
           </View>
 
           {shown.map((col) => {
+            // La note live est la seule colonne qui peut ne rien valoir :
+            // gardien hors barème, ou pas encore assez d'actions pour dire quoi
+            // que ce soit. Un tiret, pas un zéro — un zéro se lit comme un
+            // résultat neutre alors que c'est une absence de mesure.
+            if (col.kind === 'delta') {
+              const d = row.ratingDelta;
+              if (d == null) {
+                return (
+                  <Text key={col.key} variant="tableCell" tone="tertiary" style={s.cell}>
+                    —
+                  </Text>
+                );
+              }
+              const tone =
+                d > 0 ? c.positive.default : d < 0 ? c.negative.default : c.text.tertiary;
+              return (
+                <Text
+                  key={col.key}
+                  variant="tableCell"
+                  numeric
+                  weight="700"
+                  color={tone}
+                  style={s.cell}
+                >
+                  {d > 0 ? `+${d.toFixed(1)}` : d.toFixed(1)}
+                </Text>
+              );
+            }
             const raw = (row[col.key as keyof StatRow] as number) ?? 0;
             if (col.kind === 'time') {
               return (

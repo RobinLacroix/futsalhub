@@ -26,6 +26,7 @@ import { Text } from '../ui';
 import { formatSeconds } from '../../utils/matchUtils';
 import {
   CARD_ACTION_ORDER,
+  DEFAULT_SEQUENCE_LIMIT,
   PLAYER_ACTIONS,
   isGoalkeeper,
   type PlayerState,
@@ -48,6 +49,45 @@ const CARD_ACTIONS = PLAYER_ACTIONS.filter(
   (a) => a.eventType === 'yellow_card' || a.eventType === 'red_card'
 );
 
+/**
+ * Écart de note depuis le début du match.
+ *
+ * C'est l'écart qui est affiché, pas la note. Tout le monde part de 5.0 et les
+ * poids sont petits : au bout de dix minutes l'écran afficherait cinq nombres
+ * entre 4.7 et 5.4, illisibles au premier coup d'œil et faussement précis.
+ * `+0.4` se lit d'un regard et dit la seule chose utile en direct, qui est le
+ * sens et l'ampleur de ce qu'a produit le joueur.
+ *
+ * Rien n'est rendu quand la valeur est `null` (gardien hors barème, ou pas
+ * encore assez d'actions) : une case vide est plus honnête qu'un `0.0` qui se
+ * lirait comme un jugement neutre déjà établi.
+ */
+export function RatingDeltaChip({ value, label }: { value: number | null; label: string }) {
+  const s = useStyles();
+  const { theme } = useTheme();
+  const c = theme.colors;
+  if (value == null) return null;
+
+  const tone = value > 0 ? c.positive : value < 0 ? c.negative : null;
+  const text = value > 0 ? `+${value.toFixed(1)}` : value.toFixed(1);
+
+  return (
+    <View
+      style={[s.ratingChip, tone && { backgroundColor: tone.subtle, borderColor: tone.default }]}
+      accessibilityLabel={`${label} : note ${text} depuis le début du match`}
+    >
+      <Text
+        variant="caption"
+        weight="700"
+        numeric
+        color={tone ? tone.default : c.text.tertiary}
+      >
+        {text}
+      </Text>
+    </View>
+  );
+}
+
 export interface PlayerActionCardProps {
   player: Player;
   /** Nom court, désambiguïsé par `playerDisplayName` en cas d'homonyme. */
@@ -62,6 +102,8 @@ export interface PlayerActionCardProps {
   isDragging?: boolean;
   /** Nom du joueur en cours de déplacement, pour l'étiquette de dépôt. */
   incomingName?: string | null;
+  /** Écart de note depuis le début du match. `null` = ne pas afficher. */
+  ratingDelta?: number | null;
 }
 
 export function PlayerActionCard({
@@ -75,6 +117,7 @@ export function PlayerActionCard({
   isDropTarget,
   isDragging,
   incomingName,
+  ratingDelta = null,
 }: PlayerActionCardProps) {
   const s = useStyles();
   const { theme } = useTheme();
@@ -115,6 +158,7 @@ export function PlayerActionCard({
             #{player.number}
           </Text>
         )}
+        <RatingDeltaChip value={ratingDelta} label={name} />
       </View>
 
       {/*
@@ -276,6 +320,8 @@ export interface BenchCardProps {
   isDragging?: boolean;
   /** Le remplaçant entre à la place de ce joueur. */
   outgoingName?: string | null;
+  /** Écart de note depuis le début du match. `null` = ne pas afficher. */
+  ratingDelta?: number | null;
 }
 
 export function BenchCard({
@@ -287,11 +333,21 @@ export function BenchCard({
   isDropTarget,
   isDragging,
   outgoingName,
+  ratingDelta = null,
 }: BenchCardProps) {
   const s = useStyles();
   const { theme } = useTheme();
   const c = theme.colors;
   const gk = isGoalkeeper(player.position);
+
+  /**
+   * Seuil d'attente : la propre limite de séquence du joueur, celle qui déclenche
+   * déjà son « À sortir » sur le terrain. Pas de nouveau réglage à tenir, et le
+   * repère est juste — un joueur qui attend plus longtemps que ce qu'il tient en
+   * jeu a sauté un tour de rotation.
+   */
+  const wait = state?.benchTime ?? 0;
+  const waiting = wait > 0 && wait >= (state?.sequenceTimeLimit || DEFAULT_SEQUENCE_LIMIT);
 
   return (
     <Pressable
@@ -308,7 +364,7 @@ export function BenchCard({
       accessibilityState={{ selected: !!selected }}
       accessibilityLabel={
         `${player.first_name} ${player.last_name}${gk ? ', gardien' : ''}, remplaçant. ` +
-        `${formatSeconds(state?.totalTime ?? 0)} de jeu`
+        `${formatSeconds(state?.totalTime ?? 0)} de jeu, ${formatSeconds(wait)} d'attente`
       }
       accessibilityHint={selected ? 'Touchez un joueur du terrain pour échanger' : 'Sélectionner pour entrer'}
     >
@@ -326,9 +382,34 @@ export function BenchCard({
           {name}
         </Text>
       </View>
-      <Text variant="tableCell" numeric tone="secondary">
-        {formatSeconds(state?.totalTime ?? 0)}
-      </Text>
+      <View style={s.benchLine}>
+        <Text variant="tableCell" numeric tone="secondary">
+          {formatSeconds(state?.totalTime ?? 0)}
+        </Text>
+        <RatingDeltaChip value={ratingDelta} label={name} />
+      </View>
+
+      {/*
+        Le temps de jeu cumulé dit ce que le joueur a eu, l'attente dit ce qu'il
+        n'a pas. Les deux se lisent ensemble : un remplaçant à 8 minutes de jeu
+        qui attend depuis 6 minutes n'appelle pas la même décision qu'un autre à
+        8 minutes entré il y a trente secondes.
+      */}
+      <View style={s.benchWait}>
+        <Ionicons
+          name="hourglass-outline"
+          size={11}
+          color={waiting ? c.warning.default : c.text.tertiary}
+        />
+        <Text
+          variant="caption"
+          numeric
+          weight={waiting ? '700' : '400'}
+          color={waiting ? c.warning.default : c.text.tertiary}
+        >
+          {formatSeconds(state?.benchTime ?? 0)}
+        </Text>
+      </View>
       {((state?.yellowCards ?? 0) > 0 || (state?.redCards ?? 0) > 0) && (
         <View style={s.benchCards}>
           {(state?.yellowCards ?? 0) > 0 && (
@@ -386,6 +467,24 @@ const useStyles = makeStyles((t) => ({
   },
 
   head: { flexDirection: 'row', alignItems: 'center', gap: t.space.xs },
+
+  /**
+   * Bordure et fond teintés plutôt qu'un fond plein : le chip est posé sur la
+   * ligne de titre, à côté du nom, et un aplat vif y attirerait plus l'œil que
+   * le nom lui-même. En direct, c'est le nom qu'on cherche en premier.
+   */
+  ratingChip: {
+    minWidth: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: t.radius.pill,
+    borderWidth: 1,
+    borderColor: t.colors.border.subtle,
+  },
+  benchLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: t.space.xs },
+  benchWait: { flexDirection: 'row', alignItems: 'center', gap: 3 },
 
   times: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   timeCell: { minWidth: 0 },

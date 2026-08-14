@@ -1,4 +1,5 @@
 import { supabase } from '../supabase';
+import { DEFAULT_TEAM_COLOR } from '../teamColors';
 
 export async function isClubAdmin(clubId: string): Promise<boolean> {
   const { data, error } = await supabase.rpc('is_club_admin', { p_club_id: clubId });
@@ -258,7 +259,11 @@ export async function createUserClub(input: CreateClubInput): Promise<{ clubId: 
         name: 'Équipe principale',
         category: 'Senior',
         level: 'A',
-        color: '#3b82f6',
+        // Catalogue partagé avec l'écran Équipes. C'était `#3b82f6` en dur,
+        // absent de la palette depuis sa révision : la première équipe de tout
+        // nouveau club portait donc une couleur que le sélecteur ne sait pas
+        // re-proposer.
+        color: DEFAULT_TEAM_COLOR,
       })
       .select('id')
       .single();

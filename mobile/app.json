@@ -11,7 +11,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.futsalhub.app",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "FutsalHub accède à vos photos lorsque vous choisissez d'importer une image ou un document depuis votre appareil."
       },
       "requireFullScreen": false
     },

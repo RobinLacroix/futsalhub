@@ -31,21 +31,13 @@ import {
   SkeletonList,
 } from '../../../components/ui';
 import type { Team } from '../../../types';
-
-/**
- * Couleurs d'identité d'équipe. Volontairement figées : elles sont **stockées
- * en base** et servent à reconnaître une équipe d'un écran à l'autre, comme un
- * maillot. Les faire suivre le thème changerait l'identité d'une équipe selon
- * le mode d'affichage. Elles sont choisies suffisamment saturées pour rester
- * lisibles sur fond clair comme sur fond sombre.
- */
-const TEAM_COLORS = ['#5B8DEF', '#2DBE8C', '#F2994A', '#EB5757', '#9B7BEA', '#20B8CE'] as const;
+import { TEAM_COLORS, DEFAULT_TEAM_COLOR } from '../../../lib/teamColors';
 
 const DEFAULT_FORM: TeamFormData = {
   name: '',
   category: 'Senior',
   level: 'A',
-  color: TEAM_COLORS[0],
+  color: DEFAULT_TEAM_COLOR,
 };
 
 function memberLabel(m: ClubMemberWithUser): string {
@@ -132,7 +124,7 @@ export default function TeamsScreen() {
         name: team.name,
         category: team.category || 'Senior',
         level: team.level || 'A',
-        color: team.color || TEAM_COLORS[0],
+        color: team.color || DEFAULT_TEAM_COLOR,
       });
       setSheetVisible(true);
       if (!clubId) return;
@@ -301,7 +293,7 @@ export default function TeamsScreen() {
         ) : (
           teams.map((team) => {
             const isActive = activeTeamId === team.id;
-            const color = team.color || TEAM_COLORS[0];
+            const color = team.color || DEFAULT_TEAM_COLOR;
             return (
               <Card
                 key={team.id}

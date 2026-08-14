@@ -36,28 +36,55 @@ import { getPlayersByTeam, getSquadBulkStats, type PlayerSquadStat } from '../li
 import { getTeamFeedbackForLastSessions, type TeamFeedbackRow } from '../lib/services/feedback';
 import type { Training, Match, Player } from '../types';
 import Svg, { Polyline, Rect, Circle, Line as SvgLine, Text as SvgText } from 'react-native-svg';
+import { useTheme, makeStyles } from '../contexts/ThemeContext';
+import type { ThemeColors } from '../lib/design/tokens';
+import { fmPalette } from './players/fmPalette';
+import { positionStyle } from './players/positions';
 
-// ─── Design tokens ────────────────────────────────────────────────────────────
-const C = {
-  navy:    '#1e3a5f',
-  navyLt:  '#2a4f7c',
-  bg:      '#f1f5f9',
-  card:    '#ffffff',
-  border:  '#e2e8f0',
-  green:   '#16a34a',
-  greenBg: '#dcfce7',
-  amber:   '#d97706',
-  amberBg: '#fef3c7',
-  red:     '#dc2626',
-  redBg:   '#fee2e2',
-  blue:    '#2563eb',
-  blueBg:  '#dbeafe',
-  purple:  '#7c3aed',
-  purpleBg:'#ede9fe',
-  text:    '#1e293b',
-  muted:   '#64748b',
-  light:   '#94a3b8',
-};
+// ─── Palette de l'écran ───────────────────────────────────────────────────────
+
+/**
+ * Ce fichier portait un objet `C` de dix-huit couleurs figées, calibrées pour un
+ * fond clair, et se déclarait « design tokens » en commentaire. C'en était
+ * l'inverse : une table locale de plus, la troisième après `fmPalette` et la
+ * table des postes.
+ *
+ * Les clés sont conservées — elles sont lues 177 fois dans le fichier — mais
+ * elles dérivent maintenant du thème. Deux corrections de fond au passage :
+ *
+ * - le bleu nuit du bandeau était `#1e3a5f`, encore un autre que celui de la
+ *   fiche joueur et que celui d'`AnalyticsView`. Les trois lisent désormais
+ *   `fmPalette.brand` ;
+ * - `purple` ne signifiait rien : c'était une teinte catégorielle isolée. Elle
+ *   passe sur la rampe catégorielle du thème.
+ */
+function dashColors(c: ThemeColors, scheme: 'light' | 'dark') {
+  const brand = fmPalette(c, scheme);
+  return {
+    navy: brand.brand,
+    navyLt: c.bg.elevated,
+    bg: c.bg.canvas,
+    card: c.bg.surface,
+    sunken: c.bg.sunken,
+    border: c.border.subtle,
+    green: c.positive.default,
+    greenBg: c.positive.subtle,
+    amber: c.warning.default,
+    amberBg: c.warning.subtle,
+    red: c.negative.default,
+    redBg: c.negative.subtle,
+    blue: c.accent.default,
+    blueBg: c.accent.subtle,
+    purple: c.chartSeries[5] ?? c.accent.default,
+    purpleBg: c.accent.subtle,
+    text: c.text.primary,
+    muted: c.text.secondary,
+    light: c.text.tertiary,
+    onBrand: brand.onBrand,
+    onBrandMuted: brand.onBrandMuted,
+  };
+}
+type DashColors = ReturnType<typeof dashColors>;
 
 type TabId = 'week' | 'season' | 'squad';
 type RankSortKey = 'name' | 'matches' | 'victories' | 'draws' | 'defeats' | 'goals' | 'att' | 'form';
@@ -88,15 +115,15 @@ function wellnessScore(rows: TeamFeedbackRow[]): number | null {
   return vals.reduce((a, b) => a + b, 0) / vals.length;
 }
 
-function wellnessColor(score: number | null): string {
-  if (score === null) return '#e2e8f0';
+function wellnessColor(C: DashColors, score: number | null): string {
+  if (score === null) return C.border;
   if (score >= 7) return C.green;
   if (score >= 5) return C.amber;
   return C.red;
 }
 
-function wellnessBg(score: number | null): string {
-  if (score === null) return '#f8fafc';
+function wellnessBg(C: DashColors, score: number | null): string {
+  if (score === null) return C.sunken;
   if (score >= 7) return C.greenBg;
   if (score >= 5) return C.amberBg;
   return C.redBg;
@@ -110,29 +137,36 @@ const HEATMAP_METRICS = [
 ] as const;
 type HeatmapMetricKey = typeof HEATMAP_METRICS[number]['key'];
 
-function metricColor(key: HeatmapMetricKey, val: number | null): string {
-  if (val === null) return '#e2e8f0';
+/**
+ * Le RPE ne se lit pas comme les trois autres métriques : une note haute n'y est
+ * pas un mauvais résultat, c'est une charge élevée. Sa rampe est donc en cloche
+ * (faible → optimal → élevé → surcharge) et non monotone. C'est le seul endroit
+ * de l'application où cette distinction est correctement faite — elle est
+ * conservée telle quelle.
+ */
+function metricColor(C: DashColors, key: HeatmapMetricKey, val: number | null): string {
+  if (val === null) return C.border;
   if (key === 'rpe') {
     if (val < 4)    return C.blue;
     if (val <= 7)   return C.green;
     if (val <= 8.5) return C.amber;
     return C.red;
   }
-  return wellnessColor(val);
+  return wellnessColor(C, val);
 }
 
-function metricBg(key: HeatmapMetricKey, val: number | null): string {
-  if (val === null) return '#f8fafc';
+function metricBg(C: DashColors, key: HeatmapMetricKey, val: number | null): string {
+  if (val === null) return C.sunken;
   if (key === 'rpe') {
     if (val < 4)    return C.blueBg;
     if (val <= 7)   return C.greenBg;
     if (val <= 8.5) return C.amberBg;
     return C.redBg;
   }
-  return wellnessBg(val);
+  return wellnessBg(C, val);
 }
 
-function rpeLabel(avg: number): { label: string; color: string; advice: string } {
+function rpeLabel(C: DashColors, avg: number): { label: string; color: string; advice: string } {
   if (avg < 4) return { label: 'Trop faible', color: C.blue,  advice: 'Séance peu stimulante — Intensifier les prochaines' };
   if (avg <= 7) return { label: 'Zone optimale', color: C.green, advice: 'Charge idéale — Équipe prête pour le match' };
   if (avg <= 8.5) return { label: 'Charge élevée', color: C.amber, advice: 'Surveiller la récupération avant vendredi' };
@@ -145,29 +179,36 @@ function matchResult(m: Match): 'W' | 'D' | 'L' {
   return s > o ? 'W' : s < o ? 'L' : 'D';
 }
 
-function weekDayContext(): { phase: string; advice: string; icon: string } {
+type IoniconName = keyof typeof Ionicons.glyphMap;
+
+/**
+ * Les icônes étaient des emoji (🔥 ⚡ 🎯 ⚽ 📊), rendus en tofu sur l'iPad de
+ * test comme celles d'`AnalyticsView`. Ionicons est embarquée avec le bundle.
+ */
+function weekDayContext(): { phase: string; advice: string; icon: IoniconName } {
   const day = getDay(new Date()); // 0=dim, 1=lun, 2=mar, 3=mer, 4=jeu, 5=ven, 6=sam
-  if (day === 1) return { phase: 'Début de cycle — Lundi', icon: '🔥', advice: 'Séance haute intensité · Nouveau principe' };
-  if (day === 3) return { phase: 'Mi-semaine — Mercredi', icon: '⚡', advice: 'Consolidation · Intensité moyenne-haute' };
-  if (day === 5) return { phase: 'Pré-match — Vendredi', icon: '🎯', advice: 'Séance légère · Confiance et plaisir' };
-  if (day === 6 || day === 0) return { phase: 'Jour de match', icon: '⚽', advice: 'Concentration · Échauffement ciblé' };
-  return { phase: 'Hors séance', icon: '📊', advice: 'Analyse & préparation de la prochaine séance' };
+  if (day === 1) return { phase: 'Début de cycle — Lundi', icon: 'flame-outline', advice: 'Séance haute intensité · Nouveau principe' };
+  if (day === 3) return { phase: 'Mi-semaine — Mercredi', icon: 'flash-outline', advice: 'Consolidation · Intensité moyenne-haute' };
+  if (day === 5) return { phase: 'Pré-match — Vendredi', icon: 'locate-outline', advice: 'Séance légère · Confiance et plaisir' };
+  if (day === 6 || day === 0) return { phase: 'Jour de match', icon: 'football-outline', advice: 'Concentration · Échauffement ciblé' };
+  return { phase: 'Hors séance', icon: 'bar-chart-outline', advice: 'Analyse & préparation de la prochaine séance' };
 }
 
-const POS_MAP: Record<string, { abbr: string; color: string; bg: string }> = {
-  Gardien:   { abbr: 'GB',  color: '#d97706', bg: 'rgba(217,119,6,0.12)'  },
-  Ailier:    { abbr: 'AIL', color: '#2563eb', bg: 'rgba(37,99,235,0.10)'  },
-  Meneur:    { abbr: 'MEN', color: '#059669', bg: 'rgba(5,150,105,0.10)'  },
-  Pivot:     { abbr: 'PIV', color: '#ea580c', bg: 'rgba(234,88,12,0.10)'  },
-};
-function getPos(position?: string) {
-  if (!position) return { abbr: '—', color: '#94a3b8', bg: 'rgba(148,163,184,0.10)' };
-  const key = Object.keys(POS_MAP).find(k => position.toLowerCase().startsWith(k.toLowerCase()));
-  return key ? POS_MAP[key] : { abbr: position.slice(0, 3).toUpperCase(), color: '#94a3b8', bg: 'rgba(148,163,184,0.10)' };
+/**
+ * Cinquième copie de la table des postes trouvée dans ce dépôt, après celles de
+ * `squad/index`, `PlayerDetailView`, `season-planning` et la feuille de présence.
+ * Le catalogue unique vit dans `components/players/positions.ts`.
+ */
+function getPos(c: ThemeColors, position?: string) {
+  const st = positionStyle(position, c);
+  return { abbr: st.abbr, color: st.color, bg: st.color + '1A' };
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export function TeamDashboardView() {
+  const s = useStyles();
+  const { theme } = useTheme();
+  const C = dashColors(theme.colors, theme.scheme);
   const router  = useRouter();
   const { activeTeamId, activeTeam } = useActiveTeam();
   const { activeSeason } = useActiveSeason();
@@ -520,7 +561,7 @@ export function TeamDashboardView() {
             {format(now, "EEEE d MMMM yyyy", { locale: fr })}
           </Text>
           <View style={s.heroCtxRow}>
-            <Text style={s.heroCtxIcon}>{ctx.icon}</Text>
+            <Ionicons name={ctx.icon} size={20} color={C.onBrand} />
             <View>
               <Text style={s.heroCtxPhase}>{ctx.phase}</Text>
               <Text style={s.heroCtxAdvice}>{ctx.advice}</Text>
@@ -530,9 +571,9 @@ export function TeamDashboardView() {
         <View style={s.heroBilan}>
           <Text style={s.heroBilanVal}>{data.wins}V</Text>
           <Text style={s.heroBilanSep}>·</Text>
-          <Text style={[s.heroBilanVal, { color: '#fbbf24' }]}>{data.draws}N</Text>
+          <Text style={[s.heroBilanVal, { color: C.amber }]}>{data.draws}N</Text>
           <Text style={s.heroBilanSep}>·</Text>
-          <Text style={[s.heroBilanVal, { color: '#f87171' }]}>{data.losses}D</Text>
+          <Text style={[s.heroBilanVal, { color: C.red }]}>{data.losses}D</Text>
         </View>
       </View>
 
@@ -588,7 +629,7 @@ export function TeamDashboardView() {
 
       {/* ── Tab bar ──────────────────────────────────────────────────────── */}
       <View style={s.tabBar}>
-        {([['week', 'Semaine'], ['season', 'Saison'], ['squad', 'Effectif']] as [TabId, string][]).map(([id, label]) => (
+        {([['week', 'Charge'], ['season', 'Saison'], ['squad', 'Effectif']] as [TabId, string][]).map(([id, label]) => (
           <TouchableOpacity
             key={id}
             style={[s.tabBtn, tab === id && s.tabBtnActive]}
@@ -675,15 +716,15 @@ export function TeamDashboardView() {
                       const row = data.feedbackMap[p.id]?.[tid] ?? null;
                       const val = row ? (row[heatmapMetric] ?? null) : null;
                       return (
-                        <View key={tid} style={[s.heatmapCell, { backgroundColor: metricBg(heatmapMetric, val) }]}>
-                          <Text style={[s.heatmapCellText, { color: metricColor(heatmapMetric, val) }]}>
+                        <View key={tid} style={[s.heatmapCell, { backgroundColor: metricBg(C, heatmapMetric, val) }]}>
+                          <Text style={[s.heatmapCellText, { color: metricColor(C, heatmapMetric, val) }]}>
                             {val !== null ? String(val) : '—'}
                           </Text>
                         </View>
                       );
                     })}
-                    <View style={[s.heatmapAvgPill, { borderColor: metricColor(heatmapMetric, avgScore) }]}>
-                      <Text style={[s.heatmapAvgText, { color: metricColor(heatmapMetric, avgScore) }]}>
+                    <View style={[s.heatmapAvgPill, { borderColor: metricColor(C, heatmapMetric, avgScore) }]}>
+                      <Text style={[s.heatmapAvgText, { color: metricColor(C, heatmapMetric, avgScore) }]}>
                         {avgScore !== null ? avgScore.toFixed(1) : '—'}
                       </Text>
                     </View>
@@ -704,7 +745,7 @@ export function TeamDashboardView() {
                       { label: '≥7 Bien',    color: C.green, bg: C.greenBg },
                       { label: '5-6 Moyen',  color: C.amber, bg: C.amberBg },
                       { label: '<5 Alerte',  color: C.red,   bg: C.redBg   },
-                      { label: 'N/A',        color: C.light, bg: '#f8fafc' },
+                      { label: 'N/A',        color: C.light, bg: C.sunken },
                     ]
                 ).map((l) => (
                   <View key={l.label} style={[s.heatmapLegendItem, { backgroundColor: l.bg }]}>
@@ -724,15 +765,15 @@ export function TeamDashboardView() {
                   <View style={s.workloadBlock}>
                     <Text style={s.workloadLabel}>RPE MOYEN</Text>
                     <View style={s.workloadValRow}>
-                      <Text style={[s.workloadVal, { color: metricColor('rpe', data.rpeAvg) }]}>
+                      <Text style={[s.workloadVal, { color: metricColor(C, 'rpe', data.rpeAvg) }]}>
                         {data.rpeAvg ?? '—'}
                       </Text>
                       {data.rpeAvg !== null && <Text style={s.workloadUnit}>/10</Text>}
                     </View>
                     {data.rpeAvg !== null && (
-                      <View style={[s.workloadBadge, { backgroundColor: metricBg('rpe', data.rpeAvg) }]}>
-                        <Text style={[s.workloadBadgeText, { color: metricColor('rpe', data.rpeAvg) }]}>
-                          {rpeLabel(data.rpeAvg).label}
+                      <View style={[s.workloadBadge, { backgroundColor: metricBg(C, 'rpe', data.rpeAvg) }]}>
+                        <Text style={[s.workloadBadgeText, { color: metricColor(C, 'rpe', data.rpeAvg) }]}>
+                          {rpeLabel(C, data.rpeAvg).label}
                         </Text>
                       </View>
                     )}
@@ -743,14 +784,14 @@ export function TeamDashboardView() {
                   <View style={s.workloadBlock}>
                     <Text style={s.workloadLabel}>FORME MOYENNE</Text>
                     <View style={s.workloadValRow}>
-                      <Text style={[s.workloadVal, { color: wellnessColor(data.formAvg) }]}>
+                      <Text style={[s.workloadVal, { color: wellnessColor(C, data.formAvg) }]}>
                         {data.formAvg ?? '—'}
                       </Text>
                       {data.formAvg !== null && <Text style={s.workloadUnit}>/10</Text>}
                     </View>
                     {data.formAvg !== null && (
-                      <View style={[s.workloadBadge, { backgroundColor: wellnessBg(data.formAvg) }]}>
-                        <Text style={[s.workloadBadgeText, { color: wellnessColor(data.formAvg) }]}>
+                      <View style={[s.workloadBadge, { backgroundColor: wellnessBg(C, data.formAvg) }]}>
+                        <Text style={[s.workloadBadgeText, { color: wellnessColor(C, data.formAvg) }]}>
                           {data.formAvg >= 7 ? 'Bonne forme' : data.formAvg >= 5 ? 'Forme correcte' : 'Fatigue'}
                         </Text>
                       </View>
@@ -832,8 +873,9 @@ export function TeamDashboardView() {
                 </View>
                 {data.streak.count >= 2 && (
                   <View style={s.streakBanner}>
+                    <Ionicons name="flame-outline" size={15} color={theme.colors.warning.default} />
                     <Text style={s.streakText}>
-                      🔥 Série de {data.streak.count} {data.streak.type === 'V' ? 'victoires' : data.streak.type === 'N' ? 'nuls' : 'défaites'} consécutive{data.streak.count > 1 ? 's' : ''}
+                      Série de {data.streak.count} {data.streak.type === 'V' ? 'victoires' : data.streak.type === 'N' ? 'nuls' : 'défaites'} consécutive{data.streak.count > 1 ? 's' : ''}
                     </Text>
                   </View>
                 )}
@@ -846,7 +888,7 @@ export function TeamDashboardView() {
             <View style={s.bilanGrid}>
               <BilanCard value={data.matchCount} label="Matchs"    color={C.blue}   />
               <BilanCard value={`${data.winRate}%`} label="% Victoires" color={C.green} />
-              <BilanCard value={`${data.gf}`}    label="Buts marqués" color={C.navy}   />
+              <BilanCard value={`${data.gf}`}    label="Buts marqués" color={C.green}  />
               <BilanCard value={`${data.ga}`}    label="Buts encaissés" color={C.red}  />
               <BilanCard value={`${data.gf - data.ga > 0 ? '+' : ''}${data.gf - data.ga}`} label="Différentiel" color={(data.gf - data.ga) >= 0 ? C.green : C.red} />
               <BilanCard value={`${data.goalsPerMatch}`} label="Buts/match" color={C.purple} />
@@ -856,13 +898,13 @@ export function TeamDashboardView() {
               <View style={s.locationRow}>
                 {data.homeWR !== null && (
                   <View style={[s.locationChip, { backgroundColor: C.greenBg }]}>
-                    <Text style={[s.locationChipLabel, { color: C.green }]}>🏠 Domicile</Text>
+                    <Text style={[s.locationChipLabel, { color: C.green }]}>Domicile</Text>
                     <Text style={[s.locationChipVal, { color: C.green }]}>{data.homeWR}% W</Text>
                   </View>
                 )}
                 {data.awayWR !== null && (
                   <View style={[s.locationChip, { backgroundColor: C.amberBg }]}>
-                    <Text style={[s.locationChipLabel, { color: C.amber }]}>✈️ Extérieur</Text>
+                    <Text style={[s.locationChipLabel, { color: C.amber }]}>Extérieur</Text>
                     <Text style={[s.locationChipVal, { color: C.amber }]}>{data.awayWR}% W</Text>
                   </View>
                 )}
@@ -883,11 +925,11 @@ export function TeamDashboardView() {
             {/* Type legend */}
             <View style={s.chartLegendRow}>
               {[
-                { color: '#2563eb', label: 'Phase Off.' },
-                { color: '#7c3aed', label: 'Transition' },
-                { color: '#d97706', label: 'CPA' },
-                { color: '#16a34a', label: 'Supériorité' },
-                { color: '#94a3b8', label: 'N/C' },
+                // Lue depuis le catalogue, plus recopiée à la main.
+                ...GOAL_TYPE_ORDER.map(k => ({
+                  color: goalTypeColors(theme.colors)[k],
+                  label: GOAL_TYPE_LABELS[k],
+                })),
               ].map((t) => (
                 <View key={t.label} style={s.chartTypeLegendItem}>
                   <View style={[s.chartLegendDot, { backgroundColor: t.color }]} />
@@ -996,7 +1038,7 @@ export function TeamDashboardView() {
           <View style={[s.card, { padding: 0, overflow: 'hidden' }]}>
             <View style={[s.cardHeader, { marginHorizontal: 16, marginTop: 16, marginBottom: 8 }]}>
               <View style={s.cardAccent} />
-              <Ionicons name="stats-chart-outline" size={16} color={C.navy} />
+              <Ionicons name="stats-chart-outline" size={16} color={C.blue} />
               <Text style={s.cardTitle}>Classement Matchs et Forme</Text>
             </View>
 
@@ -1008,11 +1050,11 @@ export function TeamDashboardView() {
                   onPress={() => setRankCompFilter(f.value)}
                   style={{
                     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1,
-                    backgroundColor: rankCompFilter === f.value ? C.navy : '#f8fafc',
-                    borderColor: rankCompFilter === f.value ? C.navy : C.border,
+                    backgroundColor: rankCompFilter === f.value ? C.blueBg : C.sunken,
+                    borderColor: rankCompFilter === f.value ? C.blue : C.border,
                   }}
                 >
-                  <Text style={{ fontSize: 11, fontWeight: '600', color: rankCompFilter === f.value ? '#fff' : C.muted }}>
+                  <Text style={{ fontSize: 11, fontWeight: '600', color: rankCompFilter === f.value ? C.blue : C.muted }}>
                     {f.label}
                   </Text>
                 </TouchableOpacity>
@@ -1059,11 +1101,11 @@ export function TeamDashboardView() {
                     return (
                       <TouchableOpacity
                         key={row.player.id}
-                        style={[s.fmRow, { backgroundColor: i % 2 === 0 ? '#ffffff' : '#f8fafc' }]}
+                        style={[s.fmRow, { backgroundColor: i % 2 === 0 ? C.card : theme.colors.bg.stripe }]}
                         onPress={() => router.push(`/squad/${row.player.id}` as any)}
                         activeOpacity={0.6}
                       >
-                        <View style={[s.fmStripe, { backgroundColor: C.navy }]} />
+                        <View style={[s.fmStripe, { backgroundColor: C.blue }]} />
                         <View style={s.fmColRank}>
                           <Text style={s.fmRankTxt}>{i + 1}</Text>
                         </View>
@@ -1072,8 +1114,8 @@ export function TeamDashboardView() {
                           <Text style={s.fmFirstName} numberOfLines={1}>{row.player.first_name}</Text>
                         </View>
                         <View style={[s.fmColForme, { width: 46 }]}>
-                          <View style={[s.fmFormPill, { backgroundColor: wellnessBg(row.form) }]}>
-                            <Text style={[s.fmFormVal, { color: wellnessColor(row.form) }]}>
+                          <View style={[s.fmFormPill, { backgroundColor: wellnessBg(C, row.form) }]}>
+                            <Text style={[s.fmFormVal, { color: wellnessColor(C, row.form) }]}>
                               {row.form !== null ? row.form.toFixed(1) : '—'}
                             </Text>
                           </View>
@@ -1091,7 +1133,7 @@ export function TeamDashboardView() {
                           <Text style={[s.fmStatNum, row.defeats > 0 && { color: C.red }]}>{row.defeats}</Text>
                         </View>
                         <View style={{ width: 38, alignItems: 'center' }}>
-                          <Text style={[s.fmStatNum, row.goals > 0 && { color: C.navy, fontWeight: '700' }]}>{row.goals}</Text>
+                          <Text style={[s.fmStatNum, row.goals > 0 && { color: C.blue, fontWeight: '700' }]}>{row.goals}</Text>
                         </View>
                         <View style={{ width: 38, alignItems: 'center' }}>
                           <Text style={[s.fmStatNum, { color: attColor, fontWeight: '700', fontSize: 9 }]}>{row.att}%</Text>
@@ -1145,13 +1187,16 @@ export function TeamDashboardView() {
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
 function SectionCard({ title, icon, children }: {
-  title: string; icon: string; children: React.ReactNode;
+  title: string; icon: IoniconName; children: React.ReactNode;
 }) {
+  const s = useStyles();
+  const { theme } = useTheme();
+  const C = dashColors(theme.colors, theme.scheme);
   return (
     <View style={s.card}>
       <View style={s.cardHeader}>
         <View style={s.cardAccent} />
-        <Ionicons name={icon as any} size={16} color={C.navy} />
+        <Ionicons name={icon} size={16} color={C.blue} />
         <Text style={s.cardTitle}>{title}</Text>
       </View>
       {children}
@@ -1162,6 +1207,7 @@ function SectionCard({ title, icon, children }: {
 function AvailChip({ count, label, color, bg }: {
   count: number; label: string; color: string; bg: string;
 }) {
+  const s = useStyles();
   return (
     <View style={[s.availChip, { backgroundColor: bg, borderColor: color }]}>
       <Text style={[s.availCount, { color }]}>{count}</Text>
@@ -1171,6 +1217,7 @@ function AvailChip({ count, label, color, bg }: {
 }
 
 function BilanCard({ value, label, color }: { value: string | number; label: string; color: string }) {
+  const s = useStyles();
   return (
     <View style={s.bilanCard}>
       <Text style={[s.bilanVal, { color }]}>{value}</Text>
@@ -1183,6 +1230,9 @@ function BilanCard({ value, label, color }: { value: string | number; label: str
 function AttendanceLineChart({ data }: {
   data: { date: string; label: string; count: number }[];
 }) {
+  const s = useStyles();
+  const { theme } = useTheme();
+  const C = dashColors(theme.colors, theme.scheme);
   if (data.length === 0) {
     return <Text style={s.emptyCard}>Aucune séance enregistrée avec présences</Text>;
   }
@@ -1216,14 +1266,14 @@ function AttendanceLineChart({ data }: {
           return (
             <SvgLine key={`gl${val}`}
               x1={PAD_LEFT} y1={y} x2={totalW - PAD_RIGHT} y2={y}
-              stroke="#e2e8f0" strokeWidth={1} />
+              stroke={C.border} strokeWidth={1} />
           );
         })}
         {/* Y labels */}
         {gridVals.map((val) => (
           <SvgText key={`yl${val}`}
             x={PAD_LEFT - 4} y={toY(val) + 4}
-            fontSize={9} fill="#94a3b8" textAnchor="end">
+            fontSize={11} fill={C.light} textAnchor="end">
             {val}
           </SvgText>
         ))}
@@ -1238,17 +1288,17 @@ function AttendanceLineChart({ data }: {
         />
         {/* Dots (outer) */}
         {data.map((d, i) => (
-          <Circle key={`do${i}`} cx={toX(i)} cy={toY(d.count)} r={6} fill={C.navy} />
+          <Circle key={`do${i}`} cx={toX(i)} cy={toY(d.count)} r={6} fill={C.blue} />
         ))}
         {/* Dots (inner white) */}
         {data.map((d, i) => (
-          <Circle key={`di${i}`} cx={toX(i)} cy={toY(d.count)} r={3} fill="#ffffff" />
+          <Circle key={`di${i}`} cx={toX(i)} cy={toY(d.count)} r={3} fill={C.card} />
         ))}
         {/* Count labels above dots */}
         {data.map((d, i) => (
           <SvgText key={`cl${i}`}
             x={toX(i)} y={toY(d.count) - 11}
-            fontSize={11} fill={C.navy} textAnchor="middle" fontWeight="bold">
+            fontSize={11} fill={C.blue} textAnchor="middle" fontWeight="bold">
             {d.count}
           </SvgText>
         ))}
@@ -1256,7 +1306,7 @@ function AttendanceLineChart({ data }: {
         {data.map((d, i) => (
           <SvgText key={`dl${i}`}
             x={toX(i)} y={svgH - 4}
-            fontSize={9} fill="#64748b" textAnchor="middle">
+            fontSize={11} fill={C.muted} textAnchor="middle">
             {d.label}
           </SvgText>
         ))}
@@ -1265,14 +1315,33 @@ function AttendanceLineChart({ data }: {
   );
 }
 
-// ─── Goal-type colors (same palette for scored/conceded, opacity distinguishes) ─
-const GOAL_TYPE_COLORS: Record<string, string> = {
-  offensive:   '#2563eb',
-  transition:  '#7c3aed',
-  cpa:         '#d97706',
-  superiority: '#16a34a',
-  other:       '#94a3b8',
+/**
+ * Couleurs des types de but. Le type de but est une **catégorie** — phase
+ * offensive, transition, CPA, supériorité — pas un jugement : elle se lit donc
+ * sur `chartSeries`, comme les postes.
+ *
+ * Les cinq valeurs étaient écrites deux fois dans ce fichier, ici et dans la
+ * légende du graphique quarante lignes plus haut. Un seul émetteur désormais,
+ * et la légende le consomme.
+ */
+function goalTypeColors(c: ThemeColors): Record<string, string> {
+  return {
+    offensive:   c.chartSeries[0] ?? c.accent.default,
+    transition:  c.chartSeries[5] ?? c.accent.default,
+    cpa:         c.chartSeries[2] ?? c.warning.default,
+    superiority: c.chartSeries[1] ?? c.positive.default,
+    other:       c.neutralData,
+  };
+}
+
+export const GOAL_TYPE_LABELS: Record<string, string> = {
+  offensive:   'Phase off.',
+  transition:  'Transition',
+  cpa:         'CPA',
+  superiority: 'Supériorité',
+  other:       'N/C',
 };
+
 const GOAL_TYPE_ORDER = ['offensive', 'transition', 'cpa', 'superiority', 'other'] as const;
 
 // ─── SVG chart: goals stacked bars with type breakdown ────────────────────────
@@ -1286,6 +1355,10 @@ function GoalsStackedBarChart({ data }: {
     concededByType: { offensive: number; transition: number; cpa: number; superiority: number };
   }[];
 }) {
+  const s = useStyles();
+  const { theme } = useTheme();
+  const C = dashColors(theme.colors, theme.scheme);
+  const GOAL_TYPE_COLORS = goalTypeColors(theme.colors);
   if (data.length === 0) {
     return <Text style={s.emptyCard}>Aucun match joué avec score enregistré</Text>;
   }
@@ -1379,13 +1452,13 @@ function GoalsStackedBarChart({ data }: {
     if (d.scored > 0 && d.conceded > 0) {
       rects.push({
         key: `sep${i}`, x: bx, y: baseY - toH(d.scored) - 1,
-        w: BAR_W, h: 1.5, fill: '#ffffff', opacity: 1,
+        w: BAR_W, h: 1.5, fill: C.card, opacity: 1,
       });
     }
 
     const totalH = toH(d.scored + d.conceded);
     scLabels.push({ key: `sl${i}`, x: cx, y: baseY - totalH - 6, text: `${d.scored}-${d.conceded}`, fill: rColor(d.result) });
-    dtLabels.push({ key: `dl${i}`, x: cx, y: svgH - 4, text: d.label, fill: '#64748b' });
+    dtLabels.push({ key: `dl${i}`, x: cx, y: svgH - 4, text: d.label, fill: C.muted });
   });
 
   return (
@@ -1395,13 +1468,13 @@ function GoalsStackedBarChart({ data }: {
         {gridVals.map((val) => (
           <SvgLine key={`gl${val}`}
             x1={PAD_LEFT} y1={baseY - toH(val)} x2={totalW - PAD_RIGHT} y2={baseY - toH(val)}
-            stroke="#e2e8f0" strokeWidth={1} />
+            stroke={C.border} strokeWidth={1} />
         ))}
         {/* Y axis labels */}
         {gridVals.map((val) => (
           <SvgText key={`gy${val}`}
             x={PAD_LEFT - 4} y={baseY - toH(val) + 4}
-            fontSize={9} fill="#94a3b8" textAnchor="end">
+            fontSize={11} fill={C.light} textAnchor="end">
             {val}
           </SvgText>
         ))}
@@ -1430,7 +1503,9 @@ function GoalsStackedBarChart({ data }: {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const s = StyleSheet.create({
+const useStyles = makeStyles((t) => {
+  const C = dashColors(t.colors, t.scheme);
+  return {
   root: { flex: 1, backgroundColor: C.bg },
   content: { paddingBottom: 24 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: C.bg },
@@ -1442,15 +1517,15 @@ const s = StyleSheet.create({
     backgroundColor: C.navy, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16,
     flexDirection: 'row', alignItems: 'flex-start', gap: 12,
   },
-  heroTeam: { fontSize: 20, fontWeight: '800', color: '#ffffff', letterSpacing: 0.2 },
-  heroDate: { fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 2 },
+  heroTeam: { fontSize: 20, fontWeight: '800', color: C.onBrand, letterSpacing: 0.2 },
+  heroDate: { fontSize: 12, color: C.onBrandMuted, marginTop: 2 },
   heroCtxRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
   heroCtxIcon: { fontSize: 20 },
-  heroCtxPhase: { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.9)' },
-  heroCtxAdvice: { fontSize: 11, color: 'rgba(255,255,255,0.6)', marginTop: 1 },
+  heroCtxPhase: { fontSize: 12, fontWeight: '700', color: C.onBrand },
+  heroCtxAdvice: { fontSize: 11, color: C.onBrandMuted, marginTop: 1 },
   heroBilan: { alignItems: 'center', justifyContent: 'center', gap: 2 },
-  heroBilanVal: { fontSize: 15, fontWeight: '800', color: '#4ade80' },
-  heroBilanSep: { fontSize: 12, color: 'rgba(255,255,255,0.3)' },
+  heroBilanVal: { fontSize: 15, fontWeight: '800', color: t.colors.positive.default },
+  heroBilanSep: { fontSize: 12, color: C.onBrandMuted },
 
   // Next events
   nextRow: { flexDirection: 'row', gap: 8, marginHorizontal: 12, marginTop: 10 },
@@ -1467,9 +1542,9 @@ const s = StyleSheet.create({
     borderRadius: 10, borderWidth: 1, borderColor: C.border, overflow: 'hidden',
   },
   tabBtn: { flex: 1, paddingVertical: 10, alignItems: 'center' },
-  tabBtnActive: { backgroundColor: C.navy },
+  tabBtnActive: { backgroundColor: C.blueBg, borderBottomWidth: 2, borderBottomColor: C.blue },
   tabLabel: { fontSize: 13, fontWeight: '600', color: C.muted },
-  tabLabelActive: { color: '#ffffff' },
+  tabLabelActive: { color: C.blue },
 
   // Cards
   card: {
@@ -1479,7 +1554,7 @@ const s = StyleSheet.create({
   cardHeader: {
     flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14,
   },
-  cardAccent: { width: 3, height: 16, backgroundColor: C.navy, borderRadius: 2 },
+  cardAccent: { width: 3, height: 16, backgroundColor: C.blue, borderRadius: 2 },
   cardTitle: { fontSize: 14, fontWeight: '700', color: C.text },
   emptyCard: { fontSize: 13, color: C.muted, textAlign: 'center', paddingVertical: 8 },
 
@@ -1567,9 +1642,10 @@ const s = StyleSheet.create({
   formScore: { fontSize: 11, fontWeight: '600', color: C.text },
   formOpp: { fontSize: 10, color: C.muted, maxWidth: 56, textAlign: 'center' },
   streakBanner: {
-    marginTop: 14, backgroundColor: '#fef9c3', borderRadius: 8, padding: 10, alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    marginTop: 14, backgroundColor: t.colors.warning.subtle, borderRadius: 8, padding: 10,
   },
-  streakText: { fontSize: 13, fontWeight: '600', color: '#854d0e' },
+  streakText: { fontSize: 13, fontWeight: '600', color: t.colors.warning.default },
 
   // Bilan
   bilanGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
@@ -1614,8 +1690,8 @@ const s = StyleSheet.create({
   themeRank: { width: 22, fontSize: 11, color: C.muted, fontWeight: '600' },
   themeLabel: { flex: 1, fontSize: 12, color: C.text, fontWeight: '500' },
   themeBarTrack: { width: 80, height: 8, backgroundColor: C.bg, borderRadius: 4, overflow: 'hidden' },
-  themeBarFill: { height: '100%', backgroundColor: C.navy, borderRadius: 4 },
-  themeCount: { width: 28, fontSize: 11, color: C.navy, fontWeight: '700', textAlign: 'right' },
+  themeBarFill: { height: '100%', backgroundColor: C.blue, borderRadius: 4 },
+  themeCount: { width: 28, fontSize: 11, color: C.blue, fontWeight: '700', textAlign: 'right' },
 
   // Player rows
   playerRow: {
@@ -1667,15 +1743,15 @@ const s = StyleSheet.create({
   // FM Table — Classement Forme
   fmHead: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#f1f5f9',
-    borderTopWidth: 1, borderTopColor: '#e2e8f0',
-    borderBottomWidth: 1, borderBottomColor: '#e2e8f0',
+    backgroundColor: C.sunken,
+    borderTopWidth: 1, borderTopColor: C.border,
+    borderBottomWidth: 1, borderBottomColor: C.border,
     paddingVertical: 7, paddingRight: 8,
   },
   fmRow: {
     flexDirection: 'row', alignItems: 'center',
     height: 50,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e2e8f0',
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border,
   },
   fmStripe:   { width: 3, alignSelf: 'stretch' },
   fmColRank:  { width: 28, alignItems: 'center' },
@@ -1684,19 +1760,20 @@ const s = StyleSheet.create({
   fmColStat:  { width: 46, alignItems: 'center' },
   fmColSm:    { width: 36, alignItems: 'center' },
   fmHeadTxt: {
-    fontSize: 10, fontWeight: '700', color: '#64748b',
+    fontSize: 10, fontWeight: '700', color: C.muted,
     letterSpacing: 0.5, textTransform: 'uppercase',
   },
-  fmHeadTxtActive: { color: '#1e3a5f' },
-  fmRankTxt:  { fontSize: 12, fontWeight: '700', color: '#94a3b8', textAlign: 'center' },
+  fmHeadTxtActive: { color: C.blue },
+  fmRankTxt:  { fontSize: 12, fontWeight: '700', color: C.light, textAlign: 'center' },
   fmPosBadge: { paddingHorizontal: 5, paddingVertical: 2, borderRadius: 3 },
   fmPosAbbr:  { fontSize: 9, fontWeight: '800', letterSpacing: 0.3 },
-  fmLastName: { fontSize: 12, fontWeight: '700', color: '#0f172a', letterSpacing: 0.2 },
-  fmFirstName:{ fontSize: 10, color: '#64748b', marginTop: 1 },
+  fmLastName: { fontSize: 12, fontWeight: '700', color: C.text, letterSpacing: 0.2 },
+  fmFirstName:{ fontSize: 10, color: C.muted, marginTop: 1 },
   fmFormPill: {
     borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2,
     minWidth: 38, alignItems: 'center',
   },
   fmFormVal:  { fontSize: 11, fontWeight: '800' },
-  fmStatNum:  { fontSize: 13, fontWeight: '600', color: '#64748b', textAlign: 'center' },
+  fmStatNum:  { fontSize: 13, fontWeight: '600', color: C.muted, textAlign: 'center' },
+  };
 });

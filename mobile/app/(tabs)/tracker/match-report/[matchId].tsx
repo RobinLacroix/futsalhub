@@ -282,8 +282,22 @@ export default function MatchReportScreen() {
   const oppShotsOnTarget = count(events, 'opponent_shot_on_target');
   const oppShotsOff = count(events, 'opponent_shot');
 
-  const shotsCadres = ourShotsOnTarget + match.score_team;
-  const oppShotsCadres = oppShotsOnTarget + match.score_opponent;
+  // ── Les buts ne se rajoutent PAS aux tirs cadrés ───────────────────────────
+  //
+  // Un but est nécessairement cadré, et il écrit sa propre ligne
+  // `shot_on_target` : les buts sont donc DÉJÀ dans `ourShotsOnTarget`. Cet
+  // écran ajoutait `score_team` par-dessus, ce qui comptait chaque but deux
+  // fois — le total de tirs était gonflé et l'efficacité mécaniquement
+  // sous-estimée (10 buts / 20 cadrés / 20 non cadrés affichaient 20 % au lieu
+  // de 25 %).
+  //
+  // Ce n'était pas vrai partout jusqu'au 2026-08-12 : le recorder web n'écrivait
+  // pas le tir apparié, et 110 buts historiques en étaient dépourvus. C'est
+  // réglé — reprise par `20260812100000_paired_shot_backfill.sql`, règle passée
+  // dans la RPC par `20260812110000_insert_match_event_pair.sql`. La formule est
+  // désormais juste sur l'ensemble des matchs, anciens compris.
+  const shotsCadres = ourShotsOnTarget;
+  const oppShotsCadres = oppShotsOnTarget;
   const totalShots = ourShotsOff + shotsCadres;
   const oppTotalShots = oppShotsOff + oppShotsCadres;
   const maxShots = Math.max(totalShots, oppTotalShots, 1);
@@ -479,9 +493,10 @@ export default function MatchReportScreen() {
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Tirs par mi-temps</Text>
           {[
-            { label: '1ère MT — Cadrés', val: count(h1, 'shot_on_target') + count(h1, 'goal'), color: '#10B981' },
+            // Idem : `shot_on_target` contient déjà les buts, ne pas les rajouter.
+            { label: '1ère MT — Cadrés', val: count(h1, 'shot_on_target'), color: '#10B981' },
             { label: '1ère MT — Non cadrés', val: count(h1, 'shot'), color: '#6EE7B7' },
-            { label: '2ème MT — Cadrés', val: count(h2, 'shot_on_target') + count(h2, 'goal'), color: '#3B82F6' },
+            { label: '2ème MT — Cadrés', val: count(h2, 'shot_on_target'), color: '#3B82F6' },
             { label: '2ème MT — Non cadrés', val: count(h2, 'shot'), color: '#93C5FD' },
           ].map(r => (
             <HorizontalBar key={r.label} label={r.label} value={r.val} max={Math.max(1, totalShots)} color={r.color} />
