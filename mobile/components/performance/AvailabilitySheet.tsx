@@ -162,9 +162,26 @@ export function AvailabilitySheet({
             label={display(since)}
             icon="calendar-outline"
             variant="secondary"
-            onPress={() => setPicker('since')}
+            onPress={() => setPicker(picker === 'since' ? null : 'since')}
             block
           />
+          {picker === 'since' && (
+            <DateTimePicker
+              value={since}
+              mode="date"
+              display="spinner"
+              // Un statut ne peut pas commencer demain.
+              maximumDate={new Date()}
+              themeVariant={theme.scheme}
+              accentColor={theme.colors.accent.default}
+              textColor={theme.colors.text.primary}
+              style={{ marginTop: theme.space.sm }}
+              onChange={(_e, d) => {
+                setPicker(null);
+                if (d) setSince(d);
+              }}
+            />
+          )}
         </Field>
 
         {!isAvailable && (
@@ -174,9 +191,26 @@ export function AvailabilitySheet({
                 label={expectedReturn ? display(expectedReturn) : 'Non estimé'}
                 icon="calendar-outline"
                 variant="secondary"
-                onPress={() => setPicker('return')}
+                onPress={() => setPicker(picker === 'return' ? null : 'return')}
                 block
               />
+              {picker === 'return' && (
+                <DateTimePicker
+                  value={expectedReturn ?? new Date()}
+                  mode="date"
+                  display="spinner"
+                  // Un retour ne peut pas être avant le début de l'indisponibilité.
+                  minimumDate={since}
+                  themeVariant={theme.scheme}
+                  accentColor={theme.colors.accent.default}
+                  textColor={theme.colors.text.primary}
+                  style={{ marginTop: theme.space.sm }}
+                  onChange={(_e, d) => {
+                    setPicker(null);
+                    if (d) setExpectedReturn(d);
+                  }}
+                />
+              )}
               {expectedReturn && (
                 <View style={{ marginTop: theme.space.sm, gap: theme.space.sm }}>
                   <ChipGroup
@@ -228,28 +262,6 @@ export function AvailabilitySheet({
           block
         />
       </View>
-
-      {picker && (
-        <DateTimePicker
-          value={(picker === 'since' ? since : expectedReturn) ?? new Date()}
-          mode="date"
-          display="spinner"
-          // Un statut ne peut pas commencer demain, un retour ne peut pas être
-          // dans le passé lointain : on borne ce qui a un sens, rien de plus.
-          maximumDate={picker === 'since' ? new Date() : undefined}
-          minimumDate={picker === 'return' ? since : undefined}
-          themeVariant={theme.scheme}
-          accentColor={theme.colors.accent.default}
-          textColor={theme.colors.text.primary}
-          onChange={(_e, d) => {
-            const which = picker;
-            setPicker(null);
-            if (!d) return;
-            if (which === 'since') setSince(d);
-            else setExpectedReturn(d);
-          }}
-        />
-      )}
     </Sheet>
   );
 }
