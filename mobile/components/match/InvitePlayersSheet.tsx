@@ -20,10 +20,17 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { View, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { View, ScrollView, Pressable, StyleSheet, Alert } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Sheet, Text, Button, EmptyState } from '../ui';
+import { AvailabilityPill } from '../performance/AvailabilityPill';
+import {
+  needsConvocationWarning,
+  statusLabel,
+  type AvailabilityRow,
+  type AvailabilityStatus,
+} from '../../lib/availability';
 import type { PlayerWithTeams } from '../../lib/services/players';
 import type { Team } from '../../types';
 
@@ -36,6 +43,15 @@ export interface InvitePlayersSheetProps {
   teams: Team[];
   /** Ids déjà convoqués, non re-proposables. */
   alreadyInvited: ReadonlySet<string>;
+  /**
+   * Disponibilité, fournie par l'écran appelant (`useAvailability`). Optionnelle :
+   * la feuille reste utilisable si le chargement a échoué, et se comporte alors
+   * comme avant cette feature plutôt que de bloquer une convocation.
+   */
+  availability?: {
+    statusOf: (playerId: string) => AvailabilityStatus;
+    rowOf: (playerId: string) => AvailabilityRow | null;
+  };
   onConfirm: (playerIds: string[]) => void;
 }
 
@@ -45,6 +61,7 @@ export function InvitePlayersSheet({
   candidates,
   teams,
   alreadyInvited,
+  availability,
   onConfirm,
 }: InvitePlayersSheetProps) {
   const { theme } = useTheme();
@@ -76,9 +93,49 @@ export function InvitePlayersSheet({
     onClose();
   };
 
+  /**
+   * Une SEULE confirmation pour toute la sélection, pas une par joueur.
+   *
+   * Ici on coche en lot : trois boîtes de dialogue à la suite seraient validées
+   * sans être lues, et la garde ne protégerait plus de rien. On nomme donc les
+   * joueurs concernés avec leur statut, en un message, et le coach tranche une
+   * fois en connaissance de cause.
+   */
   const confirm = () => {
-    onConfirm(selectedIds.filter((id) => !alreadyInvited.has(id)));
-    reset();
+    const ids = selectedIds.filter((id) => !alreadyInvited.has(id));
+
+    const flagged = availability
+      ? ids
+          .map((id) => ({ id, status: availability.statusOf(id) }))
+          .filter(({ status }) => needsConvocationWarning(status))
+      : [];
+
+    const apply = () => {
+      onConfirm(ids);
+      reset();
+    };
+
+    if (flagged.length === 0) {
+      apply();
+      return;
+    }
+
+    const lines = flagged
+      .map(({ id, status }) => {
+        const found = candidates.find(({ player }) => player.id === id);
+        const name = found ? `${found.player.first_name} ${found.player.last_name}` : 'Joueur';
+        return `• ${name} — ${statusLabel(status).toLowerCase()}`;
+      })
+      .join('\n');
+
+    Alert.alert(
+      flagged.length > 1 ? 'Joueurs non disponibles' : 'Joueur non disponible',
+      `${lines}\n\nLes convoquer quand même ?`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        { text: 'Convoquer quand même', onPress: apply },
+      ],
+    );
   };
 
   const chip = (id: string, label: string) => {
@@ -170,6 +227,12 @@ export function InvitePlayersSheet({
                         </Text>
                       )}
                     </View>
+                    {availability && (
+                      <AvailabilityPill
+                        status={availability.statusOf(player.id)}
+                        row={availability.rowOf(player.id)}
+                      />
+                    )}
                     <Ionicons
                       name={checked ? 'checkmark-circle' : 'ellipse-outline'}
                       size={24}

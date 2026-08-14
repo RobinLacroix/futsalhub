@@ -16,6 +16,12 @@ import {
   getPlayersByClubWithTeams,
   type PlayerWithTeams,
 } from '../../../../lib/services/players';
+import {
+  getSessionByTraining,
+  createSession,
+} from '../../../../lib/services/physicalTests';
+import { getUserClubId } from '../../../../lib/services/clubs';
+import { useActiveSeason } from '../../../../contexts/ActiveSeasonContext';
 import { haptics } from '../../../../lib/design/haptics';
 import {
   Text,
@@ -31,6 +37,9 @@ import {
   type ChipOption,
 } from '../../../../components/ui';
 import { PlayerIdentity } from '../../../../components/players/PlayerIdentity';
+import { AvailabilityPill } from '../../../../components/performance/AvailabilityPill';
+import { useAvailability } from '../../../../hooks/useAvailability';
+import { needsConvocationWarning } from '../../../../lib/availability';
 import { AttendancePicker } from '../../../../components/training/AttendancePicker';
 import { InvitePlayersSheet } from '../../../../components/match/InvitePlayersSheet';
 import type { Training, Player, PlayerStatus } from '../../../../types';
@@ -50,6 +59,10 @@ export default function TrainingDetailScreen() {
   const { theme } = useTheme();
   const c = theme.colors;
   const { activeTeamId, activeTeam, teams } = useActiveTeam();
+  const { activeSeason } = useActiveSeason();
+  // Portée club et non équipe : la feuille d'invitation propose des joueurs
+  // d'autres équipes, qui n'auraient sinon aucune pastille.
+  const availability = useAvailability();
 
   const [training, setTraining] = useState<Training | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -62,6 +75,7 @@ export default function TrainingDetailScreen() {
   const [squadFilter, setSquadFilter] = useState<SquadFilter>('all');
   const [clubPlayersWithTeams, setClubPlayersWithTeams] = useState<PlayerWithTeams[]>([]);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [openingTests, setOpeningTests] = useState(false);
 
   // ── Chargement ────────────────────────────────────────────────────────────
 
@@ -161,25 +175,97 @@ export default function TrainingDetailScreen() {
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
-  const toggleConvoked = (playerId: string) => {
-    haptics.select();
-    const willConvoke = !convoked[playerId];
-    setConvoked((prev) => ({ ...prev, [playerId]: !prev[playerId] }));
-    if (willConvoke) {
-      setAttendance((att) => (att[playerId] ? att : { ...att, [playerId]: 'present' }));
+  /**
+   * Ouvre la saisie des tests physiques de cette séance, en créant la campagne
+   * si elle n'existe pas encore.
+   *
+   * Une seule campagne par séance : `getSessionByTraining` est un `maybeSingle`,
+   * et deux campagnes sur la même séance donneraient deux jeux de résultats sans
+   * moyen de savoir lequel fait foi. Le coach ne choisit donc pas, il entre.
+   */
+  const openPhysicalTests = async () => {
+    if (openingTests) return;
+    try {
+      setOpeningTests(true);
+      let session = await getSessionByTraining(trainingId);
+
+      if (!session) {
+        const clubId = await getUserClubId();
+        if (!clubId) throw new Error('Club introuvable.');
+        session = await createSession({
+          clubId,
+          teamId: activeTeamId || null,
+          trainingId,
+          date: (training?.date ?? new Date().toISOString()).slice(0, 10),
+          season: activeSeason || null,
+        });
+      }
+
+      haptics.select();
+      router.push(`/(tabs)/calendar/tests/${session.id}` as never);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ouverture des tests impossible.');
+    } finally {
+      setOpeningTests(false);
     }
   };
 
+  /**
+   * Convoquer un joueur non disponible demande une confirmation explicite.
+   * Le RETIRER n'en demande jamais : la garde protège de l'oubli, elle n'a pas à
+   * gêner la correction.
+   */
+  const toggleConvoked = (playerId: string) => {
+    haptics.select();
+    const willConvoke = !convoked[playerId];
+
+    const apply = () => {
+      setConvoked((prev) => ({ ...prev, [playerId]: !prev[playerId] }));
+      if (willConvoke) {
+        setAttendance((att) => (att[playerId] ? att : { ...att, [playerId]: 'present' }));
+      }
+    };
+
+    if (!willConvoke) {
+      apply();
+      return;
+    }
+
+    const player = players.find((p) => p.id === playerId);
+    availability.confirmConvocation(
+      playerId,
+      player ? `${player.first_name} ${player.last_name}` : 'Ce joueur',
+      apply,
+    );
+  };
+
+  /**
+   * « Convoquer tous » saute les joueurs non disponibles et le DIT.
+   *
+   * Trois boîtes de dialogue à la suite seraient validées sans être lues, et la
+   * garde ne protégerait plus de rien. Le coach reste libre de les ajouter un par
+   * un ensuite, ce qui est exactement le geste délibéré qu'on cherche.
+   */
   const convokeAll = () => {
+    const eligible = players.filter((p) => !needsConvocationWarning(availability.statusOf(p.id)));
+    const skipped = players.length - eligible.length;
+
     haptics.success();
-    setConvoked(Object.fromEntries(players.map((p) => [p.id, true])));
+    setConvoked(Object.fromEntries(eligible.map((p) => [p.id, true])));
     setAttendance((att) => {
       const next = { ...att };
-      players.forEach((p) => {
+      eligible.forEach((p) => {
         if (!next[p.id]) next[p.id] = 'present';
       });
       return next;
     });
+
+    if (skipped > 0) {
+      Alert.alert(
+        'Groupe convoqué',
+        `${skipped} joueur${skipped > 1 ? 's' : ''} non disponible${skipped > 1 ? 's n\'ont' : " n'a"} pas été convoqué${skipped > 1 ? 's' : ''}. Ajoute-les un par un si tu les veux au groupe.`,
+      );
+    }
   };
 
   /**
@@ -319,6 +405,14 @@ export default function TrainingDetailScreen() {
             onPress={() => router.push(`/(tabs)/calendar/training/edit/${trainingId}` as never)}
             style={styles.editBtn}
           />
+          <Button
+            label="Tests physiques"
+            icon="stopwatch-outline"
+            variant="secondary"
+            block
+            loading={openingTests}
+            onPress={openPhysicalTests}
+          />
         </Card>
 
         <View style={[styles.statsRow, { gap: theme.space.md }]}>
@@ -413,6 +507,13 @@ export default function TrainingDetailScreen() {
                           muted={!isConv}
                         />
                         {isGoalkeeper(p) && <Badge label="GB" size="sm" />}
+                        {/* Absente pour un joueur disponible : dix-huit pastilles
+                            vertes n'apprennent rien, deux pastilles ambre se
+                            lisent d'un coup d'oeil. */}
+                        <AvailabilityPill
+                          status={availability.statusOf(p.id)}
+                          row={availability.rowOf(p.id)}
+                        />
                         <Switch
                           value={isConv}
                           onValueChange={() => toggleConvoked(p.id)}
@@ -514,6 +615,7 @@ export default function TrainingDetailScreen() {
       </ScrollView>
 
       <InvitePlayersSheet
+        availability={availability}
         visible={inviteOpen}
         onClose={() => setInviteOpen(false)}
         candidates={inviteCandidates}

@@ -108,11 +108,28 @@ export function strongFootLabel(raw: unknown): string {
   return STRONG_FOOT_OPTIONS.find((o) => o.value === value)!.label;
 }
 
-/** Statuts d'un joueur dans l'effectif. `left` sort de l'effectif actif. */
+/**
+ * Statuts ADMINISTRATIFS d'un joueur dans l'effectif. `left` le sort de
+ * l'effectif actif.
+ *
+ * « Blessé » et « Suspendu » ont été retirés le 2026-08-13 : la disponibilité
+ * vit désormais dans `player_availability`, historisée, avec une date de retour
+ * et une zone. Les garder ici créait deux vérités concurrentes — un joueur
+ * pouvait être « Blessé » sur sa fiche et « disponible » sur l'écran de
+ * convocation, sans que rien ne relie les deux.
+ *
+ * Ce sont aussi deux valeurs DESTRUCTRICES : `players.status` porte le statut de
+ * mutation FFF, et marquer quelqu'un blessé l'écrasait définitivement.
+ *
+ * Pour changer la disponibilité : écran Performance, ou la fiche du joueur.
+ *
+ * /!\ Le web et le mobile n'écrivent toujours pas le même vocabulaire dans cette
+ * colonne : ici « Actif », là-bas « Non-muté » / « Muté » / « Muté HP ». La
+ * colonne n'a aucune contrainte CHECK, donc rien ne l'a jamais empêché. Dette
+ * connue, à normaliser à part.
+ */
 export const PLAYER_STATUS_OPTIONS = [
   { value: 'Actif', label: 'Actif' },
-  { value: 'Blessé', label: 'Blessé' },
-  { value: 'Suspendu', label: 'Suspendu' },
   { value: 'left', label: 'Parti' },
 ] as const;
 

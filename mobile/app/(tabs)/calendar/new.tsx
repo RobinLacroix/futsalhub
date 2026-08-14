@@ -25,6 +25,9 @@ import {
   type ChipOption,
 } from '../../../components/ui';
 import { PlayerIdentity } from '../../../components/players/PlayerIdentity';
+import { AvailabilityPill } from '../../../components/performance/AvailabilityPill';
+import { useAvailability } from '../../../hooks/useAvailability';
+import { needsConvocationWarning } from '../../../lib/availability';
 import { AttendancePicker } from '../../../components/training/AttendancePicker';
 import { InvitePlayersSheet } from '../../../components/match/InvitePlayersSheet';
 import { DateTimeField, hasNativePicker } from '../../../components/match/DateTimeField';
@@ -51,6 +54,9 @@ export default function NewTrainingScreen() {
   const { theme } = useTheme();
   const c = theme.colors;
   const { activeTeamId, activeTeam, teams } = useActiveTeam();
+  // Portée club et non équipe : la feuille d'invitation propose des joueurs
+  // d'autres équipes, qui n'auraient sinon aucune pastille.
+  const availability = useAvailability();
 
   const [players, setPlayers] = useState<Player[]>([]);
   const [loadingPlayers, setLoadingPlayers] = useState(true);
@@ -134,15 +140,30 @@ export default function NewTrainingScreen() {
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
+  /**
+   * Saute les joueurs non disponibles et le dit. Trois boîtes de dialogue à la
+   * suite seraient validées sans être lues, et la garde ne protégerait plus de
+   * rien ; le coach reste libre de les ajouter un par un.
+   */
   const convokeAll = () => {
+    const eligible = players.filter((p) => !needsConvocationWarning(availability.statusOf(p.id)));
+    const skipped = players.length - eligible.length;
+
     haptics.success();
     setAttendance((prev) => {
       const next = { ...prev };
-      players.forEach((p) => {
+      eligible.forEach((p) => {
         if (!next[p.id]) next[p.id] = 'present';
       });
       return next;
     });
+
+    if (skipped > 0) {
+      Alert.alert(
+        'Groupe convoqué',
+        `${skipped} joueur${skipped > 1 ? 's' : ''} non disponible${skipped > 1 ? "s n'ont" : " n'a"} pas été convoqué${skipped > 1 ? 's' : ''}. Ajoute-les un par un si tu les veux au groupe.`,
+      );
+    }
   };
 
   const clearAll = () => {
@@ -307,6 +328,11 @@ export default function NewTrainingScreen() {
                         highlighted={!!status}
                         muted={!status}
                       />
+                      {/* Absente pour un joueur disponible : voir AvailabilityPill. */}
+                      <AvailabilityPill
+                        status={availability.statusOf(p.id)}
+                        row={availability.rowOf(p.id)}
+                      />
                       {status ? (
                         <Button
                           label="Retirer"
@@ -327,7 +353,9 @@ export default function NewTrainingScreen() {
                           size="sm"
                           onPress={() => {
                             haptics.select();
-                            setAttendance((prev) => ({ ...prev, [p.id]: 'present' }));
+                            availability.confirmConvocation(p.id, name, () =>
+                              setAttendance((prev) => ({ ...prev, [p.id]: 'present' })),
+                            );
                           }}
                         />
                       )}
@@ -403,6 +431,7 @@ export default function NewTrainingScreen() {
       </ScrollView>
 
       <InvitePlayersSheet
+        availability={availability}
         visible={inviteOpen}
         onClose={() => setInviteOpen(false)}
         candidates={inviteCandidates}

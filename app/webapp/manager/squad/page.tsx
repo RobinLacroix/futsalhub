@@ -945,7 +945,12 @@ export default function SquadPage() {
                   </div>
                 </div>
 
-                {/* Statut */}
+                {/* Statut administratif — PAS la disponibilité.
+                    « Blessé » et « Suspendu » ont été retirés le 2026-08-13 : la
+                    disponibilité vit dans `player_availability`, historisée, avec
+                    date de retour et zone. Les garder ici créait deux vérités
+                    concurrentes, et surtout écrasait définitivement le statut de
+                    mutation FFF du joueur, qui est la vraie donnée de ce champ. */}
                 <div>
                   <label className="fm-label">Statut *</label>
                   <select required value={formData.status} onChange={e => setFormData({ ...formData, status: e.target.value })} className="fm-select">
@@ -953,10 +958,12 @@ export default function SquadPage() {
                     <option value="Non-muté">Non-Muté</option>
                     <option value="Muté">Muté</option>
                     <option value="Muté HP">Muté HP</option>
-                    <option value="Blessé">Blessé</option>
-                    <option value="Suspendu">Suspendu</option>
                     <option value="left">Parti (quitte le club)</option>
                   </select>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Statut de mutation. Pour une blessure ou une suspension, passez par le Pôle
+                    Performance.
+                  </p>
                 </div>
 
                 {/* Limite séquence */}
