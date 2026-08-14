@@ -54,6 +54,7 @@ import { Text, Button, Badge, EmptyState, SkeletonList } from './ui';
 import { positionStyle, strongFootLabel } from './players/positions';
 import { fmPalette, sessionColor, type FMPalette, type SessionStatus } from './players/fmPalette';
 import { PlayerAccountLink } from './players/PlayerAccountLink';
+import { PlayerTestsSection } from './players/PlayerTestsSection';
 import {
   RadarChart,
   FeedbackLineChart,
@@ -518,6 +519,14 @@ export function PlayerDetailView({
             <RatingLineChart series={ratingSeries} />
           </FMSection>
         )}
+
+        {/* ── Tests physiques ────────────────────────────────────────────── */}
+        {/* Le repère d'effectif n'est passé qu'à l'encadrement : RLS n'ouvre les
+            résultats d'un joueur qu'à lui-même et au staff, donc une « moyenne
+            du groupe » calculée par un joueur vaudrait sa propre valeur. */}
+        <FMSection title="Tests physiques" p={p}>
+          <PlayerTestsSection playerId={player.id} showSquadReference={isManager} p={p} />
+        </FMSection>
 
         {/* ── Questionnaire ──────────────────────────────────────────────── */}
         <FMSection title="Questionnaire de séance" p={p}>

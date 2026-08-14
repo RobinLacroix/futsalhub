@@ -34,4 +34,9 @@ export {
   getPlayerPainReports,
   deleteMyPainReport
 } from './painReportsService';
+export { trainingLoadService, defaultLoadWindow } from './trainingLoadService';
+export { availabilityService } from './availabilityService';
+export type { SetAvailabilityInput } from './availabilityService';
+export { physicalTestsService } from './physicalTestsService';
+export type { AttemptInput, ResultInput, SessionInput } from './physicalTestsService';
 

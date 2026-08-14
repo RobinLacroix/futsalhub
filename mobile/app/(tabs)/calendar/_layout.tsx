@@ -55,6 +55,7 @@ export default function CalendarLayout() {
       <Stack.Screen name="training/[trainingId]" options={{ title: 'Entraînement' }} />
       <Stack.Screen name="training/edit/[trainingId]" options={{ title: "Modifier l'entraînement" }} />
       <Stack.Screen name="matchDetail/[matchId]" options={{ title: 'Match' }} />
+      <Stack.Screen name="tests/[sessionId]" options={{ title: 'Tests physiques' }} />
     </Stack>
   );
 }
