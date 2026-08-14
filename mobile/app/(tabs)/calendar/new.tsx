@@ -42,6 +42,12 @@ const THEME_OPTIONS: readonly ChipOption<TrainingTheme>[] = [
   { value: 'Supériorité', label: 'Supériorité' },
 ];
 
+/** Vide → undefined (champ non renseigné, on ne force pas de valeur par défaut). */
+const parseIntOrUndefined = (s: string): number | undefined => {
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) ? n : undefined;
+};
+
 const defaultDate = () => {
   const d = new Date();
   d.setMinutes(0);
@@ -68,6 +74,9 @@ export default function NewTrainingScreen() {
   const [location, setLocation] = useState('');
   const [keyPrinciple, setKeyPrinciple] = useState('');
   const [trainingTheme, setTrainingTheme] = useState<TrainingTheme>('Offensif');
+  const [sessionDuration, setSessionDuration] = useState('');
+  const [targetRpeMin, setTargetRpeMin] = useState('');
+  const [targetRpeMax, setTargetRpeMax] = useState('');
 
   /** id → statut. Absent de l'objet = joueur non convoqué. */
   const [attendance, setAttendance] = useState<Record<string, PlayerStatus>>({});
@@ -202,6 +211,22 @@ export default function NewTrainingScreen() {
       return;
     }
 
+    const duration = parseIntOrUndefined(sessionDuration);
+    if (duration != null && (duration < 45 || duration > 150)) {
+      Alert.alert('Durée invalide', 'La durée doit être comprise entre 45 et 150 minutes.');
+      return;
+    }
+    const rpeMin = parseIntOrUndefined(targetRpeMin);
+    const rpeMax = parseIntOrUndefined(targetRpeMax);
+    if ((rpeMin != null && (rpeMin < 1 || rpeMin > 10)) || (rpeMax != null && (rpeMax < 1 || rpeMax > 10))) {
+      Alert.alert('RPE invalide', 'Le RPE cible doit être compris entre 1 et 10.');
+      return;
+    }
+    if (rpeMin != null && rpeMax != null && rpeMax < rpeMin) {
+      Alert.alert('RPE invalide', 'Le RPE max doit être supérieur ou égal au RPE min.');
+      return;
+    }
+
     setSaving(true);
     try {
       const training = await createTraining(activeTeamId, {
@@ -210,6 +235,9 @@ export default function NewTrainingScreen() {
         theme: trainingTheme,
         key_principle: keyPrinciple.trim(),
         convoked_player_ids: convokedPlayerIds,
+        session_duration: duration,
+        target_rpe_min: rpeMin,
+        target_rpe_max: rpeMax,
       });
       await updateTrainingAttendance(
         training.id,
@@ -276,6 +304,39 @@ export default function NewTrainingScreen() {
             placeholder="ex : conserver le ballon sous pression"
             hint="Le fil conducteur de la séance, rappelé sur la fiche."
           />
+          <Input
+            label="Durée de la séance"
+            optional
+            numeric
+            keyboardType="number-pad"
+            value={sessionDuration}
+            onChangeText={setSessionDuration}
+            placeholder="ex : 75"
+            hint="En minutes, entre 45 et 150."
+          />
+          <View style={{ flexDirection: 'row', gap: theme.space.sm }}>
+            <Input
+              label="RPE cible min"
+              optional
+              numeric
+              keyboardType="number-pad"
+              value={targetRpeMin}
+              onChangeText={setTargetRpeMin}
+              placeholder="ex : 5"
+              containerStyle={styles.flex}
+            />
+            <Input
+              label="RPE cible max"
+              optional
+              numeric
+              keyboardType="number-pad"
+              value={targetRpeMax}
+              onChangeText={setTargetRpeMax}
+              placeholder="ex : 7"
+              hint="Fourchette 1-10, à comparer au RPE réel des joueurs."
+              containerStyle={styles.flex}
+            />
+          </View>
         </Card>
 
         <Section

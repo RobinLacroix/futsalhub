@@ -28,6 +28,7 @@ import { format, parse, isValid } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Sheet, Text, Button, Field, Input, ChipGroup, type ChipOption } from '../ui';
+import BodyMap, { type PainSelection } from '../BodyMap';
 import { setPlayerAvailability } from '../../lib/services/availability';
 import {
   AVAILABILITY_META,
@@ -35,19 +36,12 @@ import {
   type AvailabilityRow,
   type AvailabilityStatus,
 } from '../../lib/availability';
-import { FRONT_ZONES, BACK_ZONES, JOINT_ZONES } from '../../lib/painMap';
-
-const ZONES = [...FRONT_ZONES, ...BACK_ZONES, ...JOINT_ZONES];
+import { zoneById } from '../../lib/painMap';
 
 const STATUS_CHIPS: readonly ChipOption<string>[] = AVAILABILITY_ORDER.map((status) => ({
   value: status,
   label: AVAILABILITY_META[status].label,
 }));
-
-const ZONE_CHIPS: readonly ChipOption<string>[] = [
-  { value: '', label: 'Aucune' },
-  ...ZONES.map((z) => ({ value: z.id, label: z.label })),
-];
 
 const CONFIDENCE_CHIPS: readonly ChipOption<string>[] = [
   { value: 'estimee', label: 'Estimé' },
@@ -79,7 +73,7 @@ export function AvailabilitySheet({
   const [since, setSince] = useState<Date>(new Date());
   const [expectedReturn, setExpectedReturn] = useState<Date | null>(null);
   const [confidence, setConfidence] = useState<'estimee' | 'confirmee'>('estimee');
-  const [zone, setZone] = useState('');
+  const [pain, setPain] = useState<PainSelection>({});
   const [note, setNote] = useState('');
   const [picker, setPicker] = useState<'since' | 'return' | null>(null);
   const [saving, setSaving] = useState(false);
@@ -96,26 +90,27 @@ export function AvailabilitySheet({
         : null,
     );
     setConfidence(current?.return_confidence ?? 'estimee');
-    setZone(current?.zone ?? '');
+    setPain(current?.zone ? { [current.zone]: 1 } : {});
     setNote(current?.note ?? '');
     setPicker(null);
   }, [visible, current]);
 
   const isAvailable = status === 'disponible';
+  const zone = Object.keys(pain)[0] ?? '';
 
   // Repasser un joueur en « disponible » solde son indisponibilité : garder une
   // date de retour et une zone produirait une ligne qui se contredit.
   useEffect(() => {
     if (isAvailable) {
       setExpectedReturn(null);
-      setZone('');
+      setPain({});
     }
   }, [isAvailable]);
 
   const meta = AVAILABILITY_META[status];
 
   const sideForZone = useMemo(
-    () => (zone ? (ZONES.find((z) => z.id === zone)?.side ?? null) : null),
+    () => (zone ? (zoneById(zone)?.side ?? null) : null),
     [zone],
   );
 
@@ -203,14 +198,9 @@ export function AvailabilitySheet({
             <Field
               label="Zone concernée"
               optional
-              hint="Même référentiel que les déclarations de douleur : c'est ce qui permet de rapprocher un signal d'une blessure."
+              hint="Même mannequin que les déclarations de douleur : c'est ce qui permet de rapprocher un signal d'une blessure."
             >
-              <ChipGroup
-                label="Zone concernée"
-                options={ZONE_CHIPS}
-                value={zone}
-                onChange={setZone}
-              />
+              <BodyMap value={pain} onChange={setPain} singleSelect height={280} />
             </Field>
           </>
         )}

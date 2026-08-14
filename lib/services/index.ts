@@ -32,6 +32,7 @@ export {
   reportMyPain,
   reportPainByToken,
   getPlayerPainReports,
+  getClubPainReports,
   deleteMyPainReport
 } from './painReportsService';
 export { trainingLoadService, defaultLoadWindow } from './trainingLoadService';

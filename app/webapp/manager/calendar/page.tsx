@@ -167,6 +167,8 @@ interface TrainingFormData {
   // Page 2
   sessionDuration?: number; // durée totale en minutes
   sessionParts?: SessionPart[]; // organisation de la séance
+  targetRpeMin?: number; // RPE cible, borne basse (1-10)
+  targetRpeMax?: number; // RPE cible, borne haute (1-10)
 }
 
 interface TrainingStats {
@@ -241,7 +243,14 @@ const trainingSchema = yup.object().shape({
     }
   ),
   sessionDuration: yup.number().min(45).max(150).optional(),
-  sessionParts: yup.array().optional()
+  sessionParts: yup.array().optional(),
+  targetRpeMin: yup.number().min(1).max(10).optional(),
+  targetRpeMax: yup.number().min(1).max(10).optional()
+    .test('rpe-order', 'Le RPE max doit être supérieur ou égal au RPE min', function (value) {
+      const { targetRpeMin } = this.parent;
+      if (targetRpeMin == null || value == null) return true;
+      return value >= targetRpeMin;
+    })
 });
 
 const localizer = momentLocalizer(moment);
@@ -556,6 +565,8 @@ export default function CalendarPage() {
         // Conserver session_duration et session_parts pour l'édition
         session_duration: training.session_duration || null,
         session_parts: training.session_parts || null,
+        target_rpe_min: training.target_rpe_min || null,
+        target_rpe_max: training.target_rpe_max || null,
         type: 'training' as const
       })));
     } catch (err) {
@@ -971,7 +982,9 @@ export default function CalendarPage() {
         players: playersData,
         // Charger les données de la page 2 si disponibles
         sessionDuration: (event as any).session_duration || undefined,
-        sessionParts: (event as any).session_parts || undefined
+        sessionParts: (event as any).session_parts || undefined,
+        targetRpeMin: (event as any).target_rpe_min || undefined,
+        targetRpeMax: (event as any).target_rpe_max || undefined
       };
 
       console.log('Données du formulaire à pré-remplir:', formData);
@@ -1108,6 +1121,8 @@ export default function CalendarPage() {
         // Si sessionParts est un tableau vide, le mettre à null pour nettoyer
         trainingData.session_parts = null;
       }
+      trainingData.target_rpe_min = data.targetRpeMin ?? null;
+      trainingData.target_rpe_max = data.targetRpeMax ?? null;
 
       console.log('Données de l\'entraînement à mettre à jour:', trainingData);
 
@@ -1426,6 +1441,8 @@ export default function CalendarPage() {
         if (data.sessionParts && data.sessionParts.length > 0) {
           trainingData.session_parts = data.sessionParts; // Stockage en JSONB
         }
+        if (data.targetRpeMin != null) trainingData.target_rpe_min = data.targetRpeMin;
+        if (data.targetRpeMax != null) trainingData.target_rpe_max = data.targetRpeMax;
 
         console.log('Données de l\'entraînement à enregistrer:', trainingData);
 
@@ -3114,6 +3131,50 @@ export default function CalendarPage() {
                           }}
                         />
                       </div>
+                    </div>
+
+                    {/* RPE cible : fourchette d'intensité visée pour la séance, à comparer
+                        au RPE réel remonté par les joueurs (Pôle Performance > Charge). */}
+                    <div>
+                      <label className="block text-xs font-medium text-gray-800 mb-1">
+                        RPE cible <span className="font-normal text-gray-500">(optionnel, 1-10)</span>
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <Controller
+                          name="targetRpeMin"
+                          control={trainingControl}
+                          render={({ field: { value, onChange } }) => (
+                            <input
+                              type="number"
+                              min="1"
+                              max="10"
+                              placeholder="Min"
+                              value={value ?? ''}
+                              onChange={(e) => onChange(e.target.value ? parseInt(e.target.value) : undefined)}
+                              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                            />
+                          )}
+                        />
+                        <span className="text-xs text-gray-500">à</span>
+                        <Controller
+                          name="targetRpeMax"
+                          control={trainingControl}
+                          render={({ field: { value, onChange } }) => (
+                            <input
+                              type="number"
+                              min="1"
+                              max="10"
+                              placeholder="Max"
+                              value={value ?? ''}
+                              onChange={(e) => onChange(e.target.value ? parseInt(e.target.value) : undefined)}
+                              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                            />
+                          )}
+                        />
+                      </div>
+                      {trainingErrors.targetRpeMax && (
+                        <p className="mt-1 text-xs text-red-600">{trainingErrors.targetRpeMax.message}</p>
+                      )}
                     </div>
 
                     {/* Organisation de la séance */}

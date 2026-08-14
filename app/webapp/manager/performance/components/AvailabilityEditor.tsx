@@ -28,11 +28,9 @@ import {
   type AvailabilityRow,
   type AvailabilityStatus,
 } from '@/lib/availability';
-import { FRONT_ZONES, BACK_ZONES, JOINT_ZONES } from '@/lib/painMap';
+import { zoneById } from '@/lib/painMap';
+import BodyMap, { type PainSelection } from '@/components/BodyMap';
 import { T, TONE_COLORS } from '../theme';
-
-/** Zones proposées, dans l'ordre du référentiel unique de `lib/painMap.ts`. */
-const ZONES = [...FRONT_ZONES, ...BACK_ZONES, ...JOINT_ZONES];
 
 interface AvailabilityEditorProps {
   player: { id: string; first_name: string; last_name: string };
@@ -55,11 +53,12 @@ export default function AvailabilityEditor({
   const [confidence, setConfidence] = useState<'estimee' | 'confirmee'>(
     current?.return_confidence ?? 'estimee',
   );
-  const [zone, setZone] = useState(current?.zone ?? '');
+  const [pain, setPain] = useState<PainSelection>(current?.zone ? { [current.zone]: 1 } : {});
   const [note, setNote] = useState(current?.note ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const zone = Object.keys(pain)[0] ?? '';
   const meta = AVAILABILITY_META[status];
   const isAvailable = status === 'disponible';
 
@@ -69,7 +68,7 @@ export default function AvailabilityEditor({
   useEffect(() => {
     if (isAvailable) {
       setExpectedReturn('');
-      setZone('');
+      setPain({});
     }
   }, [isAvailable]);
 
@@ -88,7 +87,7 @@ export default function AvailabilityEditor({
         // `pain_reports.side` exactement comme ça. Deux champs indépendants
         // finiraient par se contredire.
         zone: zone || null,
-        side: zone ? (ZONES.find((z) => z.id === zone)?.side ?? null) : null,
+        side: zone ? (zoneById(zone)?.side ?? null) : null,
         note: note.trim() || null,
       });
       onSaved();
@@ -223,25 +222,12 @@ export default function AvailabilityEditor({
 
         {!isAvailable && (
           <div className="mb-4">
-            <label htmlFor="av-zone" className="mb-1 block text-sm font-medium" style={{ color: T.text }}>
+            <label className="mb-1 block text-sm font-medium" style={{ color: T.text }}>
               Zone concernée <span className="font-normal">(optionnel)</span>
             </label>
-            <select
-              id="av-zone"
-              value={zone}
-              onChange={(e) => setZone(e.target.value)}
-              className="w-full rounded-md border px-3 py-2"
-              style={{ borderColor: T.border }}
-            >
-              <option value="">Aucune / sans objet</option>
-              {ZONES.map((z) => (
-                <option key={z.id} value={z.id}>
-                  {z.label}
-                </option>
-              ))}
-            </select>
+            <BodyMap value={pain} onChange={setPain} singleSelect maxHeight={280} />
             <p className="mt-1 text-xs" style={{ color: T.textMuted }}>
-              Même référentiel que les déclarations de douleur : c&apos;est ce qui permet de
+              Même mannequin que les déclarations de douleur : c&apos;est ce qui permet de
               rapprocher un signal d&apos;une blessure.
             </p>
           </div>

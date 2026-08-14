@@ -26,16 +26,23 @@
 import { useMemo } from 'react';
 import { AlertTriangle, Info } from 'lucide-react';
 import {
+  JUDGEMENT_BAND_LABELS,
   MIN_RESPONSE_RATE,
   MONOTONY_ELEVATED,
+  RPE_BAND_LABELS,
+  RPE_BAND_RAMP,
   WELLNESS_LABELS,
+  formatDelta,
   formatLoad,
   formatMonotony,
   formatRate,
   isReliable,
+  judgementBand,
   monotonyHint,
+  rpeBand,
   weekLabel,
   wellnessCarriesJudgement,
+  wellnessDelta,
   type WeeklyLoad,
   type WellnessKey,
 } from '@/lib/trainingLoad';
@@ -48,28 +55,46 @@ interface LoadPanelProps {
 const WELLNESS_ORDER: WellnessKey[] = ['rpe', 'physicalForm', 'pleasure', 'autoEvaluation'];
 
 /**
- * Couleur d'une valeur de wellness sur 10.
+ * Bande de lecture d'une valeur de wellness sur 10 : couleur + libellé.
  *
- * Le RPE ne prend JAMAIS de couleur sémantique : colorer un effort ressenti
- * élevé en rouge pousse le joueur à sous-déclarer pour éviter le rouge, et
- * détruit la donnée qu'on cherche à récolter.
+ * Le RPE ne prend JAMAIS de couleur sémantique (rampe indigo monochrome,
+ * `RPE_BAND_RAMP`) : colorer un effort ressenti élevé en rouge pousse le
+ * joueur à sous-déclarer pour éviter le rouge, et détruit la donnée qu'on
+ * cherche à récolter. Les trois autres métriques portent déjà un jugement
+ * côté questionnaire joueur, elles gardent leur code couleur.
  */
-function wellnessColor(key: WellnessKey, value: number): string {
-  if (!wellnessCarriesJudgement(key)) return T.textMuted;
-  if (value < 4) return '#B91C1C';
-  if (value < 6.5) return '#B45309';
-  return '#15803D';
+function wellnessBand(key: WellnessKey, value: number): { label: string; color: string } {
+  if (!wellnessCarriesJudgement(key)) {
+    const band = rpeBand(value);
+    return { label: RPE_BAND_LABELS[band], color: RPE_BAND_RAMP[band] };
+  }
+  const band = judgementBand(value);
+  const color = band === 'bon' ? '#15803D' : band === 'moyen' ? '#B45309' : '#B91C1C';
+  return { label: JUDGEMENT_BAND_LABELS[band], color };
 }
+
+/** Hauteur, en pixels, réservée aux barres + à la bande cible (hors ligne de valeurs). */
+const CHART_HEIGHT = 96;
+/** Repères de graduation, en fraction de l'échelle. Sobres : une échelle, pas un quadrillage. */
+const GRIDLINE_RATIOS = [0.25, 0.5, 0.75];
 
 export default function LoadPanel({ weeks }: LoadPanelProps) {
   const recent = useMemo(() => weeks.slice(-8), [weeks]);
 
-  const maxLoad = useMemo(
-    () => Math.max(1, ...recent.map((w) => w.load ?? 0)),
+  // L'échelle couvre aussi la cible : sinon une bande cible plus haute que
+  // toutes les barres serait coupée en haut du graphique.
+  const maxScale = useMemo(
+    () =>
+      Math.max(
+        1,
+        ...recent.map((w) => w.load ?? 0),
+        ...recent.map((w) => w.targetLoadMax ?? 0),
+      ),
     [recent],
   );
 
   const current = recent.length > 0 ? recent[recent.length - 1] : null;
+  const previous = recent.length > 1 ? recent[recent.length - 2] : null;
 
   if (weeks.length === 0) {
     return (
@@ -128,38 +153,82 @@ export default function LoadPanel({ weeks }: LoadPanelProps) {
       )}
 
       {/* ── Histogramme ──────────────────────────────────────────────────── */}
-      <div className="mb-2 flex items-end gap-2" style={{ height: 120 }}>
-        {recent.map((week) => {
-          const height = week.load !== null ? Math.max(4, (week.load / maxLoad) * 100) : 4;
-          const reliable = isReliable(week.responseRate);
-          return (
-            <div key={week.weekStart} className="flex flex-1 flex-col items-center justify-end gap-1">
-              <span className="text-[10px] tabular-nums" style={{ color: T.textMuted }}>
-                {week.load !== null ? formatLoad(week.load) : ''}
-              </span>
-              <div
-                className="w-full rounded-t"
-                style={{
-                  height: `${height}%`,
-                  // Rampe d'intensité : une charge n'est ni bonne ni mauvaise.
-                  backgroundColor:
+      <div className="mb-1 flex gap-2">
+        {recent.map((week) => (
+          <span
+            key={week.weekStart}
+            className="flex-1 text-center text-[10px] tabular-nums"
+            style={{ color: T.textMuted }}
+          >
+            {week.load !== null ? formatLoad(week.load) : ''}
+          </span>
+        ))}
+      </div>
+      <div className="relative mb-2" style={{ height: CHART_HEIGHT }}>
+        {/* Graduation légère : une échelle de lecture, pas un jugement. */}
+        {GRIDLINE_RATIOS.map((ratio) => (
+          <div
+            key={ratio}
+            className="absolute inset-x-0"
+            style={{ bottom: ratio * CHART_HEIGHT, borderTop: `1px dashed ${T.border}` }}
+          >
+            <span
+              className="absolute left-0 -translate-y-full text-[9px] tabular-nums"
+              style={{ color: T.textMuted, opacity: 0.7 }}
+            >
+              {formatLoad(ratio * maxScale)}
+            </span>
+          </div>
+        ))}
+
+        <div className="flex h-full items-end gap-2">
+          {recent.map((week) => {
+            const barPx = week.load !== null ? Math.max(4, (week.load / maxScale) * CHART_HEIGHT) : 4;
+            const targetTopPx =
+              week.targetLoadMax !== null ? (week.targetLoadMax / maxScale) * CHART_HEIGHT : null;
+            const targetBottomPx =
+              week.targetLoadMin !== null ? (week.targetLoadMin / maxScale) * CHART_HEIGHT : null;
+            const reliable = isReliable(week.responseRate);
+            return (
+              <div key={week.weekStart} className="relative h-full flex-1">
+                <div
+                  className="absolute inset-x-0 bottom-0 rounded-t"
+                  style={{
+                    height: barPx,
+                    // Rampe d'intensité : une charge n'est ni bonne ni mauvaise.
+                    backgroundColor:
+                      week.load === null
+                        ? T.border
+                        : week.isPeak
+                          ? '#FFB020'
+                          : INTENSITY_RAMP[3],
+                    opacity: reliable ? 1 : 0.35,
+                  }}
+                  title={
                     week.load === null
-                      ? T.border
-                      : week.isPeak
-                        ? '#FFB020'
-                        : INTENSITY_RAMP[3],
-                  opacity: reliable ? 1 : 0.35,
-                }}
-                title={
-                  week.load === null
-                    ? 'Aucune donnée exploitable cette semaine'
-                    : `${formatLoad(week.load)} · ${formatRate(week.responseRate)} de réponses${week.isPeak ? ' · pic' : ''}`
-                }
-                aria-label={`${weekLabel(week.weekStart)} : ${formatLoad(week.load)}, ${formatRate(week.responseRate)} de réponses${week.isPeak ? ', pic de charge' : ''}${reliable ? '' : ', couverture insuffisante'}`}
-              />
-            </div>
-          );
-        })}
+                      ? 'Aucune donnée exploitable cette semaine'
+                      : `${formatLoad(week.load)} · ${formatRate(week.responseRate)} de réponses${week.isPeak ? ' · pic' : ''}`
+                  }
+                  aria-label={`${weekLabel(week.weekStart)} : ${formatLoad(week.load)}, ${formatRate(week.responseRate)} de réponses${week.isPeak ? ', pic de charge' : ''}${reliable ? '' : ', couverture insuffisante'}`}
+                />
+                {/* Rendue APRÈS la barre : sinon une charge réalisée haute cache
+                    entièrement le pourtour de la bande cible en dessous. */}
+                {targetTopPx !== null && targetBottomPx !== null && (
+                  <div
+                    className="pointer-events-none absolute inset-x-0 rounded-sm"
+                    style={{
+                      bottom: targetBottomPx,
+                      height: Math.max(2, targetTopPx - targetBottomPx),
+                      border: '1px dashed rgba(100,116,139,0.55)',
+                    }}
+                    aria-hidden
+                    title={`Cible de la semaine : ${formatLoad(week.targetLoadMin)} à ${formatLoad(week.targetLoadMax)}`}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
       <div className="mb-4 flex gap-2">
         {recent.map((week) => (
@@ -203,27 +272,66 @@ export default function LoadPanel({ weeks }: LoadPanelProps) {
           <div className="grid gap-3 sm:grid-cols-4">
             {WELLNESS_ORDER.map((key) => {
               const value = current.wellness[key];
+              const band = value !== null ? wellnessBand(key, value) : null;
+              const reliable = isReliable(current.responseRate);
+              const delta = wellnessDelta(current, previous, key);
               return (
                 <div
                   key={key}
-                  className="rounded-md border px-3 py-2"
+                  className="rounded-md border px-3 py-3"
                   style={{ borderColor: T.border }}
                 >
                   <p className="text-xs" style={{ color: T.textMuted }}>
                     {WELLNESS_LABELS[key]}
                   </p>
                   <p
-                    className="text-xl font-semibold tabular-nums"
+                    className="text-3xl font-black tabular-nums"
                     style={{
-                      color: value === null ? T.textMuted : wellnessColor(key, value),
-                      opacity: isReliable(current.responseRate) ? 1 : 0.45,
+                      color: band ? band.color : T.textMuted,
+                      opacity: reliable ? 1 : 0.45,
                     }}
                   >
                     {value === null ? '—' : value.toFixed(1)}
                     <span className="text-xs font-normal" style={{ color: T.textMuted }}>
-                      {value === null ? '' : ' / 10'}
+                      {value === null ? '' : ' /10'}
                     </span>
+                    {delta !== null && (
+                      <span
+                        className="ml-1 text-xs font-semibold tabular-nums"
+                        style={{ color: T.textMuted }}
+                        title="Évolution vs la semaine précédente"
+                      >
+                        {formatDelta(delta)}
+                      </span>
+                    )}
                   </p>
+                  {band && (
+                    <>
+                      <span
+                        className="mt-1 inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                        style={{
+                          backgroundColor: `${band.color}1a`,
+                          color: band.color,
+                          opacity: reliable ? 1 : 0.45,
+                        }}
+                      >
+                        {band.label}
+                      </span>
+                      <div
+                        className="mt-2 h-1.5 w-full overflow-hidden rounded-full"
+                        style={{ backgroundColor: T.rowOdd }}
+                      >
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${Math.min(100, (value! / 10) * 100)}%`,
+                            backgroundColor: band.color,
+                            opacity: reliable ? 1 : 0.45,
+                          }}
+                        />
+                      </div>
+                    </>
+                  )}
                 </div>
               );
             })}

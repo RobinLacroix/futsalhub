@@ -113,6 +113,14 @@ export interface PainReportGroup {
   zones: PainReportZone[];
 }
 
+/** Même soumission, vue club (onglet Infirmerie) : le joueur voyage avec. */
+export interface ClubPainReportGroup extends PainReportGroup {
+  player_id: string;
+  first_name: string;
+  last_name: string;
+  number: number | null;
+}
+
 // ==================== MATCHS ====================
 export interface Match {
   id: string;
@@ -269,6 +277,9 @@ export interface Training {
   attendance?: Record<string, PlayerStatus>; // JSONB: { player_id: 'present' | 'absent' | 'injured' }
   team_id?: string; // Le club est hérité via team_id -> teams.club_id
   season?: string | null; // Saison de rattachement, ex. "2025-2026"
+  session_duration?: number | null; // minutes, 45-150
+  target_rpe_min?: number | null; // RPE cible, borne basse (1-10)
+  target_rpe_max?: number | null; // RPE cible, borne haute (1-10)
   created_at?: string;
 }
 

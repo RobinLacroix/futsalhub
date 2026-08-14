@@ -22,7 +22,11 @@ interface BodyMapProps {
   value: PainSelection;
   onChange: (next: PainSelection) => void;
   maxHeight?: number;
+  /** Une seule zone à la fois, sans intensité — pour « zone concernée » (disponibilité), pas pour la douleur. */
+  singleSelect?: boolean;
 }
+
+const SINGLE_SELECT_COLOR = '#1a2744';
 
 const T = {
   cardBg2: '#F8FAFC',
@@ -77,13 +81,17 @@ function Toggle<T extends string>({
   );
 }
 
-export default function BodyMap({ value, onChange, maxHeight = 360 }: BodyMapProps) {
+export default function BodyMap({ value, onChange, maxHeight = 360, singleSelect = false }: BodyMapProps) {
   const [view, setView] = useState<PainView>('front');
   const [mode, setMode] = useState<PainMode>('zone');
   const zones = zonesFor(view, mode);
   const selectedIds = Object.keys(value);
 
   const toggle = (id: string) => {
+    if (singleSelect) {
+      onChange(value[id] ? {} : { [id]: 1 });
+      return;
+    }
     const next = cycle(value[id]);
     const copy = { ...value };
     if (next === 0) delete copy[id];
@@ -109,8 +117,8 @@ export default function BodyMap({ value, onChange, maxHeight = 360 }: BodyMapPro
 
           {zones.map(def => {
             const intensity = value[def.id];
-            const fill = intensity ? INTENSITY_COLORS[intensity] : BODY_FILL;
-            const stroke = intensity ? INTENSITY_COLORS[intensity] : BODY_STROKE;
+            const fill = intensity ? (singleSelect ? SINGLE_SELECT_COLOR : INTENSITY_COLORS[intensity]) : BODY_FILL;
+            const stroke = intensity ? (singleSelect ? SINGLE_SELECT_COLOR : INTENSITY_COLORS[intensity]) : BODY_STROKE;
             return (
               <ShapePath key={def.id} def={def} fill={fill} stroke={stroke}
                 strokeWidth={intensity ? 2 : 1.2} onClick={() => toggle(def.id)} interactive />
@@ -119,15 +127,17 @@ export default function BodyMap({ value, onChange, maxHeight = 360 }: BodyMapPro
         </svg>
       </div>
 
-      {/* Légende intensité */}
-      <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 10 }}>
-        {([1, 2, 3] as PainIntensity[]).map(i => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ width: 12, height: 12, borderRadius: 3, background: INTENSITY_COLORS[i], display: 'inline-block' }} />
-            <span style={{ fontSize: 10, color: T.textMuted }}>{INTENSITY_LABELS[i]}</span>
-          </div>
-        ))}
-      </div>
+      {/* Légende intensité — sans objet en sélection unique (pas de gravité à indiquer) */}
+      {!singleSelect && (
+        <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 10 }}>
+          {([1, 2, 3] as PainIntensity[]).map(i => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 12, height: 12, borderRadius: 3, background: INTENSITY_COLORS[i], display: 'inline-block' }} />
+              <span style={{ fontSize: 10, color: T.textMuted }}>{INTENSITY_LABELS[i]}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Sélection */}
       <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -148,7 +158,7 @@ export default function BodyMap({ value, onChange, maxHeight = 360 }: BodyMapPro
           {selectedIds.map(id => {
             const intensity = value[id];
             const label = zoneById(id)?.label ?? id;
-            const color = INTENSITY_COLORS[intensity];
+            const color = singleSelect ? SINGLE_SELECT_COLOR : INTENSITY_COLORS[intensity];
             return (
               <span key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: `${color}1a`, border: `1px solid ${color}`, color, borderRadius: 999, padding: '4px 10px', fontSize: 12, fontWeight: 700 }}>
                 {label}

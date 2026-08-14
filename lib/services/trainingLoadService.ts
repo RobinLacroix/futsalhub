@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient';
-import type { TrainingLoadRow } from '../trainingLoad';
+import type { TrainingLoadRow, MatrixRow } from '../trainingLoad';
 
 /**
  * Charge d'entraînement — couche service web.
@@ -25,6 +25,35 @@ export const trainingLoadService = {
     });
     if (error) throw error;
     return (data || []) as TrainingLoadRow[];
+  },
+
+  /** Jumeau individuel : même forme de ligne, une valeur au lieu d'une moyenne d'équipe. */
+  async getPlayerTrainingLoad(
+    playerId: string,
+    options: { from?: string | null; to?: string | null } = {},
+  ): Promise<TrainingLoadRow[]> {
+    const { data, error } = await supabase.rpc('get_player_training_load', {
+      p_player_id: playerId,
+      p_from: options.from ?? null,
+      p_to: options.to ?? null,
+    });
+    if (error) throw error;
+    return (data || []) as TrainingLoadRow[];
+  },
+
+  /** Matrice joueurs × dernières séances, pour la vue « effectif » de la charge. */
+  async getTeamTrainingLoadMatrix(
+    clubId: string,
+    teamId: string,
+    limit = 5,
+  ): Promise<MatrixRow[]> {
+    const { data, error } = await supabase.rpc('get_team_training_load_matrix', {
+      p_club_id: clubId,
+      p_team_id: teamId,
+      p_limit: limit,
+    });
+    if (error) throw error;
+    return (data || []) as MatrixRow[];
   },
 };
 

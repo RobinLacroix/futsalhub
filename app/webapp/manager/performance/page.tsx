@@ -26,7 +26,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, Pencil, Users } from 'lucide-react';
 import { availabilityService, playersService, trainingLoadService, defaultLoadWindow } from '@/lib/services';
-import { buildWeeklyLoads, type WeeklyLoad } from '@/lib/trainingLoad';
+import { getClubPainReports } from '@/lib/services/painReportsService';
+import { buildWeeklyLoads, type MatrixRow, type WeeklyLoad } from '@/lib/trainingLoad';
 import { useUserClub } from '../../hooks/useUserClub';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
 import { zoneLabel } from '@/lib/painMap';
@@ -47,11 +48,23 @@ import {
   type PainSignalRow,
   type ResolvedPlayer,
 } from '@/lib/availability';
-import type { Player } from '@/types';
+import type { ClubPainReportGroup, Player } from '@/types';
 import AvailabilityEditor from './components/AvailabilityEditor';
 import LoadPanel from './components/LoadPanel';
+import LoadMatrixPanel from './components/LoadMatrixPanel';
 import PainSignalsPanel from './components/PainSignalsPanel';
+import PainReportsPanel from './components/PainReportsPanel';
 import { T, TONE_COLORS } from './theme';
+
+/** Charge : vue d'équipe (agrégée) ou d'un joueur (son RPE, pas une moyenne). */
+type LoadScope = 'equipe' | 'joueur';
+
+type PerformanceTab = 'infirmerie' | 'charge';
+
+const TABS: { id: PerformanceTab; label: string }[] = [
+  { id: 'infirmerie', label: 'Infirmerie' },
+  { id: 'charge', label: "Charge d'entraînement" },
+];
 
 export default function PerformancePage() {
   const router = useRouter();
@@ -61,12 +74,23 @@ export default function PerformancePage() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [rows, setRows] = useState<AvailabilityRow[]>([]);
   const [signals, setSignals] = useState<PainSignalRow[]>([]);
+  const [reports, setReports] = useState<ClubPainReportGroup[]>([]);
   const [weeks, setWeeks] = useState<WeeklyLoad[]>([]);
   const [windowDays, setWindowDays] = useState<number>(PAIN_SIGNAL_DEFAULTS.windowDays);
   const [minReports, setMinReports] = useState<number>(PAIN_SIGNAL_DEFAULTS.minReports);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ResolvedPlayer | null>(null);
+  const [tab, setTab] = useState<PerformanceTab>('infirmerie');
+
+  // Charge : équipe (agrégée, `weeks`/`sessions` ci-dessus) ou un joueur — même
+  // moteur de calcul (`buildWeeklyLoads`), deux sources de données (voir
+  // `lib/trainingLoad.ts`, TrainingLoadRow).
+  const [loadScope, setLoadScope] = useState<LoadScope>('equipe');
+  const [loadPlayerId, setLoadPlayerId] = useState<string>('');
+  const [playerWeeks, setPlayerWeeks] = useState<WeeklyLoad[]>([]);
+  const [loadingPlayerLoad, setLoadingPlayerLoad] = useState(false);
+  const [matrixRows, setMatrixRows] = useState<MatrixRow[]>([]);
 
   const loadAvailability = useCallback(async () => {
     if (!club) return;
@@ -113,7 +137,8 @@ export default function PerformancePage() {
     trainingLoadService
       .getTrainingLoad(club.id, { teamId: activeTeamId || null, from: range.from, to: range.to })
       .then((rows) => {
-        if (!cancelled) setWeeks(buildWeeklyLoads(rows));
+        if (cancelled) return;
+        setWeeks(buildWeeklyLoads(rows));
       })
       .catch(() => {
         if (!cancelled) setWeeks([]);
@@ -122,6 +147,52 @@ export default function PerformancePage() {
       cancelled = true;
     };
   }, [club, activeTeamId]);
+
+  // Matrice par joueur : exige une équipe (la RPC scope sur l'effectif d'une
+  // équipe précise, pas sur le club entier). Pas de RPC tant qu'aucune équipe
+  // n'est active.
+  useEffect(() => {
+    if (!club || !activeTeamId) {
+      setMatrixRows([]);
+      return;
+    }
+    let cancelled = false;
+    trainingLoadService
+      .getTeamTrainingLoadMatrix(club.id, activeTeamId, 5)
+      .then((rows) => {
+        if (!cancelled) setMatrixRows(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setMatrixRows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [club, activeTeamId]);
+
+  // Charge individuelle : ne se charge que si l'onglet Joueur est actif et
+  // qu'un joueur est choisi — pas de RPC à chaque ouverture de la page.
+  useEffect(() => {
+    if (loadScope !== 'joueur' || !loadPlayerId) return;
+    let cancelled = false;
+    setLoadingPlayerLoad(true);
+    const range = defaultLoadWindow(12);
+    trainingLoadService
+      .getPlayerTrainingLoad(loadPlayerId, { from: range.from, to: range.to })
+      .then((rows) => {
+        if (cancelled) return;
+        setPlayerWeeks(buildWeeklyLoads(rows));
+      })
+      .catch(() => {
+        if (!cancelled) setPlayerWeeks([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPlayerLoad(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadScope, loadPlayerId]);
 
   // Les signaux se rechargent seuls quand le seuil change : c'est un réglage de
   // lecture, il ne doit pas obliger à recharger l'effectif.
@@ -140,6 +211,24 @@ export default function PerformancePage() {
       cancelled = true;
     };
   }, [club, windowDays, minReports]);
+
+  // Les déclarations brutes se rechargent avec le club et l'équipe active,
+  // comme l'effectif — mais pas avec le seuil des signaux : ce n'est pas un
+  // réglage de lecture ici, on veut le fil complet des soumissions récentes.
+  useEffect(() => {
+    if (!club) return;
+    let cancelled = false;
+    getClubPainReports(club.id, activeTeamId || null)
+      .then((data) => {
+        if (!cancelled) setReports(data);
+      })
+      .catch(() => {
+        if (!cancelled) setReports([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [club, activeTeamId]);
 
   const resolved = useMemo(
     () =>
@@ -210,172 +299,265 @@ export default function PerformancePage() {
         </div>
       )}
 
-      {/* ── Bandeau ─────────────────────────────────────────────────────── */}
-      <section className="mb-4 grid gap-3 sm:grid-cols-3">
-        {GROUP_ORDER.map((group) => {
-          const tone =
-            group === 'apte'
-              ? TONE_COLORS.positive
-              : group === 'reprise'
-                ? TONE_COLORS.warning
-                : TONE_COLORS.injury;
+      {/* ── Onglets ─────────────────────────────────────────────────────── */}
+      <div className="mb-6 flex gap-1 border-b" style={{ borderColor: T.border }}>
+        {TABS.map((t) => {
+          const active = tab === t.id;
           return (
-            <div
-              key={group}
-              className="rounded-lg border p-4"
-              style={{ backgroundColor: T.cardBg, borderColor: T.border }}
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              aria-selected={active}
+              role="tab"
+              className="border-b-2 px-4 py-2 text-sm font-medium"
+              style={{
+                borderColor: active ? T.accent : 'transparent',
+                color: active ? T.accent : T.textMuted,
+              }}
             >
-              <p className="text-3xl font-bold tabular-nums" style={{ color: tone.fg }}>
-                {groupCounts[group]}
-              </p>
-              <p className="text-sm font-medium" style={{ color: T.text }}>
-                {GROUP_LABELS[group]}
-              </p>
-              <p className="mt-1 text-xs" style={{ color: T.textMuted }}>
-                {GROUP_ORDER.indexOf(group) === 0
-                  ? 'Alignables, avec ou sans aménagement'
-                  : detailLine(statusCounts, group)}
-              </p>
-            </div>
+              {t.label}
+            </button>
           );
         })}
-      </section>
-
-      {/* Le rappel qui évite le contresens le plus probable de l'écran. */}
-      <p className="mb-6 text-xs" style={{ color: T.textMuted }}>
-        Un joueur sans statut saisi est compté comme disponible : {players.length} joueurs dans
-        l&apos;effectif, {rows.length} avec un état enregistré.
-      </p>
-
-      {/* ── Infirmerie ──────────────────────────────────────────────────── */}
-      <section
-        className="mb-4 rounded-lg border"
-        style={{ backgroundColor: T.cardBg, borderColor: T.border }}
-      >
-        <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: T.border }}>
-          <h2 className="text-base font-semibold" style={{ color: T.text }}>
-            Infirmerie
-          </h2>
-          <span className="text-sm" style={{ color: T.textMuted }}>
-            {outList.length} joueur{outList.length > 1 ? 's' : ''}
-          </span>
-        </div>
-
-        {outList.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm" style={{ color: T.textMuted }}>
-            Aucun joueur indisponible. Utilisez la liste ci-dessous pour déclarer un statut.
-          </p>
-        ) : (
-          <ul className="divide-y" style={{ borderColor: T.border }}>
-            {outList.map((entry) => {
-              const row = entry.row!;
-              const meta = AVAILABILITY_META[entry.status];
-              const tone = TONE_COLORS[meta.tone];
-              return (
-                <li key={entry.player.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                  <span
-                    className="shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium"
-                    style={{ color: tone.fg, backgroundColor: tone.bg, borderColor: tone.border }}
-                  >
-                    {meta.label}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium" style={{ color: T.text }}>
-                      {entry.player.number != null ? `${entry.player.number}. ` : ''}
-                      {entry.player.first_name} {entry.player.last_name}
-                    </p>
-                    <p className="truncate text-sm" style={{ color: T.textMuted }}>
-                      {sinceLabel(row.days_out)}
-                      {row.zone ? ` · ${zoneLabel(row.zone)}` : ''}
-                      {row.side && row.side !== 'C' ? ` (${SIDE_LABELS[row.side]})` : ''}
-                      {' · '}
-                      {returnLabel(row)}
-                    </p>
-                    {row.note && (
-                      <p className="truncate text-xs italic" style={{ color: T.textMuted }}>
-                        {row.note}
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setEditing(entry)}
-                    className="flex shrink-0 items-center gap-1 rounded-md border px-3 py-1.5 text-sm"
-                    style={{ borderColor: T.border, color: T.text }}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                    Modifier
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      {/* ── Charge et wellness ──────────────────────────────────────────── */}
-      <div className="mb-4">
-        <LoadPanel weeks={weeks} />
       </div>
 
-      {/* ── Signaux précoces ────────────────────────────────────────────── */}
-      <div className="mb-4">
-        <PainSignalsPanel
-          signals={signals}
-          windowDays={windowDays}
-          minReports={minReports}
-          onWindowChange={setWindowDays}
-          onMinReportsChange={setMinReports}
-          onOpenPlayer={(playerId) => router.push(`/webapp/manager/squad/${playerId}`)}
-        />
-      </div>
-
-      {/* ── Effectif complet ────────────────────────────────────────────── */}
-      <section className="rounded-lg border" style={{ backgroundColor: T.cardBg, borderColor: T.border }}>
-        <div className="flex items-center gap-2 border-b px-4 py-3" style={{ borderColor: T.border }}>
-          <Users className="h-4 w-4" style={{ color: T.textMuted }} />
-          <h2 className="text-base font-semibold" style={{ color: T.text }}>
-            Effectif
-          </h2>
-        </div>
-        {resolved.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm" style={{ color: T.textMuted }}>
-            Aucun joueur dans l&apos;équipe active.
-          </p>
-        ) : (
-          <ul className="divide-y" style={{ borderColor: T.border }}>
-            {resolved.map((entry) => {
-              const meta = AVAILABILITY_META[entry.status];
-              const tone = TONE_COLORS[meta.tone];
+      {tab === 'infirmerie' && (
+        <>
+          {/* ── Bandeau ─────────────────────────────────────────────────── */}
+          <section className="mb-4 grid gap-3 sm:grid-cols-3">
+            {GROUP_ORDER.map((group) => {
+              const tone =
+                group === 'apte'
+                  ? TONE_COLORS.positive
+                  : group === 'reprise'
+                    ? TONE_COLORS.warning
+                    : TONE_COLORS.injury;
               return (
-                <li key={entry.player.id} className="flex items-center gap-3 px-4 py-2">
-                  <span
-                    className="h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: tone.fg }}
-                    aria-hidden
-                  />
-                  <span className="min-w-0 flex-1 truncate text-sm" style={{ color: T.text }}>
-                    {entry.player.number != null ? `${entry.player.number}. ` : ''}
-                    {entry.player.first_name} {entry.player.last_name}
-                  </span>
-                  <span className="shrink-0 text-sm" style={{ color: tone.fg }}>
-                    {meta.label}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setEditing(entry)}
-                    aria-label={`Modifier le statut de ${entry.player.first_name} ${entry.player.last_name}`}
-                    className="shrink-0 rounded p-1.5 hover:bg-gray-100"
-                    style={{ color: T.textMuted }}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                </li>
+                <div
+                  key={group}
+                  className="rounded-lg border p-4"
+                  style={{ backgroundColor: T.cardBg, borderColor: T.border }}
+                >
+                  <p className="text-3xl font-bold tabular-nums" style={{ color: tone.fg }}>
+                    {groupCounts[group]}
+                  </p>
+                  <p className="text-sm font-medium" style={{ color: T.text }}>
+                    {GROUP_LABELS[group]}
+                  </p>
+                  <p className="mt-1 text-xs" style={{ color: T.textMuted }}>
+                    {GROUP_ORDER.indexOf(group) === 0
+                      ? 'Alignables, avec ou sans aménagement'
+                      : detailLine(statusCounts, group)}
+                  </p>
+                </div>
               );
             })}
-          </ul>
-        )}
-      </section>
+          </section>
+
+          {/* Le rappel qui évite le contresens le plus probable de l'écran. */}
+          <p className="mb-6 text-xs" style={{ color: T.textMuted }}>
+            Un joueur sans statut saisi est compté comme disponible : {players.length} joueurs
+            dans l&apos;effectif, {rows.length} avec un état enregistré.
+          </p>
+
+          {/* ── Infirmerie ──────────────────────────────────────────────── */}
+          <section
+            className="mb-4 rounded-lg border"
+            style={{ backgroundColor: T.cardBg, borderColor: T.border }}
+          >
+            <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: T.border }}>
+              <h2 className="text-base font-semibold" style={{ color: T.text }}>
+                Infirmerie
+              </h2>
+              <span className="text-sm" style={{ color: T.textMuted }}>
+                {outList.length} joueur{outList.length > 1 ? 's' : ''}
+              </span>
+            </div>
+
+            {outList.length === 0 ? (
+              <p className="px-4 py-8 text-center text-sm" style={{ color: T.textMuted }}>
+                Aucun joueur indisponible. Utilisez la liste ci-dessous pour déclarer un statut.
+              </p>
+            ) : (
+              <ul className="divide-y" style={{ borderColor: T.border }}>
+                {outList.map((entry) => {
+                  const row = entry.row!;
+                  const meta = AVAILABILITY_META[entry.status];
+                  const tone = TONE_COLORS[meta.tone];
+                  return (
+                    <li key={entry.player.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                      <span
+                        className="shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium"
+                        style={{ color: tone.fg, backgroundColor: tone.bg, borderColor: tone.border }}
+                      >
+                        {meta.label}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium" style={{ color: T.text }}>
+                          {entry.player.number != null ? `${entry.player.number}. ` : ''}
+                          {entry.player.first_name} {entry.player.last_name}
+                        </p>
+                        <p className="truncate text-sm" style={{ color: T.textMuted }}>
+                          {sinceLabel(row.days_out)}
+                          {row.zone ? ` · ${zoneLabel(row.zone)}` : ''}
+                          {row.side && row.side !== 'C' ? ` (${SIDE_LABELS[row.side]})` : ''}
+                          {' · '}
+                          {returnLabel(row)}
+                        </p>
+                        {row.note && (
+                          <p className="truncate text-xs italic" style={{ color: T.textMuted }}>
+                            {row.note}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setEditing(entry)}
+                        className="flex shrink-0 items-center gap-1 rounded-md border px-3 py-1.5 text-sm"
+                        style={{ borderColor: T.border, color: T.text }}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        Modifier
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+
+          {/* ── Déclarations des joueurs ────────────────────────────────── */}
+          <div className="mb-4">
+            <PainReportsPanel
+              reports={reports}
+              onOpenPlayer={(playerId) => router.push(`/webapp/manager/squad/${playerId}`)}
+            />
+          </div>
+
+          {/* ── Signaux précoces ────────────────────────────────────────── */}
+          <div className="mb-4">
+            <PainSignalsPanel
+              signals={signals}
+              windowDays={windowDays}
+              minReports={minReports}
+              onWindowChange={setWindowDays}
+              onMinReportsChange={setMinReports}
+              onOpenPlayer={(playerId) => router.push(`/webapp/manager/squad/${playerId}`)}
+            />
+          </div>
+
+          {/* ── Effectif complet ─────────────────────────────────────────── */}
+          <section className="rounded-lg border" style={{ backgroundColor: T.cardBg, borderColor: T.border }}>
+            <div className="flex items-center gap-2 border-b px-4 py-3" style={{ borderColor: T.border }}>
+              <Users className="h-4 w-4" style={{ color: T.textMuted }} />
+              <h2 className="text-base font-semibold" style={{ color: T.text }}>
+                Effectif
+              </h2>
+            </div>
+            {resolved.length === 0 ? (
+              <p className="px-4 py-8 text-center text-sm" style={{ color: T.textMuted }}>
+                Aucun joueur dans l&apos;équipe active.
+              </p>
+            ) : (
+              <ul className="divide-y" style={{ borderColor: T.border }}>
+                {resolved.map((entry) => {
+                  const meta = AVAILABILITY_META[entry.status];
+                  const tone = TONE_COLORS[meta.tone];
+                  return (
+                    <li key={entry.player.id} className="flex items-center gap-3 px-4 py-2">
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: tone.fg }}
+                        aria-hidden
+                      />
+                      <span className="min-w-0 flex-1 truncate text-sm" style={{ color: T.text }}>
+                        {entry.player.number != null ? `${entry.player.number}. ` : ''}
+                        {entry.player.first_name} {entry.player.last_name}
+                      </span>
+                      <span className="shrink-0 text-sm" style={{ color: tone.fg }}>
+                        {meta.label}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setEditing(entry)}
+                        aria-label={`Modifier le statut de ${entry.player.first_name} ${entry.player.last_name}`}
+                        className="shrink-0 rounded p-1.5 hover:bg-gray-100"
+                        style={{ color: T.textMuted }}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        </>
+      )}
+
+      {tab === 'charge' && (
+        <>
+          {/* ── Équipe / joueur ─────────────────────────────────────────── */}
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <div className="inline-flex rounded-md border" style={{ borderColor: T.border }}>
+              {(['equipe', 'joueur'] as const).map((scope) => (
+                <button
+                  key={scope}
+                  type="button"
+                  onClick={() => setLoadScope(scope)}
+                  aria-pressed={loadScope === scope}
+                  className="px-3 py-1.5 text-sm font-medium"
+                  style={{
+                    backgroundColor: loadScope === scope ? T.accent : 'transparent',
+                    color: loadScope === scope ? '#fff' : T.text,
+                  }}
+                >
+                  {scope === 'equipe' ? 'Équipe' : 'Joueur'}
+                </button>
+              ))}
+            </div>
+            {loadScope === 'joueur' && (
+              <select
+                value={loadPlayerId}
+                onChange={(e) => setLoadPlayerId(e.target.value)}
+                aria-label="Choisir un joueur"
+                className="rounded-md border px-2 py-1.5 text-sm"
+                style={{ borderColor: T.border, color: T.text }}
+              >
+                <option value="">Choisir un joueur…</option>
+                {players.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.first_name} {p.last_name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {loadScope === 'equipe' ? (
+            <>
+              <div className="mb-4">
+                <LoadPanel weeks={weeks} />
+              </div>
+              <LoadMatrixPanel rows={matrixRows} />
+            </>
+          ) : !loadPlayerId ? (
+            <p className="py-6 text-center text-sm" style={{ color: T.textMuted }}>
+              Choisis un joueur pour voir sa charge individuelle.
+            </p>
+          ) : loadingPlayerLoad ? (
+            <div className="flex items-center gap-2 py-6 text-sm" style={{ color: T.textMuted }}>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Chargement…
+            </div>
+          ) : (
+            <>
+              <LoadPanel weeks={playerWeeks} />
+            </>
+          )}
+        </>
+      )}
 
       {editing && (
         <AvailabilityEditor

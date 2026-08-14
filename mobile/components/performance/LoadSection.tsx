@@ -23,20 +23,27 @@
  */
 
 import React, { useMemo } from 'react';
-import { View } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Text, Card, EmptyState } from '../ui';
 import {
+  JUDGEMENT_BAND_LABELS,
   MIN_RESPONSE_RATE,
   MONOTONY_ELEVATED,
+  RPE_BAND_LABELS,
+  RPE_BAND_RAMP,
   WELLNESS_LABELS,
+  formatDelta,
   formatLoad,
   formatMonotony,
   formatRate,
   isReliable,
+  judgementBand,
   monotonyHint,
+  rpeBand,
   weekLabel,
   wellnessCarriesJudgement,
+  wellnessDelta,
   type WeeklyLoad,
   type WellnessKey,
 } from '../../lib/trainingLoad';
@@ -44,25 +51,52 @@ import type { ThemeColors } from '../../lib/design/tokens';
 
 const WELLNESS_ORDER: WellnessKey[] = ['rpe', 'physicalForm', 'pleasure', 'autoEvaluation'];
 
-/** Le RPE ne prend JAMAIS de couleur sémantique. Voir l'en-tête. */
-function wellnessColor(key: WellnessKey, value: number, c: ThemeColors): string {
-  if (!wellnessCarriesJudgement(key)) return c.text.secondary;
-  if (value < 4) return c.negative.default;
-  if (value < 6.5) return c.warning.default;
-  return c.positive.default;
+/**
+ * Bande de lecture : couleur + libellé. Le RPE ne prend JAMAIS de couleur
+ * sémantique (rampe indigo monochrome) — voir l'en-tête du fichier.
+ */
+function wellnessBand(
+  key: WellnessKey,
+  value: number,
+  c: ThemeColors,
+): { label: string; color: string } {
+  if (!wellnessCarriesJudgement(key)) {
+    const band = rpeBand(value);
+    return { label: RPE_BAND_LABELS[band], color: RPE_BAND_RAMP[band] };
+  }
+  const band = judgementBand(value);
+  const color =
+    band === 'bon' ? c.positive.default : band === 'moyen' ? c.warning.default : c.negative.default;
+  return { label: JUDGEMENT_BAND_LABELS[band], color };
 }
 
 export interface LoadSectionProps {
   weeks: WeeklyLoad[];
 }
 
+/** Hauteur, en pixels, réservée aux barres + à la bande cible. */
+const CHART_HEIGHT = 96;
+/** Repères de graduation, en fraction de l'échelle. Sobres : une échelle, pas un quadrillage. */
+const GRIDLINE_RATIOS = [0.25, 0.5, 0.75];
+
 export function LoadSection({ weeks }: LoadSectionProps) {
   const { theme } = useTheme();
   const c = theme.colors;
 
   const recent = useMemo(() => weeks.slice(-6), [weeks]);
-  const maxLoad = useMemo(() => Math.max(1, ...recent.map((w) => w.load ?? 0)), [recent]);
+  // L'échelle couvre aussi la cible : sinon une bande cible plus haute que
+  // toutes les barres serait coupée en haut du graphique.
+  const maxScale = useMemo(
+    () =>
+      Math.max(
+        1,
+        ...recent.map((w) => w.load ?? 0),
+        ...recent.map((w) => w.targetLoadMax ?? 0),
+      ),
+    [recent],
+  );
   const current = recent.length > 0 ? recent[recent.length - 1] : null;
+  const previous = recent.length > 1 ? recent[recent.length - 2] : null;
 
   if (weeks.length === 0) {
     return (
@@ -108,35 +142,85 @@ export function LoadSection({ weeks }: LoadSectionProps) {
         <Text variant="caption" tone="tertiary">
           RPE × durée (Foster), unités arbitraires
         </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: 96 }}>
-          {recent.map((week) => {
-            const ratio = week.load !== null ? Math.max(0.04, week.load / maxLoad) : 0.04;
-            const weekReliable = isReliable(week.responseRate);
-            return (
-              <View
-                key={week.weekStart}
-                style={{ flex: 1, justifyContent: 'flex-end' }}
-                accessible
-                accessibilityLabel={`${weekLabel(week.weekStart)} : ${formatLoad(week.load)}, ${formatRate(week.responseRate)} de réponses${week.isPeak ? ', pic de charge' : ''}${weekReliable ? '' : ', couverture insuffisante'}`}
+        <View style={{ height: CHART_HEIGHT }}>
+          {/* Graduation légère : une échelle de lecture, pas un jugement. */}
+          {GRIDLINE_RATIOS.map((ratio) => (
+            <View
+              key={ratio}
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: ratio * CHART_HEIGHT,
+                borderTopWidth: StyleSheet.hairlineWidth,
+                borderColor: c.border.subtle,
+              }}
+            >
+              <Text
+                variant="caption"
+                tone="tertiary"
+                style={{ position: 'absolute', left: 0, bottom: 2, fontSize: 9, opacity: 0.7 }}
               >
+                {formatLoad(ratio * maxScale)}
+              </Text>
+            </View>
+          ))}
+
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: '100%' }}>
+            {recent.map((week) => {
+              const barPx = week.load !== null ? Math.max(4, (week.load / maxScale) * CHART_HEIGHT) : 4;
+              const targetTopPx =
+                week.targetLoadMax !== null ? (week.targetLoadMax / maxScale) * CHART_HEIGHT : null;
+              const targetBottomPx =
+                week.targetLoadMin !== null ? (week.targetLoadMin / maxScale) * CHART_HEIGHT : null;
+              const weekReliable = isReliable(week.responseRate);
+              return (
                 <View
-                  style={{
-                    height: `${ratio * 100}%`,
-                    borderRadius: theme.radius.sm,
-                    // Accent et non rampe sémantique : une charge n'est ni bonne
-                    // ni mauvaise. Seul le pic se signale, en warning.
-                    backgroundColor:
-                      week.load === null
-                        ? c.border.subtle
-                        : week.isPeak
-                          ? c.warning.default
-                          : c.accent.default,
-                    opacity: weekReliable ? 1 : 0.35,
-                  }}
-                />
-              </View>
-            );
-          })}
+                  key={week.weekStart}
+                  style={{ flex: 1, height: '100%' }}
+                  accessible
+                  accessibilityLabel={`${weekLabel(week.weekStart)} : ${formatLoad(week.load)}, ${formatRate(week.responseRate)} de réponses${week.isPeak ? ', pic de charge' : ''}${weekReliable ? '' : ', couverture insuffisante'}`}
+                >
+                  <View
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: barPx,
+                      borderRadius: theme.radius.sm,
+                      // Accent et non rampe sémantique : une charge n'est ni bonne
+                      // ni mauvaise. Seul le pic se signale, en warning.
+                      backgroundColor:
+                        week.load === null
+                          ? c.border.subtle
+                          : week.isPeak
+                            ? c.warning.default
+                            : c.accent.default,
+                      opacity: weekReliable ? 1 : 0.35,
+                    }}
+                  />
+                  {/* Rendue APRÈS la barre : sinon une charge réalisée haute
+                      cache entièrement le pourtour de la bande cible en dessous. */}
+                  {targetTopPx !== null && targetBottomPx !== null && (
+                    <View
+                      style={{
+                        position: 'absolute',
+                        left: 0,
+                        right: 0,
+                        bottom: targetBottomPx,
+                        height: Math.max(2, targetTopPx - targetBottomPx),
+                        borderWidth: 1,
+                        borderStyle: 'dashed',
+                        borderColor: 'rgba(100,116,139,0.55)',
+                        borderRadius: theme.radius.sm,
+                      }}
+                    />
+                  )}
+                </View>
+              );
+            })}
+          </View>
         </View>
         <View style={{ flexDirection: 'row', gap: 6 }}>
           {recent.map((week) => (
@@ -176,19 +260,21 @@ export function LoadSection({ weeks }: LoadSectionProps) {
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.sm }}>
             {WELLNESS_ORDER.map((key) => {
               const value = current.wellness[key];
+              const band = value !== null ? wellnessBand(key, value, c) : null;
+              const delta = wellnessDelta(current, previous, key);
               return (
                 <View
                   key={key}
-                  style={{ flexBasis: '47%', flexGrow: 1 }}
+                  style={{ flexBasis: '47%', flexGrow: 1, gap: 4 }}
                   accessible
-                  accessibilityLabel={`${WELLNESS_LABELS[key]} : ${value === null ? 'non renseigné' : `${value.toFixed(1)} sur 10`}`}
+                  accessibilityLabel={`${WELLNESS_LABELS[key]} : ${value === null ? 'non renseigné' : `${value.toFixed(1)} sur 10, ${band?.label}`}`}
                 >
                   <Text variant="caption" tone="tertiary">
                     {WELLNESS_LABELS[key]}
                   </Text>
                   <Text
-                    variant="title"
-                    color={value === null ? c.text.tertiary : wellnessColor(key, value, c)}
+                    variant="display"
+                    color={band ? band.color : c.text.tertiary}
                     numeric
                     style={{ opacity: reliable ? 1 : 0.45 }}
                   >
@@ -196,10 +282,52 @@ export function LoadSection({ weeks }: LoadSectionProps) {
                     {value !== null && (
                       <Text variant="caption" tone="tertiary">
                         {' '}
-                        / 10
+                        /10
+                      </Text>
+                    )}
+                    {delta !== null && (
+                      <Text variant="caption" tone="tertiary" weight="600">
+                        {' '}
+                        {formatDelta(delta)}
                       </Text>
                     )}
                   </Text>
+                  {band && (
+                    <>
+                      <View
+                        style={{
+                          alignSelf: 'flex-start',
+                          borderRadius: 999,
+                          paddingHorizontal: 8,
+                          paddingVertical: 2,
+                          backgroundColor: band.color + '1a',
+                          opacity: reliable ? 1 : 0.45,
+                        }}
+                      >
+                        <Text variant="caption" weight="600" style={{ color: band.color }}>
+                          {band.label}
+                        </Text>
+                      </View>
+                      <View
+                        style={{
+                          height: 6,
+                          borderRadius: 3,
+                          backgroundColor: c.border.subtle,
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <View
+                          style={{
+                            height: '100%',
+                            width: `${Math.min(100, (value! / 10) * 100)}%`,
+                            borderRadius: 3,
+                            backgroundColor: band.color,
+                            opacity: reliable ? 1 : 0.45,
+                          }}
+                        />
+                      </View>
+                    </>
+                  )}
                 </View>
               );
             })}

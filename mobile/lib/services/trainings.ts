@@ -39,6 +39,11 @@ export interface CreateTrainingInput {
   key_principle?: string;
   /** Ids des joueurs convoqués (seuls eux verront la séance dans leur calendrier). */
   convoked_player_ids: string[];
+  /** Durée totale en minutes (45-150). Alimente get_training_load. */
+  session_duration?: number;
+  /** RPE cible, fourchette 1-10. Jamais un score exact : la cible est une zone d'intensité. */
+  target_rpe_min?: number;
+  target_rpe_max?: number;
 }
 
 export async function createTraining(teamId: string, input: CreateTrainingInput): Promise<Training> {
@@ -53,6 +58,9 @@ export async function createTraining(teamId: string, input: CreateTrainingInput)
       key_principle: (input.key_principle ?? '').trim() || null,
       attendance: {},
       convoked_players,
+      session_duration: input.session_duration ?? null,
+      target_rpe_min: input.target_rpe_min ?? null,
+      target_rpe_max: input.target_rpe_max ?? null,
     })
     .select()
     .single();
@@ -80,6 +88,11 @@ export interface UpdateTrainingInput {
   location?: string;
   theme?: 'Offensif' | 'Défensif' | 'Transition' | 'Supériorité';
   key_principle?: string;
+  /** Durée totale en minutes (45-150). `undefined` = ne pas toucher, `null` = effacer. */
+  session_duration?: number | null;
+  /** RPE cible, fourchette 1-10. `undefined` = ne pas toucher, `null` = effacer. */
+  target_rpe_min?: number | null;
+  target_rpe_max?: number | null;
 }
 
 export async function updateTraining(trainingId: string, input: UpdateTrainingInput): Promise<Training> {
@@ -88,6 +101,9 @@ export async function updateTraining(trainingId: string, input: UpdateTrainingIn
   if (input.location !== undefined) updateData.location = (input.location ?? '').trim() || null;
   if (input.theme != null) updateData.theme = input.theme;
   if (input.key_principle !== undefined) updateData.key_principle = (input.key_principle ?? '').trim() || null;
+  if (input.session_duration !== undefined) updateData.session_duration = input.session_duration;
+  if (input.target_rpe_min !== undefined) updateData.target_rpe_min = input.target_rpe_min;
+  if (input.target_rpe_max !== undefined) updateData.target_rpe_max = input.target_rpe_max;
   const { data, error } = await supabase
     .from('trainings')
     .update(updateData)

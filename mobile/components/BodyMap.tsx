@@ -26,6 +26,8 @@ const C = {
   text3: '#94a3b8',
 } as const;
 
+const SINGLE_SELECT_COLOR = C.navy;
+
 function cycle(current: PainIntensity | undefined): PainIntensity | 0 {
   if (!current) return 1;
   if (current === 3) return 0;
@@ -65,9 +67,11 @@ function Toggle<T extends string>({
 }
 
 export default function BodyMap({
-  value, onChange, height = 340,
+  value, onChange, height = 340, singleSelect = false,
 }: {
   value: PainSelection; onChange: (next: PainSelection) => void; height?: number;
+  /** Une seule zone à la fois, sans intensité — pour « zone concernée » (disponibilité), pas pour la douleur. */
+  singleSelect?: boolean;
 }) {
   const [view, setView] = useState<PainView>('front');
   const [mode, setMode] = useState<PainMode>('zone');
@@ -76,6 +80,10 @@ export default function BodyMap({
   const width = height * (PAIN_VIEWBOX.w / PAIN_VIEWBOX.h);
 
   const toggle = (id: string) => {
+    if (singleSelect) {
+      onChange(value[id] ? {} : { [id]: 1 });
+      return;
+    }
     const next = cycle(value[id]);
     const copy = { ...value };
     if (next === 0) delete copy[id];
@@ -100,8 +108,8 @@ export default function BodyMap({
             ))}
           {zones.map(def => {
             const intensity = value[def.id];
-            const fill = intensity ? INTENSITY_COLORS[intensity] : BODY_FILL;
-            const stroke = intensity ? INTENSITY_COLORS[intensity] : BODY_STROKE;
+            const fill = intensity ? (singleSelect ? SINGLE_SELECT_COLOR : INTENSITY_COLORS[intensity]) : BODY_FILL;
+            const stroke = intensity ? (singleSelect ? SINGLE_SELECT_COLOR : INTENSITY_COLORS[intensity]) : BODY_STROKE;
             return (
               <ZoneShape key={def.id} def={def} fill={fill} stroke={stroke}
                 strokeWidth={intensity ? 2 : 1.2} onPress={() => toggle(def.id)} />
@@ -110,15 +118,17 @@ export default function BodyMap({
         </Svg>
       </View>
 
-      {/* Légende */}
-      <View style={st.legend}>
-        {([1, 2, 3] as PainIntensity[]).map(i => (
-          <View key={i} style={st.legendItem}>
-            <View style={[st.legendDot, { backgroundColor: INTENSITY_COLORS[i] }]} />
-            <Text style={st.legendTxt}>{INTENSITY_LABELS[i]}</Text>
-          </View>
-        ))}
-      </View>
+      {/* Légende — sans objet en sélection unique (pas de gravité à indiquer) */}
+      {!singleSelect && (
+        <View style={st.legend}>
+          {([1, 2, 3] as PainIntensity[]).map(i => (
+            <View key={i} style={st.legendItem}>
+              <View style={[st.legendDot, { backgroundColor: INTENSITY_COLORS[i] }]} />
+              <Text style={st.legendTxt}>{INTENSITY_LABELS[i]}</Text>
+            </View>
+          ))}
+        </View>
+      )}
 
       {/* Sélection */}
       <View style={st.selRow}>
@@ -139,7 +149,7 @@ export default function BodyMap({
           {selectedIds.map(id => {
             const intensity = value[id];
             const label = zoneById(id)?.label ?? id;
-            const color = INTENSITY_COLORS[intensity];
+            const color = singleSelect ? SINGLE_SELECT_COLOR : INTENSITY_COLORS[intensity];
             return (
               <TouchableOpacity key={id} onPress={() => toggle(id)} style={[st.chip, { borderColor: color, backgroundColor: color + '1a' }]} activeOpacity={0.7}>
                 <Text style={[st.chipTxt, { color }]}>{label}  ×</Text>

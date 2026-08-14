@@ -42,13 +42,21 @@
 
 // ─── Entrée ──────────────────────────────────────────────────────────────────
 
-/** Une séance, telle que la renvoie `get_training_load`. */
+/**
+ * Une séance, telle que la renvoie `get_training_load` (équipe, RPE moyen des
+ * répondants) ou `get_player_training_load` (un joueur, `rpe_mean` = son RPE,
+ * `convoked_count = response_count = 1`). Même forme des deux côtés : c'est ce
+ * qui permet à tout le reste de ce fichier (semaines, monotonie, cible) de
+ * tourner à l'identique sur les deux sources.
+ */
 export interface TrainingLoadRow {
   training_id: string;
   session_date: string; // ISO 'YYYY-MM-DD'
   team_id: string | null;
   theme: string | null;
   session_duration: number | null; // minutes
+  target_rpe_min: number | null; // RPE cible, borne basse (1-10)
+  target_rpe_max: number | null; // RPE cible, borne haute (1-10)
   convoked_count: number;
   response_count: number;
   rpe_mean: number | null;
@@ -118,6 +126,31 @@ export interface WeeklyLoad {
   };
   /** Charge > 1,5 × moyenne des 4 semaines précédentes. */
   isPeak: boolean;
+  /**
+   * Bande de charge VISÉE : somme de `target_rpe × durée` sur les séances de
+   * la semaine qui portent une cible. `null` si aucune n'en a. Repère de
+   * comparaison pour l'histogramme, pas une égalité garantie — si la semaine
+   * mélange séances ciblées et non ciblées, la bande ne couvre que les
+   * premières quand `load` couvre tout.
+   */
+  targetLoadMin: number | null;
+  targetLoadMax: number | null;
+}
+
+/** Bornes de charge visée d'une semaine. `null` si aucune séance n'a de cible. */
+function weeklyTargetLoad(weekRows: TrainingLoadRow[]): { min: number; max: number } | null {
+  let min = 0;
+  let max = 0;
+  let any = false;
+  for (const row of weekRows) {
+    if (row.target_rpe_min === null || row.target_rpe_max === null || row.session_duration === null) {
+      continue;
+    }
+    min += row.target_rpe_min * row.session_duration;
+    max += row.target_rpe_max * row.session_duration;
+    any = true;
+  }
+  return any ? { min, max } : null;
 }
 
 /**
@@ -237,6 +270,7 @@ export function buildWeeklyLoads(rows: TrainingLoadRow[]): WeeklyLoad[] {
 
       const convoked = weekRows.reduce((sum, r) => sum + r.convoked_count, 0);
       const responses = weekRows.reduce((sum, r) => sum + r.response_count, 0);
+      const targetLoad = weeklyTargetLoad(weekRows);
 
       return {
         weekStart,
@@ -252,6 +286,8 @@ export function buildWeeklyLoads(rows: TrainingLoadRow[]): WeeklyLoad[] {
           pleasure: weightedMean(weekRows, (r) => r.pleasure_mean),
         },
         isPeak: false,
+        targetLoadMin: targetLoad?.min ?? null,
+        targetLoadMax: targetLoad?.max ?? null,
       };
     });
 
@@ -330,4 +366,310 @@ export type WellnessKey = keyof typeof WELLNESS_LABELS;
  */
 export function wellnessCarriesJudgement(key: WellnessKey): boolean {
   return key !== 'rpe';
+}
+
+// ─── Bandes de lecture (gros chiffre + jauge) ────────────────────────────────
+//
+// Reprend la mise en forme « gros chiffre + badge de zone + jauge » du
+// dashboard, mais pas ses couleurs sémantiques sur le RPE : `RPE_BAND_RAMP`
+// est une rampe MONOCHROME (une seule teinte, croissante), jamais
+// bleu→vert→ambre→rouge. Les trois métriques de jugement, elles, gardent leurs
+// couleurs — c'est déjà la classification de `wellnessCarriesJudgement`.
+
+export type RpeBand = 'leger' | 'modere' | 'soutenu' | 'eleve';
+
+/** Décrit l'intensité, ne la juge pas : pas de « Optimal »/« Surcharge ». */
+export const RPE_BAND_LABELS: Record<RpeBand, string> = {
+  leger: 'Léger',
+  modere: 'Modéré',
+  soutenu: 'Soutenu',
+  eleve: 'Élevé',
+};
+
+/** Un seul indigo, du plus clair au plus soutenu. Jamais de rouge. */
+export const RPE_BAND_RAMP: Record<RpeBand, string> = {
+  leger: '#C7D2FE',
+  modere: '#A5B4FC',
+  soutenu: '#818CF8',
+  eleve: '#4F46E5',
+};
+
+export function rpeBand(value: number): RpeBand {
+  if (value < 4) return 'leger';
+  if (value <= 6) return 'modere';
+  if (value <= 8) return 'soutenu';
+  return 'eleve';
+}
+
+/** Zone à 3 niveaux pour les métriques de jugement (forme, plaisir, auto-éval). */
+export type JudgementBand = 'bon' | 'moyen' | 'attention';
+
+export const JUDGEMENT_BAND_LABELS: Record<JudgementBand, string> = {
+  bon: 'Bon',
+  moyen: 'Moyen',
+  attention: 'À surveiller',
+};
+
+export function judgementBand(value: number): JudgementBand {
+  if (value >= 7) return 'bon';
+  if (value >= 5) return 'moyen';
+  return 'attention';
+}
+
+// ─── Évolution vs semaine précédente ─────────────────────────────────────────
+
+/**
+ * Écart d'une métrique de wellness entre la semaine affichée et la précédente.
+ * `null` dès qu'une des deux valeurs manque (pas de semaine avant, ou aucune
+ * réponse cette métrique-là) — pas de delta fabriqué contre du vide.
+ */
+export function wellnessDelta(
+  current: WeeklyLoad,
+  previous: WeeklyLoad | null,
+  key: WellnessKey,
+): number | null {
+  if (!previous) return null;
+  const a = current.wellness[key];
+  const b = previous.wellness[key];
+  if (a === null || b === null) return null;
+  return a - b;
+}
+
+/** Écart signé, formaté : « +0,5 », « −1,2 », « ±0 » pile sur zéro. */
+export function formatDelta(value: number | null, digits = 1): string {
+  if (value === null || !Number.isFinite(value)) return '';
+  if (Math.abs(value) < 10 ** -digits / 2) return '±0';
+  const sign = value > 0 ? '+' : '−';
+  return `${sign}${Math.abs(value).toFixed(digits)}`;
+}
+
+// ─── Matrice individuelle (joueurs × dernières séances) ──────────────────────
+//
+// `get_team_training_load_matrix` renvoie une ligne par (séance, joueur) de
+// l'effectif ACTUEL, sur les N séances les plus récentes. `buildPlayerMatrix`
+// la met en forme : une ligne par joueur, une colonne par séance (la plus
+// ancienne à gauche) + une colonne moyenne.
+
+export interface MatrixRow {
+  training_id: string;
+  session_date: string;
+  theme: string | null;
+  session_duration: number | null;
+  target_rpe_min: number | null;
+  target_rpe_max: number | null;
+  player_id: string;
+  first_name: string;
+  last_name: string;
+  number: number | null;
+  convoked: boolean;
+  rpe: number | null;
+  physical_form: number | null;
+  pleasure: number | null;
+  auto_evaluation: number | null;
+}
+
+export type MatrixMetric = 'rpe' | 'physical_form' | 'pleasure' | 'auto_evaluation';
+
+export const MATRIX_METRIC_LABELS: Record<MatrixMetric, string> = {
+  rpe: 'RPE',
+  physical_form: 'Forme',
+  pleasure: 'Plaisir',
+  auto_evaluation: 'Auto-éval',
+};
+
+export interface MatrixSession {
+  training_id: string;
+  session_date: string;
+  theme: string | null;
+  session_duration: number | null;
+  target_rpe_min: number | null;
+  target_rpe_max: number | null;
+}
+
+/**
+ * Case de la matrice.
+ *
+ * `convoked: false` => absent / repos, case grisée, le reste n'a pas de sens.
+ * `convoked: true` avec `value: null` => convoqué mais questionnaire non
+ * répondu : ce n'est PAS la même réalité qu'une absence, donc jamais la même
+ * couleur de case. `delta` n'existe que pour le RPE : écart signé à la
+ * fourchette cible (`0` = dans la zone, `null` = séance sans cible).
+ */
+export interface MatrixCell {
+  convoked: boolean;
+  value: number | null;
+  delta: number | null;
+}
+
+export interface PlayerMatrixRow {
+  player_id: string;
+  first_name: string;
+  last_name: string;
+  number: number | null;
+  cells: MatrixCell[];
+  average: MatrixCell;
+}
+
+export interface TeamLoadMatrix {
+  sessions: MatrixSession[];
+  players: PlayerMatrixRow[];
+}
+
+/**
+ * Écart signé du RPE réalisé à la fourchette cible : négatif en dessous,
+ * positif au-dessus, `0` dans la zone, `null` sans cible. C'est ce qu'affiche
+ * la matrice (« +2 », « -1 ») plutôt qu'un badge à 3 états.
+ */
+export function rpeDelta(value: number, min: number | null, max: number | null): number | null {
+  if (min === null || max === null) return null;
+  if (value < min) return value - min;
+  if (value > max) return value - max;
+  return 0;
+}
+
+export type RpeDeltaTone = 'below' | 'in_zone' | 'above';
+
+export function rpeDeltaTone(delta: number): RpeDeltaTone {
+  if (delta < 0) return 'below';
+  if (delta > 0) return 'above';
+  return 'in_zone';
+}
+
+/**
+ * Rampe DIVERGENTE, pas un jugement : « au-dessus de la cible » n'est pas une
+ * faute, donc pas de rouge. Bleu = moins que prévu, ambre = plus que prévu ;
+ * l'intensité suit l'ampleur de l'écart.
+ * Volontairement distincte de `RPE_BAND_RAMP` (qui lit le RPE brut, jamais un
+ * écart) et de la palette de jugement (verte/ambre/rouge).
+ *
+ * Ne contredit pas « le RPE brut ne se colore jamais » (voir l'en-tête du
+ * fichier) : cette matrice est un écran STAFF (`has_club_medical_access`),
+ * jamais vu par le joueur qui a répondu. La raison de la neutralité — éviter
+ * que le joueur sous-déclare pour éviter une couleur « négative » — ne
+ * s'applique pas ici.
+ */
+export const RPE_DELTA_RAMP = {
+  below: ['#DBEAFE', '#93C5FD', '#3B82F6'],
+  above: ['#FFEDD5', '#FDBA74', '#F97316'],
+} as const;
+
+/** 0 à 2 crans selon l'ampleur de l'écart, pour choisir la teinte dans la rampe. */
+export function rpeDeltaIntensity(delta: number): 0 | 1 | 2 {
+  const abs = Math.abs(delta);
+  if (abs >= 3) return 2;
+  if (abs >= 1.5) return 1;
+  return 0;
+}
+
+function matrixValue(row: MatrixRow, metric: MatrixMetric): number | null {
+  switch (metric) {
+    case 'rpe':
+      return row.rpe;
+    case 'physical_form':
+      return row.physical_form;
+    case 'pleasure':
+      return row.pleasure;
+    case 'auto_evaluation':
+      return row.auto_evaluation;
+  }
+}
+
+export function buildPlayerMatrix(rows: MatrixRow[], metric: MatrixMetric): TeamLoadMatrix {
+  const sessionMap = new Map<string, MatrixSession>();
+  for (const row of rows) {
+    if (!sessionMap.has(row.training_id)) {
+      sessionMap.set(row.training_id, {
+        training_id: row.training_id,
+        session_date: row.session_date,
+        theme: row.theme,
+        session_duration: row.session_duration,
+        target_rpe_min: row.target_rpe_min,
+        target_rpe_max: row.target_rpe_max,
+      });
+    }
+  }
+  const sessions = [...sessionMap.values()].sort((a, b) => a.session_date.localeCompare(b.session_date));
+
+  const byPlayer = new Map<string, MatrixRow[]>();
+  for (const row of rows) {
+    const list = byPlayer.get(row.player_id);
+    if (list) list.push(row);
+    else byPlayer.set(row.player_id, [row]);
+  }
+
+  const players: PlayerMatrixRow[] = [...byPlayer.entries()].map(([playerId, playerRows]) => {
+    const bySession = new Map(playerRows.map((r) => [r.training_id, r]));
+    const cells = sessions.map((session): MatrixCell => {
+      const row = bySession.get(session.training_id);
+      if (!row || !row.convoked) return { convoked: false, value: null, delta: null };
+      const value = matrixValue(row, metric);
+      if (value === null) return { convoked: true, value: null, delta: null };
+      const delta = metric === 'rpe' ? rpeDelta(value, row.target_rpe_min, row.target_rpe_max) : null;
+      return { convoked: true, value, delta };
+    });
+
+    const withValue = cells.filter((c): c is MatrixCell & { value: number } => c.value !== null);
+    const averageValue =
+      withValue.length > 0 ? withValue.reduce((sum, c) => sum + c.value, 0) / withValue.length : null;
+    const withDelta = cells.filter((c): c is MatrixCell & { delta: number } => c.delta !== null);
+    const averageDelta =
+      metric === 'rpe' && withDelta.length > 0
+        ? withDelta.reduce((sum, c) => sum + c.delta, 0) / withDelta.length
+        : null;
+
+    const first = playerRows[0];
+    return {
+      player_id: playerId,
+      first_name: first.first_name,
+      last_name: first.last_name,
+      number: first.number,
+      cells,
+      average: { convoked: withValue.length > 0, value: averageValue, delta: averageDelta },
+    };
+  });
+
+  players.sort((a, b) => a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name));
+
+  return { sessions, players };
+}
+
+/**
+ * Ligne de synthèse équipe, à afficher en pied de matrice : moyenne
+ * RÉALISÉE de l'équipe par séance (pas la moyenne des écarts individuels —
+ * même méthode que `rpe_mean` dans `get_training_load`), et son écart à la
+ * cible pour le RPE. Remplace l'ancien panneau « RPE cible » séparé, devenu
+ * redondant une fois la matrice en place.
+ *
+ * `convoked: true` même sans aucune réponse cette séance-là (`value: null`) :
+ * une équipe n'est jamais « absente », contrairement à un joueur — la case
+ * grisée n'aurait pas de sens ici, seul le tiret « pas de donnée » est correct.
+ */
+export function teamAverageRow(matrix: TeamLoadMatrix, metric: MatrixMetric): PlayerMatrixRow {
+  const cells: MatrixCell[] = matrix.sessions.map((session, i) => {
+    const values = matrix.players
+      .map((p) => p.cells[i]?.value)
+      .filter((v): v is number => v !== null && v !== undefined);
+    if (values.length === 0) return { convoked: true, value: null, delta: null };
+    const average = values.reduce((sum, v) => sum + v, 0) / values.length;
+    const delta = metric === 'rpe' ? rpeDelta(average, session.target_rpe_min, session.target_rpe_max) : null;
+    return { convoked: true, value: average, delta };
+  });
+
+  const withValue = cells.filter((c): c is MatrixCell & { value: number } => c.value !== null);
+  const averageValue =
+    withValue.length > 0 ? withValue.reduce((sum, c) => sum + c.value, 0) / withValue.length : null;
+  const withDelta = cells.filter((c): c is MatrixCell & { delta: number } => c.delta !== null);
+  const averageDelta =
+    metric === 'rpe' && withDelta.length > 0
+      ? withDelta.reduce((sum, c) => sum + c.delta, 0) / withDelta.length
+      : null;
+
+  return {
+    player_id: '__team__',
+    first_name: 'Moyenne',
+    last_name: 'équipe',
+    number: null,
+    cells,
+    average: { convoked: withValue.length > 0, value: averageValue, delta: averageDelta },
+  };
 }

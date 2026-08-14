@@ -1,5 +1,5 @@
 import { supabase } from '../supabase';
-import type { PainReportGroup } from '../../types';
+import type { ClubPainReportGroup, PainReportGroup } from '../../types';
 import type { PainZonePayload } from '../painMap';
 
 type SubmitResult = { success: boolean; error?: string };
@@ -45,6 +45,21 @@ export async function getPlayerPainReports(playerId: string): Promise<PainReport
   const { data, error } = await supabase.rpc('get_player_pain_reports', { p_player_id: playerId });
   if (error) throw error;
   return (data as PainReportGroup[]) ?? [];
+}
+
+/** Staff : fil des déclarations du club (onglet Infirmerie), toutes zones confondues. */
+export async function getClubPainReports(
+  clubId: string,
+  teamId?: string | null,
+  limit = 30,
+): Promise<ClubPainReportGroup[]> {
+  const { data, error } = await supabase.rpc('get_club_pain_reports', {
+    p_club_id: clubId,
+    p_team_id: teamId ?? null,
+    p_limit: limit,
+  });
+  if (error) throw error;
+  return (data as ClubPainReportGroup[]) ?? [];
 }
 
 /** Joueur : supprime une de ses soumissions (report_group). */
