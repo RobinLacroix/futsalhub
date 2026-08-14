@@ -34,7 +34,12 @@ import { haptics } from '../lib/design/haptics';
 import { Text, Input, Button } from '../components/ui';
 import { AuthCard, AuthError, AuthLink } from '../components/auth/AuthChrome';
 
-const FALLBACK_SITE_URL = 'https://futsalhub.vercel.app';
+// Repli utilisé quand EXPO_PUBLIC_SITE_URL manque du build (le .env local l'a,
+// un build EAS sans la variable ne l'aurait pas). L'ancienne valeur pointait sur
+// https://futsalhub.vercel.app, qui répond 404 : le lien de réinitialisation
+// aurait mené à une page morte. Le domaine servi est futsalhub-nu.
+// À remplacer par le domaine personnalisé le jour où il est en place.
+const FALLBACK_SITE_URL = 'https://futsalhub-nu.vercel.app';
 
 function resetRedirectUrl(): string {
   const base = process.env.EXPO_PUBLIC_SITE_URL?.replace(/\/$/, '');
