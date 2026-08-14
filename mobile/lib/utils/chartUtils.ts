@@ -30,7 +30,7 @@ export function calculateAverageByField(
   const groups: Record<string, number[]> = {};
   data.forEach((item) => {
     const groupVal = item[groupField];
-    const numVal = (item as Record<string, unknown>)[valueField];
+    const numVal = (item as unknown as Record<string, unknown>)[valueField];
     if (groupVal != null && typeof numVal === 'number') {
       const key = String(groupVal);
       if (!groups[key]) groups[key] = [];

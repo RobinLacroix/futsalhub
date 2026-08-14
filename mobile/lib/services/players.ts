@@ -28,7 +28,7 @@ export async function getPlayersByClubWithTeams(clubId: string): Promise<PlayerW
 
   const byPlayer = new Map<string, { player: Player; teamIds: Set<string> }>();
   for (const row of ptData ?? []) {
-    const r = row as { players: Player | null; player_id: string; team_id: string };
+    const r = row as unknown as { players: Player | null; player_id: string; team_id: string };
     if (!r.players) continue;
     const playerId = r.player_id;
     const teamId = r.team_id;
@@ -54,8 +54,8 @@ export async function getPlayersByTeam(teamId: string): Promise<Player[]> {
 
   if (error) throw error;
 
-  const players = (data ?? [])
-    .map((item: { players: Player | null }) => item.players)
+  const players = ((data ?? []) as unknown as { players: Player | null }[])
+    .map((item) => item.players)
     .filter((p): p is Player => p != null && p.status !== 'left');
 
   return players.sort((a, b) => (a.last_name || '').localeCompare(b.last_name || ''));
@@ -171,8 +171,8 @@ export async function getPlayerTeams(playerId: string): Promise<Team[]> {
     .select('team_id, teams(id, name, category, level, color)')
     .eq('player_id', playerId);
   if (error) throw error;
-  const teams = (data ?? [])
-    .map((row: { teams: Team | null }) => row.teams)
+  const teams = ((data ?? []) as unknown as { teams: Team | null }[])
+    .map((row) => row.teams)
     .filter(Boolean) as Team[];
   return teams.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 }
