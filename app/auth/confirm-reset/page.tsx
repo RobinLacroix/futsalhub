@@ -1,25 +1,38 @@
 'use client';
 
 import { Suspense, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { supabase } from '@/lib/supabaseClient';
 
 function ConfirmResetForm() {
   const searchParams = useSearchParams();
-  const confirmationUrl = searchParams.get('confirmation_url');
-  const [redirecting, setRedirecting] = useState(false);
+  const router = useRouter();
+  const tokenHash = searchParams.get('token_hash');
+  const type = searchParams.get('type');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleConfirm = () => {
-    if (!confirmationUrl) return;
-    setRedirecting(true);
-    window.location.href = confirmationUrl;
+  const handleConfirm = async () => {
+    if (!tokenHash || type !== 'recovery') return;
+    setLoading(true);
+    setError(null);
+    const { error: err } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' });
+    if (err) {
+      setLoading(false);
+      setError('Lien invalide ou expiré. Demandez un nouveau lien de réinitialisation.');
+      return;
+    }
+    router.push('/auth/reset-password');
   };
 
-  if (!confirmationUrl) {
+  if (!tokenHash || type !== 'recovery' || error) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4">
         <div className="max-w-md w-full bg-white py-8 px-4 shadow sm:rounded-lg sm:px-10">
-          <p className="text-center text-red-600 mb-6">Lien invalide ou expiré. Demandez un nouveau lien de réinitialisation.</p>
+          <p className="text-center text-red-600 mb-6">
+            {error ?? 'Lien invalide ou expiré. Demandez un nouveau lien de réinitialisation.'}
+          </p>
           <Link
             href="/forgot-password"
             className="block w-full text-center py-2 px-4 text-blue-600 hover:text-blue-500 font-medium"
@@ -52,10 +65,10 @@ function ConfirmResetForm() {
         <button
           type="button"
           onClick={handleConfirm}
-          disabled={redirecting}
+          disabled={loading}
           className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {redirecting ? 'Redirection…' : 'Continuer'}
+          {loading ? 'Vérification…' : 'Continuer'}
         </button>
       </div>
     </div>
