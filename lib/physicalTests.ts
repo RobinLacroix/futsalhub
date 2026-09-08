@@ -313,6 +313,56 @@ export function sortTestTypes(types: PhysicalTestType[]): PhysicalTestType[] {
   return [...types].sort(compareTestTypes);
 }
 
+/**
+ * FIET (Futsal Intermittent Endurance Test, Barbero-Alvarez et al. 2005 ;
+ * Castagna & Barbero 2010) — vitesse finale atteinte, dérivée de la distance
+ * totale parcourue. Le score officiel du protocole est la distance (m), c'est
+ * elle qui est enregistrée (`fiet`, catalogue système) ; cette fonction ne
+ * fait qu'une lecture dérivée pour l'affichage, jamais stockée.
+ *
+ * Formule du protocole : navettes de 45 m, départ à 9 km/h, paliers de
+ * +0.33 km/h sur les 9 premières navettes puis +0.20 km/h ensuite. Vérifiée
+ * contre le calculateur de référence topendsports.com (32 navettes → 16.2
+ * km/h, 36 navettes → 17.0 km/h).
+ *
+ * `null` sous une navette complète (45 m) : protocole non tenu, rien à dériver.
+ */
+export function fietFinalSpeedKmh(distanceMeters: number): number | null {
+  if (!Number.isFinite(distanceMeters) || distanceMeters < 45) return null;
+  const shuttles = Math.floor(distanceMeters / 45);
+  const speed =
+    shuttles <= 9 ? 9 + 0.33 * (shuttles - 1) : 9 + 0.33 * 8 + 0.2 * (shuttles - 9);
+  return Math.round(speed * 10) / 10;
+}
+
+/**
+ * Lecture complémentaire d'une valeur retenue, pour les tests où la valeur
+ * stockée n'est pas la métrique la plus lisible pour le coach (le FIET stocke
+ * une distance, mais la vitesse finale se compare directement à la VIFT du
+ * 30-15 IFT). `null` pour tout le reste du catalogue : rien à convertir.
+ */
+export function testSecondaryReading(
+  type: Pick<PhysicalTestType, 'code'>,
+  retained: number,
+): { value: number; unit: string } | null {
+  if (type.code === 'fiet') {
+    const kmh = fietFinalSpeedKmh(retained);
+    return kmh === null ? null : { value: kmh, unit: 'km/h' };
+  }
+  return null;
+}
+
+/**
+ * `true` si ce test PEUT produire une lecture complémentaire (indépendamment
+ * de la valeur retenue). Sert à décider, avant de connaître les valeurs, si
+ * une colonne supplémentaire doit exister (export, en-tête de tableau) —
+ * `testSecondaryReading` ne peut pas répondre à cette question seul : une
+ * distance FIET sous 45 m renvoie `null` alors que le test reste concerné.
+ */
+export function testHasSecondaryReading(type: Pick<PhysicalTestType, 'code'>): boolean {
+  return type.code === 'fiet';
+}
+
 // ─── Séries de progression ───────────────────────────────────────────────────
 
 /** Clé de regroupement d'une mesure : une campagne, un test. */
@@ -475,4 +525,78 @@ export function squadAverages(
     out.set(key, { mean: avg, count: values.length });
   }
   return out;
+}
+
+// ─── Vue d'ensemble effectif ──────────────────────────────────────────────────
+//
+// Le dashboard de la page Performance : une ligne par joueur, une colonne par
+// test qui a une donnée, dernière valeur retenue + progression + comparaison
+// au groupe. Assemblage pur au-dessus de `buildPlayerSeries` et
+// `squadAverages` — aucune nouvelle règle de comparaison ou d'agrégation ici.
+
+/** Case de la vue d'ensemble : dernière valeur d'un joueur sur un test, avec repères. */
+export interface SquadTestCell {
+  /** Dernier point retenu de ce joueur sur ce test. */
+  latest: TestSeriesPoint;
+  /** Progression vs la campagne précédente DE CE JOUEUR, déjà orientée. `null` sans point antérieur, ou test `neutral`. */
+  delta: number | null;
+  /**
+   * Comparaison à la moyenne d'effectif de LA CAMPAGNE DE `latest` (pas la
+   * dernière campagne du club — un joueur absent à la dernière campagne se
+   * compare à celle où il a été mesuré). `neutral` sur un test `neutral`, ou
+   * sous `MIN_SQUAD_REFERENCE` joueurs mesurés : pas un repère publiable.
+   */
+  vsSquad: Comparison;
+  /** Moyenne d'effectif utilisée pour `vsSquad` — pour l'affichage (« toi 1.79 s, groupe 1.85 s »), même sur un test neutre. */
+  squadMean: number | null;
+}
+
+export interface SquadTestPlayerRow {
+  player_id: string;
+  /** test_type_id -> case. Un joueur jamais testé n'a pas d'entrée : à l'appelant de croiser avec l'effectif complet. */
+  cells: Map<string, SquadTestCell>;
+}
+
+export interface SquadTestOverview {
+  /** Uniquement les tests avec au moins une donnée : un catalogue de 20 tests dont 3 utilisés n'affiche pas 17 colonnes vides. */
+  types: PhysicalTestType[];
+  players: SquadTestPlayerRow[];
+}
+
+export function buildSquadTestOverview(
+  rows: Array<RetainedMeasure & { player_id: string }>,
+  types: PhysicalTestType[],
+): SquadTestOverview {
+  const byPlayer = new Map<string, RetainedMeasure[]>();
+  for (const row of rows) {
+    const list = byPlayer.get(row.player_id);
+    if (list) list.push(row);
+    else byPlayer.set(row.player_id, [row]);
+  }
+
+  const squadRef = squadAverages(rows, types);
+  const usedTypeIds = new Set(rows.map((r) => r.test_type_id));
+  const activeTypes = sortTestTypes(types.filter((t) => usedTypeIds.has(t.id)));
+
+  const players: SquadTestPlayerRow[] = [];
+  for (const [playerId, playerRows] of byPlayer) {
+    const series = buildPlayerSeries(playerRows, types);
+    const cells = new Map<string, SquadTestCell>();
+    for (const s of series) {
+      const ref = squadRef.get(measureKey(s.latest.sessionId, s.type.id)) ?? null;
+      const vsSquad: Comparison =
+        carriesJudgement(s.type.direction) && ref && ref.count >= MIN_SQUAD_REFERENCE
+          ? compareValues(s.latest.value, ref.mean, s.type.direction)
+          : 'neutral';
+      cells.set(s.type.id, {
+        latest: s.latest,
+        delta: s.delta,
+        vsSquad,
+        squadMean: ref?.mean ?? null,
+      });
+    }
+    players.push({ player_id: playerId, cells });
+  }
+
+  return { types: activeTypes, players };
 }

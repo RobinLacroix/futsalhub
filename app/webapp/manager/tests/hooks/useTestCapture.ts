@@ -100,7 +100,17 @@ export function useTestCapture(sessionId: string) {
           try {
             const training = await trainingsService.getTrainingById(current.training_id);
             const convokedIds = new Set(Object.keys(training?.attendance ?? {}));
-            if (convokedIds.size > 0) roster = roster.filter((p) => convokedIds.has(p.id));
+            if (convokedIds.size > 0) {
+              // La convocation d'une séance peut inclure des joueurs d'autres
+              // équipes (convocation cross-équipe). Résoudre sur l'effectif du
+              // club, pas sur celui de la seule équipe de la campagne : sinon
+              // ces joueurs sont perdus par intersection avant même d'exister
+              // dans la liste de départ.
+              const clubRoster = await playersService.getPlayersByClubWithTeams(current.club_id);
+              roster = clubRoster
+                .map((entry) => entry.player)
+                .filter((p) => p.status !== 'left' && convokedIds.has(p.id));
+            }
           } catch {
             /* séance introuvable : on garde tout l'effectif de l'équipe */
           }

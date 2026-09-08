@@ -35,7 +35,16 @@ export function usePlayers(options: UsePlayersOptions = {}) {
   };
 
   useEffect(() => {
-    if (autoFetch && teamId) {
+    // Sans équipe, rien à charger : on résout tout de suite, indépendamment
+    // d'`autoFetch` (souvent passé en `!!teamId` par l'appelant, donc déjà
+    // `false` ici). Sans ce court-circuit, `loading` restait bloqué à `true`
+    // pour toujours quand il n'y a pas d'équipe active.
+    if (!teamId) {
+      setPlayers([]);
+      setLoading(false);
+      return;
+    }
+    if (autoFetch) {
       fetchPlayers();
     }
   }, [teamId, autoFetch]);

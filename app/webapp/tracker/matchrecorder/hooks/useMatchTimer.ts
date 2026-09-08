@@ -22,6 +22,7 @@ export function useMatchTimer(
             ...player,
             totalTime: player.isOnField ? player.totalTime + 1 : player.totalTime,
             currentSequenceTime: player.isOnField ? player.currentSequenceTime + 1 : player.currentSequenceTime,
+            benchTime: player.isOnField ? player.benchTime : (player.benchTime ?? 0) + 1,
           })),
         }));
       }, 1000);

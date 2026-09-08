@@ -4,32 +4,38 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { usePlayerProfile } from '../../hooks/usePlayerProfile';
 import type { SharedContent, SharedFolder } from '@/types';
 import { sharedContentService } from '@/lib/services';
+import { useTheme } from '../../contexts/ThemeContext';
+import type { ThemeColors } from '@/lib/design/tokens';
 import {
   BookOpen, ChevronLeft, ChevronRight, ExternalLink,
-  Folder, Link2, Loader2, Youtube,
+  File as FileIcon, FileText, Folder, Image as ImageIcon, Link2, Loader2,
+  Users, Video, Youtube,
 } from 'lucide-react';
 
-// ─── Theme FM light ───────────────────────────────────────────────────────────
+// ─── Palette dérivée du thème actif (voir lib/design/tokens.ts) ───────────────
 
-const T = {
-  pageBg:    '#EEF0F5',
-  cardBg:    '#FFFFFF',
-  cardBg2:   '#F8FAFC',
-  border:    '#DDE1EA',
-  divider:   '#E8EDF4',
-  text:      '#1A2332',
-  textMuted: '#697585',
-  textFaint: '#94a3b8',
-  navy:      '#1a2744',
-  navyLight: '#e8eef8',
-  red:       '#dc2626',
-  redBg:     '#fef2f2',
-  blue:      '#1e40af',
-  blueBg:    '#eff6ff',
-  blueBorder:'#bfdbfe',
-};
+function paletteFrom(c: ThemeColors) {
+  return {
+    pageBg:      c.bg.canvas,
+    cardBg:      c.bg.surface,
+    cardBg2:     c.bg.sunken,
+    border:      c.border.subtle,
+    divider:     c.border.subtle,
+    text:        c.text.primary,
+    textMuted:   c.text.secondary,
+    textFaint:   c.text.tertiary,
+    navy:        c.accent.fill,
+    navyLight:   c.accent.subtle,
+    red:         c.negative.default,
+    redBg:       c.negative.subtle,
+    blue:        c.accent.default,
+    blueBg:      c.accent.subtle,
+    blueBorder:  c.accent.border,
+  };
+}
+type Palette = ReturnType<typeof paletteFrom>;
 
-type ContentFilter = 'all' | 'youtube' | 'link';
+type ContentFilter = 'all' | 'youtube' | 'link' | 'file';
 
 function extractYoutubeId(url: string): string | null {
   const patterns = [/[?&]v=([a-zA-Z0-9_-]{11})/, /youtu\.be\/([a-zA-Z0-9_-]{11})/, /embed\/([a-zA-Z0-9_-]{11})/];
@@ -37,10 +43,31 @@ function extractYoutubeId(url: string): string | null {
   return null;
 }
 
+function formatFileSize(bytes?: number | null): string {
+  if (!bytes) return '';
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} Ko`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+}
+
+/** Icône + libellé par type MIME, pour les ressources content_type === 'file'. */
+function fileTypeInfo(mime?: string | null): { Icon: typeof FileText; label: string } {
+  if (mime === 'application/pdf') return { Icon: FileText, label: 'PDF' };
+  if (mime?.startsWith('image/')) return { Icon: ImageIcon, label: 'Image' };
+  if (mime?.startsWith('video/')) return { Icon: Video, label: 'Vidéo' };
+  return { Icon: FileIcon, label: 'Fichier' };
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PlayerSharedPage() {
   const { player, loading: playerLoading } = usePlayerProfile();
+  const { theme } = useTheme();
+  const T = paletteFrom(theme.colors);
+  const sectionLabel: React.CSSProperties = {
+    fontSize: 10, fontWeight: 800, color: T.textFaint,
+    letterSpacing: '0.8px', textTransform: 'uppercase',
+    margin: '0 0 8px 0',
+  };
 
   const [folders, setFolders] = useState<SharedFolder[]>([]);
   const [items,   setItems]   = useState<SharedContent[]>([]);
@@ -119,6 +146,7 @@ export default function PlayerSharedPage() {
   const totalItems = items.length;
   const ytCount   = items.filter(i => (i.folder_id ?? null) === currentFolderId && i.content_type === 'youtube').length;
   const linkCount = items.filter(i => (i.folder_id ?? null) === currentFolderId && i.content_type === 'link').length;
+  const fileCount = items.filter(i => (i.folder_id ?? null) === currentFolderId && i.content_type === 'file').length;
   const directCount = items.filter(i => (i.folder_id ?? null) === currentFolderId).length;
 
   return (
@@ -172,9 +200,10 @@ export default function PlayerSharedPage() {
         {/* ── Filter chips ──────────────────────────────────────── */}
         <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 24px 12px', display: 'flex', gap: 6 }}>
           {([
-            { value: 'all',     label: 'Tous',  count: directCount },
-            { value: 'youtube', label: 'Vidéo', count: ytCount },
-            { value: 'link',    label: 'Lien',  count: linkCount },
+            { value: 'all',     label: 'Tous',    count: directCount },
+            { value: 'youtube', label: 'Vidéo',   count: ytCount },
+            { value: 'link',    label: 'Lien',    count: linkCount },
+            { value: 'file',    label: 'Fichier', count: fileCount },
           ] as const).map(f => (
             <button
               key={f.value}
@@ -229,7 +258,14 @@ export default function PlayerSharedPage() {
                       <Folder size={15} color={T.navy} />
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontSize: 13, fontWeight: 700, color: T.text, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</p>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <p style={{ fontSize: 13, fontWeight: 700, color: T.text, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</p>
+                        {f.team_id === null && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', borderRadius: 99, background: T.navyLight, flexShrink: 0 }}>
+                            <Users size={9} color={T.navy} /><span style={{ fontSize: 9, fontWeight: 700, color: T.navy }}>Club</span>
+                          </span>
+                        )}
+                      </div>
                       <p style={{ fontSize: 11, color: T.textFaint, margin: 0, marginTop: 1 }}>{count} ressource{count !== 1 ? 's' : ''}</p>
                     </div>
                     <ChevronRight size={14} color={T.textFaint} style={{ flexShrink: 0 }} />
@@ -272,12 +308,31 @@ export default function PlayerSharedPage() {
 // ─── PlayerContentCard ────────────────────────────────────────────────────────
 
 function PlayerContentCard({ item }: { item: SharedContent }) {
-  const ytId = item.content_type === 'youtube' ? extractYoutubeId(item.url) : null;
+  const { theme } = useTheme();
+  const T = paletteFrom(theme.colors);
+  const ytId = item.content_type === 'youtube' ? extractYoutubeId(item.url ?? '') : null;
   const isYt = item.content_type === 'youtube';
+  const isFile = item.content_type === 'file';
+  const { Icon: FileTypeIcon, label: fileTypeLabel } = fileTypeInfo(item.file_mime_type);
   const [expanded, setExpanded] = useState(false);
+  const [opening,  setOpening]  = useState(false);
+  const [openError, setOpenError] = useState<string | null>(null);
 
   const logView = () => {
     void sharedContentService.logSharedContentView(item.id);
+  };
+
+  const handleOpenFile = async () => {
+    if (!item.file_path) return;
+    logView();
+    setOpening(true); setOpenError(null);
+    try {
+      const signedUrl = await sharedContentService.getSharedFileUrl(item.file_path);
+      window.open(signedUrl, '_blank', 'noopener,noreferrer');
+    } catch {
+      setOpenError("Impossible d'ouvrir le fichier");
+    }
+    setOpening(false);
   };
 
   return (
@@ -317,7 +372,17 @@ function PlayerContentCard({ item }: { item: SharedContent }) {
             <Youtube size={10} color="#fff" />
             <span style={{ fontSize: 10, fontWeight: 700, color: '#fff' }}>Vidéo</span>
           </div>
+          {item.team_id === null && <ClubWideBadge />}
         </button>
+      ) : isFile ? (
+        <div style={{ height: 80, background: 'linear-gradient(135deg, #1a2744 0%, #2d4a7a 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', flexShrink: 0 }}>
+          <FileTypeIcon size={28} color="rgba(255,255,255,0.3)" />
+          <div style={{ position: 'absolute', bottom: 10, left: 10, display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(255,255,255,0.14)', borderRadius: 99, padding: '3px 8px', border: '1px solid rgba(255,255,255,0.18)' }}>
+            <FileTypeIcon size={10} color="#fff" />
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#fff' }}>{fileTypeLabel}</span>
+          </div>
+          {item.team_id === null && <ClubWideBadge />}
+        </div>
       ) : (
         <div style={{ height: 80, background: 'linear-gradient(135deg, #1a2744 0%, #2d4a7a 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', flexShrink: 0 }}>
           <Link2 size={28} color="rgba(255,255,255,0.3)" />
@@ -325,6 +390,7 @@ function PlayerContentCard({ item }: { item: SharedContent }) {
             <Link2 size={10} color="#fff" />
             <span style={{ fontSize: 10, fontWeight: 700, color: '#fff' }}>Lien externe</span>
           </div>
+          {item.team_id === null && <ClubWideBadge />}
         </div>
       )}
 
@@ -342,11 +408,11 @@ function PlayerContentCard({ item }: { item: SharedContent }) {
 
       {/* ── Body ──────────────────────────── */}
       <div style={{ padding: '12px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 5 }}>
-        {/* Badge lien (comme mobile) */}
+        {/* Badge lien / fichier (comme mobile) */}
         {!isYt && (
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, alignSelf: 'flex-start', padding: '3px 8px', borderRadius: 5, border: `1px solid ${T.blueBorder}`, background: T.blueBg }}>
-            <ExternalLink size={11} color={T.blue} />
-            <span style={{ fontSize: 10, fontWeight: 700, color: T.blue, letterSpacing: '0.3px' }}>Lien externe</span>
+            {isFile ? <FileTypeIcon size={11} color={T.blue} /> : <ExternalLink size={11} color={T.blue} />}
+            <span style={{ fontSize: 10, fontWeight: 700, color: T.blue, letterSpacing: '0.3px' }}>{isFile ? fileTypeLabel : 'Lien externe'}</span>
           </div>
         )}
         <p style={{ fontSize: 13, fontWeight: 700, color: T.text, margin: 0, lineHeight: 1.4 }}>{item.title}</p>
@@ -355,15 +421,34 @@ function PlayerContentCard({ item }: { item: SharedContent }) {
             {item.description}
           </p>
         )}
+        {isFile && item.file_size_bytes ? (
+          <p style={{ fontSize: 10, color: T.textFaint, margin: 0 }}>{formatFileSize(item.file_size_bytes)}</p>
+        ) : null}
       </div>
 
       {/* ── Footer ────────────────────────── */}
       <div style={{ padding: '8px 14px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: `1px solid ${T.divider}`, marginTop: 'auto' }}>
         <span style={{ fontSize: 11, color: T.textFaint }}>
-          {new Date(item.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}
+          {openError ? <span style={{ color: T.red }}>{openError}</span> : new Date(item.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}
         </span>
+        {isFile ? (
+          <button
+            onClick={handleOpenFile}
+            disabled={opening}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5, border: 'none',
+              padding: '6px 12px', borderRadius: 8,
+              background: T.navy, color: '#fff',
+              fontSize: 12, fontWeight: 700,
+              cursor: opening ? 'default' : 'pointer',
+            }}
+          >
+            Ouvrir
+            {opening ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <ExternalLink size={11} />}
+          </button>
+        ) : (
         <a
-          href={item.url}
+          href={item.url ?? '#'}
           target="_blank"
           rel="noopener noreferrer"
           onClick={logView}
@@ -377,15 +462,19 @@ function PlayerContentCard({ item }: { item: SharedContent }) {
           Ouvrir
           <ExternalLink size={11} />
         </a>
+        )}
       </div>
     </div>
   );
 }
 
-// ─── Shared ───────────────────────────────────────────────────────────────────
-
-const sectionLabel: React.CSSProperties = {
-  fontSize: 10, fontWeight: 800, color: T.textFaint,
-  letterSpacing: '0.8px', textTransform: 'uppercase',
-  margin: '0 0 8px 0',
-};
+/** Pill "Toutes les équipes" pour un contenu partagé au niveau du club (team_id null). */
+function ClubWideBadge() {
+  const { theme } = useTheme();
+  const T = paletteFrom(theme.colors);
+  return (
+    <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(255,255,255,0.92)', borderRadius: 99, padding: '3px 8px' }}>
+      <Users size={10} color={T.navy} /><span style={{ fontSize: 10, fontWeight: 700, color: T.navy }}>Toutes les équipes</span>
+    </div>
+  );
+}

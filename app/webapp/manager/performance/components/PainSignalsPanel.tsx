@@ -139,12 +139,12 @@ export default function PainSignalsPanel({
                       style={{
                         backgroundColor:
                           INTENSITY_RAMP[
-                            Math.min(3, Math.max(1, Math.round(signal.avg_intensity))) as 1 | 2 | 3
+                            Math.min(10, Math.max(1, Math.round(signal.avg_intensity))) as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10
                           ],
                       }}
                       title="Intensité moyenne déclarée. C'est une mesure, pas une note."
                     >
-                      {signal.avg_intensity.toFixed(1)} / 3
+                      {signal.avg_intensity.toFixed(1)} / 10
                     </span>
                   </div>
                 </button>

@@ -26,6 +26,7 @@ import {
   UserPlus,
   UserMinus,
   BarChart2,
+  Lock,
 } from 'lucide-react';
 import { useActiveTeam } from '../../../hooks/useActiveTeam';
 import { useActiveSeasonContext } from '../../../contexts/ActiveSeasonContext';
@@ -231,6 +232,7 @@ export default function PlayerProfilePage() {
   const [stats, setStats] = useState<{
     matches_played: number;
     goals: number;
+    assists: number;
     training_attendance: number;
     attendance_percentage: number;
     victories: number;
@@ -250,6 +252,10 @@ export default function PlayerProfilePage() {
   const ratingAvg = ratingSeries.length > 0
     ? ratingSeries.reduce((s, r) => s + r.rating, 0) / ratingSeries.length
     : null;
+
+  // Note staff (Volet C), staff-only : superposée au graphe Auto-évaluation via
+  // match_id (pas de courbe séparée). Clé = match_id.
+  const [coachNoteByMatch, setCoachNoteByMatch] = useState<Record<string, number>>({});
 
   const [linkCode, setLinkCode] = useState<string | null>(null);
   const [linkCodeLoading, setLinkCodeLoading] = useState(false);
@@ -372,6 +378,26 @@ export default function PlayerProfilePage() {
       }
     };
     loadRatingSeries();
+  }, [playerId, activeTeam, activeSeason, matchTypeFilter]);
+
+  // ── Note staff (Volet C), staff-only : map match_id → note ────────────────
+  useEffect(() => {
+    const loadCoachNotes = async () => {
+      if (!playerId || !activeTeam) { setCoachNoteByMatch({}); return; }
+      try {
+        const teamMatches = await matchesService.getMatchesByTeam(activeTeam.id, activeSeason);
+        const scoped = matchTypeFilter === 'all'
+          ? teamMatches
+          : teamMatches.filter(m => m.competition === matchTypeFilter);
+        const rows = await matchRatingsService.getCoachNotesForMatches(scoped.map(m => m.id));
+        const map: Record<string, number> = {};
+        rows.filter(r => r.player_id === playerId).forEach(r => { map[r.match_id] = r.note; });
+        setCoachNoteByMatch(map);
+      } catch {
+        setCoachNoteByMatch({});
+      }
+    };
+    loadCoachNotes();
   }, [playerId, activeTeam, activeSeason, matchTypeFilter]);
 
   // ── Club teams ───────────────────────────────────────────────────────────
@@ -626,10 +652,11 @@ export default function PlayerProfilePage() {
       </div>
 
       {/* ── Stats hero bar ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 mb-4">
         {[
           { label: 'Matchs joués', value: stats?.matches_played ?? '—', color: T.text },
           { label: 'Buts',         value: stats?.goals          ?? '—', color: '#d97706' },
+          { label: 'Passes déc.',  value: stats?.assists         ?? '—', color: '#0d9488' },
           { label: 'Victoires',    value: stats?.victories       ?? '—', color: '#16a34a' },
           { label: 'Nuls',         value: stats?.draws           ?? '—', color: '#64748b' },
           { label: 'Défaites',     value: stats?.defeats         ?? '—', color: '#dc2626' },
@@ -978,6 +1005,15 @@ export default function PlayerProfilePage() {
             <option value="rpe">RPE (intensité perçue)</option>
             <option value="physical_form">Forme physique ressentie</option>
           </select>
+          {feedbackMetric === 'auto_evaluation' && (
+            <span
+              className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded"
+              style={{ color: '#B45309', background: '#FEF3C7' }}
+              title="La note staff superposée est visible uniquement par le staff, jamais par le joueur"
+            >
+              <Lock size={10} /> + note staff
+            </span>
+          )}
         </div>
         <div className="p-6">
           {feedbackHistory.length === 0 ? (
@@ -996,6 +1032,7 @@ export default function PlayerProfilePage() {
                     session: format(new Date(row.date), 'd MMM yy', { locale: fr }),
                     index: i + 1,
                     value: row[feedbackMetric] ?? 0,
+                    coachNote: row.match_id ? coachNoteByMatch[row.match_id] ?? null : null,
                   }))}
                   margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
                 >
@@ -1003,11 +1040,31 @@ export default function PlayerProfilePage() {
                   <XAxis dataKey="session" tick={{ fontSize: 11, fill: T.textMuted }} />
                   <YAxis domain={[1, 10]} tick={{ fontSize: 11, fill: T.textMuted }} allowDecimals={false} />
                   <Tooltip
-                    formatter={(value: number) => [value, { auto_evaluation: 'Auto-éval.', rpe: 'RPE', physical_form: 'Forme', pleasure: 'Plaisir' }[feedbackMetric]]}
+                    formatter={(value: number, name: string) => [value, name]}
                     labelFormatter={label => `Séance : ${label}`}
                     contentStyle={{ background: T.cardBg, border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12 }}
                   />
-                  <Line type="monotone" dataKey="value" stroke={T.accent} strokeWidth={2} dot={{ r: 4 }} />
+                  {feedbackMetric === 'auto_evaluation' && <Legend wrapperStyle={{ fontSize: 11 }} />}
+                  <Line
+                    type="monotone"
+                    dataKey="value"
+                    name={{ auto_evaluation: 'Auto-éval.', rpe: 'RPE', physical_form: 'Forme', pleasure: 'Plaisir' }[feedbackMetric]}
+                    stroke={T.accent}
+                    strokeWidth={2}
+                    dot={{ r: 4 }}
+                  />
+                  {feedbackMetric === 'auto_evaluation' && (
+                    <Line
+                      type="monotone"
+                      dataKey="coachNote"
+                      name="Note staff"
+                      stroke="#D97706"
+                      strokeWidth={2}
+                      strokeDasharray="4 3"
+                      dot={{ r: 4 }}
+                      connectNulls={false}
+                    />
+                  )}
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -1198,7 +1255,7 @@ export default function PlayerProfilePage() {
               </span>
             )}
           </h3>
-          {painReports.length > 0 && painReports[0].max_intensity >= 3 && (
+          {painReports.length > 0 && painReports[0].max_intensity >= 7 && (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold" style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
               <AlertTriangle className="h-3.5 w-3.5" />
               Douleur intense récente
@@ -1221,7 +1278,7 @@ export default function PlayerProfilePage() {
                         {format(new Date(g.reported_at), 'd MMMM yyyy', { locale: fr })}
                       </span>
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide" style={{ background: T.cardBg, color: T.textMuted, border: `1px solid ${T.border}` }}>
-                        {g.source === 'questionnaire' ? 'Fin de séance' : 'Spontané'}
+                        {g.source === 'questionnaire' ? (g.match_id ? 'Fin de match' : 'Fin de séance') : 'Spontané'}
                       </span>
                       {g.onset && (
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide" style={{ background: T.cardBg, color: T.textMuted, border: `1px solid ${T.border}` }}>

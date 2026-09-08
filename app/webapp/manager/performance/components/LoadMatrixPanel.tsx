@@ -47,6 +47,8 @@ import { T } from '../theme';
 
 interface LoadMatrixPanelProps {
   rows: MatrixRow[];
+  /** Bascule vers la vue individuelle de ce joueur. Le nom du joueur devient un bouton quand fourni. */
+  onSelectPlayer?: (playerId: string) => void;
 }
 
 const METRIC_ORDER: MatrixMetric[] = ['rpe', 'physical_form', 'pleasure', 'auto_evaluation'];
@@ -66,7 +68,7 @@ function shortDate(iso: string): string {
 const NAME_COL_PX = 176;
 const MIN_CELL_COL_PX = 72;
 
-export default function LoadMatrixPanel({ rows }: LoadMatrixPanelProps) {
+export default function LoadMatrixPanel({ rows, onSelectPlayer }: LoadMatrixPanelProps) {
   const [metric, setMetric] = useState<MatrixMetric>('rpe');
   const matrix = useMemo(() => buildPlayerMatrix(rows, metric), [rows, metric]);
   const team = useMemo(() => (matrix.sessions.length > 0 ? teamAverageRow(matrix, metric) : null), [matrix, metric]);
@@ -159,11 +161,24 @@ export default function LoadMatrixPanel({ rows }: LoadMatrixPanelProps) {
             {matrix.players.map((player) => (
               <tr key={player.player_id}>
                 <td
-                  className="sticky left-0 truncate whitespace-nowrap px-2 py-1 text-sm"
+                  className="sticky left-0 whitespace-nowrap px-2 py-1 text-sm"
                   style={{ backgroundColor: T.cardBg, color: T.text }}
                 >
-                  {player.number != null ? `${player.number}. ` : ''}
-                  {player.first_name} {player.last_name}
+                  {onSelectPlayer ? (
+                    <button
+                      type="button"
+                      onClick={() => onSelectPlayer(player.player_id)}
+                      className="truncate underline-offset-2 hover:underline"
+                      style={{ color: T.text }}
+                      title="Voir la charge individuelle de ce joueur"
+                    >
+                      {player.first_name} {player.last_name}
+                    </button>
+                  ) : (
+                    <span className="block truncate">
+                      {player.first_name} {player.last_name}
+                    </span>
+                  )}
                 </td>
                 {player.cells.map((cell, i) => (
                   <td key={matrix.sessions[i].training_id} className="px-1 py-1 text-center">

@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useForm, Controller, type Resolver } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
-import { Calendar as ReactBigCalendar, momentLocalizer } from 'react-big-calendar';
+import { Calendar as ReactBigCalendar, momentLocalizer, type View } from 'react-big-calendar';
 import withDragAndDrop from 'react-big-calendar/lib/addons/dragAndDrop';
 import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
 import moment from 'moment';
@@ -34,6 +34,7 @@ async function notifyPlayers(
 import { useActiveTeam } from '../../hooks/useActiveTeam';
 import { useActiveSeasonContext } from '../../contexts/ActiveSeasonContext';
 import { useUserClub } from '../../hooks/useUserClub';
+import { useTheme } from '../../contexts/ThemeContext';
 import { playersService } from '@/lib/services/playersService';
 import { schematicsService, type SchematicData } from '@/lib/services/schematicsService';
 import { createTokensForTraining, getFeedbackLinksForTraining } from '@/lib/services/trainingFeedbackService';
@@ -51,12 +52,51 @@ import {
   Layout,
   ExternalLink,
   Search,
-  Filter
+  Filter,
+  Copy,
+  CheckCircle2,
+  Clock,
+  XCircle,
+  Bandage
 } from 'lucide-react';
 import { DurationSlider } from './components/DurationSlider';
 import { ConvocationControls } from './components/ConvocationControls';
+import { TrainingFeedbackResponsesModal } from './TrainingFeedbackResponsesModal';
+import { OtherTeamPlayersModal } from './OtherTeamPlayersModal';
+import { TONE_COLORS } from '../performance/theme';
 import { useAvailability } from '../../hooks/useAvailability';
 import { needsConvocationWarning } from '@/lib/availability';
+
+// ─── Design tokens (dérivés du thème, voir lib/design/tokens.ts) ─────────────
+function useT() {
+  const { theme } = useTheme();
+  const c = theme.colors;
+  return {
+    cardBg: c.bg.surface,
+    rowOdd: c.bg.stripe,
+    border: c.border.subtle,
+    text: c.text.primary,
+    textMuted: c.text.secondary,
+    accent: c.accent.default,
+    accentFill: c.accent.fill,
+    accentSubtle: c.accent.subtle,
+    positive: c.positive.default,
+    positiveSubtle: c.positive.subtle,
+    negative: c.negative.default,
+    negativeSubtle: c.negative.subtle,
+    warning: c.warning.default,
+    warningSubtle: c.warning.subtle,
+    chartSeries: c.chartSeries,
+  };
+}
+type T = ReturnType<typeof useT>;
+
+/**
+ * Entraînement/match = catégorie, pas jugement : teinte prise dans chartSeries,
+ * mêmes index que mobile/components/calendar/eventCategory.ts, pour que la
+ * couleur d'un événement soit la même sur les deux apps.
+ */
+const EVENT_CATEGORY_INDEX = { training: 0, match: 2 } as const;
 
 // Types
 interface Player {
@@ -84,6 +124,7 @@ interface Match {
   players: {
     id: string;
     goals: number;
+    assists: number;
     yellow_cards: number;
     red_cards: number;
   }[];
@@ -111,13 +152,14 @@ interface PlayerFormData {
   id: string;
   present: boolean;
   goals: number;
+  assists: number;
   yellow_cards: number;
   red_cards: number;
 }
 
 type CompetitionType = 'Championnat' | 'Coupe' | 'Amical';
 
-type LocationType = 'Domicile' | 'Exterieur';
+type LocationType = 'Domicile' | 'Extérieur';
 
 interface MatchFormData {
   title: string;
@@ -182,7 +224,7 @@ interface MatchStats {
   goals_scored: number;
   goals_conceded: number;
   result: 'Victoire' | 'Nul' | 'Défaite';
-  location: 'Domicile' | 'Exterieur';
+  location: 'Domicile' | 'Extérieur';
   goals_by_type: {
     offensive: number;
     transition: number;
@@ -203,7 +245,7 @@ interface MatchStats {
 const matchSchema = yup.object().shape({
   title: yup.string().required('Le titre est requis'),
   date: yup.date().required('La date est requise'),
-  location: yup.string().oneOf(['Domicile', 'Exterieur'] as const, 'Veuillez sélectionner un lieu').required('Le lieu est requis'),
+  location: yup.string().oneOf(['Domicile', 'Extérieur'] as const, 'Veuillez sélectionner un lieu').required('Le lieu est requis'),
   competition: yup.string().oneOf(['Championnat', 'Coupe', 'Amical'] as const, 'Veuillez sélectionner un type de compétition').required('Le type de compétition est requis'),
   score_team: yup.number().min(0).required('Le score de l\'équipe est requis'),
   score_opponent: yup.number().min(0).required('Le score de l\'adversaire est requis'),
@@ -253,6 +295,14 @@ const trainingSchema = yup.object().shape({
     })
 });
 
+/** Heure pleine la plus proche : miroir de defaultDate() dans les écrans mobile new-match.tsx / new.tsx. */
+function defaultEventDate(): Date {
+  const d = new Date();
+  d.setMinutes(0);
+  d.setSeconds(0, 0);
+  return d;
+}
+
 const localizer = momentLocalizer(moment);
 
 type RBCalendarEvent = {
@@ -266,7 +316,66 @@ type RBCalendarEvent = {
 
 const DragAndDropCalendar = withDragAndDrop<RBCalendarEvent>(ReactBigCalendar);
 
+/**
+ * Sélecteur de statut joueur — segmented control avec icônes lucide, en
+ * remplacement des radios + emoji. Couleurs alignées sur `TONE_COLORS`
+ * (performance/theme.ts) : blessé est violet, pas rouge, pour rester
+ * cohérent avec la convention déjà actée côté disponibilité/mobile
+ * (une blessure est une information à traiter, pas une sanction).
+ */
+const STATUS_OPTIONS: { value: PlayerStatus; label: string; icon: typeof CheckCircle2; tone: keyof typeof TONE_COLORS }[] = [
+  { value: 'present', label: 'Présent', icon: CheckCircle2, tone: 'positive' },
+  { value: 'late', label: 'Retard', icon: Clock, tone: 'warning' },
+  { value: 'absent', label: 'Absent', icon: XCircle, tone: 'negative' },
+  { value: 'injured', label: 'Blessé', icon: Bandage, tone: 'injury' },
+];
+
+/**
+ * Rang de tri pour la liste de convocation : présent, puis retard, puis
+ * blessé/absent regroupés. Distinct de l'ordre des puces STATUS_OPTIONS
+ * (présent/retard/absent/blessé), qui reste inchangé pour la saisie.
+ */
+const STATUS_SORT_RANK: Record<PlayerStatus, number> = { present: 0, late: 1, injured: 2, absent: 2 };
+
+function PlayerStatusSelector({
+  value,
+  onChange,
+  label,
+}: {
+  value: PlayerStatus;
+  onChange: (status: PlayerStatus) => void;
+  label: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1" role="radiogroup" aria-label={`Statut de ${label}`}>
+      {STATUS_OPTIONS.map(({ value: optValue, label: optLabel, icon: Icon, tone }) => {
+        const active = value === optValue;
+        const c = TONE_COLORS[tone];
+        return (
+          <button
+            key={optValue}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            aria-label={optLabel}
+            title={optLabel}
+            onClick={() => onChange(optValue)}
+            className="flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-medium transition-colors"
+            style={active
+              ? { color: c.fg, backgroundColor: c.bg, borderColor: c.border }
+              : { color: '#9CA3AF', backgroundColor: 'transparent', borderColor: 'transparent' }}
+          >
+            <Icon className="h-3.5 w-3.5 shrink-0" />
+            <span className="hidden sm:inline">{optLabel}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function CalendarPage() {
+  const t = useT();
   const router = useRouter();
   const { activeTeam, teams } = useActiveTeam();
   const { activeSeason } = useActiveSeasonContext();
@@ -286,10 +395,17 @@ export default function CalendarPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [trainingStats, setTrainingStats] = useState<TrainingStats[]>([]);
   const [matchStats, setMatchStats] = useState<MatchStats[]>([]);
-  const [matchLocationFilter, setMatchLocationFilter] = useState<'Tous' | 'Domicile' | 'Exterieur'>('Tous');
+  const [matchLocationFilter, setMatchLocationFilter] = useState<'Tous' | 'Domicile' | 'Extérieur'>('Tous');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [isMobile, setIsMobile] = useState(false);
-  
+  // Vue contrôlée (et non `defaultView`) : `react-big-calendar` résout sa vue
+  // via `views[props.view]`, qui vaut `undefined` tant que `defaultView` n'a
+  // pas été appliqué par le HOC `uncontrollable` — un premier rendu dans cet
+  // état fait planter `View.title()` avec « Cannot read properties of
+  // undefined (reading 'title') ». Un `view` explicite élimine la fenêtre où
+  // `props.view` peut être undefined.
+  const [calendarView, setCalendarView] = useState<View>('month');
+
   // État pour la pagination du formulaire d'entraînement
   const [trainingFormPage, setTrainingFormPage] = useState(1);
   const [availableProcedures, setAvailableProcedures] = useState<any[]>([]);
@@ -309,6 +425,7 @@ export default function CalendarPage() {
   const [inviteMatchModalOpen, setInviteMatchModalOpen] = useState(false);
   const [inviteModalSelectedIds, setInviteModalSelectedIds] = useState<Record<string, boolean>>({});
   const [feedbackLinksGenerating, setFeedbackLinksGenerating] = useState(false);
+  const [feedbackResponsesTrainingId, setFeedbackResponsesTrainingId] = useState<string | null>(null);
 
 
 
@@ -316,7 +433,7 @@ export default function CalendarPage() {
     resolver: yupResolver(matchSchema) as any,
     defaultValues: {
       title: '',
-      date: new Date(),
+      date: defaultEventDate(),
       location: 'Domicile',
       competition: 'Championnat',
       score_team: 0,
@@ -341,12 +458,12 @@ export default function CalendarPage() {
   const { control: trainingControl, handleSubmit: handleTrainingSubmit, reset: resetTraining, watch: watchTraining, setValue: setTrainingValue, getValues: getTrainingValues, formState: { errors: trainingErrors } } = useForm<TrainingFormData>({
     resolver: yupResolver(trainingSchema) as Resolver<TrainingFormData>,
     defaultValues: {
-      date: new Date(),
+      date: defaultEventDate(),
       location: '',
       theme: 'Offensif',
       key_principle: '',
       players: {},
-      sessionDuration: 60,
+      sessionDuration: undefined,
       sessionParts: [] // Ne pas préremplir - l'utilisateur créera sa propre organisation
     }
   });
@@ -435,11 +552,35 @@ export default function CalendarPage() {
   };
 
   const trainingPlayersFormData = watchTraining('players');
+  const trainingAttendanceCounts = useMemo(() => {
+    const form = (trainingPlayersFormData || {}) as Record<string, { id: string; status: PlayerStatus }>;
+    const statuses = Object.values(form).map((p) => p?.status);
+    return {
+      available: statuses.filter((s) => s === 'present' || s === 'late').length,
+      unavailable: statuses.filter((s) => s === 'absent' || s === 'injured').length,
+    };
+  }, [trainingPlayersFormData]);
   const invitedTrainingPlayerIdsInForm = useMemo(() => {
     const p = trainingPlayersFormData;
     if (!p || typeof p !== 'object') return [];
     return Object.keys(p).filter((id) => !squadIdsSet.has(id));
   }, [trainingPlayersFormData, squadIdsSet]);
+
+  const sortedPlayersForTraining = useMemo(() => {
+    if (!players?.length) return [];
+    const form = (trainingPlayersFormData || {}) as Record<string, { id: string; status: PlayerStatus }>;
+    return [...players].sort((a, b) => {
+      const aConv = a.id in form;
+      const bConv = b.id in form;
+      if (aConv !== bConv) return aConv ? -1 : 1;
+      if (aConv && bConv) {
+        const aRank = STATUS_SORT_RANK[form[a.id]?.status] ?? 0;
+        const bRank = STATUS_SORT_RANK[form[b.id]?.status] ?? 0;
+        if (aRank !== bRank) return aRank - bRank;
+      }
+      return (a.last_name || '').localeCompare(b.last_name || '', 'fr');
+    });
+  }, [players, trainingPlayersFormData]);
 
   const refreshFeedbackLinks = async () => {
     if (!editingEvent || editingEvent.type !== 'training' || !editingEvent.id) return;
@@ -486,12 +627,29 @@ export default function CalendarPage() {
       fetchPlayers();
       fetchTrainingStats();
       fetchMatchStats();
+    } else {
+      // Sans équipe active (aucune équipe créée, ou compte non rattaché), aucun
+      // fetch ne se déclenche : sans ce else, `loading` restait bloqué à `true`
+      // pour toujours et la page tournait sur son spinner indéfiniment.
+      setMatches([]);
+      setTrainings([]);
+      setPlayers([]);
+      setTrainingStats([]);
+      setMatchStats([]);
+      setLoading(false);
     }
   }, [activeTeam, activeSeason]);
 
   useEffect(() => {
     const handleResize = () => {
-      setIsMobile(window.innerWidth < 768);
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      // Bascule uniquement si la vue courante n'existe pas dans le nouveau mode.
+      setCalendarView((v) => {
+        const desktopViews: View[] = ['month', 'week', 'day'];
+        if (mobile) return v === 'agenda' ? v : 'agenda';
+        return desktopViews.includes(v) ? v : 'month';
+      });
     };
 
     handleResize();
@@ -704,7 +862,7 @@ export default function CalendarPage() {
         goals_conceded: Number(match.score_opponent) || 0,
         result: (match.score_team > match.score_opponent ? 'Victoire' : 
                 match.score_team < match.score_opponent ? 'Défaite' : 'Nul') as 'Victoire' | 'Nul' | 'Défaite',
-        location: match.location as 'Domicile' | 'Exterieur',
+        location: match.location as 'Domicile' | 'Extérieur',
         goals_by_type: match.goals_by_type || {
           offensive: 0,
           transition: 0,
@@ -730,7 +888,7 @@ export default function CalendarPage() {
   const handleOpenModal = () => {
     reset({
       title: '',
-      date: new Date(),
+      date: defaultEventDate(),
       location: 'Domicile',
       competition: 'Championnat',
       score_team: 0,
@@ -764,12 +922,12 @@ export default function CalendarPage() {
 
   const handleOpenTrainingModal = () => {
     resetTraining({
-      date: new Date(),
+      date: defaultEventDate(),
       location: '',
       theme: 'Offensif',
       key_principle: '',
       players: {},
-      sessionDuration: 60,
+      sessionDuration: undefined,
       sessionParts: [] // Ne pas préremplir
     });
     setTrainingFormPage(1);
@@ -908,6 +1066,7 @@ export default function CalendarPage() {
           id: player.id,
           present: true,
           goals: player.goals || 0,
+          assists: player.assists || 0,
           yellow_cards: player.yellow_cards || 0,
           red_cards: player.red_cards || 0
         };
@@ -1029,6 +1188,7 @@ export default function CalendarPage() {
         .map(([playerId, player]) => ({
           id: playerId,
           goals: Number(player.goals) || 0,
+          assists: Number(player.assists) || 0,
           yellow_cards: Number(player.yellow_cards) || 0,
           red_cards: Number(player.red_cards) || 0
         })) : [];
@@ -1220,23 +1380,23 @@ export default function CalendarPage() {
     const realEvent = event as RBCalendarEvent;
     let style: React.CSSProperties = {
       borderRadius: 6,
-      color: '#222',
+      color: t.text,
       border: 'none',
       padding: 0,
       opacity: 1
     };
     if (realEvent.type === 'training') {
-      style.background = 'rgba(66, 153, 225, 0.25)'; // bleu clair transparent
-      style.color = '#2563eb'; // bleu foncé
+      style.background = `${t.accent}26`; // accent, fond translucide
+      style.color = t.accent;
     } else if (realEvent.type === 'match') {
       // On regarde la compétition
       const comp = (realEvent.raw as Match).competition;
       if (comp === 'Amical') {
-        style.background = '#bbf7d0'; // vert clair
-        style.color = '#166534'; // vert foncé
+        style.background = t.positiveSubtle;
+        style.color = t.positive;
       } else {
-        style.background = '#fecaca'; // rouge clair
-        style.color = '#b91c1c'; // rouge foncé
+        style.background = t.negativeSubtle;
+        style.color = t.negative;
       }
     }
     return { style };
@@ -1247,64 +1407,6 @@ export default function CalendarPage() {
     handleEventClick((event as RBCalendarEvent).raw as CalendarEvent);
   };
 
-  // Rendu des événements sur le calendrier
-  const tileContent = ({ date }: { date: Date }) => {
-    const dayEvents = [
-      ...matches.filter(match => format(match.date, 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd')),
-      ...trainings.filter(training => format(training.date, 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd'))
-    ];
-
-    return dayEvents.length > 0 ? (
-      <div className="flex flex-col gap-1 mt-1">
-        {dayEvents.map(event => (
-          <div
-            key={event.id}
-            onClick={() => handleEventClick(event)}
-            className={`text-xs p-1 rounded cursor-pointer ${
-              event.type === 'match' 
-                ? 'bg-red-100 text-red-800 hover:bg-red-200' 
-                : 'bg-green-100 text-green-800 hover:bg-green-200'
-            }`}
-          >
-            <div className="flex justify-between items-center">
-              <div className="flex-1">
-                {event.type === 'match' ? (
-                  <>
-                    <span className="font-medium">{event.title}</span>
-                    <span className="ml-2">
-                      {event.score_team} - {event.score_opponent}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span className="font-medium">Entraînement</span>
-                    <span className="ml-2 text-xs">
-                      {event.theme}
-                    </span>
-                  </>
-                )}
-              </div>
-              <div
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (window.confirm('Êtes-vous sûr de vouloir supprimer cet événement ?')) {
-                    if (event.type === 'match') {
-                      handleDeleteMatch(event.id);
-                    } else {
-                      handleDeleteTraining(event.id);
-                    }
-                  }
-                }}
-                className="ml-2 text-gray-600 hover:text-red-600 cursor-pointer"
-              >
-                <X className="h-3 w-3" />
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    ) : null;
-  };
 
   // Modifier les fonctions de soumission des formulaires
   const onSubmit = async (data: MatchFormData) => {
@@ -1337,6 +1439,7 @@ export default function CalendarPage() {
           .map(([playerId, player]) => ({
             id: playerId,
             goals: Number(player.goals) || 0,
+            assists: Number(player.assists) || 0,
             yellow_cards: Number(player.yellow_cards) || 0,
             red_cards: Number(player.red_cards) || 0
           })) : [];
@@ -1794,11 +1897,11 @@ export default function CalendarPage() {
 
   // Composant custom pour le rendu d'un événement
   const CustomEvent = ({ event }: { event: RBCalendarEvent }) => (
-    <div style={{
+    <div className="group" style={{
       display: 'flex',
       alignItems: 'center',
-      gap: 4,
-      padding: 4,
+      gap: 5,
+      padding: '2px 4px',
       borderRadius: 6,
       whiteSpace: 'normal',
       wordBreak: 'break-word',
@@ -1806,20 +1909,27 @@ export default function CalendarPage() {
       height: '100%',
       width: '100%'
     }}>
-      <span style={{ flex: 1 }}>{event.title}</span>
+      {event.type === 'match' ? (
+        <Trophy className="h-3 w-3 shrink-0" style={{ opacity: 0.8 }} />
+      ) : (
+        <Dumbbell className="h-3 w-3 shrink-0" style={{ opacity: 0.8 }} />
+      )}
+      <span style={{ flex: 1, lineHeight: 1.25 }}>{event.title}</span>
       <button
         onClick={e => { e.stopPropagation(); handleDuplicateEvent(event); }}
         title="Dupliquer"
-        style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', marginRight: 2 }}
+        className="opacity-0 group-hover:opacity-100 transition-opacity"
+        style={{ display: 'flex', background: 'none', border: 'none', color: 'currentColor', cursor: 'pointer', padding: 2, borderRadius: 4 }}
       >
-        ⧉
+        <Copy className="h-3 w-3" />
       </button>
       <button
         onClick={e => { e.stopPropagation(); handleDeleteEvent(event); }}
         title="Supprimer"
-        style={{ background: 'none', border: 'none', color: '#e53e3e', cursor: 'pointer', fontWeight: 'bold' }}
+        className="opacity-0 group-hover:opacity-100 transition-opacity"
+        style={{ display: 'flex', background: 'none', border: 'none', color: t.negative, cursor: 'pointer', padding: 2, borderRadius: 4 }}
       >
-        ×
+        <X className="h-3 w-3" />
       </button>
     </div>
   );
@@ -1840,7 +1950,7 @@ export default function CalendarPage() {
     <div className="space-y-4 w-full">
       {error && (
         <div className="flex items-center gap-2 px-4 py-3 rounded-lg text-sm"
-          style={{ backgroundColor: 'rgba(239,68,68,0.08)', color: '#DC2626', border: '1px solid rgba(239,68,68,0.2)' }}>
+          style={{ backgroundColor: t.negativeSubtle, color: t.negative, border: `1px solid ${t.negative}33` }}>
           <AlertCircle className="h-4 w-4" />
           <span>{error}</span>
         </div>
@@ -1848,7 +1958,7 @@ export default function CalendarPage() {
 
       {/* ── Header banner ─────────────────────────────────────────────────── */}
       <div className="rounded-xl p-5 flex flex-col sm:flex-row sm:items-center gap-4"
-        style={{ background: 'linear-gradient(135deg, #1e3a5f 0%, #2a4f7c 100%)', boxShadow: '0 4px 20px rgba(30,58,95,0.15)' }}>
+        style={{ background: `linear-gradient(135deg, ${t.accentFill} 0%, ${t.accent} 100%)`, boxShadow: '0 4px 20px rgba(0,0,0,0.15)' }}>
         <div className="flex-1">
           <h1 style={{ fontSize: '1.25rem', fontWeight: 900, color: '#fff', lineHeight: 1.2 }}>Calendrier & Résultats</h1>
           {activeTeam && (
@@ -1863,7 +1973,7 @@ export default function CalendarPage() {
             onClick={handleOpenTrainingModal}
             disabled={!activeTeam}
             className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition-opacity"
-            style={{ backgroundColor: '#16A34A', color: '#fff', border: 'none', cursor: activeTeam ? 'pointer' : 'not-allowed' }}
+            style={{ backgroundColor: t.chartSeries[EVENT_CATEGORY_INDEX.training], color: '#fff', border: 'none', cursor: activeTeam ? 'pointer' : 'not-allowed' }}
           >
             <Dumbbell className="h-4 w-4" />
             Entraînement
@@ -1872,7 +1982,7 @@ export default function CalendarPage() {
             onClick={handleOpenModal}
             disabled={!activeTeam}
             className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition-opacity"
-            style={{ backgroundColor: '#D97706', color: '#fff', border: 'none', cursor: activeTeam ? 'pointer' : 'not-allowed' }}
+            style={{ backgroundColor: t.chartSeries[EVENT_CATEGORY_INDEX.match], color: '#fff', border: 'none', cursor: activeTeam ? 'pointer' : 'not-allowed' }}
           >
             <Trophy className="h-4 w-4" />
             Match
@@ -1883,21 +1993,19 @@ export default function CalendarPage() {
       {/* ── Legend ────────────────────────────────────────────────────────── */}
       <div className="flex gap-4 flex-wrap">
         {[
-          { color: '#2563EB', label: 'Match' },
-          { color: '#16A34A', label: 'Entraînement' },
-          { color: '#DC2626', label: 'Défaite' },
-          { color: '#D97706', label: 'Nul' },
+          { color: t.chartSeries[EVENT_CATEGORY_INDEX.match], label: 'Match' },
+          { color: t.chartSeries[EVENT_CATEGORY_INDEX.training], label: 'Entraînement' },
         ].map(({ color, label }) => (
           <div key={label} className="flex items-center gap-1.5">
             <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: color }} />
-            <span style={{ fontSize: '0.75rem', color: '#697585', fontWeight: 500 }}>{label}</span>
+            <span style={{ fontSize: '0.75rem', color: t.textMuted, fontWeight: 500 }}>{label}</span>
           </div>
         ))}
       </div>
 
       {/* ── Calendar ──────────────────────────────────────────────────────── */}
       <div className="rounded-xl overflow-hidden"
-        style={{ backgroundColor: '#fff', border: '1px solid #DDE1EA', boxShadow: '0 1px 4px rgba(30,58,95,0.06)' }}>
+        style={{ backgroundColor: t.cardBg, border: `1px solid ${t.border}`, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
         <div className="p-4 sm:p-5 overflow-hidden">
           <div className="w-full overflow-x-auto">
             <div className="min-w-[600px] sm:min-w-0">
@@ -1914,7 +2022,8 @@ export default function CalendarPage() {
                 eventPropGetter={eventPropGetter}
                 components={{ event: CustomEvent }}
                 views={isMobile ? ['agenda', 'day', 'week', 'month'] : ['month', 'week', 'day']}
-                defaultView={isMobile ? 'agenda' : 'month'}
+                view={calendarView}
+                onView={setCalendarView}
                 toolbar={true}
                 popup
                 date={currentDate}
@@ -1995,7 +2104,7 @@ export default function CalendarPage() {
                           className="fm-input"
                         >
                           <option value="Domicile">Domicile</option>
-                          <option value="Exterieur">Exterieur</option>
+                          <option value="Extérieur">Extérieur</option>
                         </select>
                         {errors.location && (
                           <p className="mt-1 text-sm text-red-600">{errors.location.message}</p>
@@ -2212,7 +2321,32 @@ export default function CalendarPage() {
                 </div>
 
                 <div>
-                  <label className="fm-label">Joueurs participants</label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="fm-label" style={{ marginBottom: 0 }}>Joueurs participants</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // Miroir de convokeAll() dans mobile/app/(tabs)/calendar/new-match.tsx :
+                        // convoque tout l'effectif d'un coup, sans toucher aux stats déjà saisies.
+                        const current = getValues('players') || {};
+                        const next = { ...current };
+                        players.forEach((p) => {
+                          next[p.id] = {
+                            id: p.id,
+                            present: true,
+                            goals: current[p.id]?.goals ?? 0,
+                            assists: current[p.id]?.assists ?? 0,
+                            yellow_cards: current[p.id]?.yellow_cards ?? 0,
+                            red_cards: current[p.id]?.red_cards ?? 0,
+                          };
+                        });
+                        setValue('players', next, { shouldDirty: true });
+                      }}
+                      className="text-xs px-2.5 py-1 rounded bg-[var(--fh-accent)] text-white hover:bg-[color-mix(in_srgb,var(--fh-accent)_85%,black)]"
+                    >
+                      Convoquer tout l&apos;effectif
+                    </button>
+                  </div>
                   <div className="border rounded-md overflow-hidden">
                     {/* Header de la table */}
                     <div className="hidden sm:grid grid-cols-12 gap-4 bg-gray-50 p-3 border-b">
@@ -2222,10 +2356,13 @@ export default function CalendarPage() {
                       <div className="col-span-2">
                         <span className="text-sm font-medium text-gray-800">Buts marqués</span>
                       </div>
-                      <div className="col-span-3">
+                      <div className="col-span-2">
+                        <span className="text-sm font-medium text-gray-800">Passes déc.</span>
+                      </div>
+                      <div className="col-span-2">
                         <span className="text-sm font-medium text-gray-800">Cartons jaunes</span>
                       </div>
-                      <div className="col-span-3">
+                      <div className="col-span-2">
                         <span className="text-sm font-medium text-gray-800">Cartons rouges</span>
                       </div>
                     </div>
@@ -2234,10 +2371,10 @@ export default function CalendarPage() {
                     <div className="max-h-[300px] overflow-y-auto divide-y">
                       {sortedPlayersForMatch.map(player => {
                         const isPlayerPresent = watch(`players.${player.id}.present`);
-                        
+
                         return (
-                          <div 
-                            key={player.id} 
+                          <div
+                            key={player.id}
                             className="grid grid-cols-1 sm:grid-cols-12 gap-4 p-3 hover:bg-gray-50"
                           >
                             {/* Case à cocher et nom du joueur */}
@@ -2251,7 +2388,7 @@ export default function CalendarPage() {
                                     type="checkbox"
                                     checked={value ?? false}
                                     onChange={(e) => onChange(e.target.checked)}
-                                    style={{ accentColor: '#2563EB', width: 15, height: 15 }}
+                                    style={{ accentColor: t.accent, width: 15, height: 15 }}
                                   />
                                 )}
                               />
@@ -2280,8 +2417,28 @@ export default function CalendarPage() {
                               />
                             </div>
 
+                            {/* Passes décisives */}
+                            <div className="sm:col-span-2">
+                              <label className="text-xs font-medium text-gray-600 sm:hidden">Passes déc.</label>
+                              <Controller
+                                name={`players.${player.id}.assists`}
+                                control={control}
+                                defaultValue={0}
+                                render={({ field: { value, onChange } }) => (
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={value || 0}
+                                    onChange={(e) => onChange(parseInt(e.target.value) || 0)}
+                                    disabled={!isPlayerPresent}
+                                    className={`fm-input${!isPlayerPresent ? ' fm-input-disabled' : ''}`}
+                                  />
+                                )}
+                              />
+                            </div>
+
                             {/* Cartons jaunes */}
-                            <div className="sm:col-span-3">
+                            <div className="sm:col-span-2">
                               <label className="text-xs font-medium text-gray-600 sm:hidden">Cartons jaunes</label>
                               <Controller
                                 name={`players.${player.id}.yellow_cards`}
@@ -2301,7 +2458,7 @@ export default function CalendarPage() {
                             </div>
 
                             {/* Cartons rouges */}
-                            <div className="sm:col-span-3">
+                            <div className="sm:col-span-2">
                               <label className="text-xs font-medium text-gray-600 sm:hidden">Cartons rouges</label>
                               <Controller
                                 name={`players.${player.id}.red_cards`}
@@ -2331,7 +2488,7 @@ export default function CalendarPage() {
                     <button
                       type="button"
                       onClick={() => setInviteMatchModalOpen(true)}
-                      className="fm-btn fm-btn-blue" style={{ background: '#059669', borderColor: '#059669' }}
+                      className="fm-btn fm-btn-blue" style={{ background: t.chartSeries[EVENT_CATEGORY_INDEX.training], borderColor: t.chartSeries[EVENT_CATEGORY_INDEX.training] }}
                     >
                       <Plus className="h-4 w-4" />
                       Ajouter joueurs autres équipes
@@ -2344,13 +2501,16 @@ export default function CalendarPage() {
                     <label className="fm-label">Joueurs d&apos;autres équipes convoqués</label>
                     <div className="border rounded-md overflow-hidden">
                       <div className="hidden sm:grid grid-cols-12 gap-4 bg-gray-50 p-3 border-b">
-                        <div className="col-span-4">
+                        <div className="col-span-3">
                           <span className="text-sm font-medium text-gray-800">Joueur</span>
                         </div>
                         <div className="col-span-2">
                           <span className="text-sm font-medium text-gray-800">Buts</span>
                         </div>
-                        <div className="col-span-3">
+                        <div className="col-span-2">
+                          <span className="text-sm font-medium text-gray-800">Passes déc.</span>
+                        </div>
+                        <div className="col-span-2">
                           <span className="text-sm font-medium text-gray-800">Cartons jaunes</span>
                         </div>
                         <div className="col-span-2">
@@ -2366,7 +2526,7 @@ export default function CalendarPage() {
                               key={playerId}
                               className="grid grid-cols-1 sm:grid-cols-12 gap-4 p-3 hover:bg-gray-50 items-center"
                             >
-                              <div className="flex items-center gap-3 sm:col-span-4">
+                              <div className="flex items-center gap-3 sm:col-span-3">
                                 <Controller
                                   name={`players.${playerId}.present`}
                                   control={control}
@@ -2376,7 +2536,7 @@ export default function CalendarPage() {
                                       type="checkbox"
                                       checked={value ?? true}
                                       onChange={(e) => onChange(e.target.checked)}
-                                      style={{ accentColor: '#2563EB', width: 15, height: 15 }}
+                                      style={{ accentColor: t.accent, width: 15, height: 15 }}
                                     />
                                   )}
                                 />
@@ -2399,7 +2559,24 @@ export default function CalendarPage() {
                                   )}
                                 />
                               </div>
-                              <div className="sm:col-span-3">
+                              <div className="sm:col-span-2">
+                                <Controller
+                                  name={`players.${playerId}.assists`}
+                                  control={control}
+                                  defaultValue={0}
+                                  render={({ field: { value, onChange } }) => (
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={value ?? 0}
+                                      onChange={(e) => onChange(parseInt(e.target.value) || 0)}
+                                      disabled={!isPlayerPresent}
+                                      className="fm-input"
+                                    />
+                                  )}
+                                />
+                              </div>
+                              <div className="sm:col-span-2">
                                 <Controller
                                   name={`players.${playerId}.yellow_cards`}
                                   control={control}
@@ -2471,164 +2648,64 @@ export default function CalendarPage() {
       )}
 
       {/* Modal "page" pour ajouter des joueurs d'autres équipes */}
-      {inviteMatchModalOpen && (
-        <div className="fm-overlay fm-overlay-top">
-          <div className="fm-modal" style={{ maxWidth: 520 }}>
-            <div className="fm-modal-header">
-              <div className="fm-modal-title">
-                <div className="fm-modal-title-bar" />
-                Ajouter des joueurs d&apos;autres équipes
-              </div>
-              <button type="button" className="fm-modal-close" onClick={() => { setInviteMatchModalOpen(false); setInviteModalSelectedIds({}); }}>
-                <X size={16} />
-              </button>
-            </div>
-            <div style={{ padding: '14px 20px', borderBottom: '1.5px solid #E8EDF4', background: '#F8FAFC' }}>
-              <label className="fm-label">Filtrer par équipe</label>
-              <select
-                value={inviteFilterTeamId}
-                onChange={(e) => setInviteFilterTeamId(e.target.value)}
-                className="fm-select"
-              >
-                <option value="all">Toutes les équipes</option>
-                {teams.filter((t) => t.id !== activeTeam?.id).map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4">
-              <div className="border rounded-md divide-y max-h-[320px] overflow-y-auto">
-                {otherTeamPlayersFiltered.map(({ player, teamNames }) => (
-                  <label
-                    key={player.id}
-                    className="flex items-center justify-between gap-3 p-3 hover:bg-gray-50 cursor-pointer"
-                  >
-                    <span className="text-sm text-gray-900">
-                      {player.first_name} {player.last_name}
-                      {teamNames.length > 0 && (
-                        <span className="text-xs text-gray-500 ml-1">({teamNames.join(', ')})</span>
-                      )}
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={!!inviteModalSelectedIds[player.id]}
-                      onChange={(e) => {
-                        setInviteModalSelectedIds((prev) => ({ ...prev, [player.id]: e.target.checked }));
-                      }}
-                      style={{ accentColor: '#059669', width: 15, height: 15 }}
-                    />
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div className="fm-modal-footer">
-              <button type="button" className="fm-btn fm-btn-secondary" onClick={() => { setInviteMatchModalOpen(false); setInviteModalSelectedIds({}); }}>
-                Annuler
-              </button>
-              <button
-                type="button"
-                className="fm-btn fm-btn-blue"
-                onClick={() => {
-                  const current = getValues('players') || {};
-                  const toAdd = Object.entries(inviteModalSelectedIds)
-                    .filter(([, checked]) => checked)
-                    .map(([id]) => id)
-                    .filter((id) => !current[id]);
-                  const next = { ...current };
-                  toAdd.forEach((id) => {
-                    next[id] = { id, present: true, goals: 0, yellow_cards: 0, red_cards: 0 };
-                  });
-                  setValue('players', next, { shouldDirty: true });
-                  setInviteMatchModalOpen(false);
-                  setInviteModalSelectedIds({});
-                }}
-              >
-                Ajouter la sélection
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <OtherTeamPlayersModal
+        open={inviteMatchModalOpen}
+        teams={teams}
+        activeTeamId={activeTeam?.id}
+        filterTeamId={inviteFilterTeamId}
+        onFilterTeamChange={setInviteFilterTeamId}
+        candidates={otherTeamPlayersFiltered}
+        selectedIds={inviteModalSelectedIds}
+        onToggle={(id, checked) => setInviteModalSelectedIds((prev) => ({ ...prev, [id]: checked }))}
+        onClose={() => { setInviteMatchModalOpen(false); setInviteModalSelectedIds({}); }}
+        onConfirm={() => {
+          const current = getValues('players') || {};
+          const toAdd = Object.entries(inviteModalSelectedIds)
+            .filter(([, checked]) => checked)
+            .map(([id]) => id)
+            .filter((id) => !current[id]);
+          const next = { ...current };
+          toAdd.forEach((id) => {
+            next[id] = { id, present: true, goals: 0, assists: 0, yellow_cards: 0, red_cards: 0 };
+          });
+          setValue('players', next, { shouldDirty: true });
+          setInviteMatchModalOpen(false);
+          setInviteModalSelectedIds({});
+        }}
+        dividerBorderColor={t.border}
+        dividerBg={t.rowOdd}
+        accentColor={t.chartSeries[EVENT_CATEGORY_INDEX.training]}
+      />
 
       {/* Modal "page" pour ajouter des joueurs d'autres équipes (entraînement) */}
-      {inviteTrainingModalOpen && (
-        <div className="fm-overlay fm-overlay-top">
-          <div className="fm-modal" style={{ maxWidth: 520 }}>
-            <div className="fm-modal-header">
-              <div className="fm-modal-title">
-                <div className="fm-modal-title-bar" />
-                Ajouter des joueurs d&apos;autres équipes
-              </div>
-              <button type="button" className="fm-modal-close" onClick={() => { setInviteTrainingModalOpen(false); setInviteTrainingModalSelectedIds({}); }}>
-                <X size={16} />
-              </button>
-            </div>
-            <div style={{ padding: '14px 20px', borderBottom: '1.5px solid #E8EDF4', background: '#F8FAFC' }}>
-              <label className="fm-label">Filtrer par équipe</label>
-              <select
-                value={inviteFilterTeamId}
-                onChange={(e) => setInviteFilterTeamId(e.target.value)}
-                className="fm-select"
-              >
-                <option value="all">Toutes les équipes</option>
-                {teams.filter((t) => t.id !== activeTeam?.id).map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4">
-              <div className="border rounded-md divide-y max-h-[320px] overflow-y-auto">
-                {otherTeamPlayersFiltered.map(({ player, teamNames }) => (
-                  <label
-                    key={player.id}
-                    className="flex items-center justify-between gap-3 p-3 hover:bg-gray-50 cursor-pointer"
-                  >
-                    <span className="text-sm text-gray-900">
-                      {player.first_name} {player.last_name}
-                      {teamNames.length > 0 && (
-                        <span className="text-xs text-gray-500 ml-1">({teamNames.join(', ')})</span>
-                      )}
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={!!inviteTrainingModalSelectedIds[player.id]}
-                      onChange={(e) => {
-                        setInviteTrainingModalSelectedIds((prev) => ({ ...prev, [player.id]: e.target.checked }));
-                      }}
-                      style={{ accentColor: '#059669', width: 15, height: 15 }}
-                    />
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div className="fm-modal-footer">
-              <button type="button" className="fm-btn fm-btn-secondary" onClick={() => { setInviteTrainingModalOpen(false); setInviteTrainingModalSelectedIds({}); }}>
-                Annuler
-              </button>
-              <button
-                type="button"
-                className="fm-btn fm-btn-blue"
-                onClick={() => {
-                  const current = getTrainingValues('players') || {};
-                  const toAdd = Object.entries(inviteTrainingModalSelectedIds)
-                    .filter(([, checked]) => checked)
-                    .map(([id]) => id)
-                    .filter((id) => !current[id]);
-                  const next = { ...current } as Record<string, { id: string; status: PlayerStatus }>;
-                  toAdd.forEach((id) => {
-                    next[id] = { id, status: 'present' as PlayerStatus };
-                  });
-                  setTrainingValue('players', next, { shouldDirty: true });
-                  setInviteTrainingModalOpen(false);
-                  setInviteTrainingModalSelectedIds({});
-                }}
-              >
-                Ajouter la sélection
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <OtherTeamPlayersModal
+        open={inviteTrainingModalOpen}
+        teams={teams}
+        activeTeamId={activeTeam?.id}
+        filterTeamId={inviteFilterTeamId}
+        onFilterTeamChange={setInviteFilterTeamId}
+        candidates={otherTeamPlayersFiltered}
+        selectedIds={inviteTrainingModalSelectedIds}
+        onToggle={(id, checked) => setInviteTrainingModalSelectedIds((prev) => ({ ...prev, [id]: checked }))}
+        onClose={() => { setInviteTrainingModalOpen(false); setInviteTrainingModalSelectedIds({}); }}
+        onConfirm={() => {
+          const current = getTrainingValues('players') || {};
+          const toAdd = Object.entries(inviteTrainingModalSelectedIds)
+            .filter(([, checked]) => checked)
+            .map(([id]) => id)
+            .filter((id) => !current[id]);
+          const next = { ...current } as Record<string, { id: string; status: PlayerStatus }>;
+          toAdd.forEach((id) => {
+            next[id] = { id, status: 'present' as PlayerStatus };
+          });
+          setTrainingValue('players', next, { shouldDirty: true });
+          setInviteTrainingModalOpen(false);
+          setInviteTrainingModalSelectedIds({});
+        }}
+        dividerBorderColor={t.border}
+        dividerBg={t.rowOdd}
+        accentColor={t.chartSeries[EVENT_CATEGORY_INDEX.training]}
+      />
 
       {/* Modal d'ajout d'entraînement */}
       {isTrainingModalOpen && (
@@ -2636,13 +2713,13 @@ export default function CalendarPage() {
           <div className="fm-modal" style={{ maxWidth: 820 }}>
             <div className="fm-modal-header">
               <div className="fm-modal-title">
-                <div className="fm-modal-title-bar" style={{ background: '#059669' }} />
+                <div className="fm-modal-title-bar" style={{ background: t.chartSeries[EVENT_CATEGORY_INDEX.training] }} />
                 {isEditing ? 'Modifier l\'entraînement' : 'Ajouter un entraînement'}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: trainingFormPage === 1 ? '#059669' : '#DDE1EA' }} />
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: trainingFormPage === 2 ? '#059669' : '#DDE1EA' }} />
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: trainingFormPage === 1 ? t.chartSeries[EVENT_CATEGORY_INDEX.training] : t.border }} />
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: trainingFormPage === 2 ? t.chartSeries[EVENT_CATEGORY_INDEX.training] : t.border }} />
                 </div>
                 <button className="fm-modal-close" onClick={handleCloseTrainingModal}>
                   <X size={16} />
@@ -2738,6 +2815,52 @@ export default function CalendarPage() {
                   )}
                 </div>
 
+                {isEditing && editingEvent?.type === 'training' && (
+                  <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                    <p className="text-xs font-medium text-blue-900 mb-2">Liens questionnaire (présents / retards)</p>
+                    <p className="text-xs text-blue-800 mb-2">Envoyez ces liens aux joueurs pour qu&apos;ils remplissent le questionnaire de fin de séance.</p>
+                    <div className="flex items-center gap-3 mb-3">
+                      <button
+                        type="button"
+                        onClick={handleGenerateFeedbackLinks}
+                        disabled={feedbackLinksGenerating || feedbackLinksLoading}
+                        className="text-xs font-medium text-blue-700 hover:text-blue-900 underline disabled:opacity-50"
+                      >
+                        {feedbackLinksGenerating ? 'Génération…' : 'Générer / actualiser les liens'}
+                      </button>
+                      {editingEvent?.id && (
+                        <button
+                          type="button"
+                          onClick={() => setFeedbackResponsesTrainingId(editingEvent.id!)}
+                          className="text-xs font-medium text-blue-700 hover:text-blue-900 underline"
+                        >
+                          Voir les réponses
+                        </button>
+                      )}
+                    </div>
+                    {feedbackLinksLoading ? (
+                      <p className="text-xs text-blue-700">Chargement…</p>
+                    ) : feedbackLinks.length === 0 ? (
+                      <p className="text-xs text-blue-700">Cliquez sur « Générer / actualiser les liens » ci-dessus (au moins un joueur doit être Présent ou Retard et l&apos;entraînement enregistré).</p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {feedbackLinks.map((link, i) => (
+                          <li key={i} className="flex items-center gap-2">
+                            <span className="text-xs text-gray-800 truncate flex-1">{link.player_name}</span>
+                            <button
+                              type="button"
+                              onClick={() => { navigator.clipboard.writeText(link.url); setSuccess('Lien copié'); setTimeout(() => setSuccess(null), 2000); }}
+                              className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                            >
+                              Copier
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="block text-xs font-medium text-gray-800">Statut des joueurs</label>
@@ -2760,7 +2883,7 @@ export default function CalendarPage() {
                             window.alert(`${skipped} joueur${skipped > 1 ? 's' : ''} non disponible${skipped > 1 ? "s n'ont" : " n'a"} pas été convoqué${skipped > 1 ? 's' : ''}. Ajoutez-les un par un si vous les voulez au groupe.`);
                           }
                         }}
-                        className="text-xs px-2.5 py-1 rounded bg-[#16a34a] text-white hover:bg-[#15803d]"
+                        className="text-xs px-2.5 py-1 rounded bg-[var(--fh-accent)] text-white hover:bg-[color-mix(in_srgb,var(--fh-accent)_85%,black)]"
                       >
                         Convoquer tous
                       </button>
@@ -2778,9 +2901,18 @@ export default function CalendarPage() {
                       </button>
                     </div>
                   </div>
+                  <p className="text-xs text-gray-600 mb-1.5">
+                    <span className="text-green-700 font-medium">
+                      {trainingAttendanceCounts.available} disponible{trainingAttendanceCounts.available !== 1 ? 's' : ''}
+                    </span>
+                    {' · '}
+                    <span className={trainingAttendanceCounts.unavailable > 0 ? 'text-red-600 font-medium' : ''}>
+                      {trainingAttendanceCounts.unavailable} indisponible{trainingAttendanceCounts.unavailable !== 1 ? 's' : ''}
+                    </span>
+                  </p>
                   <div className="border rounded-md overflow-hidden">
                     <div className="max-h-[200px] overflow-y-auto divide-y">
-                      {players.map(player => {
+                      {sortedPlayersForTraining.map(player => {
                         const formPlayers = watchTraining('players') || {} as Record<string, { id: string; status: PlayerStatus }>;
                         const isInForm = player.id in formPlayers;
                         return (
@@ -2797,52 +2929,11 @@ export default function CalendarPage() {
                                 name={`players.${player.id}.status`}
                                 control={trainingControl}
                                 render={({ field: { value, onChange } }) => (
-                                  <div className="flex items-center gap-3">
-                                    <label className="flex items-center gap-1 text-xs">
-                                      <input
-                                        type="radio"
-                                        name={`status-${player.id}`}
-                                        value="present"
-                                        checked={value === "present"}
-                                        onChange={(e) => onChange(e.target.value as PlayerStatus)}
-                                        className="text-green-600 focus:ring-green-500"
-                                      />
-                                      <span className="text-green-700">✅</span>
-                                    </label>
-                                    <label className="flex items-center gap-1 text-xs">
-                                      <input
-                                        type="radio"
-                                        name={`status-${player.id}`}
-                                        value="absent"
-                                        checked={value === "absent"}
-                                        onChange={(e) => onChange(e.target.value as PlayerStatus)}
-                                        className="text-red-600 focus:ring-red-500"
-                                      />
-                                      <span className="text-red-700">❌</span>
-                                    </label>
-                                    <label className="flex items-center gap-1 text-xs">
-                                      <input
-                                        type="radio"
-                                        name={`status-${player.id}`}
-                                        value="injured"
-                                        checked={value === "injured"}
-                                        onChange={(e) => onChange(e.target.value as PlayerStatus)}
-                                        className="text-orange-600 focus:ring-orange-500"
-                                      />
-                                      <span className="text-orange-700">🩹</span>
-                                    </label>
-                                    <label className="flex items-center gap-1 text-xs">
-                                      <input
-                                        type="radio"
-                                        name={`status-${player.id}`}
-                                        value="late"
-                                        checked={value === "late"}
-                                        onChange={(e) => onChange(e.target.value as PlayerStatus)}
-                                        className="text-yellow-600 focus:ring-yellow-500"
-                                      />
-                                      <span className="text-yellow-700">⏰ Retard</span>
-                                    </label>
-                                  </div>
+                                  <PlayerStatusSelector
+                                    value={value as PlayerStatus}
+                                    onChange={onChange}
+                                    label={`${player.first_name} ${player.last_name}`}
+                                  />
                                 )}
                               />
                               <button
@@ -2889,7 +2980,7 @@ export default function CalendarPage() {
                     <button
                       type="button"
                       onClick={() => setInviteTrainingModalOpen(true)}
-                      className="fm-btn fm-btn-blue" style={{ background: '#059669', borderColor: '#059669' }}
+                      className="fm-btn fm-btn-blue" style={{ background: t.chartSeries[EVENT_CATEGORY_INDEX.training], borderColor: t.chartSeries[EVENT_CATEGORY_INDEX.training] }}
                     >
                       <Plus className="h-4 w-4" />
                       Ajouter joueurs autres équipes
@@ -2913,52 +3004,11 @@ export default function CalendarPage() {
                               name={`players.${playerId}.status`}
                               control={trainingControl}
                               render={({ field: { value, onChange } }) => (
-                                <div className="flex items-center gap-3">
-                                  <label className="flex items-center gap-1 text-xs">
-                                    <input
-                                      type="radio"
-                                      name={`status-invited-${playerId}`}
-                                      value="present"
-                                      checked={value === 'present'}
-                                      onChange={(e) => onChange(e.target.value as PlayerStatus)}
-                                      className="text-green-600 focus:ring-green-500"
-                                    />
-                                    <span className="text-green-700">✅ Présent</span>
-                                  </label>
-                                  <label className="flex items-center gap-1 text-xs">
-                                    <input
-                                      type="radio"
-                                      name={`status-invited-${playerId}`}
-                                      value="late"
-                                      checked={value === 'late'}
-                                      onChange={(e) => onChange(e.target.value as PlayerStatus)}
-                                      className="text-yellow-600 focus:ring-yellow-500"
-                                    />
-                                    <span className="text-yellow-700">⏰ Retard</span>
-                                  </label>
-                                  <label className="flex items-center gap-1 text-xs">
-                                    <input
-                                      type="radio"
-                                      name={`status-invited-${playerId}`}
-                                      value="absent"
-                                      checked={value === 'absent'}
-                                      onChange={(e) => onChange(e.target.value as PlayerStatus)}
-                                      className="text-red-600 focus:ring-red-500"
-                                    />
-                                    <span className="text-red-700">❌ Absent</span>
-                                  </label>
-                                  <label className="flex items-center gap-1 text-xs">
-                                    <input
-                                      type="radio"
-                                      name={`status-invited-${playerId}`}
-                                      value="injured"
-                                      checked={value === 'injured'}
-                                      onChange={(e) => onChange(e.target.value as PlayerStatus)}
-                                      className="text-orange-600 focus:ring-orange-500"
-                                    />
-                                    <span className="text-orange-700">🩹 Blessé</span>
-                                  </label>
-                                </div>
+                                <PlayerStatusSelector
+                                  value={value as PlayerStatus}
+                                  onChange={onChange}
+                                  label={getPlayerDisplayName(playerId)}
+                                />
                               )}
                             />
                             <button
@@ -2978,41 +3028,6 @@ export default function CalendarPage() {
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
-
-                {isEditing && editingEvent?.type === 'training' && (
-                  <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                    <p className="text-xs font-medium text-blue-900 mb-2">Liens questionnaire (présents / retards)</p>
-                    <p className="text-xs text-blue-800 mb-2">Envoyez ces liens aux joueurs pour qu&apos;ils remplissent le questionnaire de fin de séance.</p>
-                    <button
-                      type="button"
-                      onClick={handleGenerateFeedbackLinks}
-                      disabled={feedbackLinksGenerating || feedbackLinksLoading}
-                      className="mb-3 text-xs font-medium text-blue-700 hover:text-blue-900 underline disabled:opacity-50"
-                    >
-                      {feedbackLinksGenerating ? 'Génération…' : 'Générer / actualiser les liens'}
-                    </button>
-                    {feedbackLinksLoading ? (
-                      <p className="text-xs text-blue-700">Chargement…</p>
-                    ) : feedbackLinks.length === 0 ? (
-                      <p className="text-xs text-blue-700">Cliquez sur « Générer / actualiser les liens » ci-dessus (au moins un joueur doit être Présent ou Retard et l&apos;entraînement enregistré).</p>
-                    ) : (
-                      <ul className="space-y-2">
-                        {feedbackLinks.map((link, i) => (
-                          <li key={i} className="flex items-center gap-2">
-                            <span className="text-xs text-gray-800 truncate flex-1">{link.player_name}</span>
-                            <button
-                              type="button"
-                              onClick={() => { navigator.clipboard.writeText(link.url); setSuccess('Lien copié'); setTimeout(() => setSuccess(null), 2000); }}
-                              className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-                            >
-                              Copier
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
                   </div>
                 )}
                   </>
@@ -3382,14 +3397,15 @@ export default function CalendarPage() {
                               const leftPercent = (startTime / totalDuration) * 100;
                               const width = (part.duration / totalDuration) * 100;
                               
-                              // Couleurs pour les segments
+                              // Couleurs pour les segments — catégorielles (chartSeries), indices
+                              // distincts de ceux d'entraînement/match (0 et 2) pour ne pas les confondre.
                               const partColors: Record<string, string> = {
-                                Echauffement: '#10b981',
-                                Exercice: '#f97316',
-                                Situation: '#3b82f6',
-                                Jeu: '#a855f7'
+                                Echauffement: t.chartSeries[1],
+                                Exercice: t.chartSeries[4],
+                                Situation: t.chartSeries[5],
+                                Jeu: t.chartSeries[3],
                               };
-                              
+
                               return (
                                 <div
                                   key={part.id}
@@ -3397,7 +3413,7 @@ export default function CalendarPage() {
                                   style={{
                                     left: `${leftPercent}%`,
                                     width: `${width}%`,
-                                    backgroundColor: partColors[part.type] || '#9ca3af',
+                                    backgroundColor: partColors[part.type] || t.textMuted,
                                     opacity: 0.8
                                   }}
                                 >
@@ -3664,7 +3680,7 @@ export default function CalendarPage() {
                     <button
                       type="button"
                       className="fm-btn fm-btn-primary"
-                      style={{ background: '#059669', borderColor: '#059669' }}
+                      style={{ background: t.chartSeries[EVENT_CATEGORY_INDEX.training], borderColor: t.chartSeries[EVENT_CATEGORY_INDEX.training] }}
                       onClick={(e) => {
                         e.preventDefault();
                         handleTrainingSubmit(onSubmitTraining)().catch((err) => {
@@ -3694,19 +3710,19 @@ export default function CalendarPage() {
                   {viewingProcedure.title}
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, paddingLeft: 16 }}>
-                  <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, background: '#EFF6FF', color: '#1D4ED8' }}>
+                  <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, background: t.accentSubtle, color: t.accent }}>
                     {viewingProcedure.theme}
                   </span>
-                  <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, background: '#F5F3FF', color: '#7C3AED' }}>
+                  <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, background: `${t.chartSeries[5]}1A`, color: t.chartSeries[5] }}>
                     {viewingProcedure.type}
                   </span>
                   {viewingProcedure.duration_minutes && (
-                    <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, background: '#F3F4F6', color: '#374151' }}>
+                    <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, background: t.rowOdd, color: t.textMuted }}>
                       {viewingProcedure.duration_minutes} min
                     </span>
                   )}
                   {viewingProcedure.min_players && (
-                    <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, background: '#F3F4F6', color: '#374151' }}>
+                    <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, background: t.rowOdd, color: t.textMuted }}>
                       {viewingProcedure.min_players} joueurs min.
                     </span>
                   )}
@@ -3829,6 +3845,13 @@ export default function CalendarPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {feedbackResponsesTrainingId && (
+        <TrainingFeedbackResponsesModal
+          trainingId={feedbackResponsesTrainingId}
+          onClose={() => setFeedbackResponsesTrainingId(null)}
+        />
       )}
     </div>
   );

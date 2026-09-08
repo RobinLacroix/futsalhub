@@ -15,6 +15,8 @@ interface Team {
   color: string;
   club_id?: string;
   created_at: string;
+  absence_notice_minutes?: number;
+  late_notice_minutes?: number;
 }
 
 interface TeamFormData {
@@ -22,7 +24,12 @@ interface TeamFormData {
   category: string;
   level: string;
   color: string;
+  absence_notice_minutes: number;
+  late_notice_minutes: number;
 }
+
+const DEFAULT_ABSENCE_NOTICE_MINUTES = 360;
+const DEFAULT_LATE_NOTICE_MINUTES = 15;
 
 interface TeamStats {
   player_count: number;
@@ -48,7 +55,9 @@ export default function TeamsPage() {
     name: '',
     category: '',
     level: '',
-    color: '#3B82F6'
+    color: '#3B82F6',
+    absence_notice_minutes: DEFAULT_ABSENCE_NOTICE_MINUTES,
+    late_notice_minutes: DEFAULT_LATE_NOTICE_MINUTES
   });
 
   useEffect(() => {
@@ -129,7 +138,9 @@ export default function TeamsPage() {
         name: team.name,
         category: team.category,
         level: team.level,
-        color: team.color
+        color: team.color,
+        absence_notice_minutes: team.absence_notice_minutes ?? DEFAULT_ABSENCE_NOTICE_MINUTES,
+        late_notice_minutes: team.late_notice_minutes ?? DEFAULT_LATE_NOTICE_MINUTES
       });
     } else {
       setIsEditing(false);
@@ -138,7 +149,9 @@ export default function TeamsPage() {
         name: '',
         category: '',
         level: '',
-        color: '#3B82F6'
+        color: '#3B82F6',
+        absence_notice_minutes: DEFAULT_ABSENCE_NOTICE_MINUTES,
+        late_notice_minutes: DEFAULT_LATE_NOTICE_MINUTES
       });
     }
     setIsModalOpen(true);
@@ -152,16 +165,26 @@ export default function TeamsPage() {
       name: '',
       category: '',
       level: '',
-      color: '#3B82F6'
+      color: '#3B82F6',
+      absence_notice_minutes: DEFAULT_ABSENCE_NOTICE_MINUTES,
+      late_notice_minutes: DEFAULT_LATE_NOTICE_MINUTES
     });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
+    if (
+      !Number.isFinite(formData.absence_notice_minutes) || formData.absence_notice_minutes < 0 || formData.absence_notice_minutes > 20160 ||
+      !Number.isFinite(formData.late_notice_minutes) || formData.late_notice_minutes < 0 || formData.late_notice_minutes > 20160
+    ) {
+      setError('Délai de prévenance invalide : entre 0 et 20160 minutes (14 jours).');
+      return;
+    }
+
     try {
       setError(null);
-      
+
       if (isEditing && currentTeam) {
         // Mise à jour d'une équipe existante
         const { error } = await supabase
@@ -494,6 +517,39 @@ export default function TeamsPage() {
                     <span style={{ fontSize: '0.8125rem', color: '#6B7280', fontFamily: 'monospace' }}>{formData.color}</span>
                   </div>
                 </div>
+
+                {isEditing && (
+                  <div>
+                    <label className="fm-label">Délai de prévenance des joueurs</label>
+                    <p style={{ fontSize: '0.75rem', color: '#6B7280', margin: '0 0 8px' }}>
+                      Au-delà de ce délai avant la séance, un joueur ne peut plus répondre lui-même.
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                      <div>
+                        <label className="fm-label" style={{ fontWeight: 400, fontSize: '0.75rem' }}>Absence (min)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={20160}
+                          value={formData.absence_notice_minutes}
+                          onChange={(e) => setFormData({ ...formData, absence_notice_minutes: parseInt(e.target.value, 10) || 0 })}
+                          className="fm-input"
+                        />
+                      </div>
+                      <div>
+                        <label className="fm-label" style={{ fontWeight: 400, fontSize: '0.75rem' }}>Retard (min)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={20160}
+                          value={formData.late_notice_minutes}
+                          onChange={(e) => setFormData({ ...formData, late_notice_minutes: parseInt(e.target.value, 10) || 0 })}
+                          className="fm-input"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="fm-modal-footer">

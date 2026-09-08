@@ -30,6 +30,18 @@ const SECTIONS: { title: string; body: React.ReactNode }[] = [
             et de match saisies manuellement).
           </li>
           <li>Jeton de notification push, si vous autorisez les notifications sur l&apos;application mobile.</li>
+          <li>
+            <strong>Données de santé</strong> : si un joueur déclare une douleur ou une blessure dans
+            l&apos;espace joueur (module infirmerie), la zone du corps concernée et son intensité sont
+            enregistrées et visibles par le staff de son équipe. Il s&apos;agit d&apos;une catégorie
+            particulière de données au sens du RGPD (article 9), traitée uniquement avec le consentement
+            explicite du joueur qui choisit de la déclarer.
+          </li>
+          <li>
+            Photos, si vous choisissez d&apos;importer une image ou un document depuis votre appareil
+            (ex. photo de profil). L&apos;accès à votre photothèque n&apos;est déclenché que par cette
+            action volontaire.
+          </li>
         </ul>
         <p className="mt-2">
           FutsalHub n&apos;utilise aucun outil d&apos;analytics ou de tracking publicitaire tiers.
@@ -53,6 +65,10 @@ const SECTIONS: { title: string; body: React.ReactNode }[] = [
       <p>
         Le traitement repose sur l&apos;exécution du service auquel vous ou votre club avez souscrit
         (exécution du contrat) et, pour les notifications, sur votre consentement explicite.
+        Les données de santé (déclarations de douleur) reposent exclusivement sur votre consentement
+        explicite au moment de la déclaration (article 9.2.a du RGPD) : vous pouvez à tout moment refuser
+        de déclarer une douleur, et retirer ce consentement en demandant la suppression des données
+        concernées.
       </p>
     ),
   },
@@ -115,7 +131,7 @@ export default function PrivacyPage() {
     <main className="min-h-screen bg-[#0E0E10] text-white px-6 py-16">
       <div className="max-w-2xl mx-auto">
         <h1 className="text-3xl font-bold mb-2">Politique de confidentialité</h1>
-        <p className="text-white/50 text-sm mb-10">Dernière mise à jour : juillet 2026</p>
+        <p className="text-white/50 text-sm mb-10">Dernière mise à jour : août 2026</p>
 
         <div className="space-y-8">
           {SECTIONS.map((section) => (

@@ -116,7 +116,9 @@ export default function FeedbackSessionPage() {
   return (
     <div className="min-h-screen bg-slate-900 text-white pb-8 safe-area-padding">
       <div className="max-w-md mx-auto px-4 pt-6">
-        <h1 className="text-xl font-bold mb-1">Questionnaire de fin de séance</h1>
+        <h1 className="text-xl font-bold mb-1">
+          {session.kind === 'match' ? 'Questionnaire de fin de match' : 'Questionnaire de fin de séance'}
+        </h1>
         <p className="text-slate-400 text-sm mb-6">
           {session.player_name && <span>{session.player_name} · </span>}
           {trainingDate}
@@ -152,7 +154,7 @@ export default function FeedbackSessionPage() {
           <div className="rounded-2xl bg-white p-4 text-slate-900">
             <p className="text-sm font-bold mb-0.5">Une douleur à signaler ?</p>
             <p className="text-xs text-slate-500 mb-3">
-              Optionnel. Touche une zone : 1 fois (modérée), 2 fois (assez intense), 3 fois (très intense).
+              Optionnel. Touche une zone, puis choisis son intensité de 1 à 10.
             </p>
             <BodyMap value={pain} onChange={setPain} />
             {Object.keys(pain).length > 0 && (

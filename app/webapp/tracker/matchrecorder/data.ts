@@ -35,6 +35,7 @@ export async function insertMatchEvent(params: {
   half: number;
   player_id: string | null;
   players_on_field: string[];
+  goal_type?: string | null;
 }) {
   const { data, error } = await supabase.rpc('insert_match_event', {
     p_match_id: params.match_id,
@@ -46,6 +47,7 @@ export async function insertMatchEvent(params: {
     // La RPC n'apparie que `goal` et `opponent_goal` ; le drapeau est ignoré
     // pour les autres types, il peut donc être passé inconditionnellement.
     p_write_pair: true,
+    p_goal_type: params.goal_type ?? null,
   });
   return { data, error };
 }

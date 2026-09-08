@@ -7,7 +7,10 @@ import { usePlayerProfile } from '../hooks/usePlayerProfile';
 import { claimPlayerLinkCode } from '@/lib/services/playerConvocationsService';
 import { clubsService } from '@/lib/services';
 import { RatingScaleEditor } from './RatingScaleEditor';
+import { DefaultTeamEditor } from './DefaultTeamEditor';
 import { NotificationPreferencesEditor } from './NotificationPreferencesEditor';
+import { DeleteAccountSection } from './DeleteAccountSection';
+import { ThemeSwitcher } from '../components/ThemeSwitcher';
 import {
   Building2,
   Plus,
@@ -21,6 +24,7 @@ import {
   X,
   Link2,
   AlertCircle,
+  Palette,
 } from 'lucide-react';
 import type { ClubMemberRole } from '@/types';
 
@@ -298,6 +302,16 @@ export default function SettingsPage() {
   if (!club) {
     return (
       <div style={{ padding: '32px 24px', maxWidth: 560, margin: '0 auto' }}>
+        <div className="fm-card">
+          <div className="fm-card-header">
+            <div className="fm-card-accent" />
+            <div className="fm-card-title"><Palette size={15} /> Apparence</div>
+          </div>
+          <div className="fm-card-body">
+            <ThemeSwitcher />
+          </div>
+        </div>
+
         <div style={{ background: '#FEF3C7', border: '1.5px solid #FDE68A', borderRadius: 12, padding: 32, textAlign: 'center' }}>
           <Building2 style={{ width: 40, height: 40, color: '#D97706', margin: '0 auto 16px' }} />
           <h2 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#92400E', marginBottom: 8 }}>Aucun club associé</h2>
@@ -365,6 +379,10 @@ export default function SettingsPage() {
             </div>
           </div>
         )}
+
+        <div style={{ marginTop: 20 }}>
+          <DeleteAccountSection />
+        </div>
       </div>
     );
   }
@@ -375,6 +393,17 @@ export default function SettingsPage() {
         <h1 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0F172A', letterSpacing: '-0.02em', margin: 0 }}>
           Paramètres du club
         </h1>
+      </div>
+
+      {/* ── Apparence ────────────────────────────────────────────── */}
+      <div className="fm-card">
+        <div className="fm-card-header">
+          <div className="fm-card-accent" />
+          <div className="fm-card-title"><Palette size={15} /> Apparence</div>
+        </div>
+        <div className="fm-card-body">
+          <ThemeSwitcher />
+        </div>
       </div>
 
       {/* ── Mon club ─────────────────────────────────────────────── */}
@@ -746,6 +775,9 @@ export default function SettingsPage() {
           {/* ── Échelle de notation ──────────────────────────────── */}
           <RatingScaleEditor />
 
+          {/* ── Équipe par défaut (admin) ─────────────────────────── */}
+          {isAdmin && <DefaultTeamEditor teams={teams} />}
+
           {/* ── Zone dangereuse ──────────────────────────────────── */}
           <div className="fm-card" style={{ borderColor: '#FECACA' }}>
             <div className="fm-card-header" style={{ background: '#FEF2F2' }}>
@@ -789,6 +821,11 @@ export default function SettingsPage() {
           </div>
         </>
       )}
+
+      {/* ── Mon compte ───────────────────────────────────────────── */}
+      <div style={{ marginTop: 20 }}>
+        <DeleteAccountSection />
+      </div>
 
       {/* ── Modal confirmation suppression membre ───────────────── */}
       {deleteConfirm && deleteConfirm !== 'SUPPRIMER' && deleteConfirm !== 'input' && deleteConfirm !== 'show' && (

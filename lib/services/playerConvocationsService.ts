@@ -10,6 +10,9 @@ export interface MyConvolutionRow {
   feedback_url: string | null;
   /** true = convoqué par une autre équipe (affichage couleur) */
   is_other_team?: boolean;
+  /** Délai de prévenance de l'équipe de la séance (minutes), réglable par son coach. */
+  absence_notice_minutes: number;
+  late_notice_minutes: number;
 }
 
 export interface MyPendingFeedbackRow {
@@ -30,6 +33,8 @@ export interface MyUpcomingMatchRow {
   team_name: string | null;
   /** true = convoqué par une autre équipe (affichage couleur) */
   is_other_team?: boolean;
+  /** false = match de l'équipe où le joueur n'est pas (encore) convoqué. */
+  is_convoked?: boolean;
 }
 
 /**
@@ -47,6 +52,8 @@ export async function getMyConvocations(): Promise<MyConvolutionRow[]> {
     feedback_token: row.feedback_token ?? null,
     feedback_url: row.feedback_url ?? null,
     is_other_team: row.is_other_team ?? false,
+    absence_notice_minutes: row.absence_notice_minutes ?? 360,
+    late_notice_minutes: row.late_notice_minutes ?? 15,
   }));
 }
 
@@ -70,6 +77,8 @@ export async function getMyCalendarEvents(): Promise<{
       feedback_token: row.feedback_token ?? null,
       feedback_url: row.feedback_url ?? null,
       is_other_team: row.is_other_team ?? false,
+      absence_notice_minutes: row.absence_notice_minutes ?? 360,
+      late_notice_minutes: row.late_notice_minutes ?? 15,
     })),
     matches: matchesRaw.map((row: any) => ({
       match_id: String(row.match_id ?? ''),
@@ -80,6 +89,7 @@ export async function getMyCalendarEvents(): Promise<{
       opponent_team: row.opponent_team ?? null,
       team_name: row.team_name ?? null,
       is_other_team: row.is_other_team ?? false,
+      is_convoked: row.is_convoked ?? false,
     })),
   };
 }

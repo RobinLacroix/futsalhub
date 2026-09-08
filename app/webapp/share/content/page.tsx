@@ -3,11 +3,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
 import type { SharedContent, SharedFolder } from '@/types';
-import { sharedContentService, type ContentAnalyticsRow } from '@/lib/services';
+import { sharedContentService, clubsService, type ContentAnalyticsRow } from '@/lib/services';
 import {
   BarChart2, BookOpen, CheckCircle2, ChevronDown, ChevronRight, ChevronUp,
-  Download, ExternalLink, Eye, Folder, FolderOpen,
-  Link2, Loader2, MoreHorizontal, Pencil, Plus, Search, Trash2, Users, X, Youtube,
+  Download, ExternalLink, Eye, File as FileIcon, FileText, Folder, FolderOpen,
+  Image as ImageIcon, Link2, Loader2, MoreHorizontal, Pencil, Plus, Search,
+  Trash2, Upload, Users, Video, X, Youtube,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartTooltip, ResponsiveContainer } from 'recharts';
 
@@ -29,6 +30,8 @@ const T = {
   green:     '#059669',
 };
 
+const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function extractYoutubeId(url: string): string | null {
@@ -38,7 +41,21 @@ function extractYoutubeId(url: string): string | null {
 }
 function isYoutubeUrl(url: string) { return /youtube\.com|youtu\.be/.test(url); }
 
-type ContentFilter = 'all' | 'youtube' | 'link';
+function formatFileSize(bytes?: number | null): string {
+  if (!bytes) return '';
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} Ko`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+}
+
+/** Icône + libellé par type MIME, pour les ressources content_type === 'file'. */
+function fileTypeInfo(mime?: string | null): { Icon: typeof FileText; label: string } {
+  if (mime === 'application/pdf') return { Icon: FileText, label: 'PDF' };
+  if (mime?.startsWith('image/')) return { Icon: ImageIcon, label: 'Image' };
+  if (mime?.startsWith('video/')) return { Icon: Video, label: 'Vidéo' };
+  return { Icon: FileIcon, label: 'Fichier' };
+}
+
+type ContentFilter = 'all' | 'youtube' | 'link' | 'file';
 type PageView = 'library' | 'analytics';
 
 
@@ -58,6 +75,9 @@ interface ContentStat {
 export default function ShareContentPage() {
   const { activeTeamId } = useActiveTeam();
 
+  const [clubId,  setClubId]  = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+
   const [folders, setFolders] = useState<SharedFolder[]>([]);
   const [items,   setItems]   = useState<SharedContent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,18 +96,27 @@ export default function ShareContentPage() {
   const [showFolderModal, setShowFolderModal] = useState(false);
   const [renameTarget,    setRenameTarget]    = useState<SharedFolder | null>(null);
   const [openMenuId,      setOpenMenuId]      = useState<string | null>(null);
+  const [editTarget,      setEditTarget]      = useState<SharedContent | null>(null);
+  const [editTitle,       setEditTitle]       = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editSaving,      setEditSaving]      = useState(false);
+  const [editError,       setEditError]       = useState<string | null>(null);
 
   // Formulaire contenu
-  const [title,       setTitle]       = useState('');
-  const [url,         setUrl]         = useState('');
-  const [description, setDescription] = useState('');
-  const [addFolderId, setAddFolderId] = useState<string | null>(null);
-  const [saving,      setSaving]      = useState(false);
-  const [formError,   setFormError]   = useState<string | null>(null);
+  const [addMode,      setAddMode]      = useState<'link' | 'file'>('link');
+  const [title,        setTitle]        = useState('');
+  const [url,          setUrl]          = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [description,  setDescription]  = useState('');
+  const [addFolderId,  setAddFolderId]  = useState<string | null>(null);
+  const [shareAllTeams, setShareAllTeams] = useState(false);
+  const [saving,       setSaving]       = useState(false);
+  const [formError,    setFormError]    = useState<string | null>(null);
 
   // Formulaire dossier
-  const [folderName,   setFolderName]   = useState('');
-  const [folderSaving, setFolderSaving] = useState(false);
+  const [folderName,          setFolderName]          = useState('');
+  const [folderShareAllTeams, setFolderShareAllTeams]  = useState(false);
+  const [folderSaving,        setFolderSaving]         = useState(false);
 
   // Analytics
   const [pageView,          setPageView]          = useState<PageView>('library');
@@ -123,6 +152,15 @@ export default function ShareContentPage() {
 
   // Reset addFolderId default when current folder changes
   useEffect(() => { setAddFolderId(currentFolderId); }, [currentFolderId]);
+
+  // Club + statut admin (conditionne l'accès au partage "toutes les équipes")
+  useEffect(() => {
+    (async () => {
+      const id = await clubsService.getUserClubId();
+      setClubId(id);
+      if (id) setIsAdmin(await clubsService.isClubAdmin(id));
+    })();
+  }, []);
 
   // ── Computed ──────────────────────────────────────────────────────────────
 
@@ -263,7 +301,7 @@ export default function ShareContentPage() {
       .map(r => [
         `"${(r.content_title ?? '').replace(/"/g, '""')}"`,
         `"${(r.folder_name ?? 'Racine').replace(/"/g, '""')}"`,
-        `"${r.content_type === 'youtube' ? 'Vidéo' : 'Lien'}"`,
+        `"${r.content_type === 'youtube' ? 'Vidéo' : r.content_type === 'file' ? 'Fichier' : 'Lien'}"`,
         `"${(r.player_name ?? '').replace(/"/g, '""')}"`,
         `"${r.viewed_at ? new Date(r.viewed_at).toLocaleString('fr-FR') : ''}"`,
       ].join(','))
@@ -296,19 +334,46 @@ export default function ShareContentPage() {
 
   const openAddModal = () => {
     setAddFolderId(currentFolderId);
-    setTitle(''); setUrl(''); setDescription(''); setFormError(null);
+    setAddMode('link');
+    setTitle(''); setUrl(''); setSelectedFile(null); setDescription('');
+    setShareAllTeams(false); setFormError(null);
     setShowAddModal(true);
   };
-  const closeAddModal = () => { setShowAddModal(false); setTitle(''); setUrl(''); setDescription(''); setFormError(null); };
+  const closeAddModal = () => {
+    setShowAddModal(false);
+    setTitle(''); setUrl(''); setSelectedFile(null); setDescription('');
+    setShareAllTeams(false); setFormError(null);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0] ?? null;
+    setFormError(null);
+    if (f && f.size > MAX_FILE_SIZE_BYTES) {
+      setFormError('Fichier trop volumineux (50 Mo maximum).');
+      setSelectedFile(null);
+      e.target.value = '';
+      return;
+    }
+    setSelectedFile(f);
+  };
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeTeamId || !title.trim() || !url.trim()) return;
+    if (!activeTeamId || !clubId || !title.trim()) return;
+    if (addMode === 'link' && !url.trim()) return;
+    if (addMode === 'file' && !selectedFile) return;
     setSaving(true); setFormError(null);
+    const teamId = isAdmin && shareAllTeams ? null : activeTeamId;
     try {
-      await sharedContentService.createSharedContent({
-        teamId: activeTeamId, title, description, url, folderId: addFolderId,
-      });
+      if (addMode === 'file' && selectedFile) {
+        await sharedContentService.createSharedFile({
+          clubId, teamId, title, description, file: selectedFile, folderId: addFolderId,
+        });
+      } else {
+        await sharedContentService.createSharedContent({
+          clubId, teamId, title, description, url, folderId: addFolderId,
+        });
+      }
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Une erreur est survenue');
       setSaving(false); return;
@@ -316,25 +381,55 @@ export default function ShareContentPage() {
     closeAddModal(); await load(); setSaving(false);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (item: SharedContent) => {
     if (!confirm('Supprimer ce contenu ?')) return;
-    try { await sharedContentService.deleteSharedContent(id); } catch { /* ignore */ }
-    setItems(prev => prev.filter(i => i.id !== id));
+    try { await sharedContentService.deleteSharedContent(item); } catch { /* ignore */ }
+    setItems(prev => prev.filter(i => i.id !== item.id));
+  };
+
+  // ── Edit content ──────────────────────────────────────────────────────────
+
+  const openEditModal = (item: SharedContent) => {
+    setEditTarget(item);
+    setEditTitle(item.title);
+    setEditDescription(item.description ?? '');
+    setEditError(null);
+  };
+  const closeEditModal = () => {
+    setEditTarget(null);
+    setEditTitle(''); setEditDescription(''); setEditError(null);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editTarget || !editTitle.trim()) return;
+    setEditSaving(true); setEditError(null);
+    try {
+      const updated = await sharedContentService.updateSharedContent(editTarget.id, {
+        title: editTitle, description: editDescription,
+      });
+      setItems(prev => prev.map(i => i.id === updated.id ? updated : i));
+      closeEditModal();
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Une erreur est survenue');
+    }
+    setEditSaving(false);
   };
 
   // ── Folders CRUD ──────────────────────────────────────────────────────────
 
-  const openFolderModal = () => { setFolderName(''); setShowFolderModal(true); };
+  const openFolderModal = () => { setFolderName(''); setFolderShareAllTeams(false); setShowFolderModal(true); };
 
   const handleCreateFolder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeTeamId || !folderName.trim()) return;
+    if (!activeTeamId || !clubId || !folderName.trim()) return;
     setFolderSaving(true);
+    const teamId = isAdmin && folderShareAllTeams ? null : activeTeamId;
     try {
-      const data = await sharedContentService.createSharedFolder(activeTeamId, folderName, currentFolderId);
+      const data = await sharedContentService.createSharedFolder(clubId, teamId, folderName, currentFolderId);
       setFolders(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name, 'fr')));
     } catch { /* ignore */ }
-    setFolderName(''); setShowFolderModal(false); setFolderSaving(false);
+    setFolderName(''); setFolderShareAllTeams(false); setShowFolderModal(false); setFolderSaving(false);
   };
 
   const handleRenameFolder = async (e: React.FormEvent) => {
@@ -372,6 +467,7 @@ export default function ShareContentPage() {
 
   const ytCount   = items.filter(i => (i.folder_id ?? null) === currentFolderId && i.content_type === 'youtube').length;
   const linkCount = items.filter(i => (i.folder_id ?? null) === currentFolderId && i.content_type === 'link').length;
+  const fileCount = items.filter(i => (i.folder_id ?? null) === currentFolderId && i.content_type === 'file').length;
 
   return (
     <div style={{ background: T.pageBg, minHeight: '100%' }} onClick={() => { setOpenMenuId(null); setShowContentDd(false); }}>
@@ -640,8 +736,12 @@ export default function ShareContentPage() {
                           style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px 140px 30px', gap: 0, padding: '12px 16px', width: '100%', background: 'none', border: 'none', borderBottom: expandedContentId === stat.id || idx < contentStats.length - 1 ? `1px solid ${T.border}` : 'none', cursor: 'pointer', textAlign: 'left', alignItems: 'center' }}
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                            <div style={{ width: 28, height: 28, borderRadius: 6, background: stat.type === 'youtube' ? '#fef2f2' : '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                              {stat.type === 'youtube' ? <Youtube size={13} color={T.red} /> : <Link2 size={13} color={T.blue} />}
+                            <div style={{ width: 28, height: 28, borderRadius: 6, background: stat.type === 'youtube' ? '#fef2f2' : stat.type === 'file' ? '#f0fdf4' : '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              {stat.type === 'youtube'
+                                ? <Youtube size={13} color={T.red} />
+                                : stat.type === 'file'
+                                  ? <FileIcon size={13} color={T.green} />
+                                  : <Link2 size={13} color={T.blue} />}
                             </div>
                             <div style={{ minWidth: 0 }}>
                               <p style={{ fontSize: 13, fontWeight: 700, color: T.text, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{stat.title}</p>
@@ -694,9 +794,10 @@ export default function ShareContentPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 6 }}>
             {([
-              { value: 'all',     label: 'Tous',  count: items.filter(i => (i.folder_id ?? null) === currentFolderId).length },
-              { value: 'youtube', label: 'Vidéo', count: ytCount },
-              { value: 'link',    label: 'Lien',  count: linkCount },
+              { value: 'all',     label: 'Tous',    count: items.filter(i => (i.folder_id ?? null) === currentFolderId).length },
+              { value: 'youtube', label: 'Vidéo',   count: ytCount },
+              { value: 'link',    label: 'Lien',    count: linkCount },
+              { value: 'file',    label: 'Fichier', count: fileCount },
             ] as const).map(f => (
               <button key={f.value} onClick={() => setFilter(f.value)} style={{
                 display: 'flex', alignItems: 'center', gap: 5, padding: '6px 11px', borderRadius: 7, border: '1px solid',
@@ -771,7 +872,7 @@ export default function ShareContentPage() {
                 ) : (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: 16 }}>
                     {currentItems.map(item => (
-                      <ContentCard key={item.id} item={item} folders={folders} onDelete={handleDelete} canDelete />
+                      <ContentCard key={item.id} item={item} folders={folders} onDelete={handleDelete} canDelete onEdit={openEditModal} canEdit />
                     ))}
                   </div>
                 )}
@@ -797,14 +898,37 @@ export default function ShareContentPage() {
             <ModalField label="Titre *">
               <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Ex: Analyse défensive" required style={inputStyle} />
             </ModalField>
-            <ModalField label="URL *">
-              <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://youtube.com/... ou autre lien" required type="url" style={inputStyle} />
-              {url && isYoutubeUrl(url) && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 5 }}>
-                  <Youtube size={11} color={T.red} /><span style={{ fontSize: 11, color: T.red, fontWeight: 600 }}>Vidéo YouTube détectée</span>
-                </div>
-              )}
-            </ModalField>
+
+            {/* Lien vs fichier */}
+            <div style={{ display: 'flex', borderRadius: 8, border: `1px solid ${T.border}`, overflow: 'hidden' }}>
+              <button type="button" onClick={() => setAddMode('link')} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '7px 12px', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: addMode === 'link' ? T.navy : T.cardBg, color: addMode === 'link' ? '#fff' : T.textMuted }}>
+                <Link2 size={13} /> Lien
+              </button>
+              <button type="button" onClick={() => setAddMode('file')} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '7px 12px', border: 'none', borderLeft: `1px solid ${T.border}`, cursor: 'pointer', fontSize: 12, fontWeight: 700, background: addMode === 'file' ? T.navy : T.cardBg, color: addMode === 'file' ? '#fff' : T.textMuted }}>
+                <Upload size={13} /> Fichier
+              </button>
+            </div>
+
+            {addMode === 'link' ? (
+              <ModalField label="URL *">
+                <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://youtube.com/... ou autre lien" required type="url" style={inputStyle} />
+                {url && isYoutubeUrl(url) && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 5 }}>
+                    <Youtube size={11} color={T.red} /><span style={{ fontSize: 11, color: T.red, fontWeight: 600 }}>Vidéo YouTube détectée</span>
+                  </div>
+                )}
+              </ModalField>
+            ) : (
+              <ModalField label="Fichier * (PDF, image ou vidéo, 50 Mo max)">
+                <input type="file" accept=".pdf,application/pdf,image/*,video/mp4,video/quicktime" onChange={handleFileChange} style={inputStyle} />
+                {selectedFile && (
+                  <p style={{ fontSize: 11, color: T.textMuted, margin: '5px 0 0' }}>
+                    {selectedFile.name} · {formatFileSize(selectedFile.size)}
+                  </p>
+                )}
+              </ModalField>
+            )}
+
             <ModalField label="Dossier">
               <select value={addFolderId ?? ''} onChange={e => setAddFolderId(e.target.value || null)} style={{ ...inputStyle, appearance: 'auto' }}>
                 <option value="">— Racine (aucun dossier) —</option>
@@ -814,21 +938,28 @@ export default function ShareContentPage() {
             <ModalField label="Description (optionnel)">
               <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Contexte, points à observer..." rows={2} style={{ ...inputStyle, resize: 'none', fontFamily: 'inherit' }} />
             </ModalField>
+            {isAdmin && <ShareAllTeamsToggle checked={shareAllTeams} onChange={setShareAllTeams} />}
             {formError && <ErrorBox msg={formError} />}
-            <ModalActions saving={saving} disabled={!title.trim() || !url.trim()} onCancel={closeAddModal} label="Publier" />
+            <ModalActions
+              saving={saving}
+              disabled={!title.trim() || (addMode === 'link' ? !url.trim() : !selectedFile)}
+              onCancel={closeAddModal}
+              label="Publier"
+            />
           </form>
         </ModalOverlay>
       )}
 
       {/* ── Modal : créer dossier ───────────────────────────────── */}
       {showFolderModal && (
-        <ModalOverlay onClose={() => { setShowFolderModal(false); setFolderName(''); }}>
+        <ModalOverlay onClose={() => { setShowFolderModal(false); setFolderName(''); setFolderShareAllTeams(false); }}>
           <h2 style={mStyles.title}>Nouveau dossier</h2>
           <form onSubmit={handleCreateFolder} style={mStyles.form}>
             <ModalField label="Nom du dossier *">
               <input value={folderName} onChange={e => setFolderName(e.target.value)} placeholder="Ex: Tactique défensive" required autoFocus style={inputStyle} />
             </ModalField>
-            <ModalActions saving={folderSaving} disabled={!folderName.trim()} onCancel={() => { setShowFolderModal(false); setFolderName(''); }} label="Créer" />
+            {isAdmin && <ShareAllTeamsToggle checked={folderShareAllTeams} onChange={setFolderShareAllTeams} />}
+            <ModalActions saving={folderSaving} disabled={!folderName.trim()} onCancel={() => { setShowFolderModal(false); setFolderName(''); setFolderShareAllTeams(false); }} label="Créer" />
           </form>
         </ModalOverlay>
       )}
@@ -842,6 +973,23 @@ export default function ShareContentPage() {
               <input value={folderName} onChange={e => setFolderName(e.target.value)} required autoFocus style={inputStyle} />
             </ModalField>
             <ModalActions saving={folderSaving} disabled={!folderName.trim()} onCancel={() => { setRenameTarget(null); setFolderName(''); }} label="Renommer" />
+          </form>
+        </ModalOverlay>
+      )}
+
+      {/* ── Modal : modifier une ressource ──────────────────────── */}
+      {editTarget && (
+        <ModalOverlay onClose={closeEditModal}>
+          <h2 style={mStyles.title}>Modifier la ressource</h2>
+          <form onSubmit={handleEditSubmit} style={mStyles.form}>
+            <ModalField label="Titre *">
+              <input value={editTitle} onChange={e => setEditTitle(e.target.value)} required autoFocus style={inputStyle} />
+            </ModalField>
+            <ModalField label="Description (optionnel)">
+              <textarea value={editDescription} onChange={e => setEditDescription(e.target.value)} placeholder="Contexte, points à observer..." rows={2} style={{ ...inputStyle, resize: 'none', fontFamily: 'inherit' }} />
+            </ModalField>
+            {editError && <ErrorBox msg={editError} />}
+            <ModalActions saving={editSaving} disabled={!editTitle.trim()} onCancel={closeEditModal} label="Enregistrer" />
           </form>
         </ModalOverlay>
       )}
@@ -873,7 +1021,14 @@ function FolderCard({ folder, count, isMenuOpen, onOpen, onMenuToggle, onRename,
           <Folder size={16} color={T.navy} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: 13, fontWeight: 700, color: T.text, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{folder.name}</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <p style={{ fontSize: 13, fontWeight: 700, color: T.text, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{folder.name}</p>
+            {folder.team_id === null && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', borderRadius: 99, background: T.navyLight, flexShrink: 0 }}>
+                <Users size={9} color={T.navy} /><span style={{ fontSize: 9, fontWeight: 700, color: T.navy }}>Club</span>
+              </span>
+            )}
+          </div>
           <p style={{ fontSize: 11, color: T.textMuted, margin: 0, marginTop: 2 }}>{count} ressource{count !== 1 ? 's' : ''}</p>
         </div>
         <ChevronRight size={15} color={T.textFaint} style={{ flexShrink: 0 }} />
@@ -908,18 +1063,36 @@ const menuItemStyle: React.CSSProperties = {
 
 // ─── ContentCard ─────────────────────────────────────────────────────────────
 
-export function ContentCard({ item, folders, onDelete, canDelete = false }: {
+export function ContentCard({ item, folders, onDelete, canDelete = false, onEdit, canEdit = false }: {
   item: SharedContent; folders?: SharedFolder[];
-  onDelete?: (id: string) => void; canDelete?: boolean;
+  onDelete?: (item: SharedContent) => void; canDelete?: boolean;
+  onEdit?: (item: SharedContent) => void; canEdit?: boolean;
 }) {
-  const ytId = item.content_type === 'youtube' ? extractYoutubeId(item.url) : null;
+  const ytId = item.content_type === 'youtube' ? extractYoutubeId(item.url ?? '') : null;
   const folder = folders?.find(f => f.id === item.folder_id);
+  const isFile = item.content_type === 'file';
+  const { Icon: FileTypeIcon, label: fileTypeLabel } = fileTypeInfo(item.file_mime_type);
+
+  const [opening,    setOpening]    = useState(false);
+  const [openError,  setOpenError]  = useState<string | null>(null);
+
+  const handleOpenFile = async () => {
+    if (!item.file_path) return;
+    setOpening(true); setOpenError(null);
+    try {
+      const signedUrl = await sharedContentService.getSharedFileUrl(item.file_path);
+      window.open(signedUrl, '_blank', 'noopener,noreferrer');
+    } catch {
+      setOpenError("Impossible d'ouvrir le fichier");
+    }
+    setOpening(false);
+  };
 
   return (
     <div style={{ background: T.cardBg, borderRadius: 12, border: `1px solid ${T.border}`, overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 1px 3px rgba(15,23,42,0.05)' }}>
       {/* Visual header */}
       {ytId ? (
-        <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', position: 'relative', aspectRatio: '16/9', background: '#000', flexShrink: 0 }}>
+        <a href={item.url ?? '#'} target="_blank" rel="noopener noreferrer" style={{ display: 'block', position: 'relative', aspectRatio: '16/9', background: '#000', flexShrink: 0 }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={`https://img.youtube.com/vi/${ytId}/mqdefault.jpg`} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
           <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -930,13 +1103,23 @@ export function ContentCard({ item, folders, onDelete, canDelete = false }: {
           <div style={{ position: 'absolute', top: 10, left: 10, display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(0,0,0,0.60)', borderRadius: 99, padding: '3px 8px' }}>
             <Youtube size={10} color="#fff" /><span style={{ fontSize: 10, fontWeight: 700, color: '#fff' }}>Vidéo</span>
           </div>
+          {item.team_id === null && <ClubWideBadge />}
         </a>
+      ) : isFile ? (
+        <div style={{ height: 80, background: 'linear-gradient(135deg, #1a2744 0%, #2d4a7a 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', flexShrink: 0 }}>
+          <FileTypeIcon size={28} color="rgba(255,255,255,0.35)" />
+          <div style={{ position: 'absolute', top: 10, left: 10, display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(255,255,255,0.14)', borderRadius: 99, padding: '3px 8px', border: '1px solid rgba(255,255,255,0.18)' }}>
+            <FileTypeIcon size={10} color="#fff" /><span style={{ fontSize: 10, fontWeight: 700, color: '#fff' }}>{fileTypeLabel}</span>
+          </div>
+          {item.team_id === null && <ClubWideBadge />}
+        </div>
       ) : (
         <div style={{ height: 80, background: 'linear-gradient(135deg, #1a2744 0%, #2d4a7a 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', flexShrink: 0 }}>
           <Link2 size={28} color="rgba(255,255,255,0.35)" />
           <div style={{ position: 'absolute', top: 10, left: 10, display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(255,255,255,0.14)', borderRadius: 99, padding: '3px 8px', border: '1px solid rgba(255,255,255,0.18)' }}>
             <Link2 size={10} color="#fff" /><span style={{ fontSize: 10, fontWeight: 700, color: '#fff' }}>Lien</span>
           </div>
+          {item.team_id === null && <ClubWideBadge />}
         </div>
       )}
       {/* Body */}
@@ -947,6 +1130,9 @@ export function ContentCard({ item, folders, onDelete, canDelete = false }: {
             {item.description}
           </p>
         )}
+        {isFile && item.file_size_bytes ? (
+          <p style={{ fontSize: 10, color: T.textFaint, margin: 0 }}>{formatFileSize(item.file_size_bytes)}</p>
+        ) : null}
         {folder && (
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
             <Folder size={10} color={T.textFaint} />
@@ -958,16 +1144,37 @@ export function ContentCard({ item, folders, onDelete, canDelete = false }: {
       <div style={{ padding: '8px 14px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: `1px solid ${T.border}` }}>
         <span style={{ fontSize: 11, color: T.textFaint }}>{new Date(item.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}</span>
         <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-          <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 6, border: `1px solid ${T.border}`, fontSize: 11, fontWeight: 600, color: T.navy, textDecoration: 'none' }}>
-            <ExternalLink size={11} />Ouvrir
-          </a>
+          {openError && <span style={{ fontSize: 10, color: T.red }}>{openError}</span>}
+          {isFile ? (
+            <button onClick={handleOpenFile} disabled={opening} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 6, border: `1px solid ${T.border}`, background: T.cardBg, fontSize: 11, fontWeight: 600, color: T.navy, cursor: opening ? 'default' : 'pointer' }}>
+              {opening ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <ExternalLink size={11} />}Ouvrir
+            </button>
+          ) : (
+            <a href={item.url ?? '#'} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 6, border: `1px solid ${T.border}`, fontSize: 11, fontWeight: 600, color: T.navy, textDecoration: 'none' }}>
+              <ExternalLink size={11} />Ouvrir
+            </a>
+          )}
+          {canEdit && onEdit && (
+            <button onClick={() => onEdit(item)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 6, border: 'none', background: 'none', cursor: 'pointer', color: T.textFaint }}>
+              <Pencil size={13} />
+            </button>
+          )}
           {canDelete && onDelete && (
-            <button onClick={() => onDelete(item.id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 6, border: 'none', background: 'none', cursor: 'pointer', color: T.textFaint }}>
+            <button onClick={() => onDelete(item)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 6, border: 'none', background: 'none', cursor: 'pointer', color: T.textFaint }}>
               <Trash2 size={13} />
             </button>
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Pill "Toutes les équipes" pour un contenu/dossier partagé au niveau du club (team_id null). */
+function ClubWideBadge() {
+  return (
+    <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(255,255,255,0.92)', borderRadius: 99, padding: '3px 8px' }}>
+      <Users size={10} color={T.navy} /><span style={{ fontSize: 10, fontWeight: 700, color: T.navy }}>Toutes les équipes</span>
     </div>
   );
 }
@@ -1009,6 +1216,19 @@ function ModalActions({ saving, disabled, onCancel, label }: { saving: boolean; 
 
 function ErrorBox({ msg }: { msg: string }) {
   return <div style={{ padding: '8px 12px', borderRadius: 8, background: T.redBg, border: '1px solid #fca5a5' }}><p style={{ fontSize: 12, color: T.red, margin: 0 }}>{msg}</p></div>;
+}
+
+/** Toggle "Partager à toutes les équipes du club", réservé aux admins de club (isAdmin). */
+function ShareAllTeamsToggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label style={{ display: 'flex', alignItems: 'center', gap: 9, cursor: 'pointer', padding: '9px 12px', borderRadius: 8, border: `1px solid ${checked ? T.navy : T.border}`, background: checked ? T.navyLight : T.cardBg2 }}>
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} style={{ width: 15, height: 15, cursor: 'pointer', flexShrink: 0 }} />
+      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Users size={13} color={checked ? T.navy : T.textMuted} />
+        <span style={{ fontSize: 12, fontWeight: 600, color: checked ? T.navy : T.text }}>Partager à toutes les équipes du club</span>
+      </span>
+    </label>
+  );
 }
 
 const inputStyle: React.CSSProperties = { width: '100%', padding: '9px 12px', borderRadius: 8, boxSizing: 'border-box', border: `1px solid ${T.border}`, fontSize: 13, color: T.text, outline: 'none', background: T.cardBg2 };

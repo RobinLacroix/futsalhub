@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabaseClient'
 import { matchRatingsService } from '@/lib/services'
 import type { CoachEvaluation, MatchPlayerRating } from '@/types'
+import { CoachNoteCell } from './CoachNoteCell'
 import {
   PieChart,
   Pie,
@@ -27,6 +28,7 @@ import {
   ArrowRight,
   ArrowUpRight,
   ArrowUp,
+  Lock,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -151,6 +153,7 @@ export default function MatchReportPage() {
   const [coachEval, setCoachEval] = useState<CoachEvaluation | null>(null)
   const [savingEval, setSavingEval] = useState(false)
   const [ratings, setRatings] = useState<Record<string, MatchPlayerRating>>({})
+  const [coachNotes, setCoachNotes] = useState<Record<string, number>>({})
 
   useEffect(() => {
     async function load() {
@@ -174,6 +177,13 @@ export default function MatchReportPage() {
       } catch {
         // Absence de notes (aucun event) ne doit pas casser le bilan.
         setRatings({})
+      }
+
+      // Volet C : notes staff (saisie manuelle, staff-only).
+      try {
+        setCoachNotes(await matchRatingsService.getCoachNotes(matchId))
+      } catch {
+        setCoachNotes({})
       }
 
       if (matchData.team_id) {
@@ -224,6 +234,27 @@ export default function MatchReportPage() {
       setCoachEval(previous) // rollback optimiste en cas d'échec
     } finally {
       setSavingEval(false)
+    }
+  }
+
+  // Volet C : enregistre ou efface (note = null) la note staff d'un joueur.
+  async function handleSetCoachNote(playerId: string, note: number | null) {
+    const previous = coachNotes[playerId] ?? null
+    setCoachNotes(prev => {
+      const next = { ...prev }
+      if (note === null) delete next[playerId]
+      else next[playerId] = note
+      return next
+    })
+    try {
+      await matchRatingsService.setCoachNote(matchId, playerId, note)
+    } catch {
+      setCoachNotes(prev => {
+        const next = { ...prev }
+        if (previous === null) delete next[playerId]
+        else next[playerId] = previous
+        return next
+      })
     }
   }
 
@@ -324,6 +355,17 @@ export default function MatchReportPage() {
     })
     .filter(p => p.timePlayed > 0 || p.goals > 0 || p.shotsOnTarget > 0 || p.recovery > 0)
     .sort((a, b) => b.timePlayed - a.timePlayed)
+
+  // Notes staff (Volet C) : basées sur les joueurs suivis au recorder si dispo,
+  // sinon repli sur les joueurs CONVOQUÉS (match.players, rempli aussi par la
+  // convocation manuelle côté calendrier) — jamais tout le roster de l'équipe.
+  const convokedIds = new Set((match.players || []).map(mp => mp.id))
+  const coachNoteRows = playerStats.length > 0
+    ? playerStats.map(p => ({ id: p.id, number: p.number, name: p.name }))
+    : players
+        .filter(p => convokedIds.has(p.id))
+        .map(p => ({ id: p.id, number: p.number, name: `${p.first_name} ${p.last_name}` }))
+        .sort((a, b) => a.number - b.number)
 
   const goalTimeline = events
     .filter(e => e.event_type === 'goal' || e.event_type === 'opponent_goal')
@@ -617,6 +659,35 @@ export default function MatchReportPage() {
                       ) : (
                         <span className="text-gray-300">—</span>
                       )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* ── Notes staff (Volet C) — indépendant du match recorder ── */}
+        {coachNoteRows.length > 0 && (
+          <div className="bg-gray-50 rounded-xl p-5 mt-6 print:hidden">
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+              <Lock size={12} /> Notes staff
+            </h3>
+            <p className="text-xs text-gray-400 mb-4">
+              Visible uniquement par le staff, jamais par le joueur.
+              {playerStats.length === 0 && ' Match non suivi au match recorder : liste basée sur les joueurs convoqués.'}
+            </p>
+            <table className="w-full text-sm max-w-md">
+              <tbody>
+                {coachNoteRows.map((p, i) => (
+                  <tr key={p.id} className={i % 2 === 0 ? '' : 'bg-white/60'}>
+                    <td className="py-2 text-gray-400 font-mono text-xs w-10">{p.number}</td>
+                    <td className="py-2 font-semibold text-gray-800">{p.name}</td>
+                    <td className="py-2 text-right w-24">
+                      <CoachNoteCell
+                        value={coachNotes[p.id] ?? null}
+                        onChange={note => handleSetCoachNote(p.id, note)}
+                      />
                     </td>
                   </tr>
                 ))}

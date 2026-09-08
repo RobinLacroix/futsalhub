@@ -62,6 +62,24 @@ export async function getClubPainReports(
   return (data as ClubPainReportGroup[]) ?? [];
 }
 
+/** Joueur : édite une de ses soumissions (report_group), zones/note/onset remplacés en bloc. */
+export async function updateMyPainReport(
+  reportGroup: string,
+  zones: PainZonePayload[],
+  note?: string | null,
+  onset?: 'aigu' | 'chronique' | null,
+): Promise<SubmitResult> {
+  const { data, error } = await supabase.rpc('update_my_pain_report', {
+    p_report_group: reportGroup,
+    p_zones: zones,
+    p_note: note ?? null,
+    p_onset: onset ?? null,
+  });
+  if (error) return { success: false, error: error.message };
+  const r = data as SubmitResult | null;
+  return r?.success ? { success: true } : { success: false, error: r?.error || 'Erreur' };
+}
+
 /** Joueur : supprime une de ses soumissions (report_group). */
 export async function deleteMyPainReport(reportGroup: string): Promise<SubmitResult> {
   const { data, error } = await supabase.rpc('delete_my_pain_report', { p_report_group: reportGroup });

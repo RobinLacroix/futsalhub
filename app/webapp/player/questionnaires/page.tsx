@@ -7,47 +7,75 @@ import { getMyPendingFeedbackTokens, type MyPendingFeedbackRow } from '@/lib/ser
 import { getFeedbackSessionByToken, submitTrainingFeedback, reportPainByToken } from '@/lib/services';
 import { toPayload } from '@/lib/painMap';
 import BodyMap, { type PainSelection } from '@/components/BodyMap';
+import { useTheme } from '../../contexts/ThemeContext';
+import type { ThemeColors } from '@/lib/design/tokens';
 import { AlertCircle, Activity, CheckCircle2, ChevronRight, FileText, Loader2, MessageCircle, RefreshCw, X } from 'lucide-react';
 
 type Onset = 'aigu' | 'chronique' | null;
 
-// ─── Theme FM light ───────────────────────────────────────────────────────────
+// ─── Palette dérivée du thème actif (voir lib/design/tokens.ts) ───────────────
 
-const T = {
-  pageBg:    '#EEF0F5',
-  cardBg:    '#FFFFFF',
-  cardBg2:   '#F8FAFC',
-  border:    '#DDE1EA',
-  divider:   '#E8EDF4',
-  text:      '#0f172a',
-  textMuted: '#475569',
-  textFaint: '#94a3b8',
-  navy:      '#1a2744',
-  green:     '#059669',
-  greenBg:   '#ecfdf5',
-  greenBorder:'#6ee7b7',
-  amber:     '#d97706',
-  red:       '#dc2626',
-  redBg:     '#fef2f2',
-};
+function paletteFrom(c: ThemeColors) {
+  return {
+    pageBg:      c.bg.canvas,
+    cardBg:      c.bg.surface,
+    cardBg2:     c.bg.sunken,
+    border:      c.border.subtle,
+    divider:     c.border.subtle,
+    text:        c.text.primary,
+    textMuted:   c.text.secondary,
+    textFaint:   c.text.tertiary,
+    navy:        c.accent.fill,
+    green:       c.positive.default,
+    greenBg:     c.positive.subtle,
+    greenBorder: c.positive.default,
+    amber:       c.warning.default,
+    red:         c.negative.default,
+    redBg:       c.negative.subtle,
+    neutralData: c.neutralData,
+    accent:      c.accent.default,
+    accentFill:  c.accent.fill,
+  };
+}
 
 // ─── Metrics config ───────────────────────────────────────────────────────────
+//
+// `kind` distingue ce qui se juge de ce qui se mesure. Seul le RPE est en
+// `intensity` : c'est la seule des quatre métriques dont une note haute n'est
+// pas un jugement — une séance dure n'est pas une mauvaise séance. La colorer
+// comme les trois autres (rouge = mauvais) pousserait les joueurs à sous-
+// déclarer, ce qui fausse la charge d'entraînement mesurée (miroir du fix
+// documenté dans mobile/components/player/ScaleSelector.tsx).
 
 type FormKey = 'auto_evaluation' | 'rpe' | 'physical_form' | 'pleasure';
 type FormValues = Record<FormKey, number | null>;
+type ScaleKind = 'judgement' | 'intensity';
 
-const METRICS: { key: FormKey; label: string; desc: string; lowLabel: string; highLabel: string }[] = [
-  { key: 'auto_evaluation', label: 'Auto-évaluation',  desc: 'Comment as-tu joué ?',               lowLabel: 'Très mal',    highLabel: 'Excellent'  },
-  { key: 'rpe',             label: 'Intensité (RPE)',   desc: "Intensité perçue de l'effort",        lowLabel: 'Très légère', highLabel: 'Maximale'   },
-  { key: 'physical_form',   label: 'Forme physique',   desc: 'Comment tu te sentais physiquement',  lowLabel: 'Très faible', highLabel: 'Parfaite'   },
-  { key: 'pleasure',        label: 'Plaisir',           desc: 'As-tu apprécié la séance ?',          lowLabel: 'Aucun',       highLabel: 'Maximum'    },
+const METRICS: { key: FormKey; label: string; desc: string; lowLabel: string; highLabel: string; kind: ScaleKind }[] = [
+  { key: 'auto_evaluation', label: 'Auto-évaluation',       desc: 'Comment as-tu joué ?',                                          lowLabel: 'Très mal',    highLabel: 'Excellent', kind: 'judgement' },
+  { key: 'rpe',             label: 'Intensité ressentie (RPE)', desc: "À quel point l'effort t'a paru dur ? Il n'y a pas de bonne réponse.", lowLabel: 'Très légère', highLabel: 'Maximale',  kind: 'intensity' },
+  { key: 'physical_form',   label: 'Forme physique',        desc: 'Comment tu te sentais physiquement',                           lowLabel: 'Très faible', highLabel: 'Parfaite',  kind: 'judgement' },
+  { key: 'pleasure',        label: 'Plaisir',               desc: 'As-tu apprécié la séance ?',                                    lowLabel: 'Aucun',       highLabel: 'Maximum',   kind: 'judgement' },
 ];
+
+function toneFor(kind: ScaleKind, n: number, T: ReturnType<typeof paletteFrom>): string {
+  if (kind === 'intensity') {
+    if (n <= 3) return T.neutralData;
+    if (n <= 7) return T.accent;
+    return T.accentFill;
+  }
+  if (n <= 3) return T.red;
+  if (n <= 6) return T.amber;
+  return T.green;
+}
 
 const INITIAL_FORM: FormValues = { auto_evaluation: null, rpe: null, physical_form: null, pleasure: null };
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PlayerQuestionnairesPage() {
+  const { theme } = useTheme();
+  const T = paletteFrom(theme.colors);
   const [items,     setItems]     = useState<MyPendingFeedbackRow[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -313,7 +341,7 @@ export default function PlayerQuestionnairesPage() {
                         <div style={{ display: 'flex', gap: 4 }}>
                           {Array.from({ length: 10 }, (_, i) => i + 1).map(n => {
                             const active = val === n;
-                            const hue = n <= 3 ? T.red : n <= 6 ? T.amber : T.green;
+                            const hue = toneFor(metric.kind, n, T);
                             return (
                               <button
                                 key={n}

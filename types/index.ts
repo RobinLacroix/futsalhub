@@ -48,8 +48,12 @@ export interface Player {
   sequence_time_limit?: number;
   team_id?: string; // Le club est hérité via team_id -> teams.club_id
   user_id?: string | null; // Compte utilisateur pour l'accès espace joueur
+  phone?: string | null;
+  parent_name?: string | null;
+  parent_phone?: string | null;
   matches_played?: number;
   goals?: number;
+  assists?: number;
   training_attendance?: number;
   attendance_percentage?: number;
   victories?: number;
@@ -69,6 +73,9 @@ export interface PlayerFormData {
   number: string;
   sequence_time_limit: string;
   selectedTeams: string[];
+  phone: string;
+  parent_name: string;
+  parent_phone: string;
 }
 
 // Statut de présence à l'entraînement
@@ -98,7 +105,7 @@ export interface PlayerEvent {
 export interface PainReportZone {
   zone: string;                       // id de zone (cf. lib/painMap.ts)
   side: 'L' | 'R' | 'C';
-  intensity: 1 | 2 | 3;
+  intensity: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
   mode: 'zone' | 'articulation';
 }
 
@@ -106,10 +113,11 @@ export interface PainReportGroup {
   report_group: string;
   reported_at: string;
   source: 'questionnaire' | 'spontane';
-  max_intensity: 1 | 2 | 3;
+  max_intensity: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
   note: string | null;
   onset: 'aigu' | 'chronique' | null;
   training_id: string | null;
+  match_id: string | null;
   zones: PainReportZone[];
 }
 
@@ -190,6 +198,14 @@ export interface RatingWeightsResult extends RatingWeights {
   is_custom: boolean; // true si le club a une échelle personnalisée (sinon défauts)
 }
 
+// Volet C : note staff /10 par joueur et par match, saisie manuelle coach.
+// Strictement staff-only (table dédiée + RLS, jamais exposée au joueur).
+export interface MatchPlayerCoachNote {
+  match_id: string;
+  player_id: string;
+  note: number; // [0.5 ; 10.0], par pas de 0.5
+}
+
 // Échelle par défaut (miroir des DEFAULT de la table match_rating_weights).
 export const DEFAULT_RATING_WEIGHTS: RatingWeights = {
   w_goal: 0.8,
@@ -209,6 +225,7 @@ export const DEFAULT_RATING_WEIGHTS: RatingWeights = {
 export interface PlayerInMatch {
   id: string;
   goals?: number;
+  assists?: number;
   yellow_cards?: number;
   red_cards?: number;
   [key: string]: any;
@@ -227,6 +244,7 @@ export interface MatchFormData {
       id: string;
       present: boolean;
       goals: number;
+      assists: number;
       yellow_cards: number;
       red_cards: number;
     };
@@ -308,15 +326,32 @@ export interface TrainingStats {
 }
 
 // ==================== ÉVÉNEMENTS DE MATCH ====================
+export type MatchEventType =
+  | 'goal'
+  | 'shot'
+  | 'shot_on_target'
+  | 'recovery'
+  | 'yellow_card'
+  | 'red_card'
+  | 'assist'
+  | 'ball_loss'
+  | 'opponent_goal'
+  | 'opponent_shot'
+  | 'opponent_shot_on_target'
+  | 'substitution';
+
+export type GoalType = 'offensive' | 'transition' | 'cpa' | 'superiority';
+
 export interface MatchEvent {
   id: string;
   match_id: string;
-  event_type: string;
+  event_type: MatchEventType;
   match_time_seconds: number;
   half: number;
   player_id?: string | null;
   players_on_field?: string[];
   event_location?: string;
+  goal_type?: GoalType | null;
   team_id?: string; // Le club est hérité via match_id -> matches.team_id -> teams.club_id
   created_at?: string;
 }
@@ -422,15 +457,20 @@ export interface MatchTrackerData {
 }
 
 // ==================== CONTENU PARTAGÉ ====================
-export type SharedContentType = 'youtube' | 'link';
+export type SharedContentType = 'youtube' | 'link' | 'file';
 
 export interface SharedContent {
   id: string;
-  team_id: string;
+  club_id: string;
+  /** null = partagé à toutes les équipes du club (réservé aux admins) */
+  team_id: string | null;
   title: string;
   description?: string | null;
   content_type: SharedContentType;
-  url: string;
+  url: string | null;
+  file_path?: string | null;
+  file_size_bytes?: number | null;
+  file_mime_type?: string | null;
   folder_id?: string | null;
   created_by?: string | null;
   created_at: string;
@@ -438,7 +478,9 @@ export interface SharedContent {
 
 export interface SharedFolder {
   id: string;
-  team_id: string;
+  club_id: string;
+  /** null = dossier au niveau du club, visible par toutes les équipes */
+  team_id: string | null;
   name: string;
   parent_id: string | null;
   created_by?: string | null;

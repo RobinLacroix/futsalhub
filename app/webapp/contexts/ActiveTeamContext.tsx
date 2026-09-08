@@ -61,9 +61,27 @@ export function ActiveTeamProvider({ children }: { children: React.ReactNode }) 
     const savedTeamId = localStorage.getItem('activeTeamId');
     if (savedTeamId && teams.some((t) => t.id === savedTeamId)) {
       setActiveTeamId(savedTeamId);
-    } else if (teams.length > 0) {
-      setActiveTeamId(teams[0].id);
+      return;
     }
+    if (teams.length === 0) return;
+
+    // Rien de mémorisé localement : équipe par défaut choisie par l'admin dans les
+    // paramètres (get_my_default_team_id), sinon la première équipe (comportement
+    // historique). Non persisté ici — un choix explicite de l'utilisateur (changeActiveTeam)
+    // reste seul à écrire dans localStorage, cf. commentaire de ce fichier.
+    let cancelled = false;
+    (async () => {
+      let fallbackId = teams[0].id;
+      try {
+        const { data } = await supabase.rpc('get_my_default_team_id');
+        const defaultId = data as string | null;
+        if (defaultId && teams.some((t) => t.id === defaultId)) fallbackId = defaultId;
+      } catch {
+        // ignore : garde le repli historique (première équipe)
+      }
+      if (!cancelled) setActiveTeamId(fallbackId);
+    })();
+    return () => { cancelled = true; };
   }, [teams]);
 
   const changeActiveTeam = useCallback((teamId: string) => {

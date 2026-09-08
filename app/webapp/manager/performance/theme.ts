@@ -46,8 +46,15 @@ export const TONE_COLORS: Record<AvailabilityTone, { fg: string; bg: string; bor
  * coloré en sémantique, et pousse le joueur à sous-déclarer pour éviter le
  * rouge — ce qui détruit la donnée qu'on essaie justement de récolter.
  */
-export const INTENSITY_RAMP: Record<1 | 2 | 3, string> = {
-  1: '#C7D2FE',
-  2: '#818CF8',
-  3: '#4F46E5',
+export const INTENSITY_RAMP: Record<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10, string> = {
+  1: '#E0E7FF',
+  2: '#C7D2FE',
+  3: '#A5B4FC',
+  4: '#818CF8',
+  5: '#6366F1',
+  6: '#4F46E5',
+  7: '#4338CA',
+  8: '#3730A3',
+  9: '#312E81',
+  10: '#1E1B4B',
 };

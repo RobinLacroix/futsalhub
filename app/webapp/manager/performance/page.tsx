@@ -24,12 +24,20 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, Pencil, Users } from 'lucide-react';
-import { availabilityService, playersService, trainingLoadService, defaultLoadWindow } from '@/lib/services';
+import { Dumbbell, HeartPulse, Loader2, Pencil, Timer, TrendingUp, Users } from 'lucide-react';
+import {
+  availabilityService,
+  physicalTestsService,
+  playersService,
+  trainingLoadService,
+  defaultLoadWindow,
+} from '@/lib/services';
 import { getClubPainReports } from '@/lib/services/painReportsService';
 import { buildWeeklyLoads, type MatrixRow, type WeeklyLoad } from '@/lib/trainingLoad';
+import type { PhysicalTestResult, PhysicalTestSession, PhysicalTestType } from '@/lib/physicalTests';
 import { useUserClub } from '../../hooks/useUserClub';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
+import { useActiveSeasonContext } from '../../contexts/ActiveSeasonContext';
 import { zoneLabel } from '@/lib/painMap';
 import {
   AVAILABILITY_META,
@@ -39,6 +47,7 @@ import {
   groupOf,
   infirmary,
   PAIN_SIGNAL_DEFAULTS,
+  recurrenceCount,
   resolveRoster,
   returnLabel,
   sinceLabel,
@@ -54,22 +63,29 @@ import LoadPanel from './components/LoadPanel';
 import LoadMatrixPanel from './components/LoadMatrixPanel';
 import PainSignalsPanel from './components/PainSignalsPanel';
 import PainReportsPanel from './components/PainReportsPanel';
+import TestOverviewPanel from './components/TestOverviewPanel';
 import { T, TONE_COLORS } from './theme';
 
 /** Charge : vue d'équipe (agrégée) ou d'un joueur (son RPE, pas une moyenne). */
 type LoadScope = 'equipe' | 'joueur';
 
-type PerformanceTab = 'infirmerie' | 'charge';
+type PerformanceTab = 'infirmerie' | 'charge' | 'tests';
 
-const TABS: { id: PerformanceTab; label: string }[] = [
-  { id: 'infirmerie', label: 'Infirmerie' },
-  { id: 'charge', label: "Charge d'entraînement" },
+/** Même style que les onglets de la page Analyse (`analytics/page.tsx`) : icône + libellé, soulignement fin. */
+const TABS: { id: PerformanceTab; label: string; icon: typeof HeartPulse }[] = [
+  { id: 'infirmerie', label: 'Infirmerie', icon: HeartPulse },
+  { id: 'charge', label: "Charge d'entraînement", icon: Dumbbell },
+  { id: 'tests', label: 'Tests physiques', icon: Timer },
 ];
+
+/** Ordre tactique, cf. `mobile/components/players/positions.ts` — même catalogue, pas de fichier partagé côté web. */
+const POSITION_OPTIONS = ['Gardien', 'Meneur', 'Ailier', 'Pivot'] as const;
 
 export default function PerformancePage() {
   const router = useRouter();
   const { club, loading: clubLoading } = useUserClub();
   const { activeTeamId, activeTeam } = useActiveTeam();
+  const { activeSeason, clubSeason } = useActiveSeasonContext();
 
   const [players, setPlayers] = useState<Player[]>([]);
   const [rows, setRows] = useState<AvailabilityRow[]>([]);
@@ -83,6 +99,11 @@ export default function PerformancePage() {
   const [editing, setEditing] = useState<ResolvedPlayer | null>(null);
   const [tab, setTab] = useState<PerformanceTab>('infirmerie');
 
+  // Filtre par poste : demandé par le préparateur physique pour sortir les
+  // gardiens (poste à part) de la moyenne RPE/tests. Vide = tous les postes.
+  // S'applique à « Charge » et « Tests » uniquement — sans objet en Infirmerie.
+  const [positionFilter, setPositionFilter] = useState<string[]>([]);
+
   // Charge : équipe (agrégée, `weeks`/`sessions` ci-dessus) ou un joueur — même
   // moteur de calcul (`buildWeeklyLoads`), deux sources de données (voir
   // `lib/trainingLoad.ts`, TrainingLoadRow).
@@ -91,6 +112,15 @@ export default function PerformancePage() {
   const [playerWeeks, setPlayerWeeks] = useState<WeeklyLoad[]>([]);
   const [loadingPlayerLoad, setLoadingPlayerLoad] = useState(false);
   const [matrixRows, setMatrixRows] = useState<MatrixRow[]>([]);
+  // Récidive : nombre d'épisodes passés sur la même zone/côté, par joueur en infirmerie.
+  const [recurrence, setRecurrence] = useState<Record<string, number>>({});
+
+  // Tests physiques : catalogue + campagnes + résultats retenus de la saison
+  // affichée. `TestOverviewPanel` fait tout l'assemblage, cette page ne fait
+  // que charger les trois briques brutes.
+  const [testTypes, setTestTypes] = useState<PhysicalTestType[]>([]);
+  const [testSessions, setTestSessions] = useState<PhysicalTestSession[]>([]);
+  const [testResults, setTestResults] = useState<PhysicalTestResult[]>([]);
 
   const loadAvailability = useCallback(async () => {
     if (!club) return;
@@ -135,7 +165,12 @@ export default function PerformancePage() {
     // Pas `window` comme nom : il masquerait l'objet global dans cette portée.
     const range = defaultLoadWindow(12);
     trainingLoadService
-      .getTrainingLoad(club.id, { teamId: activeTeamId || null, from: range.from, to: range.to })
+      .getTrainingLoad(club.id, {
+        teamId: activeTeamId || null,
+        from: range.from,
+        to: range.to,
+        positions: positionFilter.length ? positionFilter : null,
+      })
       .then((rows) => {
         if (cancelled) return;
         setWeeks(buildWeeklyLoads(rows));
@@ -146,7 +181,7 @@ export default function PerformancePage() {
     return () => {
       cancelled = true;
     };
-  }, [club, activeTeamId]);
+  }, [club, activeTeamId, positionFilter]);
 
   // Matrice par joueur : exige une équipe (la RPC scope sur l'effectif d'une
   // équipe précise, pas sur le club entier). Pas de RPC tant qu'aucune équipe
@@ -169,6 +204,46 @@ export default function PerformancePage() {
       cancelled = true;
     };
   }, [club, activeTeamId]);
+
+  // Tests physiques : catalogue puis campagnes de la saison affichée puis
+  // leurs résultats retenus — trois allers-retours séquentiels parce que le
+  // deuxième et le troisième dépendent du premier, jamais en parallèle à
+  // l'aveugle.
+  useEffect(() => {
+    if (!club) {
+      setTestTypes([]);
+      setTestSessions([]);
+      setTestResults([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const types = await physicalTestsService.getTestTypes(club.id);
+        const sessions = await physicalTestsService.getSessions(club.id, {
+          teamId: activeTeamId || null,
+          season: activeSeason,
+        });
+        const results = await physicalTestsService.getSquadRetainedResults(
+          sessions.map((s) => s.id),
+          types.map((t) => t.id),
+        );
+        if (cancelled) return;
+        setTestTypes(types);
+        setTestSessions(sessions);
+        setTestResults(results);
+      } catch {
+        if (!cancelled) {
+          setTestTypes([]);
+          setTestSessions([]);
+          setTestResults([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [club, activeTeamId, activeSeason]);
 
   // Charge individuelle : ne se charge que si l'onglet Joueur est actif et
   // qu'un joueur est choisi — pas de RPC à chaque ouverture de la page.
@@ -200,7 +275,7 @@ export default function PerformancePage() {
     if (!club) return;
     let cancelled = false;
     availabilityService
-      .getPainSignals(club.id, windowDays, minReports)
+      .getPainSignals(club.id, windowDays, minReports, activeTeamId || null)
       .then((data) => {
         if (!cancelled) setSignals(data);
       })
@@ -210,7 +285,7 @@ export default function PerformancePage() {
     return () => {
       cancelled = true;
     };
-  }, [club, windowDays, minReports]);
+  }, [club, windowDays, minReports, activeTeamId]);
 
   // Les déclarations brutes se rechargent avec le club et l'équipe active,
   // comme l'effectif — mais pas avec le seuil des signaux : ce n'est pas un
@@ -248,11 +323,67 @@ export default function PerformancePage() {
   const statusCounts = useMemo(() => countByStatus(resolved), [resolved]);
   const outList = useMemo(() => infirmary(resolved), [resolved]);
 
+  // Récidive : un épisode isolé n'a rien à signaler, un 2e sur la même zone en
+  // a. Une RPC par joueur en infirmerie avec zone renseignée — l'infirmerie
+  // compte des unités, jamais des dizaines, l'appel N+1 est sans conséquence.
+  useEffect(() => {
+    const withZone = outList.filter((entry) => entry.row?.zone);
+    if (withZone.length === 0) {
+      setRecurrence({});
+      return;
+    }
+    let cancelled = false;
+    const from = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    Promise.all(
+      withZone.map((entry) =>
+        availabilityService
+          .getPlayerAvailabilityHistory(entry.player.id, from)
+          .then(
+            (history) =>
+              [entry.player.id, recurrenceCount(history, entry.row!.zone!, entry.row!.side ?? 'C')] as const,
+          )
+          .catch(() => [entry.player.id, 0] as const),
+      ),
+    ).then((pairs) => {
+      if (!cancelled) setRecurrence(Object.fromEntries(pairs));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [outList]);
+
   const groupCounts = useMemo(() => {
     const counts: Record<string, number> = { apte: 0, reprise: 0, absent: 0 };
     for (const entry of resolved) counts[groupOf(entry.status)] += 1;
     return counts;
   }, [resolved]);
+
+  // Joueurs retenus par le filtre de poste. `null` = aucun filtre actif (tous
+  // les joueurs), distinct d'un Set vide (aucun joueur, poste sans effectif).
+  const filteredPlayerIds = useMemo(() => {
+    if (positionFilter.length === 0) return null;
+    return new Set(players.filter((p) => positionFilter.includes(p.position)).map((p) => p.id));
+  }, [players, positionFilter]);
+
+  // Matrice de charge : `LoadMatrixPanel` recalcule sa propre moyenne équipe à
+  // partir des lignes reçues, donc filtrer l'entrée suffit — aucun changement
+  // dans le composant.
+  const filteredMatrixRows = useMemo(
+    () => (filteredPlayerIds ? matrixRows.filter((r) => filteredPlayerIds.has(r.player_id)) : matrixRows),
+    [matrixRows, filteredPlayerIds],
+  );
+
+  // Tests physiques : `TestOverviewPanel` construit sa moyenne équipe à partir
+  // de `results` (pas de `players`), donc les deux doivent être filtrés pour
+  // rester cohérents — lignes affichées ET moyenne du pied de tableau.
+  const filteredTestResults = useMemo(
+    () => (filteredPlayerIds ? testResults.filter((r) => filteredPlayerIds.has(r.player_id)) : testResults),
+    [testResults, filteredPlayerIds],
+  );
+  const filteredTestPlayers = useMemo(
+    () => (filteredPlayerIds ? players.filter((p) => filteredPlayerIds.has(p.id)) : players),
+    [players, filteredPlayerIds],
+  );
 
   if (clubLoading || loading) {
     return (
@@ -300,9 +431,10 @@ export default function PerformancePage() {
       )}
 
       {/* ── Onglets ─────────────────────────────────────────────────────── */}
-      <div className="mb-6 flex gap-1 border-b" style={{ borderColor: T.border }}>
+      <div className="mb-6" style={{ display: 'flex', gap: 6, borderBottom: `1px solid ${T.border}` }}>
         {TABS.map((t) => {
           const active = tab === t.id;
+          const Icon = t.icon;
           return (
             <button
               key={t.id}
@@ -310,12 +442,22 @@ export default function PerformancePage() {
               onClick={() => setTab(t.id)}
               aria-selected={active}
               role="tab"
-              className="border-b-2 px-4 py-2 text-sm font-medium"
               style={{
-                borderColor: active ? T.accent : 'transparent',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '8px 14px',
+                fontSize: 13,
+                fontWeight: 600,
+                border: 'none',
+                borderBottom: `2px solid ${active ? T.accent : 'transparent'}`,
+                backgroundColor: 'transparent',
                 color: active ? T.accent : T.textMuted,
+                cursor: 'pointer',
+                marginBottom: -1,
               }}
             >
+              <Icon size={14} />
               {t.label}
             </button>
           );
@@ -405,12 +547,31 @@ export default function PerformancePage() {
                           {' · '}
                           {returnLabel(row)}
                         </p>
+                        {row.zone && recurrence[entry.player.id] >= 2 && (
+                          <p className="truncate text-xs font-medium" style={{ color: TONE_COLORS.warning.fg }}>
+                            {recurrence[entry.player.id]}ᵉ épisode {zoneLabel(row.zone).toLowerCase()}
+                            {row.side && row.side !== 'C' ? ` ${SIDE_LABELS[row.side]}` : ''} en 12 mois
+                          </p>
+                        )}
                         {row.note && (
                           <p className="truncate text-xs italic" style={{ color: T.textMuted }}>
                             {row.note}
                           </p>
                         )}
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTab('charge');
+                          setLoadScope('joueur');
+                          setLoadPlayerId(entry.player.id);
+                        }}
+                        className="flex shrink-0 items-center gap-1 rounded-md border px-3 py-1.5 text-sm"
+                        style={{ borderColor: T.border, color: T.text }}
+                      >
+                        <TrendingUp className="h-3.5 w-3.5" />
+                        Sa charge
+                      </button>
                       <button
                         type="button"
                         onClick={() => setEditing(entry)}
@@ -496,6 +657,47 @@ export default function PerformancePage() {
         </>
       )}
 
+      {(tab === 'charge' || tab === 'tests') && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium" style={{ color: T.textMuted }}>
+            Postes
+          </span>
+          {POSITION_OPTIONS.map((position) => {
+            const active = positionFilter.includes(position);
+            return (
+              <button
+                key={position}
+                type="button"
+                onClick={() =>
+                  setPositionFilter((prev) =>
+                    prev.includes(position) ? prev.filter((p) => p !== position) : [...prev, position],
+                  )
+                }
+                aria-pressed={active}
+                className="rounded-full border px-3 py-1 text-sm font-medium"
+                style={{
+                  borderColor: active ? T.accent : T.border,
+                  backgroundColor: active ? T.accent : 'transparent',
+                  color: active ? '#fff' : T.text,
+                }}
+              >
+                {position}
+              </button>
+            );
+          })}
+          {positionFilter.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setPositionFilter([])}
+              className="text-xs font-medium underline"
+              style={{ color: T.textMuted }}
+            >
+              Réinitialiser
+            </button>
+          )}
+        </div>
+      )}
+
       {tab === 'charge' && (
         <>
           {/* ── Équipe / joueur ─────────────────────────────────────────── */}
@@ -540,7 +742,13 @@ export default function PerformancePage() {
               <div className="mb-4">
                 <LoadPanel weeks={weeks} />
               </div>
-              <LoadMatrixPanel rows={matrixRows} />
+              <LoadMatrixPanel
+                rows={filteredMatrixRows}
+                onSelectPlayer={(playerId) => {
+                  setLoadScope('joueur');
+                  setLoadPlayerId(playerId);
+                }}
+              />
             </>
           ) : !loadPlayerId ? (
             <p className="py-6 text-center text-sm" style={{ color: T.textMuted }}>
@@ -557,6 +765,28 @@ export default function PerformancePage() {
             </>
           )}
         </>
+      )}
+
+      {tab === 'tests' && (
+        <TestOverviewPanel
+          clubId={club.id}
+          teamId={activeTeamId || null}
+          clubSeason={clubSeason}
+          types={testTypes}
+          sessions={testSessions}
+          results={filteredTestResults}
+          players={filteredTestPlayers.map((p) => ({
+            id: p.id,
+            first_name: p.first_name,
+            last_name: p.last_name,
+            number: p.number ?? null,
+          }))}
+          onCreated={(session) => {
+            setTestSessions((prev) => [session, ...prev]);
+            router.push(`/webapp/manager/tests/${session.id}`);
+          }}
+          onOpenSession={(sessionId) => router.push(`/webapp/manager/tests/${sessionId}`)}
+        />
       )}
 
       {editing && (

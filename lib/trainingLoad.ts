@@ -309,6 +309,82 @@ export function buildWeeklyLoads(rows: TrainingLoadRow[]): WeeklyLoad[] {
   return weeks;
 }
 
+// ─── Séances (graphique par séance) ──────────────────────────────────────────
+//
+// La monotonie et la contrainte n'ont de sens qu'à l'échelle de la semaine
+// (voir l'en-tête), mais la charge de Foster elle-même est une mesure PAR
+// séance. `buildSessionLoads` l'expose telle quelle, une entrée par séance,
+// pour l'histogramme qui veut lire séance par séance plutôt que semaine par
+// semaine — sans dupliquer `sessionLoad`/`responseRate` ci-dessus.
+
+export interface SessionLoadPoint {
+  training_id: string;
+  session_date: string;
+  theme: string | null;
+  /** Charge de Foster de la séance. `null` si RPE ou durée manquants. */
+  load: number | null;
+  responseRate: number | null;
+  /** Bande de charge visée de CETTE séance (`target_rpe × durée`), `null` si pas de cible. */
+  targetLoadMin: number | null;
+  targetLoadMax: number | null;
+  /** Charge > 1,5 × moyenne des `PEAK_BASELINE_SESSIONS` séances précédentes exploitables. */
+  isPeak: boolean;
+}
+
+/** Nombre de séances antérieures utilisées pour détecter un pic, à l'échelle séance. */
+export const PEAK_BASELINE_SESSIONS = 4;
+
+/**
+ * Une entrée par séance, triée chronologiquement. Contrairement à
+ * `buildWeeklyLoads`, aucun regroupement : chaque ligne d'entrée est une
+ * séance, donc chaque séance donne un point.
+ */
+export function buildSessionLoads(rows: TrainingLoadRow[]): SessionLoadPoint[] {
+  const sorted = [...rows].sort(
+    (a, b) => a.session_date.localeCompare(b.session_date) || a.training_id.localeCompare(b.training_id),
+  );
+
+  const points: SessionLoadPoint[] = sorted.map((row) => ({
+    training_id: row.training_id,
+    session_date: row.session_date,
+    theme: row.theme,
+    load: sessionLoad(row),
+    responseRate: responseRate(row),
+    targetLoadMin:
+      row.target_rpe_min !== null && row.session_duration !== null
+        ? row.target_rpe_min * row.session_duration
+        : null,
+    targetLoadMax:
+      row.target_rpe_max !== null && row.session_duration !== null
+        ? row.target_rpe_max * row.session_duration
+        : null,
+    isPeak: false,
+  }));
+
+  // Même logique que le pic hebdomadaire : la référence ne compte que les
+  // séances précédentes EXPLOITABLES, pour qu'une séance sans questionnaire ne
+  // fabrique pas un pic en abaissant artificiellement la moyenne.
+  points.forEach((point, index) => {
+    if (point.load === null) return;
+    const baseline = points
+      .slice(0, index)
+      .map((p) => p.load)
+      .filter((v): v is number => v !== null)
+      .slice(-PEAK_BASELINE_SESSIONS);
+    if (baseline.length < 2) return;
+    const mean = baseline.reduce((sum, v) => sum + v, 0) / baseline.length;
+    point.isPeak = mean > 0 && point.load > PEAK_FACTOR * mean;
+  });
+
+  return points;
+}
+
+/** Libellé court d'une séance : « 11 août ». */
+export function sessionLabel(sessionDate: string): string {
+  const date = new Date(`${sessionDate}T00:00:00`);
+  return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+}
+
 // ─── Lecture ─────────────────────────────────────────────────────────────────
 
 /**
@@ -399,6 +475,24 @@ export function rpeBand(value: number): RpeBand {
   if (value <= 6) return 'modere';
   if (value <= 8) return 'soutenu';
   return 'eleve';
+}
+
+/**
+ * Lecture absolue du RPE, celle-ci JUGE (rouge au sommet) — contrairement à
+ * `RPE_BAND_RAMP` ci-dessus, volontairement neutre. Réservée aux écrans
+ * STAFF (`has_club_medical_access`), jamais vus par le joueur qui répond :
+ * même raisonnement d'audience que `RPE_DELTA_RAMP` plus bas. Seuils repris
+ * de la heatmap déjà en prod sur le tableau de bord équipe
+ * (`TeamDashboardView.tsx`, `metricColor`), pour rester cohérent d'un écran
+ * à l'autre plutôt que d'inventer une troisième échelle.
+ */
+export type RpeAbsoluteBand = 'faible' | 'optimal' | 'eleve' | 'surmenage';
+
+export function rpeAbsoluteBand(value: number): RpeAbsoluteBand {
+  if (value < 4) return 'faible';
+  if (value <= 7) return 'optimal';
+  if (value <= 8.5) return 'eleve';
+  return 'surmenage';
 }
 
 /** Zone à 3 niveaux pour les métriques de jugement (forme, plaisir, auto-éval). */

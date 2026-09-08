@@ -9,6 +9,15 @@ export interface Player {
   isOnField: boolean;
   totalTime: number;
   currentSequenceTime: number;
+  /**
+   * Temps passé sur le banc depuis la dernière sortie (ou depuis le coup
+   * d'envoi pour qui n'est pas encore entré). Miroir de
+   * mobile/components/recorder/recorderModel.ts (PlayerState.benchTime) :
+   * ne court que chrono lancé, et n'est PAS remis à zéro à la mi-temps
+   * (contrairement à `currentSequenceTime`) — la pause coupe l'effort, elle
+   * n'efface pas l'information qu'un joueur n'a pas joué la période.
+   */
+  benchTime?: number;
   sequenceTimeLimit: number;
   yellowCards: number;
   redCards: number;

@@ -15,13 +15,14 @@ import type { TrainingLoadRow, MatrixRow } from '../trainingLoad';
 export const trainingLoadService = {
   async getTrainingLoad(
     clubId: string,
-    options: { teamId?: string | null; from?: string | null; to?: string | null } = {},
+    options: { teamId?: string | null; from?: string | null; to?: string | null; positions?: string[] | null } = {},
   ): Promise<TrainingLoadRow[]> {
     const { data, error } = await supabase.rpc('get_training_load', {
       p_club_id: clubId,
       p_team_id: options.teamId ?? null,
       p_from: options.from ?? null,
       p_to: options.to ?? null,
+      p_positions: options.positions?.length ? options.positions : null,
     });
     if (error) throw error;
     return (data || []) as TrainingLoadRow[];

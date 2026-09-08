@@ -7,7 +7,6 @@ import {
   zoneById,
   PAIN_VIEWBOX,
   INTENSITY_COLORS,
-  INTENSITY_LABELS,
   BODY_STROKE,
   BODY_FILL,
   type PainMode,
@@ -37,12 +36,7 @@ const T = {
   navy: '#1a2744',
 };
 
-// 1 clic → 1, 2 clics → 2, 3 clics → 3, 4e clic → désélection
-function cycle(current: PainIntensity | undefined): PainIntensity | 0 {
-  if (!current) return 1;
-  if (current === 3) return 0;
-  return (current + 1) as PainIntensity;
-}
+const INTENSITY_VALUES: PainIntensity[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 function ShapePath({
   def, fill, stroke, strokeWidth, onClick, interactive,
@@ -87,15 +81,27 @@ export default function BodyMap({ value, onChange, maxHeight = 360, singleSelect
   const zones = zonesFor(view, mode);
   const selectedIds = Object.keys(value);
 
+  // Un clic sélectionne/désélectionne la zone (intensité par défaut 5/10,
+  // ajustable ensuite via le sélecteur 1-10). Remplace l'ancien cycle de clics
+  // (plafonné à 3) : le kiné veut un chiffre choisi explicitement.
   const toggle = (id: string) => {
     if (singleSelect) {
       onChange(value[id] ? {} : { [id]: 1 });
       return;
     }
-    const next = cycle(value[id]);
     const copy = { ...value };
-    if (next === 0) delete copy[id];
-    else copy[id] = next;
+    if (copy[id]) delete copy[id];
+    else copy[id] = 5;
+    onChange(copy);
+  };
+
+  const setIntensity = (id: string, intensity: PainIntensity) => {
+    onChange({ ...value, [id]: intensity });
+  };
+
+  const removeZone = (id: string) => {
+    const copy = { ...value };
+    delete copy[id];
     onChange(copy);
   };
 
@@ -127,15 +133,10 @@ export default function BodyMap({ value, onChange, maxHeight = 360, singleSelect
         </svg>
       </div>
 
-      {/* Légende intensité — sans objet en sélection unique (pas de gravité à indiquer) */}
+      {/* Consigne — sans objet en sélection unique (pas de gravité à indiquer) */}
       {!singleSelect && (
-        <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 10 }}>
-          {([1, 2, 3] as PainIntensity[]).map(i => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ width: 12, height: 12, borderRadius: 3, background: INTENSITY_COLORS[i], display: 'inline-block' }} />
-              <span style={{ fontSize: 10, color: T.textMuted }}>{INTENSITY_LABELS[i]}</span>
-            </div>
-          ))}
+        <div style={{ textAlign: 'center', marginTop: 10, fontSize: 11, color: T.textMuted }}>
+          Cliquez une zone, puis choisissez son intensité de 1 à 10.
         </div>
       )}
 
@@ -154,16 +155,45 @@ export default function BodyMap({ value, onChange, maxHeight = 360, singleSelect
       </div>
 
       {selectedIds.length > 0 && (
-        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {selectedIds.map(id => {
             const intensity = value[id];
             const label = zoneById(id)?.label ?? id;
             const color = singleSelect ? SINGLE_SELECT_COLOR : INTENSITY_COLORS[intensity];
             return (
-              <span key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: `${color}1a`, border: `1px solid ${color}`, color, borderRadius: 999, padding: '4px 10px', fontSize: 12, fontWeight: 700 }}>
-                {label}
-                <button type="button" onClick={() => toggle(id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color, padding: 0, lineHeight: 1, fontSize: 13 }} aria-label={`Retirer ${label}`}>×</button>
-              </span>
+              <div key={id} style={{ border: `1px solid ${color}`, borderRadius: 12, padding: 10, background: T.cardBg2 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ color, fontWeight: 700, fontSize: 13 }}>{label}</span>
+                  <button type="button" onClick={() => removeZone(id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.textMuted, fontSize: 12, fontWeight: 600 }}>
+                    Retirer
+                  </button>
+                </div>
+                {!singleSelect && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                    {INTENSITY_VALUES.map(n => {
+                      const active = intensity === n;
+                      const cellColor = INTENSITY_COLORS[n];
+                      return (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => setIntensity(id, n)}
+                          aria-label={`Intensité ${n} sur 10 pour ${label}`}
+                          style={{
+                            width: 30, height: 30, borderRadius: 8, cursor: 'pointer',
+                            border: `1.5px solid ${active ? cellColor : T.border}`,
+                            background: active ? cellColor : '#fff',
+                            color: active ? '#fff' : T.textMuted,
+                            fontSize: 13, fontWeight: 700,
+                          }}
+                        >
+                          {n}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>

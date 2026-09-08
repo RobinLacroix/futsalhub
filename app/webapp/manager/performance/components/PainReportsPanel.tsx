@@ -23,10 +23,11 @@ interface PainReportsPanelProps {
   onOpenPlayer: (playerId: string) => void;
 }
 
-const SOURCE_LABELS: Record<'questionnaire' | 'spontane', string> = {
-  questionnaire: 'Fin de séance',
-  spontane: 'Spontané',
-};
+/** 'questionnaire' recouvre fin de séance ET fin de match : `match_id` tranche. */
+function sourceLabel(report: { source: 'questionnaire' | 'spontane'; match_id: string | null }): string {
+  if (report.source !== 'questionnaire') return 'Spontané';
+  return report.match_id ? 'Fin de match' : 'Fin de séance';
+}
 
 const ONSET_LABELS: Record<'aigu' | 'chronique', string> = {
   aigu: 'Récent / aigu',
@@ -83,7 +84,7 @@ export default function PainReportsPanel({ reports, onOpenPlayer }: PainReportsP
                       .join(', ')}
                   </p>
                   <p className="mt-0.5 truncate text-xs" style={{ color: T.textMuted }}>
-                    {SOURCE_LABELS[report.source]} · {fmtDateTime(report.reported_at)}
+                    {sourceLabel(report)} · {fmtDateTime(report.reported_at)}
                     {report.onset ? ` · ${ONSET_LABELS[report.onset]}` : ''}
                   </p>
                   {report.note && (
@@ -97,7 +98,7 @@ export default function PainReportsPanel({ reports, onOpenPlayer }: PainReportsP
                   style={{ backgroundColor: INTENSITY_RAMP[report.max_intensity] }}
                   title="Intensité maximale déclarée dans cette soumission. C'est une mesure, pas une note."
                 >
-                  {report.max_intensity} / 3
+                  {report.max_intensity} / 10
                 </span>
               </button>
             </li>

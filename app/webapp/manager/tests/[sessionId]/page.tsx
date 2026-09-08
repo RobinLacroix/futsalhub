@@ -9,11 +9,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import { ArrowLeft, Check, ClipboardPaste, CloudOff, Loader2 } from 'lucide-react';
+import { useParams, useRouter } from 'next/navigation';
+import { ArrowLeft, Check, ClipboardPaste, CloudOff, Download, Loader2, Trash2 } from 'lucide-react';
 import { useTestCapture, type GridColumn } from '../hooks/useTestCapture';
 import TestGrid, { UnreadableBanner } from '../components/TestGrid';
+import { physicalTestsService } from '@/lib/services';
 import { CATEGORY_LABELS } from '@/lib/physicalTests';
+import { exportSessionResults } from '@/lib/physicalTestsExport';
 
 const fmtDate = (iso: string) =>
   new Date(iso).toLocaleDateString('fr-FR', {
@@ -25,7 +27,26 @@ const fmtDate = (iso: string) =>
 
 export default function PhysicalTestSessionPage() {
   const params = useParams<{ sessionId: string }>();
+  const router = useRouter();
   const sessionId = params?.sessionId ?? '';
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = useCallback(async () => {
+    if (
+      !confirm(
+        'Supprimer cette campagne ? Tous les résultats saisis seront perdus, définitivement.',
+      )
+    )
+      return;
+    setDeleting(true);
+    try {
+      await physicalTestsService.deleteSession(sessionId);
+      router.push('/webapp/manager/tests');
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Suppression impossible.');
+      setDeleting(false);
+    }
+  }, [sessionId, router]);
 
   const {
     session,
@@ -118,7 +139,28 @@ export default function PhysicalTestSessionPage() {
             {session.conditions ? ` · ${session.conditions}` : ''}
           </p>
         </div>
-        <SaveIndicator state={saveState} />
+        <div className="flex items-center gap-3">
+          <SaveIndicator state={saveState} />
+          <button
+            type="button"
+            onClick={() => exportSessionResults(session, players, selectedTypes, entries, retainedFor)}
+            disabled={selectedTypes.length === 0 || players.length === 0}
+            className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            title="Exporter les tests affichés en Excel"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Exporter
+          </button>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={deleting}
+            className="flex items-center gap-1.5 rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Supprimer
+          </button>
+        </div>
       </div>
 
       {/* ── Colonnes affichées ─────────────────────────────────────────── */}

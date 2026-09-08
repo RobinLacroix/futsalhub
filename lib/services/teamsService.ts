@@ -78,7 +78,20 @@ export const teamsService = {
       .eq('id', teamId);
 
     if (error) throw error;
-  }
+  },
+
+  /** Équipe de landing par défaut de l'admin connecté (null = comportement automatique). */
+  async getMyDefaultTeamId(): Promise<string | null> {
+    const { data, error } = await supabase.rpc('get_my_default_team_id');
+    if (error) throw error;
+    return (data as string | null) ?? null;
+  },
+
+  /** Enregistre (ou efface avec null) l'équipe de landing par défaut de l'admin connecté. */
+  async setMyDefaultTeamId(teamId: string | null): Promise<void> {
+    const { error } = await supabase.rpc('set_my_default_team_id', { p_team_id: teamId });
+    if (error) throw error;
+  },
 };
 
 

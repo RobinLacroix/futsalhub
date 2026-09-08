@@ -56,7 +56,9 @@ export async function sendQuestionnairesForTraining(trainingId: string): Promise
  * Utilise l'RPC qui peut être appelée sans auth.
  */
 export async function getFeedbackSessionByToken(token: string): Promise<{
-  training_id: string;
+  kind: 'training' | 'match';
+  training_id?: string;
+  match_id?: string;
   player_id: string;
   training_date: string;
   theme: string | null;
@@ -73,7 +75,9 @@ export async function getFeedbackSessionByToken(token: string): Promise<{
   if (data == null) return null;
   if (typeof data === 'object' && 'error' in data) return data as { error: string };
   return data as {
-    training_id: string;
+    kind: 'training' | 'match';
+    training_id?: string;
+    match_id?: string;
     player_id: string;
     training_date: string;
     theme: string | null;
@@ -134,8 +138,9 @@ export async function getFeedbackLinksForTraining(
   }));
 }
 
-export interface PlayerTrainingFeedbackRow {
+export interface TeamFeedbackRow {
   training_id: string;
+  player_id: string;
   date: string;
   auto_evaluation: number | null;
   rpe: number | null;
@@ -144,26 +149,83 @@ export interface PlayerTrainingFeedbackRow {
 }
 
 /**
- * Récupère l'historique des feedbacks d'entraînement pour un joueur (pour le graphique évolutif).
+ * Feedbacks de TOUS les joueurs pour les N dernières séances d'une équipe
+ * (miroir de mobile/lib/services/feedback.ts::getTeamFeedbackForLastSessions).
+ * Utilisé par le Dashboard pour la forme physique récente par joueur.
+ */
+export async function getTeamFeedbackForLastSessions(
+  teamId: string,
+  sessionCount = 5
+): Promise<TeamFeedbackRow[]> {
+  const { data: trainings, error: tErr } = await supabase
+    .from('trainings')
+    .select('id, date')
+    .eq('team_id', teamId)
+    .order('date', { ascending: false })
+    .limit(sessionCount);
+
+  if (tErr || !trainings?.length) return [];
+
+  const trainingIds = (trainings as { id: string; date: string }[]).map((t) => t.id);
+  const dateById = Object.fromEntries(
+    (trainings as { id: string; date: string }[]).map((t) => [t.id, t.date])
+  );
+
+  const { data, error } = await supabase
+    .from('training_player_feedback')
+    .select('training_id, player_id, auto_evaluation, rpe, physical_form, pleasure')
+    .in('training_id', trainingIds);
+
+  if (error) throw error;
+
+  return ((data ?? []) as any[]).map((row) => ({
+    training_id: row.training_id,
+    player_id: row.player_id,
+    date: dateById[row.training_id] ?? '',
+    auto_evaluation: row.auto_evaluation ?? null,
+    rpe: row.rpe ?? null,
+    physical_form: row.physical_form ?? null,
+    pleasure: row.pleasure ?? null,
+  }));
+}
+
+export interface PlayerTrainingFeedbackRow {
+  training_id: string | null;
+  match_id: string | null;
+  date: string;
+  auto_evaluation: number | null;
+  rpe: number | null;
+  physical_form: number | null;
+  pleasure: number | null;
+}
+
+/**
+ * Récupère l'historique des feedbacks (séance ET match) pour un joueur, pour
+ * le graphique évolutif du profil. `training_id`/`match_id` sont mutuellement
+ * exclusifs (contrainte CHECK) : on embed les deux relations sans `!inner`
+ * pour ne perdre ni l'un ni l'autre.
  */
 export async function getPlayerTrainingFeedback(playerId: string): Promise<PlayerTrainingFeedbackRow[]> {
   const { data, error } = await supabase
     .from('training_player_feedback')
     .select(`
       training_id,
+      match_id,
       auto_evaluation,
       rpe,
       physical_form,
       pleasure,
-      trainings!inner ( date )
+      trainings ( date ),
+      matches ( date )
     `)
     .eq('player_id', playerId);
 
   if (error) throw error;
 
   const rows = (data || []).map((row: any) => ({
-    training_id: row.training_id,
-    date: row.trainings?.date ?? row.training_id,
+    training_id: row.training_id ?? null,
+    match_id: row.match_id ?? null,
+    date: row.trainings?.date ?? row.matches?.date ?? row.training_id ?? row.match_id,
     auto_evaluation: row.auto_evaluation ?? null,
     rpe: row.rpe ?? null,
     physical_form: row.physical_form ?? null,
@@ -172,4 +234,45 @@ export async function getPlayerTrainingFeedback(playerId: string): Promise<Playe
 
   rows.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   return rows;
+}
+
+// ─── Réponses au questionnaire d'une séance (staff) ───────────────────────────
+
+export interface TrainingFeedbackResponse {
+  player_id: string;
+  player_name: string;
+  team_id: string | null;
+  team_name: string | null;
+  /** Joueur d'une autre équipe que celle de la séance (invité). */
+  is_guest: boolean;
+  auto_evaluation: number | null;
+  rpe: number | null;
+  physical_form: number | null;
+  pleasure: number | null;
+  submitted_at: string | null;
+  comment: string | null;
+}
+
+/**
+ * Réponses au questionnaire pour une séance, staff uniquement — inclut les joueurs
+ * invités d'autres équipes (is_guest). Note : `comment` est rattaché par date de séance,
+ * pas par un lien direct en base (player_events n'a pas de training_id) — fiable dans la
+ * quasi-totalité des cas, peut manquer si un joueur a deux séances le même jour.
+ */
+export async function getTrainingFeedbackResponses(trainingId: string): Promise<TrainingFeedbackResponse[]> {
+  const { data, error } = await supabase.rpc('get_training_feedback_responses', { p_training_id: trainingId });
+  if (error) throw error;
+  return ((data || []) as any[]).map((row) => ({
+    player_id: row.player_id,
+    player_name: row.player_name ?? 'Joueur',
+    team_id: row.team_id ?? null,
+    team_name: row.team_name ?? null,
+    is_guest: !!row.is_guest,
+    auto_evaluation: row.auto_evaluation ?? null,
+    rpe: row.rpe ?? null,
+    physical_form: row.physical_form ?? null,
+    pleasure: row.pleasure ?? null,
+    submitted_at: row.submitted_at ?? null,
+    comment: row.comment ?? null,
+  }));
 }

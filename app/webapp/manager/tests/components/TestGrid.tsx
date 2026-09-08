@@ -31,6 +31,7 @@ import { AlertTriangle } from 'lucide-react';
 import {
   formatTestValue,
   parsePastedGrid,
+  testSecondaryReading,
   type PhysicalTestType,
 } from '@/lib/physicalTests';
 import type { Player } from '@/types';
@@ -176,6 +177,7 @@ export default function TestGrid({
                 const key = entryKey(type.id, player.id);
                 const values = entries[key] ?? Array(type.attempts).fill('');
                 const retained = retainedFor(type.id, player.id);
+                const secondary = retained !== null ? testSecondaryReading(type, retained) : null;
 
                 return (
                   <FragmentRow key={type.id}>
@@ -216,6 +218,11 @@ export default function TestGrid({
                     })}
                     <td className="border-b border-gray-200 px-2 py-1.5 text-center tabular-nums text-gray-500">
                       {retained !== null ? formatTestValue(retained, type) : '—'}
+                      {secondary && (
+                        <span className="ml-1 text-gray-400">
+                          ({formatTestValue(secondary.value, { decimals: 1 })} {secondary.unit})
+                        </span>
+                      )}
                     </td>
                   </FragmentRow>
                 );

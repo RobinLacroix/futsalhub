@@ -13,30 +13,36 @@ import {
   type MyConvolutionRow,
   type MyUpcomingMatchRow,
 } from '@/lib/services/playerConvocationsService';
+import { useTheme } from '../../contexts/ThemeContext';
+import type { ThemeColors } from '@/lib/design/tokens';
 
-// ─── Theme FM light ───────────────────────────────────────────────────────────
+// ─── Palette dérivée du thème actif (voir lib/design/tokens.ts) ───────────────
 
-const T = {
-  pageBg:    '#EEF0F5',
-  cardBg:    '#FFFFFF',
-  cardBg2:   '#F8FAFC',
-  border:    '#DDE1EA',
-  divider:   '#E8EDF4',
-  text:      '#0f172a',
-  textMuted: '#475569',
-  textFaint: '#94a3b8',
-  navy:      '#1a2744',
-  green:     '#059669',
-  greenBg:   '#ecfdf5',
-  amber:     '#d97706',
-  amberBg:   '#fef3c7',
-  red:       '#dc2626',
-  redBg:     '#fef2f2',
-  blue:      '#1e40af',
-  blueBg:    '#eff6ff',
-  purple:    '#7c3aed',
-  purpleBg:  '#f5f3ff',
-};
+function paletteFrom(c: ThemeColors) {
+  const purple = c.chartSeries[5] ?? c.accent.default;
+  return {
+    pageBg:    c.bg.canvas,
+    cardBg:    c.bg.surface,
+    cardBg2:   c.bg.sunken,
+    border:    c.border.subtle,
+    divider:   c.border.subtle,
+    text:      c.text.primary,
+    textMuted: c.text.secondary,
+    textFaint: c.text.tertiary,
+    navy:      c.accent.fill,
+    green:     c.positive.default,
+    greenBg:   c.positive.subtle,
+    amber:     c.warning.default,
+    amberBg:   c.warning.subtle,
+    red:       c.negative.default,
+    redBg:     c.negative.subtle,
+    blue:      c.accent.default,
+    blueBg:    c.accent.subtle,
+    purple,
+    purpleBg:  `${purple}22`,
+  };
+}
+type Palette = ReturnType<typeof paletteFrom>;
 
 type AttendanceStatus = 'present' | 'absent' | 'late' | 'injured';
 type CalendarItem =
@@ -51,14 +57,33 @@ function sortItems(items: CalendarItem[]): CalendarItem[] {
   });
 }
 
-const ATTENDANCE = [
-  { status: 'present' as const, label: 'Présent',    color: T.green,  bg: T.greenBg,  icon: CheckCircle2 },
-  { status: 'late'    as const, label: 'En retard',  color: T.amber,  bg: T.amberBg,  icon: Clock        },
-  { status: 'absent'  as const, label: 'Absent',     color: T.red,    bg: T.redBg,    icon: AlertCircle  },
-  { status: 'injured' as const, label: 'Blessé',     color: T.purple, bg: T.purpleBg, icon: Loader2      },
-];
+/**
+ * Délai avant la séance au-delà duquel la RPC refuse la réponse — différencié par statut ET
+ * réglable par équipe (teams.absence_notice_minutes / late_notice_minutes, coach de
+ * l'équipe). Chaque ligne porte ses propres minutes (voir formatNotice / c.absence_notice_minutes).
+ */
+function formatNotice(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m === 0 ? `${h}h` : `${h}h${m}`;
+}
+
+const statusLabel = (s: AttendanceStatus) =>
+  s === 'present' ? 'présent' : s === 'absent' ? 'absent' : s === 'late' ? 'en retard' : 'blessé';
+
+function attendanceOptions(T: Palette) {
+  return [
+    { status: 'present' as const, label: 'Présent',    color: T.green,  bg: T.greenBg,  icon: CheckCircle2 },
+    { status: 'late'    as const, label: 'En retard',  color: T.amber,  bg: T.amberBg,  icon: Clock        },
+    { status: 'absent'  as const, label: 'Absent',     color: T.red,    bg: T.redBg,    icon: AlertCircle  },
+    { status: 'injured' as const, label: 'Blessé',     color: T.purple, bg: T.purpleBg, icon: Loader2      },
+  ];
+}
 
 export default function PlayerCalendarPage() {
+  const { theme } = useTheme();
+  const T = paletteFrom(theme.colors);
   const [trainings, setTrainings]   = useState<MyConvolutionRow[]>([]);
   const [matches,   setMatches]     = useState<MyUpcomingMatchRow[]>([]);
   const [loading,   setLoading]     = useState(true);
@@ -100,10 +125,14 @@ export default function PlayerCalendarPage() {
     setUpdatingId(null);
     if (result.ok) {
       setTrainings(prev => prev.map(c => c.training_id === trainingId ? { ...c, my_status: status } : c));
+    } else if (result.error === 'too_late') {
+      const c = trainings.find(x => x.training_id === trainingId);
+      const minutes = status === 'absent' ? (c?.absence_notice_minutes ?? 360) : (c?.late_notice_minutes ?? 15);
+      setError(status === 'absent'
+        ? `Trop tard pour se déclarer absent : ferme ${formatNotice(minutes)} avant la séance.`
+        : `Trop tard pour répondre : ferme ${formatNotice(minutes)} avant la séance.`);
     } else {
-      setError(result.error === 'too_late'
-        ? "Il est trop tard pour répondre (jusqu'à 2h avant la séance)."
-        : (result.error ?? 'Erreur'));
+      setError(result.error ?? 'Erreur');
     }
   };
 
@@ -186,6 +215,8 @@ export default function PlayerCalendarPage() {
 // ─── MatchCard ────────────────────────────────────────────────────────────────
 
 function MatchCard({ m }: { m: MyUpcomingMatchRow }) {
+  const { theme } = useTheme();
+  const T = paletteFrom(theme.colors);
   const date = m.match_date ? parseISO(m.match_date) : new Date();
   const other = !!m.is_other_team;
   const accentColor = other ? T.purple : T.blue;
@@ -205,6 +236,11 @@ function MatchCard({ m }: { m: MyUpcomingMatchRow }) {
           </span>
         </div>
         {m.competition && <span style={{ fontSize: 11, color: T.textFaint, fontStyle: 'italic' }}>{m.competition}</span>}
+        {!m.is_convoked && (
+          <span style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, padding: '2px 8px', borderRadius: 6, background: T.pageBg, border: `1px solid ${T.border}` }}>
+            Non convoqué
+          </span>
+        )}
       </div>
 
       <p style={{ fontSize: 16, fontWeight: 700, color: T.text, margin: '0 0 4px 0' }}>{m.title || 'Match'}</p>
@@ -231,9 +267,16 @@ function TrainingCard({ c, isUpdating, onSetAttendance }: {
   isUpdating: boolean;
   onSetAttendance: (id: string, s: AttendanceStatus) => void;
 }) {
+  const { theme } = useTheme();
+  const T = paletteFrom(theme.colors);
+  const ATTENDANCE = attendanceOptions(T);
   const date   = c.training_date ? parseISO(c.training_date) : new Date();
   const status = (c.my_status as AttendanceStatus) || null;
   const other  = !!c.is_other_team;
+  const answerCutoffMs = Math.min(c.absence_notice_minutes, c.late_notice_minutes) * 60 * 1000;
+  const absentCutoffMs = c.absence_notice_minutes * 60 * 1000;
+  const closed = c.training_date ? new Date(c.training_date).getTime() - Date.now() < answerCutoffMs : false;
+  const absentClosed = c.training_date ? new Date(c.training_date).getTime() - Date.now() < absentCutoffMs : false;
   const accentColor = other ? T.purple : T.green;
   const badgeBg     = other ? T.purpleBg : T.greenBg;
 
@@ -265,38 +308,55 @@ function TrainingCard({ c, isUpdating, onSetAttendance }: {
 
       {/* ── Attendance ────────────────── */}
       <div style={{ borderTop: `1px solid ${T.divider}`, paddingTop: 12 }}>
-        <p style={{ fontSize: 10, fontWeight: 800, color: T.textFaint, textTransform: 'uppercase', letterSpacing: '0.7px', margin: '0 0 8px 0' }}>
-          Ma présence
-        </p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {ATTENDANCE.map(btn => {
-            const active = status === btn.status;
-            const Icon = btn.icon;
-            return (
-              <button
-                key={btn.status}
-                onClick={() => onSetAttendance(c.training_id, btn.status)}
-                disabled={isUpdating}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '7px 12px', borderRadius: 8, cursor: 'pointer',
-                  fontSize: 12, fontWeight: active ? 700 : 600,
-                  border: `1.5px solid ${active ? btn.color : T.border}`,
-                  background: active ? btn.bg : T.cardBg2,
-                  color: active ? btn.color : T.textMuted,
-                  opacity: isUpdating ? 0.6 : 1,
-                  transition: 'all 0.15s',
-                }}
-              >
-                {isUpdating && active
-                  ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
-                  : <Icon size={13} />
-                }
-                {btn.label}
-              </button>
-            );
-          })}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <p style={{ fontSize: 10, fontWeight: 800, color: T.textFaint, textTransform: 'uppercase', letterSpacing: '0.7px', margin: 0 }}>
+            Ma présence
+          </p>
+          {closed && <span style={{ fontSize: 10, color: T.textFaint }}>Réponses closes</span>}
         </div>
+        {closed ? (
+          <p style={{ fontSize: 13, color: T.textMuted, margin: 0 }}>
+            {status ? `Tu avais répondu : ${statusLabel(status)}.` : `Les réponses ferment ${formatNotice(c.late_notice_minutes)} avant la séance (${formatNotice(c.absence_notice_minutes)} pour une absence).`}
+          </p>
+        ) : (
+          <>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {ATTENDANCE.map(btn => {
+                const active = status === btn.status;
+                const disabled = isUpdating || (btn.status === 'absent' && absentClosed);
+                const Icon = btn.icon;
+                return (
+                  <button
+                    key={btn.status}
+                    onClick={() => onSetAttendance(c.training_id, btn.status)}
+                    disabled={disabled}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '7px 12px', borderRadius: 8, cursor: disabled ? 'default' : 'pointer',
+                      fontSize: 12, fontWeight: active ? 700 : 600,
+                      border: `1.5px solid ${active ? btn.color : T.border}`,
+                      background: active ? btn.bg : T.cardBg2,
+                      color: active ? btn.color : T.textMuted,
+                      opacity: isUpdating ? 0.6 : disabled ? 0.4 : 1,
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {isUpdating && active
+                      ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
+                      : <Icon size={13} />
+                    }
+                    {btn.label}
+                  </button>
+                );
+              })}
+            </div>
+            {absentClosed && (
+              <p style={{ fontSize: 11, color: T.textFaint, margin: '6px 0 0' }}>
+                Se déclarer absent ferme {formatNotice(c.absence_notice_minutes)} avant la séance.
+              </p>
+            )}
+          </>
+        )}
       </div>
 
       {/* ── Feedback link ─────────────── */}
@@ -321,6 +381,8 @@ function TrainingCard({ c, isUpdating, onSetAttendance }: {
 // ─── MetaItem ─────────────────────────────────────────────────────────────────
 
 function MetaItem({ icon, text }: { icon: React.ReactNode; text: string }) {
+  const { theme } = useTheme();
+  const T = paletteFrom(theme.colors);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       {icon}
