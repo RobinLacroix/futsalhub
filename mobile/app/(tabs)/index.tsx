@@ -109,10 +109,10 @@ export default function HomeScreen() {
   const winRate = form.played > 0 ? Math.round((form.wins / form.played) * 100) : 0;
 
   const alerts = [
-    { key: 'absences', label: 'Absences signalées', count: counts.absence_report, icon: 'person-remove-outline' as const, route: '/(tabs)/calendar' },
-    { key: 'injuries', label: 'Blessures et douleurs', count: counts.injury, icon: 'medkit-outline' as const, route: '/(tabs)/calendar' },
-    { key: 'quest', label: 'Questionnaires reçus', count: counts.questionnaire_response, icon: 'clipboard-outline' as const, route: '/(tabs)/squad' },
-    { key: 'feedback', label: 'Retours joueurs', count: counts.feedback_comment, icon: 'chatbubble-ellipses-outline' as const, route: '/(tabs)/squad' },
+    { key: 'absences', label: 'Absences signalées', count: counts.absence_report, icon: 'person-remove-outline' as const, type: 'absence_report' },
+    { key: 'injuries', label: 'Blessures et douleurs', count: counts.injury, icon: 'medkit-outline' as const, type: 'injury' },
+    { key: 'quest', label: 'Questionnaires reçus', count: counts.questionnaire_response, icon: 'clipboard-outline' as const, type: 'questionnaire_response' },
+    { key: 'feedback', label: 'Retours joueurs', count: counts.feedback_comment, icon: 'chatbubble-ellipses-outline' as const, type: 'feedback_comment' },
   ].filter((a) => a.count > 0);
 
   return (
@@ -156,6 +156,39 @@ export default function HomeScreen() {
           />
         </Section>
       ) : null}
+
+      {/* Fil d'équipe + Tracker */}
+      <Section>
+        <View style={{ gap: theme.space.sm }}>
+          <Card
+            variant="flat"
+            padding="md"
+            onPress={() => router.push('/(tabs)/feed')}
+            accessibilityLabel="Fil d'équipe"
+            style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}
+          >
+            <Ionicons name="chatbubbles-outline" size={20} color={c.accent.default} />
+            <Text variant="body" style={{ flex: 1 }}>Fil d'équipe</Text>
+            {counts.post_tag > 0 ? <Badge label={String(counts.post_tag)} tone="accent" solid size="sm" /> : null}
+            <Ionicons name="chevron-forward" size={16} color={c.text.tertiary} />
+          </Card>
+          {/* Tracker n'est plus dans le bandeau (fusionné dans « Analyse » puis
+              retiré, cf. lib/navigation.ts) : accès permanent demandé ici en
+              plus de « Plus », sans attendre le jour du match comme le bouton
+              « Ouvrir le recorder » plus bas. */}
+          <Card
+            variant="flat"
+            padding="md"
+            onPress={() => router.push('/(tabs)/tracker' as any)}
+            accessibilityLabel="Tracker"
+            style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}
+          >
+            <Ionicons name="videocam-outline" size={20} color={c.accent.default} />
+            <Text variant="body" style={{ flex: 1 }}>Tracker</Text>
+            <Ionicons name="chevron-forward" size={16} color={c.text.tertiary} />
+          </Card>
+        </View>
+      </Section>
 
       {/* 1. Prochaine échéance */}
       <Section title="Prochaine échéance">
@@ -280,7 +313,7 @@ export default function HomeScreen() {
                 key={a.key}
                 variant="flat"
                 padding="md"
-                onPress={() => router.push(a.route as any)}
+                onPress={() => router.push(`/(tabs)/notifications?type=${a.type}` as never)}
                 accessibilityLabel={`${a.count} ${a.label}`}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}
               >
@@ -290,6 +323,15 @@ export default function HomeScreen() {
                 <Ionicons name="chevron-forward" size={16} color={c.text.tertiary} />
               </Card>
             ))}
+            <Card
+              variant="flat"
+              padding="md"
+              onPress={() => router.push('/(tabs)/notifications' as never)}
+              accessibilityLabel="Voir toutes les notifications"
+              style={{ alignItems: 'center' }}
+            >
+              <Text variant="callout" tone="accent">Voir tout</Text>
+            </Card>
           </View>
         </Section>
       ) : null}

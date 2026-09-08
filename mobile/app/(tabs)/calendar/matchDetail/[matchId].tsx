@@ -11,14 +11,16 @@ import {
   Platform,
   Pressable,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { format, parse, parseISO, isValid } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useIsTablet } from '../../../../hooks/useIsTablet';
 import { useTheme } from '../../../../contexts/ThemeContext';
 import { useActiveTeam } from '../../../../contexts/ActiveTeamContext';
-import { getMatchById, updateMatch } from '../../../../lib/services/matches';
+import { getMatchById, updateMatch, sendQuestionnairesForMatch } from '../../../../lib/services/matches';
+import { TrainingFeedbackResponsesSheet } from '../../../../components/training/TrainingFeedbackResponsesSheet';
+import { shareConvocationToFeed } from '../../../../lib/services/teamFeed';
 import {
   getPlayersByTeam,
   getPlayersByClubWithTeams,
@@ -34,7 +36,16 @@ import {
   Section,
   EmptyState,
   SkeletonDetail,
+  Field,
+  Input,
+  ChipGroup,
 } from '../../../../components/ui';
+import {
+  LOCATION_OPTIONS,
+  COMPETITION_OPTIONS,
+  type LocationOption,
+  type CompetitionOption,
+} from '../../../../lib/matchOptions';
 import { Stepper } from '../../../../components/match/Stepper';
 import {
   GoalTypesEditor,
@@ -50,11 +61,12 @@ import type { Match, MatchPlayer, Player, GoalsByTypeRecord } from '../../../../
 
 interface PlayerLine {
   goals: number;
+  assists: number;
   yellow_cards: number;
   red_cards: number;
 }
 
-const emptyLine = (): PlayerLine => ({ goals: 0, yellow_cards: 0, red_cards: 0 });
+const emptyLine = (): PlayerLine => ({ goals: 0, assists: 0, yellow_cards: 0, red_cards: 0 });
 
 function parseMatchPlayers(m: Match): MatchPlayer[] {
   if (!m.players) return [];
@@ -72,6 +84,7 @@ function parseMatchPlayers(m: Match): MatchPlayer[] {
 
 export default function MatchDetailScreen() {
   const { matchId } = useLocalSearchParams<{ matchId: string }>();
+  const router = useRouter();
   const isTablet = useIsTablet();
   const { theme } = useTheme();
   const c = theme.colors;
@@ -95,10 +108,20 @@ export default function MatchDetailScreen() {
 
   const [clubPlayersWithTeams, setClubPlayersWithTeams] = useState<PlayerWithTeams[]>([]);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [sharingConvocation, setSharingConvocation] = useState(false);
+  const [sendingQuestionnaires, setSendingQuestionnaires] = useState(false);
+  const [responsesOpen, setResponsesOpen] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [editDateTime, setEditDateTime] = useState(() => new Date());
   const [editDateStr, setEditDateStr] = useState('');
   const [editTimeStr, setEditTimeStr] = useState('');
+  const [editMeetingDateTime, setEditMeetingDateTime] = useState(() => new Date());
+  const [editMeetingDateStr, setEditMeetingDateStr] = useState('');
+  const [editMeetingTimeStr, setEditMeetingTimeStr] = useState('');
+  const [editVenueAddress, setEditVenueAddress] = useState('');
+  const [editConvocationMessage, setEditConvocationMessage] = useState('');
+  const [editLocation, setEditLocation] = useState<LocationOption>('Domicile');
+  const [editCompetition, setEditCompetition] = useState<CompetitionOption>('Championnat');
 
   // ── Chargement ────────────────────────────────────────────────────────────
 
@@ -125,6 +148,7 @@ export default function MatchDetailScreen() {
           conv[p.id] = true;
           stats[p.id] = {
             goals: p.goals ?? 0,
+            assists: p.assists ?? 0,
             yellow_cards: p.yellow_cards ?? 0,
             red_cards: p.red_cards ?? 0,
           };
@@ -245,6 +269,19 @@ export default function MatchDetailScreen() {
     setEditDateTime(d);
     setEditDateStr(format(d, 'dd/MM/yyyy', { locale: fr }));
     setEditTimeStr(format(d, 'HH:mm'));
+
+    const ms = match.meeting_time;
+    const md = ms ? parseISO(ms) : new Date(d.getTime() - 30 * 60 * 1000);
+    setEditMeetingDateTime(md);
+    setEditMeetingDateStr(format(md, 'dd/MM/yyyy', { locale: fr }));
+    setEditMeetingTimeStr(format(md, 'HH:mm'));
+
+    setEditVenueAddress(match.venue_address ?? '');
+    setEditConvocationMessage(match.convocation_message ?? '');
+
+    setEditLocation(LOCATION_OPTIONS.some(o => o.value === match.location) ? (match.location as LocationOption) : 'Domicile');
+    setEditCompetition(COMPETITION_OPTIONS.some(o => o.value === match.competition) ? (match.competition as CompetitionOption) : 'Championnat');
+
     setEditing(true);
   }, [match]);
 
@@ -289,6 +326,7 @@ export default function MatchDetailScreen() {
           const cur = next[a.player_id] ?? emptyLine();
           next[a.player_id] = {
             goals: cur.goals + a.goals,
+            assists: cur.assists + a.assists,
             yellow_cards: cur.yellow_cards + a.yellow_cards,
             red_cards: cur.red_cards + a.red_cards,
           };
@@ -324,6 +362,18 @@ export default function MatchDetailScreen() {
       submitDate.setHours(h, mn, 0, 0);
     }
 
+    let meetingDate: Date | null = null;
+    if (hasNativePicker) {
+      meetingDate = editMeetingDateTime;
+    } else {
+      const mParsed = parse(editMeetingDateStr.trim(), 'dd/MM/yyyy', new Date(), { locale: fr });
+      const [mh, mm] = editMeetingTimeStr.trim().split(':').map(Number);
+      if (isValid(mParsed) && !Number.isNaN(mh) && !Number.isNaN(mm) && mh >= 0 && mh <= 23 && mm >= 0 && mm <= 59) {
+        meetingDate = new Date(mParsed);
+        meetingDate.setHours(mh, mm, 0, 0);
+      }
+    }
+
     const st = parseInt(scoreTeam.trim(), 10);
     const so = parseInt(scoreOpponent.trim(), 10);
     if (Number.isNaN(st) || Number.isNaN(so) || st < 0 || so < 0) {
@@ -355,12 +405,17 @@ export default function MatchDetailScreen() {
       const updated = await updateMatch(matchId, {
         title: editTitle.trim(),
         date: submitDate.toISOString(),
+        location: editLocation,
+        competition: editCompetition,
         convoquedPlayerIds: convoquedIds,
         score_team: st,
         score_opponent: so,
         playerStats: stats,
         goals_by_type: goalsByType,
         conceded_by_type: concededByType,
+        venue_address: editVenueAddress.trim() || null,
+        meeting_time: meetingDate ? meetingDate.toISOString() : null,
+        convocation_message: editConvocationMessage.trim() || null,
       });
       setMatch(updated);
       setEditing(false);
@@ -377,6 +432,13 @@ export default function MatchDetailScreen() {
     editDateTime,
     editDateStr,
     editTimeStr,
+    editMeetingDateTime,
+    editMeetingDateStr,
+    editMeetingTimeStr,
+    editVenueAddress,
+    editConvocationMessage,
+    editLocation,
+    editCompetition,
     convoqued,
     scoreTeam,
     scoreOpponent,
@@ -385,6 +447,46 @@ export default function MatchDetailScreen() {
     concededByType,
     displayName,
   ]);
+
+  const shareConvocation = async () => {
+    if (!matchId) return;
+    setSharingConvocation(true);
+    const r = await shareConvocationToFeed({ matchId });
+    setSharingConvocation(false);
+    if (r.success) {
+      haptics.success();
+      Alert.alert('Partagé', "La convocation est visible dans le fil d'équipe.");
+    } else {
+      haptics.error();
+      const msg = r.error === 'no_convocation' ? 'Aucun joueur convoqué pour ce match.' : (r.error ?? 'Impossible de partager');
+      Alert.alert('Erreur', msg);
+    }
+  };
+
+  const sendQuestionnaires = async () => {
+    if (!matchId) return;
+    setSendingQuestionnaires(true);
+    try {
+      const result = await sendQuestionnairesForMatch(matchId);
+      if (result.ok) {
+        haptics.success();
+        Alert.alert(
+          'Questionnaires envoyés',
+          result.count
+            ? `${result.count} lien(s) créé(s) pour les joueurs convoqués.`
+            : 'Les joueurs convoqués peuvent remplir le questionnaire.'
+        );
+      } else {
+        haptics.error();
+        Alert.alert('Erreur', result.error ?? "Impossible d'envoyer les questionnaires.");
+      }
+    } catch (e) {
+      haptics.error();
+      Alert.alert('Erreur', e instanceof Error ? e.message : "Impossible d'envoyer les questionnaires.");
+    } finally {
+      setSendingQuestionnaires(false);
+    }
+  };
 
   // ── États non nominaux ────────────────────────────────────────────────────
 
@@ -462,13 +564,58 @@ export default function MatchDetailScreen() {
                   accessibilityLabel="Titre du match"
                 />
               </View>
-              <DateTimeField
-                value={editDateTime}
-                onChange={setEditDateTime}
-                dateText={editDateStr}
-                timeText={editTimeStr}
-                onDateTextChange={setEditDateStr}
-                onTimeTextChange={setEditTimeStr}
+              <Field label="Coup d'envoi">
+                <DateTimeField
+                  value={editDateTime}
+                  onChange={setEditDateTime}
+                  dateText={editDateStr}
+                  timeText={editTimeStr}
+                  onDateTextChange={setEditDateStr}
+                  onTimeTextChange={setEditTimeStr}
+                />
+              </Field>
+              <Field label="Heure de rendez-vous" hint="Convocation des joueurs, distincte du coup d'envoi.">
+                <DateTimeField
+                  value={editMeetingDateTime}
+                  onChange={setEditMeetingDateTime}
+                  dateText={editMeetingDateStr}
+                  timeText={editMeetingTimeStr}
+                  onDateTextChange={setEditMeetingDateStr}
+                  onTimeTextChange={setEditMeetingTimeStr}
+                />
+              </Field>
+              <Field label="Lieu">
+                <ChipGroup
+                  label="Lieu du match"
+                  options={LOCATION_OPTIONS}
+                  value={editLocation}
+                  onChange={setEditLocation}
+                />
+              </Field>
+              <Field label="Compétition">
+                <ChipGroup
+                  label="Type de compétition"
+                  options={COMPETITION_OPTIONS}
+                  value={editCompetition}
+                  onChange={setEditCompetition}
+                />
+              </Field>
+              <Input
+                label="Adresse du gymnase"
+                optional
+                value={editVenueAddress}
+                onChangeText={setEditVenueAddress}
+                placeholder="12 rue du Stade, 75014 Paris"
+              />
+              <Input
+                label="Message pour la convocation"
+                optional
+                value={editConvocationMessage}
+                onChangeText={setEditConvocationMessage}
+                placeholder="Consignes, tenue, covoiturage…"
+                multiline
+                numberOfLines={4}
+                inputStyle={{ minHeight: 90, textAlignVertical: 'top' }}
               />
             </>
           ) : (
@@ -477,6 +624,11 @@ export default function MatchDetailScreen() {
               <Text variant="callout" tone="secondary">
                 {format(date, "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr })}
               </Text>
+              {match.meeting_time ? (
+                <Text variant="caption" tone="tertiary">
+                  Rendez-vous à {format(parseISO(match.meeting_time), 'HH:mm')}
+                </Text>
+              ) : null}
               <View style={styles.metaRow}>
                 {match.location ? (
                   <View style={styles.metaItem}>
@@ -488,6 +640,19 @@ export default function MatchDetailScreen() {
                 ) : null}
                 {match.competition ? <Badge label={match.competition} size="sm" /> : null}
               </View>
+              {match.venue_address ? (
+                <View style={styles.metaItem}>
+                  <Ionicons name="navigate-outline" size={13} color={c.text.tertiary} />
+                  <Text variant="caption" tone="tertiary">
+                    {match.venue_address}
+                  </Text>
+                </View>
+              ) : null}
+              {match.convocation_message ? (
+                <Text variant="callout" tone="secondary" style={{ marginTop: 4 }}>
+                  {match.convocation_message}
+                </Text>
+              ) : null}
             </View>
           )}
 
@@ -528,6 +693,51 @@ export default function MatchDetailScreen() {
             )}
           </View>
         </Card>
+
+        {!editing && (
+          <Button
+            label="Voir le bilan de match"
+            icon="stats-chart-outline"
+            variant="secondary"
+            block
+            onPress={() => router.push(`/(tabs)/tracker/match-report/${matchId}`)}
+          />
+        )}
+
+        {convoquedPlayers.length + invitedPlayerIds.length > 0 ? (
+          <Button
+            label="Partager la convocation"
+            icon="megaphone-outline"
+            variant="secondary"
+            block
+            loading={sharingConvocation}
+            onPress={shareConvocation}
+          />
+        ) : null}
+
+        {!editing && convoquedPlayers.length + invitedPlayerIds.length > 0 && (
+          <Section
+            title="Après le match"
+            subtitle="Crée un lien questionnaire (auto-éval, RPE, forme, plaisir) pour chaque joueur convoqué."
+          >
+            <Button
+              label={sendingQuestionnaires ? 'Envoi…' : 'Envoyer les questionnaires'}
+              icon="paper-plane-outline"
+              variant="secondary"
+              onPress={sendQuestionnaires}
+              loading={sendingQuestionnaires}
+              disabled={sendingQuestionnaires}
+              block
+            />
+            <Button
+              label="Voir les réponses"
+              icon="chatbox-ellipses-outline"
+              variant="ghost"
+              onPress={() => setResponsesOpen(true)}
+              block
+            />
+          </Section>
+        )}
 
         {/* ── Édition ─────────────────────────────────────────────────────── */}
         {editing ? (
@@ -640,6 +850,13 @@ export default function MatchDetailScreen() {
                             caption="Buts"
                             compact
                           />
+                          <Stepper
+                            value={line.assists}
+                            onChange={(d) => setStat(p.id, 'assists', d)}
+                            label={`passes décisives de ${name}`}
+                            caption="Passes déc."
+                            compact
+                          />
                         </View>
                       )}
                     </Card>
@@ -690,6 +907,13 @@ export default function MatchDetailScreen() {
                           onChange={(d) => setStat(playerId, 'goals', d)}
                           label={`buts de ${name}`}
                           caption="Buts"
+                          compact
+                        />
+                        <Stepper
+                          value={line.assists}
+                          onChange={(d) => setStat(playerId, 'assists', d)}
+                          label={`passes décisives de ${name}`}
+                          caption="Passes déc."
                           compact
                         />
                         <Stepper
@@ -813,6 +1037,14 @@ export default function MatchDetailScreen() {
           )}
         </View>
       </ScrollView>
+
+      {matchId && (
+        <TrainingFeedbackResponsesSheet
+          visible={responsesOpen}
+          onClose={() => setResponsesOpen(false)}
+          matchId={matchId}
+        />
+      )}
 
       <InvitePlayersSheet
         visible={inviteOpen}

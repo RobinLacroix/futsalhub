@@ -20,7 +20,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { View, ScrollView, Pressable, StyleSheet, Alert } from 'react-native';
+import { View, ScrollView, Pressable, StyleSheet, Alert, TextInput } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Sheet, Text, Button, EmptyState } from '../ui';
@@ -68,15 +68,19 @@ export function InvitePlayersSheet({
   const c = theme.colors;
 
   const [filterTeamId, setFilterTeamId] = useState<string>('all');
+  const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Record<string, boolean>>({});
 
-  const filtered = useMemo(
-    () =>
-      filterTeamId === 'all'
-        ? candidates
-        : candidates.filter(({ teamIds }) => teamIds.includes(filterTeamId)),
-    [candidates, filterTeamId]
-  );
+  const filtered = useMemo(() => {
+    const byTeam = filterTeamId === 'all'
+      ? candidates
+      : candidates.filter(({ teamIds }) => teamIds.includes(filterTeamId));
+    const q = search.trim().toLowerCase();
+    if (!q) return byTeam;
+    return byTeam.filter(({ player }) =>
+      `${player.first_name} ${player.last_name}`.toLowerCase().includes(q)
+    );
+  }, [candidates, filterTeamId, search]);
 
   const selectedIds = useMemo(
     () => Object.entries(selected).filter(([, v]) => v).map(([id]) => id),
@@ -86,6 +90,7 @@ export function InvitePlayersSheet({
   const reset = () => {
     setSelected({});
     setFilterTeamId('all');
+    setSearch('');
   };
 
   const close = () => {
@@ -189,6 +194,19 @@ export function InvitePlayersSheet({
             {teams.map((t) => chip(t.id, t.name))}
           </ScrollView>
 
+          <View style={[styles.searchBar, { backgroundColor: c.bg.surface, borderColor: c.border.subtle }]}>
+            <Ionicons name="search-outline" size={16} color={c.text.tertiary} />
+            <TextInput
+              style={[styles.searchInput, { color: c.text.primary }]}
+              placeholder="Rechercher un joueur…"
+              accessibilityLabel="Rechercher un joueur"
+              value={search}
+              onChangeText={setSearch}
+              placeholderTextColor={c.text.tertiary}
+              clearButtonMode="while-editing"
+            />
+          </View>
+
           <ScrollView style={styles.list}>
             {filtered.length === 0 ? (
               <EmptyState icon="filter-outline" title="Aucun joueur dans ce filtre" compact />
@@ -266,6 +284,17 @@ export function InvitePlayersSheet({
 const styles = StyleSheet.create({
   chipRow: { flexGrow: 0, marginBottom: 12 },
   chipContent: { alignItems: 'center' },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    height: 40,
+    marginBottom: 12,
+  },
+  searchInput: { flex: 1, fontSize: 15 },
   list: { maxHeight: 320 },
   row: {
     flexDirection: 'row',

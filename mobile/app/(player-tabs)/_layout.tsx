@@ -17,35 +17,29 @@
  * club (défaut d'`ActiveSeasonContext`), les écrans qui la lisent ne changent
  * pas de comportement.
  *
- * À sa place, la bascule clair / sombre. L'espace joueur n'a aucun écran de
- * réglages : sans ça, un joueur qui n'est pas coach n'a aucun moyen de choisir
- * son thème.
+ * À sa place vivait la bascule clair / sombre, puis (P1-7 v2) les actions de
+ * compte sur l'onglet « Ma fiche » — parce que l'espace joueur n'avait aucun
+ * écran de réglages où les poser. Ce trou est refermé par `player-settings.tsx`
+ * (écran poussé, même format que « Plus » côté coach) : thème 3 positions,
+ * bascule coach, déconnexion, suppression de compte y vivent maintenant tous
+ * ensemble.
  *
  * ## Répartition du header
  *
- * Les trois contrôles étaient empilés à droite des quatre onglets, dont
- * « Espace coach » et sa centaine de points de libellé : le titre était comprimé
- * partout pour deux actions utilisées une fois par session.
- *
- *   - **Gauche** : la bascule de thème. Un onglet n'a pas de bouton retour, la
- *     place est libre, et un réglage d'affichage n'appartient à aucun écran.
- *   - **Droite, sur « Ma fiche » uniquement** : sortie vers l'espace coach et
- *     déconnexion. Ce sont des actions de compte, elles vivent sur l'onglet du
- *     compte — même arbitrage que « Plus » côté coach, qui les regroupe déjà.
- *
- * « Ma fiche » gagne au passage son header : il était masqué (`headerShown:
- * false`) parce que `PlayerDetailView` porte son propre bandeau de marque. Ça
- * privait l'onglet de titre, et surtout du seul endroit où poser ces actions.
+ * Une seule icône réglages en `headerLeft`, globale aux quatre onglets — un
+ * onglet n'a pas de bouton retour, la place était déjà libre, et un réglage
+ * n'appartient à aucun écran en particulier. Elle ouvre `player-settings.tsx`.
+ * Plus rien en `headerRight` : les anciennes actions (bascule coach,
+ * déconnexion, suppression) ont migré sur cet écran, `SwitchSpaceButton.tsx`
+ * et `ThemeToggleButton.tsx` sont supprimés (plus aucun appelant).
  */
 
 import { Tabs } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { View } from 'react-native';
 import { useTheme } from '../../contexts/ThemeContext';
-import { SwitchToCoachButton, SignOutIconButton } from '../../components/SwitchSpaceButton';
-import { ThemeToggleButton } from '../../components/ThemeToggleButton';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 import { useNotifications } from '../../contexts/NotificationContext';
+import { PlayerSettingsButton } from '../../components/PlayerSettingsButton';
 
 export default function PlayerTabsLayout() {
   usePushNotifications();
@@ -64,18 +58,15 @@ export default function PlayerTabsLayout() {
         tabBarInactiveTintColor: c.text.tertiary,
         tabBarStyle: { backgroundColor: c.bg.surface, borderTopColor: c.border.subtle },
         // Un onglet n'a pas de bouton retour : la gauche du header est libre, et
-        // c'est la place d'un réglage d'affichage — il n'appartient pas à
-        // l'écran, contrairement à une action.
-        headerLeft: () => (
-          <View style={{ paddingLeft: 12 }}>
-            <ThemeToggleButton />
-          </View>
-        ),
+        // c'est la place d'un réglage — il n'appartient à aucun écran en
+        // particulier, contrairement à une action.
+        headerLeft: () => <PlayerSettingsButton />,
       }}
       screenListeners={({ route }) => ({
         focus: () => {
           if (route.name === 'index') void markRead(['convocation']);
           if (route.name === 'questionnaires') void markRead(['questionnaire']);
+          if (route.name === 'feed') void markRead(['post_tag', 'post_comment']);
         },
       })}
     >
@@ -95,17 +86,6 @@ export default function PlayerTabsLayout() {
         options={{
           title: 'Ma fiche',
           tabBarLabel: 'Ma fiche',
-          // Les actions de compte vivent ici et nulle part ailleurs. Elles
-          // occupaient la droite du header des quatre onglets, où « Espace
-          // coach » mangeait une centaine de points sur chaque écran. C'est
-          // l'onglet du compte : c'est là qu'on quitte l'espace et qu'on se
-          // déconnecte, comme « Plus » côté coach.
-          headerRight: () => (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingRight: 8 }}>
-              <SwitchToCoachButton />
-              <SignOutIconButton />
-            </View>
-          ),
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? 'person' : 'person-outline'} size={size} color={color} />
           ),
@@ -129,6 +109,17 @@ export default function PlayerTabsLayout() {
           tabBarLabel: 'Contenu',
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? 'share-social' : 'share-social-outline'} size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="feed"
+        options={{
+          headerShown: false,
+          tabBarLabel: 'Fil',
+          tabBarBadge: counts.post_tag > 0 ? counts.post_tag : undefined,
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'chatbubbles' : 'chatbubbles-outline'} size={size} color={color} />
           ),
         }}
       />

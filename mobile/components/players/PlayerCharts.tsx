@@ -348,7 +348,7 @@ export function RadarChart({ data, axes }: { data: PlayerRadarResult; axes: read
 
 // ─── Courbe de questionnaire ──────────────────────────────────────────────────
 
-type FeedbackKey = 'auto_evaluation' | 'rpe' | 'physical_form' | 'pleasure';
+type FeedbackKey = 'auto_evaluation' | 'rpe' | 'physical_form' | 'pleasure' | 'coach_note';
 
 const FEEDBACK_LINES: { key: FeedbackKey; label: string; seriesIndex: number }[] = [
   { key: 'auto_evaluation', label: 'Auto-évaluation', seriesIndex: 0 },
@@ -357,15 +357,40 @@ const FEEDBACK_LINES: { key: FeedbackKey; label: string; seriesIndex: number }[]
   { key: 'pleasure', label: 'Plaisir', seriesIndex: 2 },
 ];
 
-export function FeedbackLineChart({ rows }: { rows: PlayerFeedbackRow[] }) {
+// Volet C : note staff superposée à la même courbe, jamais une couleur de
+// palette (qui varie selon le thème) — ambre fixe pour ne jamais la confondre
+// avec les 4 courbes d'auto-évaluation.
+const STAFF_NOTE_LINE = { key: 'coach_note' as const, label: 'Note staff 🔒', seriesIndex: -1 };
+const STAFF_NOTE_COLOR = '#D97706';
+
+type FeedbackRowWithNote = PlayerFeedbackRow & { coach_note: number | null };
+
+export function FeedbackLineChart({
+  rows,
+  coachNoteByMatch,
+}: {
+  rows: PlayerFeedbackRow[];
+  /**
+   * Note staff (Volet C) à superposer sur la courbe Auto-évaluation, clé =
+   * match_id. STAFF-ONLY : ne jamais passer cette prop depuis l'écran joueur
+   * (`isManager` false) — sa seule absence garantit l'invisibilité joueur ici,
+   * la RLS de la table fait le reste côté données.
+   */
+  coachNoteByMatch?: Record<string, number>;
+}) {
   const { theme } = useTheme();
   const p = useMemo(() => fmPalette(theme.colors, theme.scheme), [theme]);
-  const [active, setActive] = useState<Set<FeedbackKey>>(
-    () => new Set(FEEDBACK_LINES.map((l) => l.key))
-  );
+  const showStaffNote = !!coachNoteByMatch;
+  const lines = showStaffNote ? [...FEEDBACK_LINES, STAFF_NOTE_LINE] : FEEDBACK_LINES;
+  const colorFor = (key: FeedbackKey, seriesIndex: number) =>
+    key === 'coach_note' ? STAFF_NOTE_COLOR : p.series[seriesIndex] ?? p.accent;
+  const [active, setActive] = useState<Set<FeedbackKey>>(() => new Set(lines.map((l) => l.key)));
   const [width, setWidth] = useState(0);
 
-  const data = rows.slice(-20);
+  const data: FeedbackRowWithNote[] = rows.slice(-20).map((row) => ({
+    ...row,
+    coach_note: showStaffNote && row.match_id ? coachNoteByMatch[row.match_id] ?? null : null,
+  }));
   const n = data.length;
   const PAD_L = 28;
   const PAD_R = 8;
@@ -387,14 +412,14 @@ export function FeedbackLineChart({ rows }: { rows: PlayerFeedbackRow[] }) {
     });
 
   const last = data[data.length - 1];
-  const activeLines = FEEDBACK_LINES.filter((l) => active.has(l.key));
+  const activeLines = lines.filter((l) => active.has(l.key));
 
   return (
     <View>
       <View style={styles.filterRow}>
-        {FEEDBACK_LINES.map(({ key, label, seriesIndex }) => {
+        {lines.map(({ key, label, seriesIndex }) => {
           const on = active.has(key);
-          const color = p.series[seriesIndex] ?? p.accent;
+          const color = colorFor(key, seriesIndex);
           return (
             <Pressable
               key={key}
@@ -439,7 +464,7 @@ export function FeedbackLineChart({ rows }: { rows: PlayerFeedbackRow[] }) {
               strokeWidth={1}
             />
             {activeLines.map(({ key, seriesIndex }) => {
-              const color = p.series[seriesIndex] ?? p.accent;
+              const color = colorFor(key, seriesIndex);
               const pts = data.reduce<{ x: number; y: number }[]>((acc, row, i) => {
                 const v = row[key];
                 if (v != null) acc.push({ x: toX(i), y: toY(v as number) });
@@ -447,7 +472,15 @@ export function FeedbackLineChart({ rows }: { rows: PlayerFeedbackRow[] }) {
               }, []);
               const d = smoothPath(pts);
               return d ? (
-                <Path key={key} d={d} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" />
+                <Path
+                  key={key}
+                  d={d}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeDasharray={key === 'coach_note' ? '5,4' : undefined}
+                />
               ) : null;
             })}
             {activeLines.map(({ key, seriesIndex }) =>
@@ -459,7 +492,7 @@ export function FeedbackLineChart({ rows }: { rows: PlayerFeedbackRow[] }) {
                     cx={toX(i)}
                     cy={toY(v as number)}
                     r={3}
-                    fill={p.series[seriesIndex] ?? p.accent}
+                    fill={colorFor(key, seriesIndex)}
                   />
                 );
               })
@@ -494,7 +527,7 @@ export function FeedbackLineChart({ rows }: { rows: PlayerFeedbackRow[] }) {
                   accessible
                   accessibilityLabel={`${label} : ${last[key]} sur 10`}
                 >
-                  <Text variant="title" color={p.series[seriesIndex] ?? p.accent} numeric>
+                  <Text variant="title" color={colorFor(key, seriesIndex)} numeric>
                     {String(last[key])}
                   </Text>
                   <Text variant="caption" tone="tertiary" numberOfLines={1}>

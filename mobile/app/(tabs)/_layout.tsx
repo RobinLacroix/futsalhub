@@ -49,6 +49,7 @@ const HIDDEN_ROUTE_TITLES: Record<string, string> = {
   teams: 'Équipes',
   settings: 'Paramètres',
   share: 'Partage',
+  notifications: 'Notifications',
 };
 
 /**
@@ -62,9 +63,15 @@ const NO_SEASON_ROUTES = new Set(['create-club', 'join-club-staff']);
 const HIDDEN_ROUTES = [
   'dashboard/index',
   'analytics/index',
-  'tracker/index',
+  // Groupe avec son propre `_layout.tsx` imbriqué (Stack) : Expo Router
+  // l'enregistre sous le nom du dossier seul, pas `tracker/index` (qui ne
+  // correspond à aucun écran réel — silencieusement inopérant s'il est listé
+  // ici à la place). Accessible depuis « Plus » et l'accueil, pas le bandeau.
+  'tracker',
   'tracker/record',
   'tracker/match-report/[matchId]',
+  'feed/new-post',
+  'feed/[postId]',
   'calendar/training/[trainingId]',
   'calendar/training/edit/[trainingId]',
   'calendar/matchDetail/[matchId]',
@@ -81,6 +88,7 @@ const HIDDEN_ROUTES = [
   'settings',
   'share',
   'join-club-staff',
+  'notifications',
 ] as const;
 
 function TabsLayoutContent() {
@@ -160,6 +168,23 @@ function TabsLayoutContent() {
           }}
         />
       ))}
+
+      {/* Hors `PRIMARY_DESTINATIONS` (plafonnées à 5, cf. lib/navigation.ts) :
+          ajouté à la demande de Robin, qui veut Feed directement dans le
+          bandeau plutôt que derrière la carte d'accueil ou « Plus ». */}
+      <Tabs.Screen
+        name="feed"
+        options={{
+          title: "Fil d'équipe",
+          tabBarLabel: 'Fil',
+          headerShown: false,
+          tabBarBadge: badgeFor('feed'),
+          tabBarAccessibilityLabel: "Fil d'équipe",
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'chatbubbles' : 'chatbubbles-outline'} size={size} color={color} />
+          ),
+        }}
+      />
 
       {HIDDEN_ROUTES.map((name) => (
         <Tabs.Screen

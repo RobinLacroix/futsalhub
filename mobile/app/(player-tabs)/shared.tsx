@@ -16,7 +16,7 @@
  */
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { View, Pressable, Linking, Image, ScrollView, BackHandler } from 'react-native';
+import { View, Pressable, Linking, Image, ScrollView, BackHandler, Alert } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme, makeStyles } from '../../contexts/ThemeContext';
 import { HIT_SLOP_MIN } from '../../lib/design/tokens';
@@ -28,11 +28,20 @@ import {
   getSharedContentForPlayer,
   getSharedFoldersForPlayer,
   logSharedContentView,
+  getSharedFileUrl,
   extractYoutubeId,
   youtubeThumbnail,
   type SharedContent,
   type SharedFolder,
 } from '../../lib/services/sharedContent';
+
+function fileIcon(mime?: string | null): keyof typeof Ionicons.glyphMap {
+  if (!mime) return 'document-outline';
+  if (mime === 'application/pdf') return 'document-text-outline';
+  if (mime.startsWith('image/')) return 'image-outline';
+  if (mime.startsWith('video/')) return 'videocam-outline';
+  return 'document-outline';
+}
 
 export default function PlayerSharedScreen() {
   const s = useStyles();
@@ -230,18 +239,50 @@ function ContentCard({ item }: { item: SharedContent }) {
   const c = theme.colors;
 
   const [thumbFailed, setThumbFailed] = useState(false);
-  const ytId = item.content_type === 'youtube' ? extractYoutubeId(item.url) : null;
+  const [opening, setOpening] = useState(false);
+  const ytId = item.content_type === 'youtube' && item.url ? extractYoutubeId(item.url) : null;
+  const isFile = item.content_type === 'file';
 
-  const open = useCallback(() => {
+  const open = useCallback(async () => {
     haptics.select();
     logSharedContentView(item.id);
-    Linking.openURL(item.url).catch(() => {});
-  }, [item.id, item.url]);
+    if (isFile) {
+      if (!item.file_path) return;
+      setOpening(true);
+      try {
+        const signedUrl = await getSharedFileUrl(item.file_path);
+        const canOpen = await Linking.canOpenURL(signedUrl);
+        if (!canOpen) {
+          Alert.alert(
+            'Ouverture impossible',
+            "Aucune application sur cet appareil ne sait ouvrir ce fichier. Réessaie depuis un navigateur, ou vérifie qu'une app compatible est installée."
+          );
+          return;
+        }
+        await Linking.openURL(signedUrl);
+      } catch (e) {
+        // Rendu visible (contrairement à avant) : un échec silencieux ici a fait
+        // remonter plusieurs signalements joueurs impossibles à diagnostiquer.
+        const message = e instanceof Error ? e.message : String(e);
+        Alert.alert('Ouverture impossible', message);
+      } finally {
+        setOpening(false);
+      }
+    } else if (item.url) {
+      Linking.openURL(item.url).catch((e) => {
+        const message = e instanceof Error ? e.message : String(e);
+        Alert.alert('Ouverture impossible', message);
+      });
+    }
+  }, [item.id, item.url, item.file_path, isFile]);
 
   const dateLabel = new Date(item.created_at).toLocaleDateString('fr-FR', {
     day: 'numeric',
     month: 'long',
   });
+
+  const typeLabel = ytId ? 'Vidéo' : isFile ? 'Fichier' : 'Lien externe';
+  const typeTone = ytId ? 'negative' : isFile ? 'warning' : 'accent';
 
   return (
     <Card variant="flat" padding="none" style={s.contentCard}>
@@ -279,11 +320,12 @@ function ContentCard({ item }: { item: SharedContent }) {
       )}
 
       <View style={s.contentBody}>
-        <Badge
-          label={ytId ? 'Vidéo' : 'Lien externe'}
-          tone={ytId ? 'negative' : 'accent'}
-          size="sm"
-        />
+        <View style={s.badgeRow}>
+          <Badge label={typeLabel} icon={isFile ? fileIcon(item.file_mime_type) : undefined} tone={typeTone} size="sm" />
+          {item.team_id === null && (
+            <Badge label="Toutes les équipes" icon="people-outline" tone="accent" size="sm" />
+          )}
+        </View>
         <Text variant="headline" numberOfLines={2}>
           {item.title}
         </Text>
@@ -296,7 +338,14 @@ function ContentCard({ item }: { item: SharedContent }) {
           <Text variant="caption" tone="tertiary">
             Publié le {dateLabel}
           </Text>
-          <Button label="Ouvrir" onPress={open} size="sm" icon="open-outline" iconAfter />
+          <Button
+            label={opening ? 'Ouverture…' : 'Ouvrir'}
+            onPress={open}
+            size="sm"
+            icon="open-outline"
+            iconAfter
+            loading={opening}
+          />
         </View>
       </View>
     </Card>
@@ -368,6 +417,7 @@ const useStyles = makeStyles((t) => ({
   },
 
   contentBody: { padding: t.space.lg, gap: t.space.sm, alignItems: 'flex-start' },
+  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.xs },
   contentFooter: {
     flexDirection: 'row',
     alignItems: 'center',

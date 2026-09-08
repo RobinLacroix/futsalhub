@@ -30,8 +30,10 @@ import {
   Platform,
   InputAccessoryView,
   Pressable,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -42,15 +44,17 @@ import {
   getSessionResults,
   getTestTypes,
   saveResults,
+  deleteSession,
   type ResultInput,
 } from '../../../../lib/services/physicalTests';
 import { getTrainingById } from '../../../../lib/services/trainings';
-import { getPlayersByTeam } from '../../../../lib/services/players';
+import { getPlayersByTeam, getPlayersByClubWithTeams } from '../../../../lib/services/players';
 import {
   parseTestInput,
   type PhysicalTestSession,
   type PhysicalTestType,
 } from '../../../../lib/physicalTests';
+import { exportSessionResults } from '../../../../lib/physicalTestsExport';
 import { Text, Card, Button, EmptyState, SkeletonDetail } from '../../../../components/ui';
 import { PlayerTestRow } from '../../../../components/tests/PlayerTestRow';
 import { TestPickerSheet } from '../../../../components/tests/TestPickerSheet';
@@ -66,6 +70,7 @@ type SaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
 export default function PhysicalTestEntryScreen() {
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
+  const router = useRouter();
   const { theme } = useTheme();
   const c = theme.colors;
 
@@ -78,6 +83,55 @@ export default function PhysicalTestEntryScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
+  const [deleting, setDeleting] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const handleDelete = useCallback(() => {
+    Alert.alert(
+      'Supprimer la campagne',
+      'Tous les résultats saisis sur cette campagne seront perdus. Cette action est définitive.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            setDeleting(true);
+            try {
+              await deleteSession(sessionId);
+              router.back();
+            } catch (e) {
+              Alert.alert('Erreur', e instanceof Error ? e.message : 'Suppression impossible.');
+              setDeleting(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [sessionId, router]);
+
+  const handleExport = useCallback(async () => {
+    if (!session) return;
+    const typesWithData = types.filter((t) =>
+      players.some((p) =>
+        (entries[entryKey(t.id, p.id)] ?? []).some((v) => parseTestInput(v) !== null),
+      ),
+    );
+    if (typesWithData.length === 0) {
+      Alert.alert('Rien à exporter', 'Aucun résultat saisi sur cette campagne.');
+      return;
+    }
+    setExporting(true);
+    try {
+      await exportSessionResults(session, players, typesWithData, entries);
+      haptics.success();
+    } catch (e) {
+      haptics.error();
+      Alert.alert('Erreur', e instanceof Error ? e.message : "Impossible d'exporter.");
+    } finally {
+      setExporting(false);
+    }
+  }, [session, types, players, entries]);
 
   const inputRefs = useRef(new Map<string, TextInput>());
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -112,7 +166,17 @@ export default function PhysicalTestEntryScreen() {
         if (current.training_id) {
           const training = await getTrainingById(current.training_id);
           const convokedIds = new Set((training?.convoked_players ?? []).map((p) => p.id));
-          if (convokedIds.size > 0) roster = roster.filter((p) => convokedIds.has(p.id));
+          if (convokedIds.size > 0) {
+            // La convocation d'une séance peut inclure des joueurs d'autres
+            // équipes (convocation cross-équipe). Résoudre sur l'effectif du
+            // club, pas sur celui de la seule équipe de la campagne : sinon ces
+            // joueurs sont perdus par intersection avant même d'exister dans la
+            // liste de départ.
+            const clubRoster = await getPlayersByClubWithTeams(current.club_id);
+            roster = clubRoster
+              .map((entry) => entry.player)
+              .filter((p) => p.status !== 'left' && convokedIds.has(p.id));
+          }
         }
 
         const rebuilt: Record<string, string[]> = {};
@@ -308,10 +372,34 @@ export default function PhysicalTestEntryScreen() {
     <View style={styles.flex}>
       <View style={[styles.flex, { padding: theme.space.lg, gap: theme.space.lg }]}>
         <Card variant="flat" padding="md" style={{ gap: theme.space.xs }}>
-          <Text variant="caption" tone="tertiary">
-            {format(parseISO(session.date), 'EEEE d MMMM yyyy', { locale: fr })}
-            {session.conditions ? ` · ${session.conditions}` : ''}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.sm }}>
+            <Text variant="caption" tone="tertiary" style={{ flex: 1 }}>
+              {format(parseISO(session.date), 'EEEE d MMMM yyyy', { locale: fr })}
+              {session.conditions ? ` · ${session.conditions}` : ''}
+            </Text>
+            <Pressable
+              onPress={handleExport}
+              disabled={exporting}
+              accessibilityRole="button"
+              accessibilityLabel="Exporter la campagne en Excel"
+              hitSlop={8}
+            >
+              {exporting ? (
+                <ActivityIndicator size="small" color={c.text.tertiary} />
+              ) : (
+                <Ionicons name="share-outline" size={18} color={c.text.secondary} />
+              )}
+            </Pressable>
+            <Pressable
+              onPress={handleDelete}
+              disabled={deleting}
+              accessibilityRole="button"
+              accessibilityLabel="Supprimer la campagne"
+              hitSlop={8}
+            >
+              <Ionicons name="trash-outline" size={18} color={c.negative.default} />
+            </Pressable>
+          </View>
 
           <Pressable
             onPress={() => {

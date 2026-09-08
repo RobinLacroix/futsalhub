@@ -4,13 +4,14 @@ import type { UpdateMatchInput } from './matchUpdateTypes';
 
 function toPlayersArray(
   convoquedIds: string[],
-  stats?: Record<string, { goals: number; yellow_cards: number; red_cards: number; time_played?: number }>,
+  stats?: Record<string, { goals: number; assists: number; yellow_cards: number; red_cards: number; time_played?: number }>,
   existingPlayers?: MatchPlayer[]
 ): MatchPlayer[] {
   const existingById = new Map((existingPlayers ?? []).map((p) => [p.id, p]));
   return convoquedIds.map((id) => ({
     id,
     goals: stats?.[id]?.goals ?? 0,
+    assists: stats?.[id]?.assists ?? 0,
     yellow_cards: stats?.[id]?.yellow_cards ?? 0,
     red_cards: stats?.[id]?.red_cards ?? 0,
     // Préserver le temps de jeu existant (match recorder) si non fourni explicitement
@@ -26,12 +27,17 @@ export async function buildRemoteMatchUpdatePayload(
   const updateData: Record<string, unknown> = {};
   if (input.title !== undefined) updateData.title = input.title.trim();
   if (input.date !== undefined) updateData.date = input.date;
+  if (input.location !== undefined) updateData.location = input.location;
+  if (input.competition !== undefined) updateData.competition = input.competition;
   if (input.score_team !== undefined) updateData.score_team = input.score_team;
   if (input.score_opponent !== undefined) updateData.score_opponent = input.score_opponent;
   if (input.fouls_team !== undefined) updateData.fouls_team = input.fouls_team;
   if (input.fouls_opponent !== undefined) updateData.fouls_opponent = input.fouls_opponent;
   if (input.goals_by_type !== undefined) updateData.goals_by_type = input.goals_by_type;
   if (input.conceded_by_type !== undefined) updateData.conceded_by_type = input.conceded_by_type;
+  if (input.venue_address !== undefined) updateData.venue_address = input.venue_address;
+  if (input.meeting_time !== undefined) updateData.meeting_time = input.meeting_time;
+  if (input.convocation_message !== undefined) updateData.convocation_message = input.convocation_message;
 
   if (input.convoquedPlayerIds !== undefined || input.playerStats !== undefined) {
     // Toujours charger les players existants pour préserver time_played (match recorder)
@@ -60,12 +66,17 @@ export function applyUpdateMatchLocal(base: Match, input: UpdateMatchInput): Mat
   const next: Match = { ...base };
   if (input.title !== undefined) next.title = input.title.trim();
   if (input.date !== undefined) next.date = input.date;
+  if (input.location !== undefined) next.location = input.location;
+  if (input.competition !== undefined) next.competition = input.competition;
   if (input.score_team !== undefined) next.score_team = input.score_team;
   if (input.score_opponent !== undefined) next.score_opponent = input.score_opponent;
   if (input.fouls_team !== undefined) next.fouls_team = input.fouls_team;
   if (input.fouls_opponent !== undefined) next.fouls_opponent = input.fouls_opponent;
   if (input.goals_by_type !== undefined) next.goals_by_type = input.goals_by_type;
   if (input.conceded_by_type !== undefined) next.conceded_by_type = input.conceded_by_type;
+  if (input.venue_address !== undefined) next.venue_address = input.venue_address;
+  if (input.meeting_time !== undefined) next.meeting_time = input.meeting_time;
+  if (input.convocation_message !== undefined) next.convocation_message = input.convocation_message;
 
   if (input.convoquedPlayerIds !== undefined || input.playerStats !== undefined) {
     const raw = base.players;

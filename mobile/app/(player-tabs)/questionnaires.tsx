@@ -57,7 +57,9 @@ import { toPayload } from '../../lib/painMap';
 type Onset = 'aigu' | 'chronique' | null;
 
 type SessionInfo = {
-  training_id: string;
+  kind: 'training' | 'match';
+  training_id?: string;
+  match_id?: string;
   player_id: string;
   training_date: string;
   theme: string | null;

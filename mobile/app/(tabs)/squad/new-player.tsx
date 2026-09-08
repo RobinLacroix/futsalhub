@@ -51,6 +51,9 @@ export default function NewPlayerScreen() {
   const [position, setPosition] = useState<string>('Ailier');
   const [strongFoot, setStrongFoot] = useState<string>('Droit');
   const [numberStr, setNumberStr] = useState('');
+  const [phone, setPhone] = useState('');
+  const [parentName, setParentName] = useState('');
+  const [parentPhone, setParentPhone] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const numberError = useMemo(() => {
@@ -86,6 +89,9 @@ export default function NewPlayerScreen() {
         position,
         strong_foot: strongFoot,
         number: numberStr.trim() ? parseInt(numberStr.trim(), 10) : undefined,
+        phone: phone.trim() || undefined,
+        parent_name: parentName.trim() || undefined,
+        parent_phone: parentPhone.trim() || undefined,
       });
       haptics.success();
       Alert.alert('Joueur ajouté', `${player.first_name} ${player.last_name} rejoint l'effectif.`, [
@@ -184,6 +190,33 @@ export default function NewPlayerScreen() {
             keyboardType="number-pad"
             numeric
             containerStyle={styles.numberField}
+          />
+        </Card>
+
+        <Card variant="raised" padding="lg" style={{ gap: theme.space.lg }}>
+          <Input
+            label="Téléphone du joueur"
+            optional
+            value={phone}
+            onChangeText={setPhone}
+            placeholder="06 12 34 56 78"
+            keyboardType="phone-pad"
+          />
+          <Input
+            label="Nom du parent"
+            optional
+            value={parentName}
+            onChangeText={setParentName}
+            placeholder="Nom du parent"
+            autoCapitalize="words"
+          />
+          <Input
+            label="Téléphone du parent"
+            optional
+            value={parentPhone}
+            onChangeText={setParentPhone}
+            placeholder="06 12 34 56 78"
+            keyboardType="phone-pad"
           />
         </Card>
 

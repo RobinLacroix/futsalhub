@@ -19,9 +19,12 @@ import { Card, Text, SkeletonList } from './ui';
 import {
   getNotificationPreferences,
   setNotificationPreference,
+  getNotificationTeamPreferences,
+  setNotificationTeamPreference,
   DEFAULT_NOTIF_PREFS,
   type CoachNotifType,
   type NotificationPreferences,
+  type NotificationTeamPreference,
 } from '../lib/services/notifications';
 
 const ROWS: {
@@ -54,6 +57,12 @@ const ROWS: {
     hint: 'Un joueur laisse un commentaire libre.',
     icon: 'chatbubble-ellipses-outline',
   },
+  {
+    key: 'pain_report',
+    label: 'Douleur signalée',
+    hint: 'Un joueur signale une douleur.',
+    icon: 'body-outline',
+  },
 ];
 
 export function NotificationPreferencesEditor() {
@@ -62,13 +71,34 @@ export function NotificationPreferencesEditor() {
   const [prefs, setPrefs] = useState<NotificationPreferences>(DEFAULT_NOTIF_PREFS);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState<CoachNotifType | null>(null);
+  const [teamPrefs, setTeamPrefs] = useState<NotificationTeamPreference[]>([]);
+  const [pendingTeam, setPendingTeam] = useState<string | null>(null);
 
   useEffect(() => {
     getNotificationPreferences()
       .then(setPrefs)
       .catch(() => setPrefs(DEFAULT_NOTIF_PREFS))
       .finally(() => setLoading(false));
+    // Renvoie [] pour un non-admin : la section équipes se masque d'elle-même.
+    getNotificationTeamPreferences()
+      .then(setTeamPrefs)
+      .catch(() => setTeamPrefs([]));
   }, []);
+
+  const toggleTeam = async (teamId: string, value: boolean) => {
+    const previous = teamPrefs;
+    haptics.select();
+    setTeamPrefs((rows) => rows.map((r) => (r.team_id === teamId ? { ...r, enabled: value } : r)));
+    setPendingTeam(teamId);
+    try {
+      await setNotificationTeamPreference(teamId, value);
+    } catch {
+      haptics.error();
+      setTeamPrefs(previous);
+    } finally {
+      setPendingTeam(null);
+    }
+  };
 
   const toggle = async (key: CoachNotifType, value: boolean) => {
     const previous = prefs[key];
@@ -86,6 +116,7 @@ export function NotificationPreferencesEditor() {
   };
 
   return (
+    <>
     <Card variant="raised" padding="lg" style={{ gap: theme.space.md }}>
       <View style={styles.header}>
         <Ionicons name="notifications-outline" size={18} color={c.text.secondary} />
@@ -132,6 +163,42 @@ export function NotificationPreferencesEditor() {
         ))
       )}
     </Card>
+
+    {teamPrefs.length > 0 && (
+      <Card variant="raised" padding="lg" style={{ gap: theme.space.md }}>
+        <View style={styles.header}>
+          <Ionicons name="shield-checkmark-outline" size={18} color={c.text.secondary} />
+          <Text variant="headline">Notifications par équipe</Text>
+        </View>
+        <Text variant="callout" tone="secondary">
+          Coupe les notifications d'une équipe précise, quel que soit le type d'alerte.
+        </Text>
+        {teamPrefs.map((row, i) => (
+          <View
+            key={row.team_id}
+            style={[
+              styles.row,
+              { gap: theme.space.md },
+              i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border.subtle },
+            ]}
+          >
+            <Text variant="body" weight="600" style={styles.rowText}>
+              {row.team_name}
+            </Text>
+            <Switch
+              value={row.enabled}
+              onValueChange={(v) => toggleTeam(row.team_id, v)}
+              disabled={pendingTeam === row.team_id}
+              trackColor={{ true: c.accent.fill, false: c.bg.sunken }}
+              thumbColor={c.text.onFill}
+              accessibilityLabel={row.team_name}
+              style={pendingTeam === row.team_id ? styles.pending : undefined}
+            />
+          </View>
+        ))}
+      </Card>
+    )}
+    </>
   );
 }
 

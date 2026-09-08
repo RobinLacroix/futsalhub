@@ -19,7 +19,7 @@ import {
 } from '../../../lib/services/players';
 import { getTrainingsByTeam } from '../../../lib/services/trainings';
 import { getMatchesByTeam } from '../../../lib/services/matches';
-import { getMatchPlayerRatingsBulk } from '../../../lib/services/matchRatings';
+import { getMatchPlayerRatingsBulk, getCoachNotesForMatches } from '../../../lib/services/matchRatings';
 import { getPlayerFeedbackHistory, type PlayerFeedbackRow } from '../../../lib/services/feedback';
 import { supabase } from '../../../lib/supabase';
 import type { Player, Team, PlayerEvent } from '../../../types';
@@ -92,6 +92,7 @@ export default function PlayerDetailScreen() {
   const [feedbackRows, setFeedbackRows]       = useState<PlayerFeedbackRow[]>([]);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [ratingSeries, setRatingSeries]       = useState<{ date: string; rating: number }[]>([]);
+  const [coachNoteByMatch, setCoachNoteByMatch] = useState<Record<string, number>>({});
 
   // ── Modal édition joueur ──────────────────────────────────────────────────
   const [showEditModal, setShowEditModal] = useState(false);
@@ -99,6 +100,7 @@ export default function PlayerDetailScreen() {
     first_name: '', last_name: '', birth_date: '',
     position: '', strong_foot: '', status: '',
     number: '', sequence_time_limit: '',
+    phone: '', parent_name: '', parent_phone: '',
   });
   const [savingPlayer, setSavingPlayer] = useState(false);
 
@@ -126,6 +128,7 @@ export default function PlayerDetailScreen() {
           sorted.map(t => ({
             date: t.date,
             status: (t.attendance?.[playerId] ?? 'not_recorded') as TrainingSession['status'],
+            excused: t.attendance_excused?.[playerId],
           }))
         );
       }
@@ -166,6 +169,26 @@ export default function PlayerDetailScreen() {
         );
       } catch {
         setRatingSeries([]);
+      }
+    })();
+  }, [playerId, activeTeamId, matchFilter, activeSeason]);
+
+  // Note staff (Volet C), staff-only : map match_id → note, superposée sur la
+  // courbe Auto-évaluation (pas de graphe séparé).
+  useEffect(() => {
+    if (!playerId || !activeTeamId) { setCoachNoteByMatch({}); return; }
+    (async () => {
+      try {
+        const teamMatches = await getMatchesByTeam(activeTeamId, activeSeason);
+        const scoped = matchFilter === 'all'
+          ? teamMatches
+          : teamMatches.filter(m => m.competition === matchFilter);
+        const rows = await getCoachNotesForMatches(scoped.map(m => m.id));
+        const map: Record<string, number> = {};
+        rows.filter(r => r.player_id === playerId).forEach(r => { map[r.match_id] = r.note; });
+        setCoachNoteByMatch(map);
+      } catch {
+        setCoachNoteByMatch({});
       }
     })();
   }, [playerId, activeTeamId, matchFilter, activeSeason]);
@@ -225,6 +248,9 @@ export default function PlayerDetailScreen() {
       status:              player.status ?? 'Actif',
       number:              player.number != null ? String(player.number) : '',
       sequence_time_limit: player.sequence_time_limit != null ? String(player.sequence_time_limit) : '',
+      phone:               player.phone ?? '',
+      parent_name:         player.parent_name ?? '',
+      parent_phone:        player.parent_phone ?? '',
     });
     setShowEditModal(true);
   };
@@ -242,6 +268,9 @@ export default function PlayerDetailScreen() {
         status:              editForm.status || undefined,
         number:              editForm.number ? Number(editForm.number) : undefined,
         sequence_time_limit: editForm.sequence_time_limit ? Number(editForm.sequence_time_limit) : undefined,
+        phone:               editForm.phone.trim() || undefined,
+        parent_name:         editForm.parent_name.trim() || undefined,
+        parent_phone:        editForm.parent_phone.trim() || undefined,
       });
       setPlayer(updated);
       setShowEditModal(false);
@@ -308,6 +337,7 @@ export default function PlayerDetailScreen() {
         feedbackRows={feedbackRows}
         feedbackLoading={feedbackLoading}
         ratingSeries={ratingSeries}
+        coachNoteByMatch={coachNoteByMatch}
         allSessions={allSessions}
         initialEvents={initialEvents}
         matchFilter={matchFilter}
@@ -316,6 +346,7 @@ export default function PlayerDetailScreen() {
         onMatchFilterChange={setMatchFilter}
         onAddToTeam={handleAddToTeam}
         onRemoveFromTeam={handleRemoveFromTeam}
+        onUnlinked={() => setPlayer((prev) => (prev ? { ...prev, user_id: undefined } : prev))}
       />
 
       <Sheet
@@ -406,6 +437,36 @@ export default function PlayerDetailScreen() {
             numeric
             containerStyle={styles.numberField}
           />
+
+          <Input
+            label="Téléphone du joueur"
+            optional
+            value={editForm.phone}
+            onChangeText={v => setEditForm(f => ({ ...f, phone: v }))}
+            placeholder="06 12 34 56 78"
+            keyboardType="phone-pad"
+          />
+
+          <View style={styles.row}>
+            <Input
+              label="Nom du parent"
+              optional
+              value={editForm.parent_name}
+              onChangeText={v => setEditForm(f => ({ ...f, parent_name: v }))}
+              placeholder="Nom du parent"
+              autoCapitalize="words"
+              containerStyle={styles.flex}
+            />
+            <Input
+              label="Téléphone du parent"
+              optional
+              value={editForm.parent_phone}
+              onChangeText={v => setEditForm(f => ({ ...f, parent_phone: v }))}
+              placeholder="06 12 34 56 78"
+              keyboardType="phone-pad"
+              containerStyle={styles.flex}
+            />
+          </View>
 
           <Button
             label={savingPlayer ? 'Enregistrement…' : 'Enregistrer'}

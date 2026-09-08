@@ -30,6 +30,14 @@ export interface AttendancePickerProps {
   loading?: boolean;
   /** Libellés complets plutôt qu'abrégés. Le joueur choisit une fois, pas vingt. */
   fullLabels?: boolean;
+  /**
+   * Prévenu / non prévenu, pertinent seulement pour absent/late. `undefined` masque le
+   * toggle (utilisé côté joueur : sa propre déclaration est prévenue par construction).
+   */
+  excused?: boolean;
+  onExcusedChange?: (excused: boolean) => void;
+  /** Statuts grisés, non sélectionnables (ex: 'absent' une fois son délai de prévenance passé). */
+  disabledValues?: PlayerStatus[];
   style?: ViewStyle;
 }
 
@@ -40,6 +48,9 @@ export function AttendancePicker({
   iconOnly = false,
   loading = false,
   fullLabels = false,
+  excused,
+  onExcusedChange,
+  disabledValues,
   style,
 }: AttendancePickerProps) {
   const { theme } = useTheme();
@@ -48,10 +59,14 @@ export function AttendancePicker({
   const toneColor = (tone: string) =>
     tone === 'positive' ? c.positive : tone === 'negative' ? c.negative : c.warning;
 
+  const showExcusedToggle = onExcusedChange && (value === 'absent' || value === 'late');
+
   return (
+    <View style={{ gap: theme.space.xs }}>
     <View style={[styles.row, { gap: theme.space.sm }, style]} accessibilityRole="radiogroup">
       {ATTENDANCE_STATUSES.map((s) => {
         const active = s.value === value;
+        const disabled = loading || !!disabledValues?.includes(s.value);
         const palette = toneColor(s.tone);
         return (
           <Pressable
@@ -60,9 +75,9 @@ export function AttendancePicker({
               haptics.select();
               onChange(s.value);
             }}
-            disabled={loading}
+            disabled={disabled}
             accessibilityRole="radio"
-            accessibilityState={{ selected: active, checked: active, disabled: loading }}
+            accessibilityState={{ selected: active, checked: active, disabled }}
             accessibilityLabel={`${playerName} : ${s.label}`}
             style={({ pressed }) => [
               styles.chip,
@@ -72,7 +87,7 @@ export function AttendancePicker({
                 gap: theme.space.xs,
                 backgroundColor: active ? palette.subtle : c.bg.sunken,
                 borderColor: active ? palette.default : 'transparent',
-                opacity: pressed ? 0.7 : loading && !active ? 0.4 : 1,
+                opacity: pressed ? 0.7 : disabled && !active ? 0.35 : 1,
               },
             ]}
           >
@@ -98,6 +113,46 @@ export function AttendancePicker({
         );
       })}
     </View>
+
+      {showExcusedToggle && (
+        <View style={[styles.row, { gap: theme.space.sm }]} accessibilityRole="radiogroup">
+          {[
+            { key: 'excused' as const, label: 'Prévenu', active: !!excused },
+            { key: 'unexcused' as const, label: 'Non prévenu', active: !excused },
+          ].map((opt) => (
+            <Pressable
+              key={opt.key}
+              onPress={() => {
+                haptics.select();
+                onExcusedChange!(opt.key === 'excused');
+              }}
+              disabled={loading}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: opt.active, checked: opt.active, disabled: loading }}
+              accessibilityLabel={`${playerName} : ${opt.label}`}
+              style={({ pressed }) => [
+                styles.chip,
+                styles.excusedChip,
+                {
+                  borderRadius: theme.radius.pill,
+                  backgroundColor: opt.active ? c.bg.sunken : 'transparent',
+                  borderColor: opt.active ? c.border.strong : c.border.subtle,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <Text
+                variant="caption"
+                color={opt.active ? c.text.primary : c.text.tertiary}
+                weight={opt.active ? '700' : '500'}
+              >
+                {opt.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -108,5 +163,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minHeight: 44,
     borderWidth: 1.5,
+  },
+  excusedChip: {
+    minHeight: 32,
+    paddingHorizontal: 10,
+    borderWidth: 1,
   },
 });

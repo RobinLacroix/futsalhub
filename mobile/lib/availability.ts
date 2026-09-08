@@ -288,6 +288,25 @@ export function sinceLabel(days: number): string {
   return `Depuis ${days} jours`;
 }
 
+/**
+ * Combien de fois cette zone/côté apparaît dans l'historique fourni —
+ * l'épisode en cours inclus, puisqu'il fait déjà partie de ce que renvoie
+ * `get_player_availability_history`. En dessous de 2, ce n'est pas une
+ * récidive, l'appelant ne doit rien afficher.
+ *
+ * Pas de notion de « saison » ici : rien dans le repo n'a encore de bornes de
+ * saison calendaire fiables — `get_player_availability_history` prend une
+ * date brute (`p_from`), pas un identifiant de saison. La fenêtre est donc
+ * celle que l'appelant a demandée à la RPC, pas un an sportif.
+ */
+export function recurrenceCount(
+  history: AvailabilityHistoryRow[],
+  zone: string,
+  side: 'L' | 'R' | 'C',
+): number {
+  return history.filter((h) => h.zone === zone && h.side === side).length;
+}
+
 export const SIDE_LABELS: Record<'L' | 'R' | 'C', string> = {
   L: 'gauche',
   R: 'droit',

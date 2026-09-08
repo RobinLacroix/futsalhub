@@ -68,6 +68,9 @@ export interface CreatePlayerInput {
   position: string;
   strong_foot: string;
   number?: number;
+  phone?: string;
+  parent_name?: string;
+  parent_phone?: string;
 }
 
 export async function createPlayer(teamId: string, input: CreatePlayerInput): Promise<Player> {
@@ -82,6 +85,10 @@ export async function createPlayer(teamId: string, input: CreatePlayerInput): Pr
       status: 'active',
       number: input.number ?? null,
       sequence_time_limit: 180,
+      team_id: teamId,
+      phone: input.phone ?? null,
+      parent_name: input.parent_name ?? null,
+      parent_phone: input.parent_phone ?? null,
     })
     .select()
     .single();
@@ -118,6 +125,7 @@ export async function createPlayersBulk(
         status: 'active',
         number: r.number ?? null,
         sequence_time_limit: 180,
+        team_id: teamId,
       }))
     )
     .select();
@@ -152,6 +160,31 @@ export async function updatePlayer(
     .single();
   if (error) throw error;
   return updated as Player;
+}
+
+/**
+ * Délie le compte utilisateur de la fiche joueur (`players.user_id = NULL`).
+ *
+ * Passe par la RPC `unlink_player_account` plutôt qu'une écriture directe :
+ * elle seule autorise le joueur à le faire sur sa propre fiche (la policy RLS
+ * d'écriture de `players` ne couvre que coach de l'équipe / admin du club).
+ */
+export async function unlinkPlayerAccount(playerId: string): Promise<{ ok: boolean; error?: string }> {
+  const { data, error } = await supabase.rpc('unlink_player_account', { p_player_id: playerId });
+  if (error) return { ok: false, error: error.message };
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (result?.ok) return { ok: true };
+  if (result?.error === 'no_access') return { ok: false, error: "Tu n'as pas les droits sur ce joueur." };
+  if (result?.error === 'not_found') return { ok: false, error: 'Joueur introuvable.' };
+  return { ok: false, error: result?.error ?? 'Erreur inconnue' };
+}
+
+/** Joueurs par IDs, sans filtre d'équipe (pour compléter un effectif avec des convoqués d'autres équipes). */
+export async function getPlayersByIds(playerIds: string[]): Promise<Player[]> {
+  if (playerIds.length === 0) return [];
+  const { data, error } = await supabase.from('players').select('*').in('id', playerIds);
+  if (error) throw error;
+  return (data ?? []) as Player[];
 }
 
 export async function getPlayerById(playerId: string): Promise<Player | null> {
@@ -215,6 +248,7 @@ export async function getPlayerStats(
 ): Promise<{
   matches_played: number;
   goals: number;
+  assists: number;
   training_attendance: number;
   attendance_percentage: number;
   victories: number;
@@ -223,7 +257,7 @@ export async function getPlayerStats(
 }> {
   let matchesQ = supabase
     .from('matches')
-    .select('competition, players, score_team, score_opponent')
+    .select('id, competition, players, score_team, score_opponent')
     .eq('team_id', teamId);
   if (season) matchesQ = matchesQ.eq('season', season);
   const { data: matchesData, error: matchesError } = await matchesQ;
@@ -305,9 +339,51 @@ export async function getPlayerStats(
     }
   });
 
+  // Passes décisives : la source la plus fiable, par match.
+  // - Match suivi en direct (au moins un match_events, tous joueurs/types
+  //   confondus) : compter ses événements 'assist' pour ce joueur — mesure en
+  //   temps réel, complète même si le match n'a jamais été « terminé » côté
+  //   tracker (auquel cas matches.players n'aurait encore rien).
+  // - Match jamais suivi (aucun match_events) : matches.players est la seule
+  //   donnée disponible, saisie à la main dans le calendrier.
+  // Sans ce repli par match, un match uniquement saisi à la main contribuerait
+  // zéro, et un match tracké mais non terminé perdrait ses passes déc.
+  const matchIds = matches.map((m) => m.id as string).filter(Boolean);
+  let assists = 0;
+  if (matchIds.length > 0) {
+    const { data: evData, error: evError } = await supabase
+      .from('match_events')
+      .select('match_id, event_type, player_id')
+      .in('match_id', matchIds);
+    if (evError) throw evError;
+
+    const trackedMatchIds = new Set<string>();
+    const assistsByMatch = new Map<string, number>();
+    (evData ?? []).forEach((ev) => {
+      trackedMatchIds.add(ev.match_id);
+      if (ev.event_type === 'assist' && ev.player_id === playerId) {
+        assistsByMatch.set(ev.match_id, (assistsByMatch.get(ev.match_id) ?? 0) + 1);
+      }
+    });
+
+    assists = matches.reduce((sum, m) => {
+      const id = m.id as string;
+      if (trackedMatchIds.has(id)) return sum + (assistsByMatch.get(id) ?? 0);
+      if (!m.players) return sum;
+      try {
+        const arr = Array.isArray(m.players) ? m.players : JSON.parse(m.players as string);
+        const p = arr.find((x: { id: string; assists?: number }) => x.id === playerId);
+        return sum + (p?.assists ?? 0);
+      } catch {
+        return sum;
+      }
+    }, 0);
+  }
+
   return {
     matches_played: matchesPlayed,
     goals,
+    assists,
     training_attendance: trainingAttendance,
     attendance_percentage,
     victories,
@@ -319,7 +395,9 @@ export async function getPlayerStats(
 export interface PlayerSquadStat {
   matches: number;
   goals: number;
+  assists: number;
   seances: number; // séances présent ou en retard
+  unexcusedCount: number; // absences/retards non prévenus, sur la saison
 }
 
 /**
@@ -338,7 +416,7 @@ export async function getSquadBulkStats(
   if (season) matchesQ = matchesQ.eq('season', season);
   let trainingsQ = supabase
     .from('trainings')
-    .select('attendance')
+    .select('attendance, attendance_excused')
     .eq('team_id', teamId);
   if (season) trainingsQ = trainingsQ.eq('season', season);
   const [{ data: matchesData }, { data: trainingsData }] = await Promise.all([
@@ -358,13 +436,13 @@ export async function getSquadBulkStats(
   const stats: Record<string, PlayerSquadStat> = {};
 
   const ensurePlayer = (id: string) => {
-    if (!stats[id]) stats[id] = { matches: 0, goals: 0, seances: 0 };
+    if (!stats[id]) stats[id] = { matches: 0, goals: 0, assists: 0, seances: 0, unexcusedCount: 0 };
   };
 
   for (const m of matches) {
     if (!m.players) continue;
     try {
-      const arr: { id: string; goals?: number }[] = Array.isArray(m.players)
+      const arr: { id: string; goals?: number; assists?: number }[] = Array.isArray(m.players)
         ? m.players
         : JSON.parse(m.players as string);
       for (const p of arr) {
@@ -372,6 +450,7 @@ export async function getSquadBulkStats(
         ensurePlayer(p.id);
         stats[p.id].matches += 1;
         stats[p.id].goals += p.goals ?? 0;
+        stats[p.id].assists += p.assists ?? 0;
       }
     } catch {
       // JSONB malformé — ignorer ce match
@@ -384,10 +463,18 @@ export async function getSquadBulkStats(
       const att: Record<string, string> = typeof t.attendance === 'string'
         ? JSON.parse(t.attendance)
         : t.attendance;
+      const excusedMap: Record<string, boolean> =
+        (typeof t.attendance_excused === 'string'
+          ? JSON.parse(t.attendance_excused)
+          : t.attendance_excused) ?? {};
       for (const [playerId, status] of Object.entries(att)) {
         if (status === 'present' || status === 'late') {
           ensurePlayer(playerId);
           stats[playerId].seances += 1;
+        }
+        if ((status === 'absent' || status === 'late') && !excusedMap[playerId]) {
+          ensurePlayer(playerId);
+          stats[playerId].unexcusedCount += 1;
         }
       }
     } catch {
@@ -469,16 +556,20 @@ export async function getPlayerRadarStats(
   const matchIds = matches.map((m) => m.id as string);
 
   // 2. Événements de match
-  type EventRow = { player_id: string | null; event_type: string; players_on_field: string[] | null };
+  type EventRow = { match_id: string; player_id: string | null; event_type: string; players_on_field: string[] | null };
   let events: EventRow[] = [];
   if (matchIds.length > 0) {
     const { data: eventsData, error: eventsError } = await supabase
       .from('match_events')
-      .select('player_id, event_type, players_on_field')
+      .select('match_id, player_id, event_type, players_on_field')
       .in('match_id', matchIds);
     if (eventsError) throw eventsError;
     events = (eventsData ?? []) as EventRow[];
   }
+  // Matchs jamais suivis en direct (aucun match_events) : leurs passes déc.
+  // ne peuvent venir que de matches.players (saisie calendrier), sinon ce
+  // match contribue zéro au radar alors que la saisie existe.
+  const trackedMatchIds = new Set(events.map((ev) => ev.match_id));
 
   // 3. Agrégation par joueur
   type Acc = {
@@ -497,17 +588,20 @@ export async function getPlayerRadarStats(
   const per = new Map<string, Acc>();
   const ensure = (id: string) => { if (!per.has(id)) per.set(id, initAcc()); return per.get(id)!; };
 
-  // Depuis matches.players JSON → temps de jeu + nb matchs joués
+  // Depuis matches.players JSON → temps de jeu + nb matchs joués (+ passes
+  // déc. de repli pour les matchs jamais suivis en direct, voir plus haut)
   for (const m of matches) {
     if (!m.players) continue;
-    let arr: Array<{ id: string; time_played?: number }>;
+    let arr: Array<{ id: string; time_played?: number; assists?: number }>;
     try { arr = Array.isArray(m.players) ? m.players : JSON.parse(m.players as string); }
     catch { continue; }
+    const isUntracked = !trackedMatchIds.has(m.id as string);
     for (const p of arr) {
       const acc = ensure(p.id);
       acc.matchCount++;
       const sec = Number(p.time_played) || 0;
       if (sec > 0) { acc.totalTimeSec += sec; acc.matchesWithTime++; }
+      if (isUntracked) acc.assists += Number(p.assists) || 0;
     }
   }
 

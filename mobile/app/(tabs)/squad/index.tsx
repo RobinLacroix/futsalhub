@@ -22,7 +22,7 @@ import type { Player } from '../../../types';
 
 // ─── Modèle de tri ────────────────────────────────────────────────────────────
 
-type SortKey = 'name' | 'position' | 'seances' | 'matches' | 'goals';
+type SortKey = 'name' | 'position' | 'seances' | 'matches' | 'goals' | 'assists';
 type SortDir = 'asc' | 'desc';
 
 const FILTERS: readonly ChipOption<MatchTypeFilter>[] = [
@@ -33,10 +33,11 @@ const FILTERS: readonly ChipOption<MatchTypeFilter>[] = [
 ];
 
 /** Colonnes chiffrées du tableau. `label` reste court : la largeur est de 52 pt. */
-const STAT_COLUMNS: { key: Extract<SortKey, 'seances' | 'matches' | 'goals'>; label: string; full: string }[] = [
+const STAT_COLUMNS: { key: Extract<SortKey, 'seances' | 'matches' | 'goals' | 'assists'>; label: string; full: string }[] = [
   { key: 'seances', label: 'SÉA', full: 'séances' },
   { key: 'matches', label: 'MAT', full: 'matchs' },
   { key: 'goals', label: 'BUT', full: 'buts' },
+  { key: 'assists', label: 'PD', full: 'passes déc.' },
 ];
 
 const COL_NUM = 38;
@@ -132,7 +133,7 @@ export default function SquadScreen() {
   };
 
   const sortedPlayers = useMemo(() => {
-    const empty: PlayerSquadStat = { seances: 0, matches: 0, goals: 0 };
+    const empty: PlayerSquadStat = { seances: 0, matches: 0, goals: 0, assists: 0, unexcusedCount: 0 };
     return [...players].sort((a, b) => {
       const sA = stats[a.id] ?? empty;
       const sB = stats[b.id] ?? empty;
@@ -374,16 +375,18 @@ export default function SquadScreen() {
             />
           }
           renderItem={({ item, index }) => {
-            const s = stats[item.id] ?? { seances: 0, matches: 0, goals: 0 };
+            const s = stats[item.id] ?? { seances: 0, matches: 0, goals: 0, assists: 0, unexcusedCount: 0 };
             const pos = positionStyle(item.position, c);
             const hasFeedback = feedbackPlayerIds.has(item.id);
+            const hasUnexcused = s.unexcusedCount > 0;
 
             const a11y = [
               `${item.first_name} ${item.last_name}`,
               item.number != null ? `numéro ${item.number}` : undefined,
               pos.label,
-              `${s.seances} séances, ${s.matches} matchs, ${s.goals} buts`,
+              `${s.seances} séances, ${s.matches} matchs, ${s.goals} buts, ${s.assists} passes déc.`,
               hasFeedback ? 'nouveau retour à lire' : undefined,
+              hasUnexcused ? `${s.unexcusedCount} absence ou retard non prévenu` : undefined,
             ]
               .filter(Boolean)
               .join(', ');
@@ -466,6 +469,9 @@ export default function SquadScreen() {
                       </Text>
                       {hasFeedback && (
                         <View style={[styles.dot, { backgroundColor: c.negative.default }]} />
+                      )}
+                      {hasUnexcused && (
+                        <Ionicons name="alert-circle" size={14} color={c.warning.default} />
                       )}
                     </View>
                     <Text variant="caption" tone="tertiary" numberOfLines={1}>

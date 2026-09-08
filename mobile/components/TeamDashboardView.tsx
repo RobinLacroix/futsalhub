@@ -35,9 +35,9 @@ import { getMatchesByTeam } from '../lib/services/matches';
 import { getPlayersByTeam, getSquadBulkStats, type PlayerSquadStat } from '../lib/services/players';
 import { getTeamFeedbackForLastSessions, type TeamFeedbackRow } from '../lib/services/feedback';
 import type { Training, Match, Player } from '../types';
-import Svg, { Polyline, Rect, Circle, Line as SvgLine, Text as SvgText } from 'react-native-svg';
+import Svg, { Polyline, Circle, Line as SvgLine, Text as SvgText } from 'react-native-svg';
 import { useTheme, makeStyles } from '../contexts/ThemeContext';
-import type { ThemeColors } from '../lib/design/tokens';
+import { deltaColor, type ThemeColors } from '../lib/design/tokens';
 import { fmPalette } from './players/fmPalette';
 import { positionStyle } from './players/positions';
 
@@ -86,33 +86,13 @@ function dashColors(c: ThemeColors, scheme: 'light' | 'dark') {
 }
 type DashColors = ReturnType<typeof dashColors>;
 
-type TabId = 'week' | 'season' | 'squad';
-type RankSortKey = 'name' | 'matches' | 'victories' | 'draws' | 'defeats' | 'goals' | 'att' | 'form';
-type CompFilter = 'all' | 'Championnat' | 'Coupe' | 'Amical';
-const COMP_FILTERS: { label: string; value: CompFilter }[] = [
-  { label: 'Tous',         value: 'all'          },
-  { label: 'Champ.',       value: 'Championnat'  },
-  { label: 'Coupe',        value: 'Coupe'        },
-  { label: 'Amical',       value: 'Amical'       },
-];
+type TabId = 'season' | 'squad';
+type RankSortKey = 'name' | 'formRecent' | 'formDelta' | 'sessions' | 'att' | 'injured' | 'late' | 'absent';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function abbrev(p: Player) {
   return `${p.first_name[0] ?? '?'}.${p.last_name?.[0] ?? ''}`;
-}
-
-function wellnessScore(rows: TeamFeedbackRow[]): number | null {
-  const vals = rows
-    .map((r) => {
-      const v: number[] = [];
-      if (r.physical_form != null) v.push(r.physical_form);
-      if (r.pleasure      != null) v.push(r.pleasure);
-      return v;
-    })
-    .flat();
-  if (!vals.length) return null;
-  return vals.reduce((a, b) => a + b, 0) / vals.length;
 }
 
 function wellnessColor(C: DashColors, score: number | null): string {
@@ -127,56 +107,6 @@ function wellnessBg(C: DashColors, score: number | null): string {
   if (score >= 7) return C.greenBg;
   if (score >= 5) return C.amberBg;
   return C.redBg;
-}
-
-const HEATMAP_METRICS = [
-  { key: 'auto_evaluation' as const, label: 'Auto-éval.' },
-  { key: 'rpe'             as const, label: 'Intensité'  },
-  { key: 'physical_form'   as const, label: 'Forme'      },
-  { key: 'pleasure'        as const, label: 'Plaisir'    },
-] as const;
-type HeatmapMetricKey = typeof HEATMAP_METRICS[number]['key'];
-
-/**
- * Le RPE ne se lit pas comme les trois autres métriques : une note haute n'y est
- * pas un mauvais résultat, c'est une charge élevée. Sa rampe est donc en cloche
- * (faible → optimal → élevé → surcharge) et non monotone. C'est le seul endroit
- * de l'application où cette distinction est correctement faite — elle est
- * conservée telle quelle.
- */
-function metricColor(C: DashColors, key: HeatmapMetricKey, val: number | null): string {
-  if (val === null) return C.border;
-  if (key === 'rpe') {
-    if (val < 4)    return C.blue;
-    if (val <= 7)   return C.green;
-    if (val <= 8.5) return C.amber;
-    return C.red;
-  }
-  return wellnessColor(C, val);
-}
-
-function metricBg(C: DashColors, key: HeatmapMetricKey, val: number | null): string {
-  if (val === null) return C.sunken;
-  if (key === 'rpe') {
-    if (val < 4)    return C.blueBg;
-    if (val <= 7)   return C.greenBg;
-    if (val <= 8.5) return C.amberBg;
-    return C.redBg;
-  }
-  return wellnessBg(C, val);
-}
-
-function rpeLabel(C: DashColors, avg: number): { label: string; color: string; advice: string } {
-  if (avg < 4) return { label: 'Trop faible', color: C.blue,  advice: 'Séance peu stimulante — Intensifier les prochaines' };
-  if (avg <= 7) return { label: 'Zone optimale', color: C.green, advice: 'Charge idéale — Équipe prête pour le match' };
-  if (avg <= 8.5) return { label: 'Charge élevée', color: C.amber, advice: 'Surveiller la récupération avant vendredi' };
-  return { label: 'Surcharge', color: C.red, advice: 'Réduire l\'intensité — Risque de surmenage' };
-}
-
-function matchResult(m: Match): 'W' | 'D' | 'L' {
-  const s = m.score_team, o = m.score_opponent;
-  if (s == null || o == null) return 'D';
-  return s > o ? 'W' : s < o ? 'L' : 'D';
 }
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
@@ -220,16 +150,14 @@ export function TeamDashboardView() {
 
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [tab, setTab]               = useState<TabId>('week');
+  const [tab, setTab]               = useState<TabId>('season');
 
   const [trainings,   setTrainings]   = useState<Training[]>([]);
   const [matches,     setMatches]     = useState<Match[]>([]);
   const [players,     setPlayers]     = useState<Player[]>([]);
   const [feedback,    setFeedback]    = useState<TeamFeedbackRow[]>([]);
   const [squadStats,  setSquadStats]  = useState<Record<string, PlayerSquadStat>>({});
-  const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetricKey>('physical_form');
-  const [rankCompFilter, setRankCompFilter] = useState<CompFilter>('all');
-  const [rankSort, setRankSort] = useState<{ key: RankSortKey; dir: 'asc' | 'desc' }>({ key: 'goals', dir: 'desc' });
+  const [rankSort, setRankSort] = useState<{ key: RankSortKey; dir: 'asc' | 'desc' }>({ key: 'formRecent', dir: 'desc' });
 
   const handleRankSort = (key: RankSortKey) =>
     setRankSort(prev => ({
@@ -251,7 +179,7 @@ export function TeamDashboardView() {
         getTrainingsByTeam(activeTeamId, activeSeason),
         getMatchesByTeam(activeTeamId, activeSeason),
         getPlayersByTeam(activeTeamId),
-        getTeamFeedbackForLastSessions(activeTeamId, 5),
+        getTeamFeedbackForLastSessions(activeTeamId, 10),
         getSquadBulkStats(activeTeamId, 'all', activeSeason),
       ]);
       setTrainings(tr); setMatches(ma); setPlayers(pl); setFeedback(fb); setSquadStats(ss);
@@ -283,55 +211,11 @@ export function TeamDashboardView() {
     const pastMatches = matches
       .filter((m) => m.date < today && m.score_team != null && m.score_opponent != null)
       .sort((a, b) => b.date.localeCompare(a.date));
-    const last5 = pastMatches.slice(0, 5);
 
     // Season bilan
     const wins   = pastMatches.filter((m) => m.score_team! > m.score_opponent!).length;
     const draws  = pastMatches.filter((m) => m.score_team! === m.score_opponent!).length;
     const losses = pastMatches.filter((m) => m.score_team! < m.score_opponent!).length;
-    const gf = pastMatches.reduce((s, m) => s + (m.score_team ?? 0), 0);
-    const ga = pastMatches.reduce((s, m) => s + (m.score_opponent ?? 0), 0);
-
-    // Win rate
-    const winRate = pastMatches.length > 0 ? Math.round((wins / pastMatches.length) * 100) : 0;
-
-    // Goal DNA
-    const dna = { off: [0, 0], trans: [0, 0], cpa: [0, 0], sup: [0, 0] }; // [scored, conceded]
-    pastMatches.forEach((m) => {
-      const gb = (m as any).goals_by_type    ?? {};
-      const cb = (m as any).conceded_by_type ?? {};
-      dna.off[0]   += gb.offensive ?? 0; dna.off[1]   += cb.offensive ?? 0;
-      dna.trans[0] += gb.transition ?? 0; dna.trans[1] += cb.transition ?? 0;
-      dna.cpa[0]   += gb.cpa ?? 0;       dna.cpa[1]   += cb.cpa ?? 0;
-      dna.sup[0]   += gb.superiority ?? 0; dna.sup[1]  += cb.superiority ?? 0;
-    });
-    const dnaMax = Math.max(
-      dna.off[0], dna.off[1], dna.trans[0], dna.trans[1],
-      dna.cpa[0], dna.cpa[1], dna.sup[0],   dna.sup[1], 1
-    );
-
-    // Shots efficiency — inferred from score + goals_by_type
-    const totalGoals     = gf;
-    const matchCount     = pastMatches.length;
-    const goalsPerMatch  = matchCount ? +(gf / matchCount).toFixed(1) : 0;
-    const concededPerM   = matchCount ? +(ga / matchCount).toFixed(1) : 0;
-
-    // Recent trainings (last 5 sorted desc)
-    const recentTrainings = [...trainings]
-      .filter((t) => t.date <= today)
-      .sort((a, b) => b.date.localeCompare(a.date))
-      .slice(0, 5);
-
-    // Last 5 training IDs (for heatmap ordering, oldest → newest)
-    const last5TrainingIds = [...recentTrainings].reverse().map((t) => t.id);
-    const trainingDateById = Object.fromEntries(trainings.map((t) => [t.id, t.date]));
-
-    // Attendance per session (for recent training cards)
-    const attendanceBySession = recentTrainings.map((t) => {
-      const att = t.attendance ?? {};
-      const present = Object.values(att).filter((v) => v === 'present' || v === 'late').length;
-      return { training: t, present, total: Object.keys(att).length };
-    });
 
     // Training themes (for season tab)
     const themeCount: Record<string, number> = {};
@@ -342,16 +226,20 @@ export function TeamDashboardView() {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
 
-    // Attendance rate per player: (present + late) / sessions where player was convoked
+    // Attendance & availability tallies per player (saison, tous les entraînements passés)
     const convokedCount: Record<string, number> = {};
-    const presentCount: Record<string, number> = {};
+    const presentCount:  Record<string, number> = {};
+    const injuredCount:  Record<string, number> = {};
+    const lateCount:     Record<string, number> = {};
+    const absentCount:   Record<string, number> = {};
     trainings.filter((t) => t.date <= today).forEach((t) => {
       const att = t.attendance ?? {};
       Object.entries(att).forEach(([pid, status]) => {
         convokedCount[pid] = (convokedCount[pid] ?? 0) + 1;
-        if (status === 'present' || status === 'late') {
-          presentCount[pid] = (presentCount[pid] ?? 0) + 1;
-        }
+        if (status === 'present' || status === 'late') presentCount[pid] = (presentCount[pid] ?? 0) + 1;
+        if (status === 'injured') injuredCount[pid] = (injuredCount[pid] ?? 0) + 1;
+        if (status === 'late')    lateCount[pid]    = (lateCount[pid]    ?? 0) + 1;
+        if (status === 'absent')  absentCount[pid]  = (absentCount[pid]  ?? 0) + 1;
       });
     });
     const attendanceRate: Record<string, number> = {};
@@ -369,59 +257,31 @@ export function TeamDashboardView() {
       feedbackMap[f.player_id][f.training_id] = f;
     });
 
-    // RPE + Form avg (last 5 sessions)
-    const rpeVals  = feedback
-      .filter((f) => last5TrainingIds.includes(f.training_id) && f.rpe != null)
-      .map((f) => f.rpe as number);
-    const rpeAvg = rpeVals.length ? +(rpeVals.reduce((a, b) => a + b, 0) / rpeVals.length).toFixed(1) : null;
-    const formVals = feedback
-      .filter((f) => last5TrainingIds.includes(f.training_id) && f.physical_form != null)
-      .map((f) => f.physical_form as number);
-    const formAvg = formVals.length ? +(formVals.reduce((a, b) => a + b, 0) / formVals.length).toFixed(1) : null;
-
-    // Player form scores (avg wellbeing across last 5 sessions)
-    const playerForm: Record<string, number | null> = {};
+    /**
+     * Forme physique : moyenne sur les 5 dernières séances, et évolution vs
+     * le bloc des 5 séances précédentes. `physical_form` seul, pas mélangé à
+     * `pleasure` (ce que faisait l'ancien `wellnessScore`) — la question
+     * posée ici est physique, pas le ressenti global.
+     */
+    const recentTrainings = [...trainings]
+      .filter((t) => t.date <= today)
+      .sort((a, b) => b.date.localeCompare(a.date));
+    const last5Ids = new Set(recentTrainings.slice(0, 5).map((t) => t.id));
+    const prev5Ids  = new Set(recentTrainings.slice(5, 10).map((t) => t.id));
+    const physicalFormAvg = (ids: Set<string>, playerId: string): number | null => {
+      const vals = feedback
+        .filter((f) => f.player_id === playerId && ids.has(f.training_id) && f.physical_form != null)
+        .map((f) => f.physical_form as number);
+      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    };
+    const formRecent: Record<string, number | null> = {};
+    const formDelta:  Record<string, number | null> = {};
     players.forEach((p) => {
-      const rows = Object.values(feedbackMap[p.id] ?? {});
-      playerForm[p.id] = wellnessScore(rows);
+      const recent = physicalFormAvg(last5Ids, p.id);
+      const prev   = physicalFormAvg(prev5Ids, p.id);
+      formRecent[p.id] = recent;
+      formDelta[p.id]  = recent != null && prev != null ? recent - prev : null;
     });
-
-    // Squad availability
-    const squadStatus: Record<string, 'green' | 'amber' | 'red'> = {};
-    players.forEach((p) => {
-      const form = playerForm[p.id];
-      const att  = attendanceRate[p.id] ?? 0;
-      if (form !== null && form < 5)  { squadStatus[p.id] = 'red';   return; }
-      if (form !== null && form < 7)  { squadStatus[p.id] = 'amber'; return; }
-      if (att < 50)                   { squadStatus[p.id] = 'amber'; return; }
-      squadStatus[p.id] = 'green';
-    });
-    const greenCount = Object.values(squadStatus).filter((s) => s === 'green').length;
-    const amberCount = Object.values(squadStatus).filter((s) => s === 'amber').length;
-    const redCount   = Object.values(squadStatus).filter((s) => s === 'red').length;
-
-    // Players sorted by form (best first)
-    const playersSortedByForm = [...players].sort((a, b) => {
-      const fa = playerForm[a.id] ?? -1;
-      const fb = playerForm[b.id] ?? -1;
-      return fb - fa;
-    });
-
-    // Home/away split
-    const home = pastMatches.filter((m) => (m.location ?? '').toLowerCase().includes('dom'));
-    const away = pastMatches.filter((m) => !((m.location ?? '').toLowerCase().includes('dom')));
-    const homeWR = home.length ? Math.round((home.filter((m) => m.score_team! > m.score_opponent!).length / home.length) * 100) : null;
-    const awayWR = away.length ? Math.round((away.filter((m) => m.score_team! > m.score_opponent!).length / away.length) * 100) : null;
-
-    // Current streak
-    let streak = { count: 0, type: '' as 'V' | 'N' | 'D' | '' };
-    for (const m of last5) {
-      const r = matchResult(m);
-      const type = r === 'W' ? 'V' : r === 'D' ? 'N' : 'D';
-      if (!streak.type) { streak = { count: 1, type }; }
-      else if (streak.type === type) { streak.count++; }
-      else break;
-    }
 
     // ── Attendance evolution (all sessions, chronological) ────────────────
     // Includes players from all teams present in the attendance record
@@ -434,78 +294,38 @@ export function TeamDashboardView() {
         count: Object.values(t.attendance ?? {}).filter((v) => v === 'present' || v === 'late').length,
       }));
 
-    // ── Goals per match, chronological (for stacked bar) ─────────────────
-    const matchGoalsHistory = [...pastMatches]
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .map((m) => {
-        const gb = (m as any).goals_by_type    ?? {};
-        const cb = (m as any).conceded_by_type ?? {};
-        return {
-          label:    format(parseISO(m.date), 'd/MM'),
-          scored:   m.score_team    ?? 0,
-          conceded: m.score_opponent ?? 0,
-          result:   matchResult(m),
-          scoredByType: {
-            offensive:   gb.offensive   ?? 0,
-            transition:  gb.transition  ?? 0,
-            cpa:         gb.cpa         ?? 0,
-            superiority: gb.superiority ?? 0,
-          },
-          concededByType: {
-            offensive:   cb.offensive   ?? 0,
-            transition:  cb.transition  ?? 0,
-            cpa:         cb.cpa         ?? 0,
-            superiority: cb.superiority ?? 0,
-          },
-        };
-      });
-
     return {
       nextTraining, nextMatch,
-      last5, last5TrainingIds, trainingDateById,
-      wins, draws, losses, gf, ga, winRate, matchCount,
-      goalsPerMatch, concededPerM, totalGoals,
-      dna, dnaMax,
-      recentTrainings, attendanceBySession,
+      wins, draws, losses,
       themes, themeCount,
-      attendanceRate, feedbackMap,
-      playerForm, playersSortedByForm, squadStatus,
-      greenCount, amberCount, redCount,
-      rpeAvg, formAvg,
-      homeWR, awayWR,
-      streak,
+      presentCount, attendanceRate, injuredCount, lateCount, absentCount,
+      feedbackMap, formRecent, formDelta,
       futureTrainings, futureMatches,
       sessionAttHistory,
-      matchGoalsHistory,
     };
   }, [trainings, matches, players, feedback]);
 
-  // ── Ranking stats (M/V/N/D/Buts/Présence/Forme) with competition filter ───
+  /**
+   * Forme et présence uniquement : M/V/N/D/Buts vivent désormais dans le
+   * segment « Matchs » de l'onglet Analyse (Statistiques joueurs, source
+   * tracker) — cette table n'a plus vocation à les recalculer depuis le JSON
+   * manuel du match, une deuxième source pour la même donnée. Domicile /
+   * Extérieur a suivi le même chemin : c'est un résultat de match, pas de
+   * séance.
+   */
   const rankData = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    const filtered = matches
-      .filter(m => m.date < today && m.score_team != null && m.score_opponent != null)
-      .filter(m => rankCompFilter === 'all' || (m.competition ?? '') === rankCompFilter);
-
-    return players.map(p => {
-      let matchesPlayed = 0, victories = 0, draws = 0, defeats = 0, goals = 0;
-      for (const m of filtered) {
-        try {
-          const arr: { id: string; goals?: number }[] = Array.isArray(m.players)
-            ? (m.players as { id: string; goals?: number }[])
-            : JSON.parse((m.players as string | undefined) ?? '[]');
-          const entry = arr.find(pm => pm.id === p.id);
-          if (!entry) continue;
-          matchesPlayed++;
-          goals += entry.goals ?? 0;
-          if (m.score_team! > m.score_opponent!) victories++;
-          else if (m.score_team! === m.score_opponent!) draws++;
-          else defeats++;
-        } catch { /* JSON malformé */ }
-      }
-      return { player: p, matches: matchesPlayed, victories, draws, defeats, goals, att: data.attendanceRate[p.id] ?? 0, form: data.playerForm[p.id] ?? null };
-    });
-  }, [players, matches, rankCompFilter, data.attendanceRate, data.playerForm]);
+    return players.map(p => ({
+      player:     p,
+      formRecent: data.formRecent[p.id] ?? null,
+      formDelta:  data.formDelta[p.id]  ?? null,
+      // « Nombre de présence » = présent + en retard, pas le total convoqué.
+      sessions:   data.presentCount[p.id] ?? 0,
+      att:        data.attendanceRate[p.id] ?? 0,
+      injured:    data.injuredCount[p.id] ?? 0,
+      late:       data.lateCount[p.id] ?? 0,
+      absent:     data.absentCount[p.id] ?? 0,
+    }));
+  }, [players, data.formRecent, data.formDelta, data.presentCount, data.attendanceRate, data.injuredCount, data.lateCount, data.absentCount]);
 
   const rankSortedData = useMemo(() => {
     return [...rankData].sort((a, b) => {
@@ -513,10 +333,14 @@ export function TeamDashboardView() {
       if (rankSort.key === 'name')
         return dir * `${a.player.last_name} ${a.player.first_name}`.localeCompare(`${b.player.last_name} ${b.player.first_name}`, 'fr');
       const map: Record<RankSortKey, number> = {
-        name: 0, matches: a.matches - b.matches, victories: a.victories - b.victories,
-        draws: a.draws - b.draws, defeats: a.defeats - b.defeats,
-        goals: a.goals - b.goals, att: a.att - b.att,
-        form: (a.form ?? -1) - (b.form ?? -1),
+        name: 0,
+        formRecent: (a.formRecent ?? -1) - (b.formRecent ?? -1),
+        formDelta:  (a.formDelta  ?? -99) - (b.formDelta  ?? -99),
+        sessions: a.sessions - b.sessions,
+        att:      a.att - b.att,
+        injured:  a.injured - b.injured,
+        late:     a.late - b.late,
+        absent:   a.absent - b.absent,
       };
       return dir * (map[rankSort.key] ?? 0);
     });
@@ -583,7 +407,7 @@ export function TeamDashboardView() {
         {data.nextTraining && (
           <TouchableOpacity
             style={[s.nextCard, { borderLeftColor: C.blue }]}
-            onPress={() => router.push(`/calendar/training/${data.nextTraining!.id}` as any)}
+            onPress={() => router.push(`/(tabs)/calendar/training/${data.nextTraining!.id}` as never)}
             activeOpacity={0.8}
           >
             <Ionicons name="barbell-outline" size={16} color={C.blue} />
@@ -603,7 +427,7 @@ export function TeamDashboardView() {
         {data.nextMatch && (
           <TouchableOpacity
             style={[s.nextCard, { borderLeftColor: C.amber }]}
-            onPress={() => router.push(`/calendar/matchDetail/${data.nextMatch!.id}` as any)}
+            onPress={() => router.push(`/(tabs)/calendar/matchDetail/${data.nextMatch!.id}` as never)}
             activeOpacity={0.8}
           >
             <Ionicons name="football-outline" size={16} color={C.amber} />
@@ -629,7 +453,7 @@ export function TeamDashboardView() {
 
       {/* ── Tab bar ──────────────────────────────────────────────────────── */}
       <View style={s.tabBar}>
-        {([['week', 'Charge'], ['season', 'Saison'], ['squad', 'Effectif']] as [TabId, string][]).map(([id, label]) => (
+        {([['season', 'Saison'], ['squad', 'Effectif']] as [TabId, string][]).map(([id, label]) => (
           <TouchableOpacity
             key={id}
             style={[s.tabBtn, tab === id && s.tabBtnActive]}
@@ -642,276 +466,10 @@ export function TeamDashboardView() {
       </View>
 
       {/* ════════════════════════════════════════════════════════════════════
-          TAB — SEMAINE
-      ════════════════════════════════════════════════════════════════════ */}
-      {tab === 'week' && (
-        <>
-          {/* ── Squad availability ─────────────────────────────────── */}
-          <SectionCard title="Disponibilité effectif" icon="people">
-            <View style={s.availRow}>
-              <AvailChip count={data.greenCount} label="Disponibles" color={C.green}   bg={C.greenBg}  />
-              <AvailChip count={data.amberCount} label="Surveillance" color={C.amber}  bg={C.amberBg}  />
-              <AvailChip count={data.redCount}   label="Alertes"     color={C.red}     bg={C.redBg}    />
-            </View>
-            {data.redCount > 0 && (
-              <View style={s.alertBanner}>
-                <Ionicons name="warning" size={14} color={C.red} />
-                <Text style={s.alertBannerText}>
-                  {data.playersSortedByForm
-                    .filter((p) => data.squadStatus[p.id] === 'red')
-                    .map((p) => `${p.first_name} ${p.last_name}`)
-                    .join(', ')} — État critique signalé
-                </Text>
-              </View>
-            )}
-          </SectionCard>
-
-          {/* ── Questionnaires heatmap ─────────────────────────────── */}
-          {data.last5TrainingIds.length > 0 && (
-            <SectionCard title="Questionnaires — 5 dernières séances" icon="heart-outline">
-              {/* Metric filter chips */}
-              <View style={s.heatmapFilterRow}>
-                {HEATMAP_METRICS.map(({ key, label }) => (
-                  <TouchableOpacity
-                    key={key}
-                    style={[s.heatmapFilterChip, heatmapMetric === key && s.heatmapFilterChipActive]}
-                    onPress={() => setHeatmapMetric(key)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[s.heatmapFilterLabel, heatmapMetric === key && s.heatmapFilterLabelActive]}>
-                      {label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {/* Column headers */}
-              <View style={s.heatmapHeader}>
-                <View style={{ width: 60 }} />
-                {data.last5TrainingIds.map((tid) => (
-                  <View key={tid} style={s.heatmapColHeader}>
-                    <Text style={s.heatmapColLabel}>
-                      {data.trainingDateById[tid]
-                        ? format(parseISO(data.trainingDateById[tid]), 'd/MM')
-                        : '—'}
-                    </Text>
-                  </View>
-                ))}
-                <View style={{ width: 36 }} />
-              </View>
-
-              {/* Player rows */}
-              {players.map((p) => {
-                const metricRows = Object.values(data.feedbackMap[p.id] ?? {});
-                const metricVals = metricRows
-                  .map(r => r[heatmapMetric])
-                  .filter((v): v is number => v != null);
-                const avgScore = metricVals.length
-                  ? +(metricVals.reduce((a, b) => a + b, 0) / metricVals.length).toFixed(1)
-                  : null;
-                return (
-                  <View key={p.id} style={s.heatmapRow}>
-                    <Text style={s.heatmapPlayerLabel} numberOfLines={1}>{abbrev(p)} {p.last_name}</Text>
-                    {data.last5TrainingIds.map((tid) => {
-                      const row = data.feedbackMap[p.id]?.[tid] ?? null;
-                      const val = row ? (row[heatmapMetric] ?? null) : null;
-                      return (
-                        <View key={tid} style={[s.heatmapCell, { backgroundColor: metricBg(C, heatmapMetric, val) }]}>
-                          <Text style={[s.heatmapCellText, { color: metricColor(C, heatmapMetric, val) }]}>
-                            {val !== null ? String(val) : '—'}
-                          </Text>
-                        </View>
-                      );
-                    })}
-                    <View style={[s.heatmapAvgPill, { borderColor: metricColor(C, heatmapMetric, avgScore) }]}>
-                      <Text style={[s.heatmapAvgText, { color: metricColor(C, heatmapMetric, avgScore) }]}>
-                        {avgScore !== null ? avgScore.toFixed(1) : '—'}
-                      </Text>
-                    </View>
-                  </View>
-                );
-              })}
-
-              {/* Legend */}
-              <View style={s.heatmapLegendRow}>
-                {(heatmapMetric === 'rpe'
-                  ? [
-                      { label: '<4 Faible',   color: C.blue,  bg: C.blueBg  },
-                      { label: '4-7 Optimal', color: C.green, bg: C.greenBg },
-                      { label: '>7 Élevé',    color: C.amber, bg: C.amberBg },
-                      { label: '>8.5 Surm.',  color: C.red,   bg: C.redBg   },
-                    ]
-                  : [
-                      { label: '≥7 Bien',    color: C.green, bg: C.greenBg },
-                      { label: '5-6 Moyen',  color: C.amber, bg: C.amberBg },
-                      { label: '<5 Alerte',  color: C.red,   bg: C.redBg   },
-                      { label: 'N/A',        color: C.light, bg: C.sunken },
-                    ]
-                ).map((l) => (
-                  <View key={l.label} style={[s.heatmapLegendItem, { backgroundColor: l.bg }]}>
-                    <Text style={[s.heatmapLegendText, { color: l.color }]}>{l.label}</Text>
-                  </View>
-                ))}
-              </View>
-            </SectionCard>
-          )}
-
-          {/* ── RPE charge gauge ───────────────────────────────────── */}
-          <SectionCard title="Charge de travail — 5 dernières séances" icon="fitness-outline">
-            {(data.rpeAvg !== null || data.formAvg !== null) ? (
-              <>
-                {/* Two KPI blocks */}
-                <View style={s.workloadRow}>
-                  <View style={s.workloadBlock}>
-                    <Text style={s.workloadLabel}>RPE MOYEN</Text>
-                    <View style={s.workloadValRow}>
-                      <Text style={[s.workloadVal, { color: metricColor(C, 'rpe', data.rpeAvg) }]}>
-                        {data.rpeAvg ?? '—'}
-                      </Text>
-                      {data.rpeAvg !== null && <Text style={s.workloadUnit}>/10</Text>}
-                    </View>
-                    {data.rpeAvg !== null && (
-                      <View style={[s.workloadBadge, { backgroundColor: metricBg(C, 'rpe', data.rpeAvg) }]}>
-                        <Text style={[s.workloadBadgeText, { color: metricColor(C, 'rpe', data.rpeAvg) }]}>
-                          {rpeLabel(C, data.rpeAvg).label}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-
-                  <View style={s.workloadDivider} />
-
-                  <View style={s.workloadBlock}>
-                    <Text style={s.workloadLabel}>FORME MOYENNE</Text>
-                    <View style={s.workloadValRow}>
-                      <Text style={[s.workloadVal, { color: wellnessColor(C, data.formAvg) }]}>
-                        {data.formAvg ?? '—'}
-                      </Text>
-                      {data.formAvg !== null && <Text style={s.workloadUnit}>/10</Text>}
-                    </View>
-                    {data.formAvg !== null && (
-                      <View style={[s.workloadBadge, { backgroundColor: wellnessBg(C, data.formAvg) }]}>
-                        <Text style={[s.workloadBadgeText, { color: wellnessColor(C, data.formAvg) }]}>
-                          {data.formAvg >= 7 ? 'Bonne forme' : data.formAvg >= 5 ? 'Forme correcte' : 'Fatigue'}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-
-              </>
-            ) : (
-              <Text style={s.emptyCard}>Aucune donnée de questionnaire disponible</Text>
-            )}
-          </SectionCard>
-
-          {/* ── Recent sessions ────────────────────────────────────── */}
-          <SectionCard title="Séances récentes" icon="calendar-outline">
-            {data.attendanceBySession.length === 0 && (
-              <Text style={s.emptyCard}>Aucune séance passée</Text>
-            )}
-            {data.attendanceBySession.map(({ training: t, present, total }) => (
-              <TouchableOpacity
-                key={t.id}
-                style={s.sessionRow}
-                onPress={() => router.push(`/calendar/training/${t.id}` as any)}
-                activeOpacity={0.8}
-              >
-                <View style={s.sessionDate}>
-                  <Text style={s.sessionDay}>{format(parseISO(t.date), 'd', { locale: fr })}</Text>
-                  <Text style={s.sessionMonth}>{format(parseISO(t.date), 'MMM', { locale: fr })}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.sessionTheme} numberOfLines={1}>{t.theme || '—'}</Text>
-                  {t.key_principle && (
-                    <Text style={s.sessionPrinciple} numberOfLines={1}>↳ {t.key_principle}</Text>
-                  )}
-                </View>
-                <View style={[s.sessionAttBadge, {
-                  backgroundColor: present >= total * 0.8 ? C.greenBg : present >= total * 0.6 ? C.amberBg : C.redBg
-                }]}>
-                  <Text style={[s.sessionAttText, {
-                    color: present >= total * 0.8 ? C.green : present >= total * 0.6 ? C.amber : C.red
-                  }]}>
-                    {present}/{total}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </SectionCard>
-        </>
-      )}
-
-      {/* ════════════════════════════════════════════════════════════════════
           TAB — SAISON
       ════════════════════════════════════════════════════════════════════ */}
       {tab === 'season' && (
         <>
-          {/* ── Form guide ─────────────────────────────────────────── */}
-          <SectionCard title="Forme récente" icon="trending-up-outline">
-            {data.last5.length === 0 ? (
-              <Text style={s.emptyCard}>Aucun match joué</Text>
-            ) : (
-              <>
-                <View style={s.formRow}>
-                  {data.last5.map((m) => {
-                    const r = matchResult(m);
-                    const bg   = r === 'W' ? C.green  : r === 'D' ? C.amber  : C.red;
-                    const bgLt = r === 'W' ? C.greenBg: r === 'D' ? C.amberBg: C.redBg;
-                    return (
-                      <View key={m.id} style={s.formItem}>
-                        <View style={[s.formDot, { backgroundColor: bgLt, borderColor: bg }]}>
-                          <Text style={[s.formDotLabel, { color: bg }]}>{r === 'W' ? 'V' : r}</Text>
-                        </View>
-                        <Text style={s.formScore}>{m.score_team}–{m.score_opponent}</Text>
-                        <Text style={s.formOpp} numberOfLines={1}>
-                          {(m.opponent_team || m.title || '').slice(0, 8)}
-                        </Text>
-                      </View>
-                    );
-                  })}
-                </View>
-                {data.streak.count >= 2 && (
-                  <View style={s.streakBanner}>
-                    <Ionicons name="flame-outline" size={15} color={theme.colors.warning.default} />
-                    <Text style={s.streakText}>
-                      Série de {data.streak.count} {data.streak.type === 'V' ? 'victoires' : data.streak.type === 'N' ? 'nuls' : 'défaites'} consécutive{data.streak.count > 1 ? 's' : ''}
-                    </Text>
-                  </View>
-                )}
-              </>
-            )}
-          </SectionCard>
-
-          {/* ── Season bilan ───────────────────────────────────────── */}
-          <SectionCard title="Bilan de saison" icon="trophy-outline">
-            <View style={s.bilanGrid}>
-              <BilanCard value={data.matchCount} label="Matchs"    color={C.blue}   />
-              <BilanCard value={`${data.winRate}%`} label="% Victoires" color={C.green} />
-              <BilanCard value={`${data.gf}`}    label="Buts marqués" color={C.green}  />
-              <BilanCard value={`${data.ga}`}    label="Buts encaissés" color={C.red}  />
-              <BilanCard value={`${data.gf - data.ga > 0 ? '+' : ''}${data.gf - data.ga}`} label="Différentiel" color={(data.gf - data.ga) >= 0 ? C.green : C.red} />
-              <BilanCard value={`${data.goalsPerMatch}`} label="Buts/match" color={C.purple} />
-            </View>
-            {/* Home/Away split */}
-            {(data.homeWR !== null || data.awayWR !== null) && (
-              <View style={s.locationRow}>
-                {data.homeWR !== null && (
-                  <View style={[s.locationChip, { backgroundColor: C.greenBg }]}>
-                    <Text style={[s.locationChipLabel, { color: C.green }]}>Domicile</Text>
-                    <Text style={[s.locationChipVal, { color: C.green }]}>{data.homeWR}% W</Text>
-                  </View>
-                )}
-                {data.awayWR !== null && (
-                  <View style={[s.locationChip, { backgroundColor: C.amberBg }]}>
-                    <Text style={[s.locationChipLabel, { color: C.amber }]}>Extérieur</Text>
-                    <Text style={[s.locationChipVal, { color: C.amber }]}>{data.awayWR}% W</Text>
-                  </View>
-                )}
-              </View>
-            )}
-          </SectionCard>
-
           {/* ── Attendance evolution ───────────────────────────────── */}
           <SectionCard title="Présence en séance — Saison" icon="people-outline">
             <Text style={s.heatmapLegend}>
@@ -920,68 +478,26 @@ export function TeamDashboardView() {
             <AttendanceLineChart data={data.sessionAttHistory} />
           </SectionCard>
 
-          {/* ── Goals per match ────────────────────────────────────── */}
-          <SectionCard title="Buts par match — Saison" icon="football-outline">
-            {/* Type legend */}
-            <View style={s.chartLegendRow}>
-              {[
-                // Lue depuis le catalogue, plus recopiée à la main.
-                ...GOAL_TYPE_ORDER.map(k => ({
-                  color: goalTypeColors(theme.colors)[k],
-                  label: GOAL_TYPE_LABELS[k],
-                })),
-              ].map((t) => (
-                <View key={t.label} style={s.chartTypeLegendItem}>
-                  <View style={[s.chartLegendDot, { backgroundColor: t.color }]} />
-                  <Text style={s.chartLegendText}>{t.label}</Text>
-                </View>
-              ))}
+          {/* ── Charge — raccourci ───────────────────────────────────
+              La charge d'entraînement (cible vs avérée) vit dans l'onglet
+              Performance, pas ici : les segments d'Analyse restent tous
+              montés, une charge lourde de plus la ralentirait pour un écran
+              consulté deux fois par semaine. Ce raccourci évite de la
+              dupliquer tout en gardant l'accès à une intention près. */}
+          <TouchableOpacity
+            style={[s.card, s.chargeShortcut]}
+            onPress={() => router.push('/(tabs)/performance?tab=charge' as any)}
+            activeOpacity={0.8}
+          >
+            <View style={[s.chargeShortcutIcon, { backgroundColor: C.blueBg }]}>
+              <Ionicons name="trending-up-outline" size={18} color={C.blue} />
             </View>
-            <Text style={[s.heatmapLegend, { marginBottom: 8 }]}>
-              Couleurs vives = marqués · Estompés = encaissés
-            </Text>
-            <GoalsStackedBarChart data={data.matchGoalsHistory} />
-          </SectionCard>
-
-          {/* ── Goal DNA ───────────────────────────────────────────── */}
-          <SectionCard title="DNA des buts" icon="analytics-outline">
-            <Text style={s.heatmapLegend}>Comment on marque et comment on encaisse</Text>
-            {[
-              { label: 'Phase Offens.', scored: data.dna.off[0],   conceded: data.dna.off[1],   color: C.blue   },
-              { label: 'Transition',   scored: data.dna.trans[0],  conceded: data.dna.trans[1],  color: C.purple },
-              { label: 'CPA',          scored: data.dna.cpa[0],    conceded: data.dna.cpa[1],    color: C.amber  },
-              { label: 'Supériorité',  scored: data.dna.sup[0],    conceded: data.dna.sup[1],    color: C.green  },
-            ].map((row) => (
-              <View key={row.label} style={s.dnaRow}>
-                <Text style={s.dnaLabel}>{row.label}</Text>
-                <View style={s.dnaBars}>
-                  {/* Scored bar */}
-                  <View style={s.dnaBarTrack}>
-                    <View style={[s.dnaBarFill, {
-                      width: `${(row.scored / data.dnaMax) * 100}%` as any,
-                      backgroundColor: row.color,
-                    }]} />
-                  </View>
-                  <Text style={[s.dnaCount, { color: row.color }]}>{row.scored}</Text>
-                  <Text style={s.dnaSep}>·</Text>
-                  {/* Conceded bar */}
-                  <View style={s.dnaBarTrack}>
-                    <View style={[s.dnaBarFill, {
-                      width: `${(row.conceded / data.dnaMax) * 100}%` as any,
-                      backgroundColor: C.red,
-                    }]} />
-                  </View>
-                  <Text style={[s.dnaCount, { color: C.red }]}>{row.conceded}</Text>
-                </View>
-              </View>
-            ))}
-            <View style={s.dnaLegendRow}>
-              <View style={[s.dnaLegendDot, { backgroundColor: C.blue }]} />
-              <Text style={s.dnaLegendText}>Buts marqués</Text>
-              <View style={[s.dnaLegendDot, { backgroundColor: C.red, marginLeft: 12 }]} />
-              <Text style={s.dnaLegendText}>Buts encaissés</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={s.cardTitle}>Charge d'entraînement</Text>
+              <Text style={s.noTeamText}>Cible vs avérée, par équipe ou par joueur</Text>
             </View>
-          </SectionCard>
+            <Ionicons name="chevron-forward" size={16} color={C.light} />
+          </TouchableOpacity>
 
           {/* ── Training themes ────────────────────────────────────── */}
           {data.themes.length > 0 && (
@@ -1009,87 +525,69 @@ export function TeamDashboardView() {
       ════════════════════════════════════════════════════════════════════ */}
       {tab === 'squad' && (
         <>
-          {/* ── Alerts first ───────────────────────────────────────── */}
-          {data.playersSortedByForm.filter((p) => data.squadStatus[p.id] === 'red').length > 0 && (
-            <SectionCard title="Alertes joueurs" icon="warning-outline">
-              {data.playersSortedByForm
-                .filter((p) => data.squadStatus[p.id] === 'red')
-                .map((p) => {
-                  const fb = Object.values(data.feedbackMap[p.id] ?? {}).slice(-1)[0];
-                  return (
-                    <View key={p.id} style={s.alertRow}>
-                      <View style={s.alertDot} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.alertName}>{p.first_name} {p.last_name}</Text>
-                        <Text style={s.alertDetail}>
-                          {fb?.rpe != null ? `RPE ${fb.rpe}/10` : ''}
-                          {fb?.pleasure != null ? ` · Plaisir ${fb.pleasure}/10` : ''}
-                          {fb?.physical_form != null ? ` · Forme ${fb.physical_form}/10` : ''}
-                          {!fb ? 'Aucune réponse au questionnaire' : ''}
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                })}
-            </SectionCard>
-          )}
+          {/* ── Infirmerie — raccourci ────────────────────────────────
+              Les alertes joueurs (blessures, signaux précoces) vivent dans
+              Performance. Les reconstruire ici depuis le questionnaire de
+              fin de séance aurait fait un deuxième mécanisme d'alerte pour
+              la même préoccupation, avec une source différente et donc un
+              risque de désaccord entre les deux écrans. */}
+          <TouchableOpacity
+            style={[s.card, s.chargeShortcut]}
+            onPress={() => router.push('/(tabs)/performance?tab=infirmerie' as any)}
+            activeOpacity={0.8}
+          >
+            <View style={[s.chargeShortcutIcon, { backgroundColor: C.redBg }]}>
+              <Ionicons name="medkit-outline" size={18} color={C.red} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.cardTitle}>Infirmerie</Text>
+              <Text style={s.noTeamText}>Blessures, signaux précoces, retours</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={C.light} />
+          </TouchableOpacity>
 
-          {/* ── Classement Matchs et Forme ────────────────────────── */}
+          {/* ── Forme et présence ──────────────────────────────────
+              M/V/N/D/Buts vivent dans Analyse > Matchs > Joueurs (source
+              tracker) — cette table ne garde que ce qui est propre à la
+              séance : forme déclarée et assiduité à l'entraînement. */}
           <View style={[s.card, { padding: 0, overflow: 'hidden' }]}>
             <View style={[s.cardHeader, { marginHorizontal: 16, marginTop: 16, marginBottom: 8 }]}>
               <View style={s.cardAccent} />
-              <Ionicons name="stats-chart-outline" size={16} color={C.blue} />
-              <Text style={s.cardTitle}>Classement Matchs et Forme</Text>
+              <Ionicons name="people-outline" size={16} color={C.blue} />
+              <Text style={s.cardTitle}>Forme et présence</Text>
             </View>
 
-            {/* Competition filter */}
-            <View style={{ flexDirection: 'row', gap: 6, paddingHorizontal: 16, marginBottom: 8, flexWrap: 'wrap' }}>
-              {COMP_FILTERS.map(f => (
-                <TouchableOpacity
-                  key={f.value}
-                  onPress={() => setRankCompFilter(f.value)}
-                  style={{
-                    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1,
-                    backgroundColor: rankCompFilter === f.value ? C.blueBg : C.sunken,
-                    borderColor: rankCompFilter === f.value ? C.blue : C.border,
-                  }}
-                >
-                  <Text style={{ fontSize: 11, fontWeight: '600', color: rankCompFilter === f.value ? C.blue : C.muted }}>
-                    {f.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Table header */}
+            {/* Table pleine largeur : nom en flex, colonnes de données à
+                largeur fixe étroite — même gabarit que l'ancienne table à
+                7 colonnes de stats, qui tenait déjà sans défilement. */}
             {(() => {
-              const cols: { key: RankSortKey; label: string; flex?: number; width?: number; align?: 'center' | 'left' }[] = [
-                { key: 'name',      label: 'NOM',   flex: 1, align: 'left'   },
-                { key: 'form',      label: 'Forme', width: 46, align: 'center' },
-                { key: 'matches',   label: 'M',     align: 'center' },
-                { key: 'victories', label: 'V',     align: 'center' },
-                { key: 'draws',     label: 'N',     align: 'center' },
-                { key: 'defeats',   label: 'D',     align: 'center' },
-                { key: 'goals',     label: 'Buts',  align: 'center' },
-                { key: 'att',       label: 'Prés.', align: 'center' },
+              const dataCols: { key: RankSortKey; label: string; width: number }[] = [
+                { key: 'formRecent', label: 'Forme',  width: 44 },
+                { key: 'formDelta',  label: 'Évol.',  width: 38 },
+                { key: 'sessions',   label: 'Prés.',  width: 34 },
+                { key: 'att',        label: '%',      width: 34 },
+                { key: 'injured',    label: 'Bles.',  width: 34 },
+                { key: 'late',       label: 'Ret.',   width: 34 },
+                { key: 'absent',     label: 'Abs.',   width: 34 },
               ];
               return (
                 <>
                   <View style={[s.fmHead, { paddingHorizontal: 0 }]}>
                     <View style={{ width: 3 }} />
                     <View style={s.fmColRank}><Text style={s.fmHeadTxt}>#</Text></View>
-                    {cols.map(col => (
+                    <TouchableOpacity style={s.fmColNameFlex} onPress={() => handleRankSort('name')} activeOpacity={0.7}>
+                      <Text style={[s.fmHeadTxt, rankSort.key === 'name' && s.fmHeadTxtActive]}>
+                        NOM{rankSort.key === 'name' ? (rankSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+                      </Text>
+                    </TouchableOpacity>
+                    {dataCols.map(col => (
                       <TouchableOpacity
                         key={col.key}
-                        style={col.flex ? { flex: col.flex, paddingRight: 4 } : { width: col.width ?? 38 }}
+                        style={{ width: col.width, alignItems: 'center' }}
                         onPress={() => handleRankSort(col.key)}
                         activeOpacity={0.7}
                       >
-                        <Text style={[
-                          s.fmHeadTxt,
-                          col.align === 'center' && { textAlign: 'center' },
-                          rankSort.key === col.key && s.fmHeadTxtActive,
-                        ]}>
+                        <Text style={[s.fmHeadTxt, { textAlign: 'center' }, rankSort.key === col.key && s.fmHeadTxtActive]}>
                           {col.label}{rankSort.key === col.key ? (rankSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
                         </Text>
                       </TouchableOpacity>
@@ -1109,34 +607,36 @@ export function TeamDashboardView() {
                         <View style={s.fmColRank}>
                           <Text style={s.fmRankTxt}>{i + 1}</Text>
                         </View>
-                        <View style={{ flex: 1, paddingRight: 4 }}>
+                        <View style={s.fmColNameFlex}>
                           <Text style={s.fmLastName} numberOfLines={1}>{row.player.last_name.toUpperCase()}</Text>
                           <Text style={s.fmFirstName} numberOfLines={1}>{row.player.first_name}</Text>
                         </View>
-                        <View style={[s.fmColForme, { width: 46 }]}>
-                          <View style={[s.fmFormPill, { backgroundColor: wellnessBg(C, row.form) }]}>
-                            <Text style={[s.fmFormVal, { color: wellnessColor(C, row.form) }]}>
-                              {row.form !== null ? row.form.toFixed(1) : '—'}
+                        <View style={{ width: 44, alignItems: 'center' }}>
+                          <View style={[s.fmFormPill, { backgroundColor: wellnessBg(C, row.formRecent) }]}>
+                            <Text style={[s.fmFormVal, { color: wellnessColor(C, row.formRecent) }]}>
+                              {row.formRecent !== null ? row.formRecent.toFixed(1) : '—'}
                             </Text>
                           </View>
                         </View>
                         <View style={{ width: 38, alignItems: 'center' }}>
-                          <Text style={s.fmStatNum}>{row.matches}</Text>
+                          <Text style={[s.fmStatNum, { fontSize: 11, color: row.formDelta == null ? C.light : deltaColor(theme, row.formDelta) }]}>
+                            {row.formDelta == null ? '—' : `${row.formDelta > 0 ? '+' : ''}${row.formDelta.toFixed(1)}`}
+                          </Text>
                         </View>
-                        <View style={{ width: 38, alignItems: 'center' }}>
-                          <Text style={[s.fmStatNum, row.victories > 0 && { color: C.green, fontWeight: '700' }]}>{row.victories}</Text>
+                        <View style={{ width: 34, alignItems: 'center' }}>
+                          <Text style={[s.fmStatNum, { fontSize: 11 }]}>{row.sessions}</Text>
                         </View>
-                        <View style={{ width: 38, alignItems: 'center' }}>
-                          <Text style={[s.fmStatNum, { color: C.amber }]}>{row.draws}</Text>
-                        </View>
-                        <View style={{ width: 38, alignItems: 'center' }}>
-                          <Text style={[s.fmStatNum, row.defeats > 0 && { color: C.red }]}>{row.defeats}</Text>
-                        </View>
-                        <View style={{ width: 38, alignItems: 'center' }}>
-                          <Text style={[s.fmStatNum, row.goals > 0 && { color: C.blue, fontWeight: '700' }]}>{row.goals}</Text>
-                        </View>
-                        <View style={{ width: 38, alignItems: 'center' }}>
+                        <View style={{ width: 34, alignItems: 'center' }}>
                           <Text style={[s.fmStatNum, { color: attColor, fontWeight: '700', fontSize: 9 }]}>{row.att}%</Text>
+                        </View>
+                        <View style={{ width: 34, alignItems: 'center' }}>
+                          <Text style={[s.fmStatNum, { fontSize: 11 }, row.injured > 0 && { color: C.amber, fontWeight: '700' }]}>{row.injured}</Text>
+                        </View>
+                        <View style={{ width: 34, alignItems: 'center' }}>
+                          <Text style={[s.fmStatNum, { fontSize: 11 }, row.late > 0 && { color: C.amber, fontWeight: '700' }]}>{row.late}</Text>
+                        </View>
+                        <View style={{ width: 34, alignItems: 'center' }}>
+                          <Text style={[s.fmStatNum, { fontSize: 11 }, row.absent > 0 && { color: C.red, fontWeight: '700' }]}>{row.absent}</Text>
                         </View>
                       </TouchableOpacity>
                     );
@@ -1200,28 +700,6 @@ function SectionCard({ title, icon, children }: {
         <Text style={s.cardTitle}>{title}</Text>
       </View>
       {children}
-    </View>
-  );
-}
-
-function AvailChip({ count, label, color, bg }: {
-  count: number; label: string; color: string; bg: string;
-}) {
-  const s = useStyles();
-  return (
-    <View style={[s.availChip, { backgroundColor: bg, borderColor: color }]}>
-      <Text style={[s.availCount, { color }]}>{count}</Text>
-      <Text style={[s.availLabel, { color }]}>{label}</Text>
-    </View>
-  );
-}
-
-function BilanCard({ value, label, color }: { value: string | number; label: string; color: string }) {
-  const s = useStyles();
-  return (
-    <View style={s.bilanCard}>
-      <Text style={[s.bilanVal, { color }]}>{value}</Text>
-      <Text style={s.bilanLabel}>{label}</Text>
     </View>
   );
 }
@@ -1315,193 +793,6 @@ function AttendanceLineChart({ data }: {
   );
 }
 
-/**
- * Couleurs des types de but. Le type de but est une **catégorie** — phase
- * offensive, transition, CPA, supériorité — pas un jugement : elle se lit donc
- * sur `chartSeries`, comme les postes.
- *
- * Les cinq valeurs étaient écrites deux fois dans ce fichier, ici et dans la
- * légende du graphique quarante lignes plus haut. Un seul émetteur désormais,
- * et la légende le consomme.
- */
-function goalTypeColors(c: ThemeColors): Record<string, string> {
-  return {
-    offensive:   c.chartSeries[0] ?? c.accent.default,
-    transition:  c.chartSeries[5] ?? c.accent.default,
-    cpa:         c.chartSeries[2] ?? c.warning.default,
-    superiority: c.chartSeries[1] ?? c.positive.default,
-    other:       c.neutralData,
-  };
-}
-
-export const GOAL_TYPE_LABELS: Record<string, string> = {
-  offensive:   'Phase off.',
-  transition:  'Transition',
-  cpa:         'CPA',
-  superiority: 'Supériorité',
-  other:       'N/C',
-};
-
-const GOAL_TYPE_ORDER = ['offensive', 'transition', 'cpa', 'superiority', 'other'] as const;
-
-// ─── SVG chart: goals stacked bars with type breakdown ────────────────────────
-function GoalsStackedBarChart({ data }: {
-  data: {
-    label: string;
-    scored: number;
-    conceded: number;
-    result: 'W' | 'D' | 'L';
-    scoredByType:   { offensive: number; transition: number; cpa: number; superiority: number };
-    concededByType: { offensive: number; transition: number; cpa: number; superiority: number };
-  }[];
-}) {
-  const s = useStyles();
-  const { theme } = useTheme();
-  const C = dashColors(theme.colors, theme.scheme);
-  const GOAL_TYPE_COLORS = goalTypeColors(theme.colors);
-  if (data.length === 0) {
-    return <Text style={s.emptyCard}>Aucun match joué avec score enregistré</Text>;
-  }
-
-  const BAR_W     = 30;
-  const CHART_H   = 120;
-  const PAD_TOP   = 28;
-  const PAD_BOT   = 26;
-  const PAD_LEFT  = 30;
-  const PAD_RIGHT = 12;
-  const SPACING   = 52;
-
-  const maxGoals = Math.max(...data.map((d) => d.scored + d.conceded), 1);
-  const totalW   = Math.max(data.length * SPACING + PAD_LEFT + PAD_RIGHT, 280);
-  const svgH     = CHART_H + PAD_TOP + PAD_BOT;
-  const baseY    = PAD_TOP + CHART_H;
-
-  const toH    = (v: number) => (v / maxGoals) * CHART_H;
-  const barX   = (i: number) => PAD_LEFT + i * SPACING + (SPACING - BAR_W) / 2;
-  const rColor = (r: 'W' | 'D' | 'L') => r === 'W' ? C.green : r === 'D' ? C.amber : C.red;
-
-  const gridVals = [0, Math.round(maxGoals * 0.5), maxGoals].filter(
-    (v, idx, arr) => arr.indexOf(v) === idx
-  );
-
-  // ── Pre-compute all rect data imperatively (avoids JSX fragment typing) ──
-  type SegRect = { key: string; x: number; y: number; w: number; h: number; fill: string; opacity: number };
-  type BarLabel = { key: string; x: number; y: number; text: string; fill: string };
-
-  const rects:  SegRect[]  = [];
-  const scLabels: BarLabel[] = [];
-  const dtLabels: BarLabel[] = [];
-
-  data.forEach((d, i) => {
-    const bx  = barX(i);
-    const cx  = bx + BAR_W / 2;
-
-    // Helper: stack type segments from a starting Y upward
-    const stackTypes = (
-      total:  number,
-      byType: { offensive: number; transition: number; cpa: number; superiority: number },
-      startY: number,
-      prefix: string,
-      opacity: number,
-      fallbackFill: string,
-    ) => {
-      const known =
-        byType.offensive + byType.transition + byType.cpa + byType.superiority;
-      const other = Math.max(total - known, 0);
-      const counts: Record<string, number> = {
-        offensive:   byType.offensive,
-        transition:  byType.transition,
-        cpa:         byType.cpa,
-        superiority: byType.superiority,
-        other,
-      };
-
-      let curY     = startY;
-      let hadAny   = false;
-
-      for (const type of GOAL_TYPE_ORDER) {
-        const count = counts[type] ?? 0;
-        if (count <= 0) continue;
-        const h = toH(count);
-        rects.push({
-          key:     `${prefix}${type}${i}`,
-          x:       bx,
-          y:       curY - h,
-          w:       BAR_W,
-          h,
-          fill:    GOAL_TYPE_COLORS[type],
-          opacity,
-        });
-        curY   -= h;
-        hadAny  = true;
-      }
-
-      // No type data → solid fallback bar
-      if (!hadAny && total > 0) {
-        const h = toH(total);
-        rects.push({ key: `${prefix}solid${i}`, x: bx, y: startY - h, w: BAR_W, h, fill: fallbackFill, opacity: 1 });
-      }
-    };
-
-    // Scored (bright, bottom)
-    stackTypes(d.scored,   d.scoredByType,   baseY,                  'sc', 1.0,  C.blue);
-    // Conceded (dimmed, stacked on top of scored)
-    stackTypes(d.conceded, d.concededByType, baseY - toH(d.scored),  'co', 0.42, C.red);
-
-    // Separator line between scored and conceded
-    if (d.scored > 0 && d.conceded > 0) {
-      rects.push({
-        key: `sep${i}`, x: bx, y: baseY - toH(d.scored) - 1,
-        w: BAR_W, h: 1.5, fill: C.card, opacity: 1,
-      });
-    }
-
-    const totalH = toH(d.scored + d.conceded);
-    scLabels.push({ key: `sl${i}`, x: cx, y: baseY - totalH - 6, text: `${d.scored}-${d.conceded}`, fill: rColor(d.result) });
-    dtLabels.push({ key: `dl${i}`, x: cx, y: svgH - 4, text: d.label, fill: C.muted });
-  });
-
-  return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-      <Svg width={totalW} height={svgH}>
-        {/* Grid lines */}
-        {gridVals.map((val) => (
-          <SvgLine key={`gl${val}`}
-            x1={PAD_LEFT} y1={baseY - toH(val)} x2={totalW - PAD_RIGHT} y2={baseY - toH(val)}
-            stroke={C.border} strokeWidth={1} />
-        ))}
-        {/* Y axis labels */}
-        {gridVals.map((val) => (
-          <SvgText key={`gy${val}`}
-            x={PAD_LEFT - 4} y={baseY - toH(val) + 4}
-            fontSize={11} fill={C.light} textAnchor="end">
-            {val}
-          </SvgText>
-        ))}
-        {/* Coloured type segments */}
-        {rects.map((r) => (
-          <Rect key={r.key} x={r.x} y={r.y} width={r.w} height={r.h}
-            fill={r.fill} fillOpacity={r.opacity} rx={2} />
-        ))}
-        {/* Score labels */}
-        {scLabels.map((l) => (
-          <SvgText key={l.key} x={l.x} y={l.y}
-            fontSize={10} fill={l.fill} textAnchor="middle" fontWeight="bold">
-            {l.text}
-          </SvgText>
-        ))}
-        {/* Date labels */}
-        {dtLabels.map((l) => (
-          <SvgText key={l.key} x={l.x} y={l.y}
-            fontSize={9} fill={l.fill} textAnchor="middle">
-            {l.text}
-          </SvgText>
-        ))}
-      </Svg>
-    </ScrollView>
-  );
-}
-
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const useStyles = makeStyles((t) => {
   const C = dashColors(t.colors, t.scheme);
@@ -1557,6 +848,11 @@ const useStyles = makeStyles((t) => {
   cardAccent: { width: 3, height: 16, backgroundColor: C.blue, borderRadius: 2 },
   cardTitle: { fontSize: 14, fontWeight: '700', color: C.text },
   emptyCard: { fontSize: 13, color: C.muted, textAlign: 'center', paddingVertical: 8 },
+
+  chargeShortcut: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  chargeShortcutIcon: {
+    width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+  },
 
   // Availability
   availRow: { flexDirection: 'row', gap: 8 },
@@ -1655,10 +951,6 @@ const useStyles = makeStyles((t) => {
   },
   bilanVal: { fontSize: 22, fontWeight: '800' },
   bilanLabel: { fontSize: 10, color: C.muted, marginTop: 4, textAlign: 'center' },
-  locationRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  locationChip: { flex: 1, borderRadius: 10, padding: 10, alignItems: 'center' },
-  locationChipLabel: { fontSize: 12, fontWeight: '600' },
-  locationChipVal:   { fontSize: 16, fontWeight: '800', marginTop: 2 },
 
   // DNA bars
   dnaRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 8 },
@@ -1755,6 +1047,7 @@ const useStyles = makeStyles((t) => {
   },
   fmStripe:   { width: 3, alignSelf: 'stretch' },
   fmColRank:  { width: 28, alignItems: 'center' },
+  fmColNameFlex: { flex: 1, paddingRight: 4, minWidth: 60 },
   fmColPos:   { width: 52, alignItems: 'center' },
   fmColForme: { width: 52, alignItems: 'center' },
   fmColStat:  { width: 46, alignItems: 'center' },

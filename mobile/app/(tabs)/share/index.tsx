@@ -1,25 +1,32 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, StyleSheet, Alert, Linking, Image, ScrollView, Pressable } from 'react-native';
+import { View, StyleSheet, Alert, Linking, Image, ScrollView, Pressable, Switch } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import * as DocumentPicker from 'expo-document-picker';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 import { haptics } from '../../../lib/design/haptics';
+import { getUserClubId, isClubAdmin } from '../../../lib/services/clubs';
 import {
   getSharedContent,
   getSharedFolders,
   createSharedContent,
+  createSharedFile,
   createSharedFolder,
   renameSharedFolder,
+  updateSharedContent,
   deleteSharedContent,
   deleteSharedFolder,
   getSharedContentAnalytics,
+  getSharedFileUrl,
   extractYoutubeId,
   isYoutubeUrl,
   youtubeThumbnail,
   type SharedContent,
   type SharedFolder,
   type ContentAnalyticsRow,
+  type PickedFile,
 } from '../../../lib/services/sharedContent';
+import { shareVideoToFeed } from '../../../lib/services/teamFeed';
 import {
   Text,
   Card,
@@ -37,13 +44,37 @@ import {
 } from '../../../components/ui';
 import { ShareAnalyticsSheet } from '../../../components/share/ShareAnalyticsSheet';
 
-type ContentFilter = 'all' | 'youtube' | 'link';
-type SheetKind = 'add-content' | 'add-folder' | 'rename-folder' | null;
+type ContentFilter = 'all' | 'youtube' | 'link' | 'file';
+type ContentInputMode = 'link' | 'file';
+type SheetKind = 'add-content' | 'add-folder' | 'rename-folder' | 'edit-content' | null;
+
+const FILE_TYPES = ['application/pdf', 'image/*', 'video/mp4', 'video/quicktime'];
+
+const CONTENT_MODES: readonly ChipOption<ContentInputMode>[] = [
+  { value: 'link', label: 'Lien / vidéo', icon: 'link-outline' },
+  { value: 'file', label: 'Fichier', icon: 'document-attach-outline' },
+];
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} Ko`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+}
+
+function fileIcon(mime?: string | null): keyof typeof Ionicons.glyphMap {
+  if (!mime) return 'document-outline';
+  if (mime === 'application/pdf') return 'document-text-outline';
+  if (mime.startsWith('image/')) return 'image-outline';
+  if (mime.startsWith('video/')) return 'videocam-outline';
+  return 'document-outline';
+}
 
 export default function ShareScreen() {
   const { theme } = useTheme();
   const c = theme.colors;
   const { activeTeamId } = useActiveTeam();
+
+  const [clubId, setClubId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const [folders, setFolders] = useState<SharedFolder[]>([]);
   const [items, setItems] = useState<SharedContent[]>([]);
@@ -55,6 +86,7 @@ export default function ShareScreen() {
 
   const [sheet, setSheet] = useState<SheetKind>(null);
   const [renameTarget, setRenameTarget] = useState<SharedFolder | null>(null);
+  const [editTarget, setEditTarget] = useState<SharedContent | null>(null);
 
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const [analyticsRows, setAnalyticsRows] = useState<ContentAnalyticsRow[]>([]);
@@ -65,6 +97,10 @@ export default function ShareScreen() {
   const [url, setUrl] = useState('');
   const [description, setDescription] = useState('');
   const [addFolderId, setAddFolderId] = useState<string | null>(null);
+  const [shareToFeed, setShareToFeed] = useState(true);
+  const [shareToAllTeams, setShareToAllTeams] = useState(false);
+  const [contentMode, setContentMode] = useState<ContentInputMode>('link');
+  const [pickedFile, setPickedFile] = useState<PickedFile | null>(null);
   const [folderName, setFolderName] = useState('');
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -91,6 +127,18 @@ export default function ShareScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const cid = await getUserClubId();
+        setClubId(cid);
+        if (cid) setIsAdmin(await isClubAdmin(cid));
+      } catch {
+        // Non bloquant : le toggle « toutes les équipes » reste simplement masqué.
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     setAddFolderId(currentFolderId);
@@ -126,10 +174,13 @@ export default function ShareScreen() {
 
   const FILTERS: readonly ChipOption<ContentFilter>[] = useMemo(() => {
     const yt = inCurrent.filter((i) => i.content_type === 'youtube').length;
+    const file = inCurrent.filter((i) => i.content_type === 'file').length;
+    const link = inCurrent.length - yt - file;
     return [
       { value: 'all', label: `Tous (${inCurrent.length})` },
       { value: 'youtube', label: `Vidéos (${yt})`, icon: 'logo-youtube' },
-      { value: 'link', label: `Liens (${inCurrent.length - yt})`, icon: 'link-outline' },
+      { value: 'link', label: `Liens (${link})`, icon: 'link-outline' },
+      { value: 'file', label: `Fichiers (${file})`, icon: 'document-outline' },
     ];
   }, [inCurrent]);
 
@@ -166,17 +217,52 @@ export default function ShareScreen() {
     setFolderName('');
     setFormError(null);
     setRenameTarget(null);
+    setEditTarget(null);
+    setShareToFeed(true);
+    setShareToAllTeams(false);
+    setContentMode('link');
+    setPickedFile(null);
+  };
+
+  const pickFile = async () => {
+    setFormError(null);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: FILE_TYPES, copyToCacheDirectory: true });
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      if (asset.size != null && asset.size > 50 * 1024 * 1024) {
+        setFormError('Fichier trop volumineux (50 Mo maximum).');
+        return;
+      }
+      setPickedFile({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType, size: asset.size });
+    } catch {
+      setFormError('Impossible de sélectionner ce fichier.');
+    }
   };
 
   const addContent = async () => {
-    if (!activeTeamId || !title.trim() || !url.trim()) return;
+    if (!activeTeamId || !clubId || !title.trim()) return;
+    if (contentMode === 'link' && !url.trim()) return;
+    if (contentMode === 'file' && !pickedFile) return;
     setSaving(true);
     setFormError(null);
     try {
-      await createSharedContent({ teamId: activeTeamId, title, url, description, folderId: addFolderId });
+      const teamId = isAdmin && shareToAllTeams ? null : activeTeamId;
+      const created =
+        contentMode === 'file' && pickedFile
+          ? await createSharedFile({ clubId, teamId, title, description, file: pickedFile, folderId: addFolderId })
+          : await createSharedContent({ clubId, teamId, title, url, description, folderId: addFolderId });
       haptics.success();
       closeSheet();
       await load();
+      // Un échec du partage ne remet pas en cause l'ajout du contenu, déjà
+      // enregistré : on l'affiche quand même, pour ne pas le manquer en silence.
+      if (shareToFeed) {
+        const shareResult = await shareVideoToFeed(created.id);
+        if (!shareResult.success) {
+          Alert.alert('Contenu ajouté', `Le partage dans le fil d'équipe a échoué : ${shareResult.error ?? 'erreur inconnue'}.`);
+        }
+      }
     } catch (e) {
       haptics.error();
       setFormError(e instanceof Error ? e.message : 'Impossible de publier');
@@ -192,7 +278,7 @@ export default function ShareScreen() {
         text: 'Supprimer',
         style: 'destructive',
         onPress: async () => {
-          await deleteSharedContent(item.id);
+          await deleteSharedContent(item);
           haptics.success();
           setItems((prev) => prev.filter((i) => i.id !== item.id));
         },
@@ -200,11 +286,29 @@ export default function ShareScreen() {
     ]);
   };
 
+  const saveEdit = async () => {
+    if (!editTarget || !title.trim()) return;
+    setSaving(true);
+    setFormError(null);
+    try {
+      const updated = await updateSharedContent(editTarget.id, { title, description });
+      setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+      haptics.success();
+      closeSheet();
+    } catch (e) {
+      haptics.error();
+      setFormError(e instanceof Error ? e.message : 'Erreur');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const addFolder = async () => {
-    if (!activeTeamId || !folderName.trim()) return;
+    if (!activeTeamId || !clubId || !folderName.trim()) return;
     setSaving(true);
     try {
-      const f = await createSharedFolder(activeTeamId, folderName.trim(), currentFolderId);
+      const teamId = isAdmin && shareToAllTeams ? null : activeTeamId;
+      const f = await createSharedFolder(clubId, teamId, folderName.trim(), currentFolderId);
       setFolders((prev) => [...prev, f].sort((a, b) => a.name.localeCompare(b.name, 'fr')));
       haptics.success();
       closeSheet();
@@ -344,6 +448,7 @@ export default function ShareScreen() {
             onPress={() => {
               setFormError(null);
               setFolderName('');
+              setShareToAllTeams(false);
               setSheet('add-folder');
             }}
           />
@@ -357,6 +462,9 @@ export default function ShareScreen() {
               setUrl('');
               setDescription('');
               setFormError(null);
+              setContentMode('link');
+              setPickedFile(null);
+              setShareToAllTeams(false);
               setSheet('add-content');
             }}
           />
@@ -404,6 +512,9 @@ export default function ShareScreen() {
                 label: 'Ajouter une ressource',
                 onPress: () => {
                   setAddFolderId(currentFolderId);
+                  setContentMode('link');
+                  setPickedFile(null);
+                  setShareToAllTeams(false);
                   setSheet('add-content');
                 },
               }}
@@ -411,7 +522,18 @@ export default function ShareScreen() {
           ) : (
             <Section title={currentFolders.length > 0 ? 'Ressources' : undefined}>
               {currentItems.map((item) => (
-                <ContentCard key={item.id} item={item} onDelete={() => removeContent(item)} />
+                <ContentCard
+                  key={item.id}
+                  item={item}
+                  onDelete={() => removeContent(item)}
+                  onEdit={() => {
+                    setEditTarget(item);
+                    setTitle(item.title);
+                    setDescription(item.description ?? '');
+                    setFormError(null);
+                    setSheet('edit-content');
+                  }}
+                />
               ))}
             </Section>
           )}
@@ -423,20 +545,55 @@ export default function ShareScreen() {
         visible={sheet === 'add-content'}
         onClose={closeSheet}
         title="Nouvelle ressource"
-        subtitle="Une vidéo YouTube ou n'importe quel lien."
+        subtitle="Une vidéo YouTube, un lien, ou un fichier."
       >
         <View style={{ gap: theme.space.lg }}>
           <Input label="Titre" value={title} onChangeText={setTitle} placeholder="ex : Analyse défensive J12" />
-          <Input
-            label="Lien"
-            value={url}
-            onChangeText={setUrl}
-            placeholder="https://…"
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-            hint={url.length > 0 && isYoutubeUrl(url) ? 'Vidéo YouTube détectée, la miniature sera affichée.' : undefined}
+
+          <ChipGroup
+            label="Type de ressource"
+            options={CONTENT_MODES}
+            value={contentMode}
+            onChange={(m) => {
+              setContentMode(m);
+              setFormError(null);
+            }}
           />
+
+          {contentMode === 'link' ? (
+            <Input
+              label="Lien"
+              value={url}
+              onChangeText={setUrl}
+              placeholder="https://…"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              hint={url.length > 0 && isYoutubeUrl(url) ? 'Vidéo YouTube détectée, la miniature sera affichée.' : undefined}
+            />
+          ) : (
+            <Field label="Fichier" hint="PDF, image ou vidéo. 50 Mo maximum.">
+              {pickedFile ? (
+                <View style={[styles.filePicked, { borderRadius: theme.radius.sm, backgroundColor: c.bg.sunken }]}>
+                  <Ionicons name={fileIcon(pickedFile.mimeType)} size={20} color={c.text.secondary} />
+                  <View style={styles.flex}>
+                    <Text variant="callout" weight="600" numberOfLines={1}>
+                      {pickedFile.name}
+                    </Text>
+                    {pickedFile.size != null && (
+                      <Text variant="caption" tone="tertiary">
+                        {formatFileSize(pickedFile.size)}
+                      </Text>
+                    )}
+                  </View>
+                  <IconButton icon="close-circle-outline" label="Retirer le fichier" onPress={() => setPickedFile(null)} size="sm" />
+                </View>
+              ) : (
+                <Button label="Choisir un fichier" icon="document-attach-outline" variant="secondary" onPress={pickFile} />
+              )}
+            </Field>
+          )}
+
           <Field label="Dossier" hint="Où ranger cette ressource.">
             <View style={styles.folderPicker}>
               <FolderChip label="Racine" icon="home-outline" active={addFolderId === null} onPress={() => setAddFolderId(null)} />
@@ -461,11 +618,37 @@ export default function ShareScreen() {
             inputStyle={styles.textarea}
             error={formError ?? undefined}
           />
+          {isAdmin && (
+            <View style={styles.shareRow}>
+              <View style={styles.flex}>
+                <Text variant="callout" weight="600">Partager à toutes les équipes du club</Text>
+                <Text variant="caption" tone="tertiary">Visible par tous les joueurs du club, pas seulement cette équipe.</Text>
+              </View>
+              <Switch
+                value={shareToAllTeams}
+                onValueChange={setShareToAllTeams}
+                trackColor={{ true: theme.colors.accent.default }}
+                accessibilityLabel="Partager à toutes les équipes du club"
+              />
+            </View>
+          )}
+          <View style={styles.shareRow}>
+            <View style={styles.flex}>
+              <Text variant="callout" weight="600">Partager dans le fil d'équipe</Text>
+              <Text variant="caption" tone="tertiary">L'équipe est prévenue avec un lien vers cette ressource.</Text>
+            </View>
+            <Switch
+              value={shareToFeed}
+              onValueChange={setShareToFeed}
+              trackColor={{ true: theme.colors.accent.default }}
+              accessibilityLabel="Partager dans le fil d'équipe"
+            />
+          </View>
           <Button
-            label={saving ? 'Publication…' : 'Publier'}
+            label={saving ? (contentMode === 'file' ? 'Téléversement…' : 'Publication…') : 'Publier'}
             onPress={addContent}
             loading={saving}
-            disabled={!title.trim() || !url.trim() || saving}
+            disabled={!title.trim() || (contentMode === 'link' ? !url.trim() : !pickedFile) || saving}
             size="lg"
             block
           />
@@ -487,6 +670,20 @@ export default function ShareScreen() {
             error={formError ?? undefined}
             autoFocus
           />
+          {isAdmin && sheet === 'add-folder' && (
+            <View style={styles.shareRow}>
+              <View style={styles.flex}>
+                <Text variant="callout" weight="600">Partager à toutes les équipes du club</Text>
+                <Text variant="caption" tone="tertiary">Visible par tous les joueurs du club, pas seulement cette équipe.</Text>
+              </View>
+              <Switch
+                value={shareToAllTeams}
+                onValueChange={setShareToAllTeams}
+                trackColor={{ true: theme.colors.accent.default }}
+                accessibilityLabel="Partager à toutes les équipes du club"
+              />
+            </View>
+          )}
           <Button
             label={
               saving ? 'Enregistrement…' : sheet === 'rename-folder' ? 'Renommer' : 'Créer le dossier'
@@ -494,6 +691,31 @@ export default function ShareScreen() {
             onPress={sheet === 'rename-folder' ? renameFolder : addFolder}
             loading={saving}
             disabled={!folderName.trim() || saving}
+            size="lg"
+            block
+          />
+        </View>
+      </Sheet>
+
+      {/* ── Modification d'une ressource ──────────────────────────────── */}
+      <Sheet visible={sheet === 'edit-content'} onClose={closeSheet} title="Modifier la ressource">
+        <View style={{ gap: theme.space.lg }}>
+          <Input label="Titre" value={title} onChangeText={setTitle} placeholder="ex : Analyse défensive J12" />
+          <Input
+            label="Description"
+            optional
+            value={description}
+            onChangeText={setDescription}
+            placeholder="Contexte, points à observer…"
+            multiline
+            inputStyle={styles.textarea}
+            error={formError ?? undefined}
+          />
+          <Button
+            label={saving ? 'Enregistrement…' : 'Enregistrer'}
+            onPress={saveEdit}
+            loading={saving}
+            disabled={!title.trim() || saving}
             size="lg"
             block
           />
@@ -605,11 +827,37 @@ function FolderRow({
   );
 }
 
-function ContentCard({ item, onDelete }: { item: SharedContent; onDelete: () => void }) {
+function ContentCard({ item, onDelete, onEdit }: { item: SharedContent; onDelete: () => void; onEdit: () => void }) {
   const { theme } = useTheme();
   const c = theme.colors;
-  const ytId = item.content_type === 'youtube' ? extractYoutubeId(item.url) : null;
-  const open = () => Linking.openURL(item.url);
+  const [opening, setOpening] = useState(false);
+  const ytId = item.content_type === 'youtube' && item.url ? extractYoutubeId(item.url) : null;
+  const isFile = item.content_type === 'file';
+
+  const open = async () => {
+    if (isFile) {
+      if (!item.file_path) return;
+      setOpening(true);
+      try {
+        const signedUrl = await getSharedFileUrl(item.file_path);
+        await Linking.openURL(signedUrl);
+      } catch {
+        Alert.alert('Erreur', "Impossible d'ouvrir ce fichier.");
+      } finally {
+        setOpening(false);
+      }
+    } else if (item.url) {
+      Linking.openURL(item.url);
+    }
+  };
+
+  const typeLabel = ytId ? 'Vidéo' : isFile ? 'Fichier' : 'Lien';
+  const typeIcon: keyof typeof Ionicons.glyphMap = ytId
+    ? 'play-circle-outline'
+    : isFile
+      ? fileIcon(item.file_mime_type)
+      : 'link-outline';
+  const typeTone = ytId ? 'negative' : isFile ? 'warning' : 'accent';
 
   return (
     <Card variant="raised" padding="none" style={styles.contentCard}>
@@ -630,24 +878,23 @@ function ContentCard({ item, onDelete }: { item: SharedContent; onDelete: () => 
           </>
         ) : (
           <View style={[styles.linkBanner, { backgroundColor: c.bg.sunken }]}>
-            <Ionicons name="link-outline" size={26} color={c.text.tertiary} />
+            <Ionicons name={isFile ? fileIcon(item.file_mime_type) : 'link-outline'} size={26} color={c.text.tertiary} />
           </View>
         )}
         <View style={styles.typePill}>
-          <Badge
-            label={ytId ? 'Vidéo' : 'Lien'}
-            icon={ytId ? 'play-circle-outline' : 'link-outline'}
-            tone={ytId ? 'negative' : 'accent'}
-            size="sm"
-            solid
-          />
+          <Badge label={typeLabel} icon={typeIcon} tone={typeTone} size="sm" solid />
         </View>
       </Pressable>
 
       <View style={[styles.contentBody, { gap: theme.space.sm }]}>
-        <Text variant="headline" numberOfLines={2}>
-          {item.title}
-        </Text>
+        <View style={styles.titleRow}>
+          <Text variant="headline" numberOfLines={2} style={styles.flex}>
+            {item.title}
+          </Text>
+          {item.team_id === null && (
+            <Badge label="Toutes les équipes" icon="people-outline" tone="accent" size="sm" />
+          )}
+        </View>
         {item.description ? (
           <Text variant="callout" tone="secondary" numberOfLines={2}>
             {item.description}
@@ -658,7 +905,15 @@ function ContentCard({ item, onDelete }: { item: SharedContent; onDelete: () => 
           <Text variant="caption" tone="tertiary" style={styles.flex}>
             {new Date(item.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}
           </Text>
-          <Button label="Ouvrir" icon="arrow-forward" iconAfter size="sm" onPress={open} />
+          <Button
+            label={opening ? 'Ouverture…' : 'Ouvrir'}
+            icon="arrow-forward"
+            iconAfter
+            size="sm"
+            loading={opening}
+            onPress={open}
+          />
+          <IconButton icon="pencil-outline" label={`Modifier ${item.title}`} onPress={onEdit} size="sm" />
           <IconButton icon="trash-outline" label={`Supprimer ${item.title}`} onPress={onDelete} variant="destructive" size="sm" />
         </View>
       </View>
@@ -701,6 +956,8 @@ const styles = StyleSheet.create({
   linkBanner: { height: 84, justifyContent: 'center', alignItems: 'center' },
   typePill: { position: 'absolute', top: 10, left: 10 },
   contentBody: { padding: 14 },
+  titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  filePicked: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10 },
   contentFooter: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -720,4 +977,5 @@ const styles = StyleSheet.create({
     maxWidth: 180,
   },
   textarea: { minHeight: 84, paddingTop: 12, textAlignVertical: 'top' },
+  shareRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
 });

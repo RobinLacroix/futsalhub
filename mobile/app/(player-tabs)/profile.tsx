@@ -56,6 +56,7 @@ export default function PlayerProfileScreen() {
           sorted.map(t => ({
             date: t.date,
             status: (t.attendance?.[player.id] ?? 'not_recorded') as TrainingSession['status'],
+            excused: t.attendance_excused?.[player.id],
           }))
         );
       }

@@ -43,6 +43,12 @@ export interface PlayerEventCardProps {
   location?: string | null;
   /** Convocation avec une équipe autre que la sienne. */
   otherTeam?: boolean;
+  /**
+   * Match de son équipe mais où le joueur n'est pas (encore) convoqué — le
+   * calendrier montre maintenant tous les matchs de l'équipe, pas seulement
+   * ceux où le joueur figure. `undefined` = non applicable (séances).
+   */
+  convoked?: boolean;
   children?: React.ReactNode;
 }
 
@@ -55,6 +61,7 @@ export function PlayerEventCard({
   teamName,
   location,
   otherTeam,
+  convoked,
   children,
 }: PlayerEventCardProps) {
   const s = useStyles();
@@ -96,6 +103,7 @@ export function PlayerEventCard({
           </Text>
         </View>
         {otherTeam && <Badge label="Autre équipe" tone="neutral" size="sm" />}
+        {convoked === false && <Badge label="Non convoqué" tone="neutral" size="sm" />}
         {competition ? (
           <Text variant="caption" tone="tertiary" numberOfLines={1} style={s.flex}>
             {competition}

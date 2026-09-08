@@ -38,7 +38,7 @@
  * dériver du thème casserait la correspondance entre la consigne et le rendu.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Modal,
@@ -50,8 +50,8 @@ import {
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import BodyMap, { type PainSelection } from './BodyMap';
-import { toPayload } from '../lib/painMap';
-import { reportMyPain } from '../lib/services/painReports';
+import { toPayload, type PainZonePayload } from '../lib/painMap';
+import { reportMyPain, updateMyPainReport } from '../lib/services/painReports';
 import { useTheme, makeStyles } from '../contexts/ThemeContext';
 import { haptics } from '../lib/design/haptics';
 import { Text, Button, Card, Field, IconButton } from './ui';
@@ -63,14 +63,24 @@ const ONSET_OPTIONS: readonly { value: Exclude<Onset, null>; label: string }[] =
   { value: 'chronique', label: 'Qui traîne' },
 ];
 
+/** Déclaration existante à modifier — omis pour une nouvelle déclaration. */
+export interface PainReportEditing {
+  reportGroup: string;
+  zones: PainZonePayload[];
+  note: string | null;
+  onset: Onset;
+}
+
 export default function PainReportModal({
   visible,
   onClose,
   onSubmitted,
+  editing,
 }: {
   visible: boolean;
   onClose: () => void;
   onSubmitted?: () => void;
+  editing?: PainReportEditing | null;
 }) {
   const s = useStyles();
   const { theme } = useTheme();
@@ -84,6 +94,24 @@ export default function PainReportModal({
   const [error, setError] = useState<string | null>(null);
 
   const hasSelection = Object.keys(pain).length > 0;
+
+  // Pré-remplit (édition) ou vide (nouvelle déclaration) à chaque ouverture —
+  // le Modal reste monté entre deux ouvertures, l'état ne se réinitialise pas
+  // tout seul quand `editing` change d'une ouverture à l'autre.
+  useEffect(() => {
+    if (!visible) return;
+    if (editing) {
+      setPain(Object.fromEntries(editing.zones.map((z) => [z.zone, z.intensity])) as PainSelection);
+      setNote(editing.note ?? '');
+      setOnset(editing.onset ?? null);
+    } else {
+      setPain({});
+      setNote('');
+      setOnset(null);
+    }
+    setSubmitted(false);
+    setError(null);
+  }, [visible, editing]);
 
   const reset = () => {
     setPain({});
@@ -103,10 +131,12 @@ export default function PainReportModal({
     setSubmitting(true);
     setError(null);
     try {
-      const res = await reportMyPain(zones, note.trim() || null, onset, null);
+      const res = editing
+        ? await updateMyPainReport(editing.reportGroup, zones, note.trim() || null, onset)
+        : await reportMyPain(zones, note.trim() || null, onset, null);
       if (!res.success) {
         haptics.error();
-        setError(res.error || "Impossible d'envoyer le signalement.");
+        setError(res.error || (editing ? "Impossible d'enregistrer les modifications." : "Impossible d'envoyer le signalement."));
         return;
       }
       haptics.success();
@@ -114,7 +144,7 @@ export default function PainReportModal({
       onSubmitted?.();
     } catch (e) {
       haptics.error();
-      setError(e instanceof Error ? e.message : "Impossible d'envoyer le signalement.");
+      setError(e instanceof Error ? e.message : "Erreur d'envoi.");
     } finally {
       setSubmitting(false);
     }
@@ -134,7 +164,7 @@ export default function PainReportModal({
         <View style={s.header}>
           <View style={s.headerLeft}>
             <View style={s.accentBar} />
-            <Text variant="headline">Signaler une douleur</Text>
+            <Text variant="headline">{editing ? 'Modifier ta déclaration' : 'Signaler une douleur'}</Text>
           </View>
           <IconButton icon="close" label="Fermer" variant="surface" size="lg" onPress={close} />
         </View>
@@ -145,7 +175,7 @@ export default function PainReportModal({
               <View style={[s.successIcon, { backgroundColor: c.positive.fill }]}>
                 <Ionicons name="checkmark" size={32} color={c.text.onFill} />
               </View>
-              <Text variant="title">Signalement envoyé</Text>
+              <Text variant="title">{editing ? 'Déclaration mise à jour' : 'Signalement envoyé'}</Text>
               <Text variant="callout" tone="secondary" style={s.center}>
                 Ton staff a été alerté.
               </Text>
@@ -156,8 +186,8 @@ export default function PainReportModal({
               <Card style={s.intro}>
                 <Text variant="title">Où as-tu mal ?</Text>
                 <Text variant="callout" tone="secondary">
-                  Touche une zone : 1 fois modérée, 2 fois assez intense, 3 fois très
-                  intense. Bascule Face / Dos en haut.
+                  Touche une zone, puis choisis son intensité de 1 à 10.
+                  Bascule Face / Dos en haut.
                 </Text>
               </Card>
 
@@ -252,8 +282,8 @@ export default function PainReportModal({
               ) : null}
 
               <Button
-                label="Envoyer au staff"
-                icon="send-outline"
+                label={editing ? 'Enregistrer les modifications' : 'Envoyer au staff'}
+                icon={editing ? 'checkmark-outline' : 'send-outline'}
                 onPress={() => void submit()}
                 loading={submitting}
                 disabled={!hasSelection || submitting}

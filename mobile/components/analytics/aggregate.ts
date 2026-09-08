@@ -85,7 +85,14 @@ export function computePlayingTime(events: MatchEvent[]): Map<string, number> {
 }
 
 /** Temps de jeu saisi sur la feuille de match, quand il existe. */
-type MatchPlayerRow = { id: string; time_played?: number };
+type MatchPlayerRow = {
+  id: string;
+  time_played?: number;
+  goals?: number;
+  assists?: number;
+  yellow_cards?: number;
+  red_cards?: number;
+};
 
 /**
  * La colonne `matches.players` est tantôt un tableau, tantôt du JSON sérialisé
@@ -168,6 +175,23 @@ export function buildPlayerStats({
   Object.entries(eventsByMatch).forEach(([matchId, events]) => {
     if (!filteredMatchIds.has(matchId)) return;
 
+    if (events.length === 0) {
+      // Match jamais suivi en direct (aucun match_events) : les buts, passes
+      // décisives et cartons saisis à la main dans le calendrier
+      // (matches.players) sont la seule donnée disponible pour ce match. Sans
+      // ce repli, un match entièrement saisi à la main contribuerait zéro aux
+      // stats, alors que la saisie existe bel et bien.
+      parseMatchPlayers(matches.find((m) => m.id === matchId)).forEach((p) => {
+        if (!p.id) return;
+        const cur = ensure(p.id);
+        cur.goals += p.goals ?? 0;
+        cur.assist += p.assists ?? 0;
+        cur.yellow_cards += p.yellow_cards ?? 0;
+        cur.red_cards += p.red_cards ?? 0;
+      });
+      return;
+    }
+
     events.forEach((ev) => {
       // `player_id` = auteur de l'action.
       if (ev.player_id) {
@@ -215,6 +239,18 @@ export function buildPlayerStats({
     if (!filteredMatchIds.has(matchId)) return;
 
     const sheet = parseMatchPlayers(matches.find((m) => m.id === matchId));
+
+    if (events.length === 0) {
+      // Idem : aucune mesure de temps de jeu possible sans événements, mais le
+      // joueur a bien participé — compté dans matchesPlayed, pas dans le temps
+      // de jeu (qui reste réservé aux matchs suivis en direct).
+      sheet.forEach((p) => {
+        if (!p.id) return;
+        ensure(p.id).matchesPlayed++;
+      });
+      return;
+    }
+
     const fromSheet = new Map(
       sheet
         .filter((p) => (p.time_played ?? 0) > 0)
@@ -277,4 +313,53 @@ export function buildPlayerStats({
  */
 export function totalShots(row: Pick<PlayerStats, 'shot' | 'shot_on_target'>): number {
   return row.shot + row.shot_on_target;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Temps de jeu par match
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface PlayingTimeByMatchPoint {
+  matchId: string;
+  label: string;
+  seconds: number;
+}
+
+/**
+ * Temps de jeu d'un joueur, détaillé match par match — même résolution que
+ * `buildPlayerStats` (feuille `time_played` en priorité, sinon reconstruction
+ * depuis les events), mais sans accumuler : un point par match, pour tracer
+ * une évolution. Un match sans `match_events` (jamais suivi au tracker) n'a
+ * pas de temps mesurable et n'apparaît pas dans la série.
+ */
+export function computePlayingTimeByMatch(
+  playerId: string,
+  matches: Match[],
+  eventsByMatch: Record<string, MatchEvent[]>,
+  filteredMatchIds: Set<string>,
+): PlayingTimeByMatchPoint[] {
+  return matches
+    .filter((m) => filteredMatchIds.has(m.id))
+    .slice()
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+    .map((m): PlayingTimeByMatchPoint | null => {
+      const events = eventsByMatch[m.id] ?? [];
+      if (events.length === 0) return null;
+
+      const fromSheet = new Map(
+        parseMatchPlayers(m)
+          .filter((p) => (p.time_played ?? 0) > 0)
+          .map((p) => [p.id, p.time_played as number])
+      );
+      const timeMap = fromSheet.size > 0 ? fromSheet : computePlayingTime(events);
+      const seconds = timeMap.get(playerId);
+      if (!seconds) return null;
+
+      return {
+        matchId: m.id,
+        label: new Date(String(m.date)).toLocaleDateString('fr-FR', { day: 'numeric', month: 'numeric' }),
+        seconds,
+      };
+    })
+    .filter((p): p is PlayingTimeByMatchPoint => p !== null);
 }

@@ -10,6 +10,7 @@
  * compte n'a rien à faire dans un chrome de navigation permanent.
  */
 
+import { useState } from 'react';
 import { View, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -19,6 +20,7 @@ import { useActiveTeam } from '../../contexts/ActiveTeamContext';
 import { supabase } from '../../lib/supabase';
 import { SECONDARY_DESTINATIONS } from '../../lib/navigation';
 import { Screen, Section, Card, Text, Button, ThemeSwitcher } from '../../components/ui';
+import { DeleteAccountSheet } from '../../components/DeleteAccountSheet';
 
 export default function PlusScreen() {
   const router = useRouter();
@@ -26,6 +28,7 @@ export default function PlusScreen() {
   const { isPlayer, player, setAppRole } = useAppRole();
   const { activeTeam, teams } = useActiveTeam();
   const c = theme.colors;
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
 
   const handleSignOut = () => {
     Alert.alert('Déconnexion', 'Veux-tu te déconnecter ?', [
@@ -142,8 +145,17 @@ export default function PlusScreen() {
             icon="log-out-outline"
             block
           />
+          <Button
+            label="Supprimer mon compte"
+            onPress={() => setDeleteAccountOpen(true)}
+            variant="destructive"
+            icon="trash-outline"
+            block
+          />
         </View>
       </Section>
+
+      <DeleteAccountSheet visible={deleteAccountOpen} onClose={() => setDeleteAccountOpen(false)} />
 
       {/* Accès à la galerie du design system pendant la refonte UI.
           `__DEV__` est faux dans tout build de production. */}

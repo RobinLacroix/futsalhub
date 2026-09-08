@@ -14,13 +14,14 @@ import type { TrainingLoadRow, MatrixRow } from '../trainingLoad';
  */
 export async function getTrainingLoad(
   clubId: string,
-  options: { teamId?: string | null; from?: string | null; to?: string | null } = {},
+  options: { teamId?: string | null; from?: string | null; to?: string | null; positions?: string[] | null } = {},
 ): Promise<TrainingLoadRow[]> {
   const { data, error } = await supabase.rpc('get_training_load', {
     p_club_id: clubId,
     p_team_id: options.teamId ?? null,
     p_from: options.from ?? null,
     p_to: options.to ?? null,
+    p_positions: options.positions?.length ? options.positions : null,
   });
   if (error) throw error;
   return (data || []) as TrainingLoadRow[];
@@ -40,16 +41,26 @@ export async function getPlayerTrainingLoad(
   return (data || []) as TrainingLoadRow[];
 }
 
-/** Matrice joueurs × dernières séances, pour la vue « effectif » de la charge. */
+/**
+ * Matrice joueurs × dernières séances, pour la vue « effectif » de la charge.
+ *
+ * `from`/`to` bornent les séances éligibles à la saison choisie (RPC migrée
+ * le 2026-08-21) : sans borne, la fonction retombe sur son ancien
+ * comportement (les `limit` dernières séances toutes saisons confondues), ce
+ * qui reste le comportement du web tant qu'il ne les passe pas.
+ */
 export async function getTeamTrainingLoadMatrix(
   clubId: string,
   teamId: string,
   limit = 5,
+  options: { from?: string | null; to?: string | null } = {},
 ): Promise<MatrixRow[]> {
   const { data, error } = await supabase.rpc('get_team_training_load_matrix', {
     p_club_id: clubId,
     p_team_id: teamId,
     p_limit: limit,
+    p_from: options.from ?? null,
+    p_to: options.to ?? null,
   });
   if (error) throw error;
   return (data || []) as MatrixRow[];

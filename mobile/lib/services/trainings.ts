@@ -117,13 +117,21 @@ export async function updateTraining(trainingId: string, input: UpdateTrainingIn
 export async function updateTrainingAttendance(
   trainingId: string,
   attendance: Record<string, PlayerStatus>,
-  convokedPlayerIds?: string[]
+  convokedPlayerIds?: string[],
+  attendanceExcused?: Record<string, boolean>
 ): Promise<Training> {
-  const updateData: { attendance: Record<string, PlayerStatus>; convoked_players?: { id: string }[] } = {
+  const updateData: {
+    attendance: Record<string, PlayerStatus>;
+    convoked_players?: { id: string }[];
+    attendance_excused?: Record<string, boolean>;
+  } = {
     attendance,
   };
   if (convokedPlayerIds !== undefined) {
     updateData.convoked_players = convokedPlayerIds.map((id) => ({ id }));
+  }
+  if (attendanceExcused !== undefined) {
+    updateData.attendance_excused = attendanceExcused;
   }
   const { data, error } = await supabase
     .from('trainings')

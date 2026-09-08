@@ -42,8 +42,14 @@ import {
 } from '../../lib/services/playerConvocations';
 import type { PlayerStatus } from '../../types';
 
-/** Délai avant la séance au-delà duquel la réponse est refusée côté RPC. */
-const ANSWER_CUTOFF_MS = 2 * 60 * 60 * 1000;
+/**
+ * Délai avant la séance au-delà duquel la réponse est refusée côté RPC — différencié par
+ * statut ET réglable par équipe (`teams.absence_notice_minutes` / `late_notice_minutes`,
+ * coach de l'équipe). Chaque ligne de convocation porte ses propres minutes (équipe de la
+ * séance, pas forcément celle du joueur s'il est invité). Le gate d'affichage (`closed`,
+ * ci-dessous) utilise le plus court des deux pour garder le picker visible tant qu'AU
+ * MOINS un statut reste possible ; la RPC tranche ensuite au cas par cas.
+ */
 
 type CalendarItem =
   | { type: 'training'; data: MyConvolutionRow }
@@ -51,6 +57,14 @@ type CalendarItem =
 
 const itemDate = (i: CalendarItem) =>
   i.type === 'training' ? i.data.training_date : i.data.match_date;
+
+/** "6 h", "1 h 30", "15 min" — pour les libellés de délai, réglés par équipe. */
+function formatNotice(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m === 0 ? `${h} h` : `${h} h ${m}`;
+}
 
 export default function PlayerConvocationsScreen() {
   const s = useStyles();
@@ -120,12 +134,18 @@ export default function PlayerConvocationsScreen() {
       );
       return;
     }
-    setError(
-      result.error === 'too_late'
-        ? 'Trop tard pour répondre : les réponses ferment 2 h avant la séance.'
-        : (result.error ?? 'Erreur')
-    );
-  }, []);
+    if (result.error === 'too_late') {
+      const c = convocations.find((x) => x.training_id === trainingId);
+      const minutes = status === 'absent' ? (c?.absence_notice_minutes ?? 360) : (c?.late_notice_minutes ?? 15);
+      setError(
+        status === 'absent'
+          ? `Trop tard pour se déclarer absent : ferme ${formatNotice(minutes)} avant la séance.`
+          : `Trop tard pour répondre : ferme ${formatNotice(minutes)} avant la séance.`
+      );
+    } else {
+      setError(result.error ?? 'Erreur');
+    }
+  }, [convocations]);
 
   /**
    * Le questionnaire se remplit DANS l'application, onglet « Questionnaires ».
@@ -218,6 +238,7 @@ export default function PlayerConvocationsScreen() {
               teamName={item.data.team_name}
               location={item.data.location}
               otherTeam={!!item.data.is_other_team}
+              convoked={item.data.is_convoked}
             />
           ) : (
             <TrainingItem
@@ -249,10 +270,16 @@ function TrainingItem({
   const { theme } = useTheme();
 
   const other = !!c.is_other_team;
-  // La RPC refuse la réponse à moins de 2 h. Le dire avant évite un aller-retour
-  // qui se soldait par un message d'erreur rouge en haut de l'écran.
+  const answerCutoffMs = Math.min(c.absence_notice_minutes, c.late_notice_minutes) * 60 * 1000;
+  const absentCutoffMs = c.absence_notice_minutes * 60 * 1000;
+  // Le picker reste ouvert tant qu'AU MOINS un statut reste possible (le plus court des
+  // deux délais de CETTE équipe). La RPC tranche ensuite au cas par cas — se déclarer
+  // absent ferme au délai absence, le reste (présent/retard/blessé) au délai retard.
   const closed = c.training_date
-    ? new Date(c.training_date).getTime() - Date.now() < ANSWER_CUTOFF_MS
+    ? new Date(c.training_date).getTime() - Date.now() < answerCutoffMs
+    : false;
+  const absentClosed = c.training_date
+    ? new Date(c.training_date).getTime() - Date.now() < absentCutoffMs
     : false;
 
   return (
@@ -280,16 +307,24 @@ function TrainingItem({
         <Text variant="callout" tone="tertiary">
           {c.my_status
             ? `Tu avais répondu : ${statusLabel(c.my_status as PlayerStatus)}.`
-            : 'Les réponses ferment 2 h avant la séance.'}
+            : `Les réponses ferment ${formatNotice(c.late_notice_minutes)} avant la séance (${formatNotice(c.absence_notice_minutes)} pour une absence).`}
         </Text>
       ) : (
-        <AttendancePicker
-          value={(c.my_status as PlayerStatus) ?? null}
-          onChange={(status) => onSetAttendance(c.training_id, status)}
-          playerName="Ma présence"
-          loading={updating}
-          fullLabels
-        />
+        <>
+          <AttendancePicker
+            value={(c.my_status as PlayerStatus) ?? null}
+            onChange={(status) => onSetAttendance(c.training_id, status)}
+            playerName="Ma présence"
+            loading={updating}
+            fullLabels
+            disabledValues={absentClosed ? ['absent'] : undefined}
+          />
+          {absentClosed && (
+            <Text variant="caption" tone="tertiary">
+              Se déclarer absent ferme {formatNotice(c.absence_notice_minutes)} avant la séance.
+            </Text>
+          )}
+        </>
       )}
 
       {c.feedback_token && !other && (

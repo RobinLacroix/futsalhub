@@ -30,35 +30,27 @@ import {
   Section,
   EmptyState,
   SkeletonList,
-  type ChipOption,
 } from '../../../components/ui';
 import { PlayerIdentity } from '../../../components/players/PlayerIdentity';
 import { Stepper } from '../../../components/match/Stepper';
 import { InvitePlayersSheet } from '../../../components/match/InvitePlayersSheet';
 import { DateTimeField, hasNativePicker } from '../../../components/match/DateTimeField';
 import type { Player } from '../../../types';
-
-type LocationOption = 'Domicile' | 'Extérieur';
-type CompetitionOption = 'Championnat' | 'Coupe' | 'Amical';
-
-const LOCATION_OPTIONS: readonly ChipOption<LocationOption>[] = [
-  { value: 'Domicile', label: 'Domicile', icon: 'home-outline' },
-  { value: 'Extérieur', label: 'Extérieur', icon: 'bus-outline' },
-];
-
-const COMPETITION_OPTIONS: readonly ChipOption<CompetitionOption>[] = [
-  { value: 'Championnat', label: 'Championnat' },
-  { value: 'Coupe', label: 'Coupe' },
-  { value: 'Amical', label: 'Amical' },
-];
+import {
+  LOCATION_OPTIONS,
+  COMPETITION_OPTIONS,
+  type LocationOption,
+  type CompetitionOption,
+} from '../../../lib/matchOptions';
 
 interface PlayerLine {
   goals: number;
+  assists: number;
   yellow_cards: number;
   red_cards: number;
 }
 
-const emptyLine = (): PlayerLine => ({ goals: 0, yellow_cards: 0, red_cards: 0 });
+const emptyLine = (): PlayerLine => ({ goals: 0, assists: 0, yellow_cards: 0, red_cards: 0 });
 
 const defaultDate = () => {
   const d = new Date();
@@ -82,6 +74,15 @@ export default function NewMatchScreen() {
   const [dateTime, setDateTime] = useState(defaultDate);
   const [dateStr, setDateStr] = useState('');
   const [timeStr, setTimeStr] = useState('');
+  const [meetingDateTime, setMeetingDateTime] = useState(() => {
+    const d = defaultDate();
+    d.setMinutes(d.getMinutes() - 30);
+    return d;
+  });
+  const [meetingDateStr, setMeetingDateStr] = useState('');
+  const [meetingTimeStr, setMeetingTimeStr] = useState('');
+  const [venueAddress, setVenueAddress] = useState('');
+  const [convocationMessage, setConvocationMessage] = useState('');
   const [location, setLocation] = useState<LocationOption>('Domicile');
   const [competition, setCompetition] = useState<CompetitionOption>('Championnat');
   const [convoqued, setConvoqued] = useState<Record<string, boolean>>({});
@@ -96,6 +97,10 @@ export default function NewMatchScreen() {
     const d = defaultDate();
     setDateStr(format(d, 'dd/MM/yyyy', { locale: fr }));
     setTimeStr(format(d, 'HH:mm'));
+    const m = new Date(d);
+    m.setMinutes(m.getMinutes() - 30);
+    setMeetingDateStr(format(m, 'dd/MM/yyyy', { locale: fr }));
+    setMeetingTimeStr(format(m, 'HH:mm'));
   }, []);
 
   useEffect(() => {
@@ -186,16 +191,19 @@ export default function NewMatchScreen() {
     });
   };
 
-  const resolveDate = (): Date | null => {
-    if (hasNativePicker) return dateTime;
-    const parsed = parse(dateStr.trim(), 'dd/MM/yyyy', new Date(), { locale: fr });
+  const resolveDateFrom = (dt: Date, dStr: string, tStr: string): Date | null => {
+    if (hasNativePicker) return dt;
+    const parsed = parse(dStr.trim(), 'dd/MM/yyyy', new Date(), { locale: fr });
     if (!isValid(parsed)) return null;
-    const [h, m] = timeStr.trim().split(':').map(Number);
+    const [h, m] = tStr.trim().split(':').map(Number);
     if (Number.isNaN(h) || Number.isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) return null;
     const out = new Date(parsed);
     out.setHours(h, m, 0, 0);
     return out;
   };
+
+  const resolveDate = (): Date | null => resolveDateFrom(dateTime, dateStr, timeStr);
+  const resolveMeetingDate = (): Date | null => resolveDateFrom(meetingDateTime, meetingDateStr, meetingTimeStr);
 
   const submit = async () => {
     if (!activeTeamId) {
@@ -246,6 +254,9 @@ export default function NewMatchScreen() {
         score_team: st,
         score_opponent: so,
         playerStats,
+        venue_address: venueAddress.trim() || undefined,
+        meeting_time: resolveMeetingDate() ?? undefined,
+        convocation_message: convocationMessage.trim() || undefined,
       });
       haptics.success();
       Alert.alert('Match créé', undefined, [
@@ -286,13 +297,42 @@ export default function NewMatchScreen() {
             error={titleError ?? undefined}
             placeholder="ex : J12 — Sporting Paris"
           />
-          <DateTimeField
-            value={dateTime}
-            onChange={setDateTime}
-            dateText={dateStr}
-            timeText={timeStr}
-            onDateTextChange={setDateStr}
-            onTimeTextChange={setTimeStr}
+          <Field label="Coup d'envoi">
+            <DateTimeField
+              value={dateTime}
+              onChange={setDateTime}
+              dateText={dateStr}
+              timeText={timeStr}
+              onDateTextChange={setDateStr}
+              onTimeTextChange={setTimeStr}
+            />
+          </Field>
+          <Field label="Heure de rendez-vous" hint="Convocation des joueurs, distincte du coup d'envoi.">
+            <DateTimeField
+              value={meetingDateTime}
+              onChange={setMeetingDateTime}
+              dateText={meetingDateStr}
+              timeText={meetingTimeStr}
+              onDateTextChange={setMeetingDateStr}
+              onTimeTextChange={setMeetingTimeStr}
+            />
+          </Field>
+          <Input
+            label="Adresse du gymnase"
+            optional
+            value={venueAddress}
+            onChangeText={setVenueAddress}
+            placeholder="12 rue du Stade, 75014 Paris"
+          />
+          <Input
+            label="Message pour la convocation"
+            optional
+            value={convocationMessage}
+            onChangeText={setConvocationMessage}
+            placeholder="Consignes, tenue, covoiturage…"
+            multiline
+            numberOfLines={4}
+            inputStyle={{ minHeight: 90, textAlignVertical: 'top' }}
           />
           <Field label="Lieu">
             <ChipGroup
@@ -439,6 +479,13 @@ export default function NewMatchScreen() {
                       onChange={(d) => setInvitedStat(playerId, 'goals', d)}
                       label={`buts de ${name}`}
                       caption="Buts"
+                      compact
+                    />
+                    <Stepper
+                      value={line.assists}
+                      onChange={(d) => setInvitedStat(playerId, 'assists', d)}
+                      label={`passes décisives de ${name}`}
+                      caption="Passes déc."
                       compact
                     />
                     <Stepper

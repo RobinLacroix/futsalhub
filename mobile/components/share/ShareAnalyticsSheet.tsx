@@ -321,6 +321,7 @@ export function ShareAnalyticsSheet({
                 </Text>
                 {perContent.map((row) => {
                   const isYt = row.type === 'youtube';
+                  const isFile = row.type === 'file';
                   const expanded = expandedId === row.id;
                   return (
                     <Card key={row.id} variant="flat" padding="none">
@@ -339,7 +340,7 @@ export function ShareAnalyticsSheet({
                           ]}
                         >
                           <Ionicons
-                            name={isYt ? 'logo-youtube' : 'link-outline'}
+                            name={isYt ? 'logo-youtube' : isFile ? 'document-outline' : 'link-outline'}
                             size={16}
                             color={c.text.secondary}
                           />

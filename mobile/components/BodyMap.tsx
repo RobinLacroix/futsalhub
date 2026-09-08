@@ -7,7 +7,6 @@ import {
   zoneById,
   PAIN_VIEWBOX,
   INTENSITY_COLORS,
-  INTENSITY_LABELS,
   BODY_STROKE,
   BODY_FILL,
   type PainMode,
@@ -27,12 +26,7 @@ const C = {
 } as const;
 
 const SINGLE_SELECT_COLOR = C.navy;
-
-function cycle(current: PainIntensity | undefined): PainIntensity | 0 {
-  if (!current) return 1;
-  if (current === 3) return 0;
-  return (current + 1) as PainIntensity;
-}
+const INTENSITY_VALUES: PainIntensity[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 function ZoneShape({
   def, fill, stroke, strokeWidth, onPress,
@@ -79,15 +73,29 @@ export default function BodyMap({
   const selectedIds = Object.keys(value);
   const width = height * (PAIN_VIEWBOX.w / PAIN_VIEWBOX.h);
 
+  // Un tap sélectionne/désélectionne la zone (intensité par défaut 5/10,
+  // ajustable ensuite via le sélecteur 1-10 sous la silhouette). Remplace
+  // l'ancien cycle de clics (1 tap = modérée, 2 = assez intense, 3 = très
+  // intense, plafonné à 3) : le kiné veut un chiffre choisi explicitement,
+  // pas un nombre de taps.
   const toggle = (id: string) => {
     if (singleSelect) {
       onChange(value[id] ? {} : { [id]: 1 });
       return;
     }
-    const next = cycle(value[id]);
     const copy = { ...value };
-    if (next === 0) delete copy[id];
-    else copy[id] = next;
+    if (copy[id]) delete copy[id];
+    else copy[id] = 5;
+    onChange(copy);
+  };
+
+  const setIntensity = (id: string, intensity: PainIntensity) => {
+    onChange({ ...value, [id]: intensity });
+  };
+
+  const removeZone = (id: string) => {
+    const copy = { ...value };
+    delete copy[id];
     onChange(copy);
   };
 
@@ -118,16 +126,9 @@ export default function BodyMap({
         </Svg>
       </View>
 
-      {/* Légende — sans objet en sélection unique (pas de gravité à indiquer) */}
+      {/* Consigne — sans objet en sélection unique (pas de gravité à indiquer) */}
       {!singleSelect && (
-        <View style={st.legend}>
-          {([1, 2, 3] as PainIntensity[]).map(i => (
-            <View key={i} style={st.legendItem}>
-              <View style={[st.legendDot, { backgroundColor: INTENSITY_COLORS[i] }]} />
-              <Text style={st.legendTxt}>{INTENSITY_LABELS[i]}</Text>
-            </View>
-          ))}
-        </View>
+        <Text style={st.legendTxt}>Touchez une zone, puis choisissez son intensité de 1 à 10.</Text>
       )}
 
       {/* Sélection */}
@@ -145,15 +146,40 @@ export default function BodyMap({
       </View>
 
       {selectedIds.length > 0 && (
-        <View style={st.chips}>
+        <View style={st.zoneList}>
           {selectedIds.map(id => {
             const intensity = value[id];
             const label = zoneById(id)?.label ?? id;
             const color = singleSelect ? SINGLE_SELECT_COLOR : INTENSITY_COLORS[intensity];
             return (
-              <TouchableOpacity key={id} onPress={() => toggle(id)} style={[st.chip, { borderColor: color, backgroundColor: color + '1a' }]} activeOpacity={0.7}>
-                <Text style={[st.chipTxt, { color }]}>{label}  ×</Text>
-              </TouchableOpacity>
+              <View key={id} style={[st.zoneCard, { borderColor: color }]}>
+                <View style={st.zoneCardHead}>
+                  <Text style={[st.zoneCardLabel, { color }]}>{label}</Text>
+                  <TouchableOpacity onPress={() => removeZone(id)} hitSlop={8}>
+                    <Text style={st.reset}>Retirer</Text>
+                  </TouchableOpacity>
+                </View>
+                {!singleSelect && (
+                  <View style={st.intensityRow}>
+                    {INTENSITY_VALUES.map(n => {
+                      const active = intensity === n;
+                      const cellColor = INTENSITY_COLORS[n];
+                      return (
+                        <TouchableOpacity
+                          key={n}
+                          onPress={() => setIntensity(id, n)}
+                          style={[st.intensityCell, active && { backgroundColor: cellColor, borderColor: cellColor }]}
+                          accessibilityRole="radio"
+                          accessibilityState={{ selected: active }}
+                          accessibilityLabel={`Intensité ${n} sur 10 pour ${label}`}
+                        >
+                          <Text style={[st.intensityTxt, active && st.intensityTxtActive]}>{n}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
             );
           })}
         </View>
@@ -172,16 +198,21 @@ const st = StyleSheet.create({
 
   canvas: { backgroundColor: C.surface2, borderWidth: 1, borderColor: C.border, borderRadius: 14, padding: 8, alignItems: 'center' },
 
-  legend: { flexDirection: 'row', justifyContent: 'center', gap: 14, marginTop: 10 },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  legendDot: { width: 12, height: 12, borderRadius: 3 },
-  legendTxt: { fontSize: 10, color: C.text2 },
+  legendTxt: { fontSize: 11, color: C.text2, textAlign: 'center', marginTop: 10 },
 
   selRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 },
   selCount: { fontSize: 11, fontWeight: '700', color: C.text3, letterSpacing: 0.6 },
   reset: { fontSize: 12, color: C.text2, fontWeight: '600' },
 
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
-  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
-  chipTxt: { fontSize: 12, fontWeight: '700' },
+  zoneList: { gap: 10, marginTop: 10 },
+  zoneCard: { borderWidth: 1, borderRadius: 12, padding: 10, gap: 8, backgroundColor: C.surface2 },
+  zoneCardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  zoneCardLabel: { fontSize: 13, fontWeight: '700' },
+  intensityRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  intensityCell: {
+    width: 30, height: 30, borderRadius: 8, borderWidth: 1.5, borderColor: C.border,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff',
+  },
+  intensityTxt: { fontSize: 13, fontWeight: '700', color: C.text2 },
+  intensityTxtActive: { color: '#fff' },
 });

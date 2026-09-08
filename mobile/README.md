@@ -2,7 +2,7 @@
 
 Application iOS / Android / iPadOS. Phase 1 en cours.
 
-**SDK 54** — compatible avec l’app Expo Go (App Store / Play Store).
+**SDK 56** — nécessite la version d'Expo Go correspondante (App Store / Play Store). Passé de SDK 54 à 56 par `f367348` pour corriger un crash au lancement ; si Expo Go affiche « version trop ancienne » et qu'aucune mise à jour n'apparaît sur l'App Store, tester d'abord via le simulateur iOS (`npx expo start` puis touche `i`), qui installe automatiquement le build Expo Go compatible sans dépendre du délai de publication App Store.
 
 ## Configuration Supabase (une fois)
 

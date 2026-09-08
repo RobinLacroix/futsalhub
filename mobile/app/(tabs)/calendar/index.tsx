@@ -16,6 +16,7 @@ import { Text, EmptyState, SkeletonList, Badge } from '../../../components/ui';
 import { MonthGrid, type DayEvents } from '../../../components/calendar/MonthGrid';
 import { EventCard, type CalendarEvent } from '../../../components/calendar/EventCard';
 import { AddEventButton } from '../../../components/calendar/AddEventButton';
+import { SharePlanningButton } from '../../../components/calendar/SharePlanningButton';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -224,7 +225,14 @@ export default function CalendarScreen() {
         compact={isTablet}
         // Sur iPad le Stack ne rend pas de header : le bouton d'ajout doit
         // vivre ici, sinon la création d'événement est inaccessible.
-        headerAction={isTablet ? <AddEventButton variant="labelled" /> : undefined}
+        headerAction={
+          isTablet ? (
+            <>
+              <SharePlanningButton variant="labelled" style={{ marginRight: theme.space.sm }} />
+              <AddEventButton variant="labelled" />
+            </>
+          ) : undefined
+        }
       />
 
       {selectedDay && (

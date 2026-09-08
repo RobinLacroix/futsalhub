@@ -20,6 +20,7 @@ import {
   getSessionByTraining,
   createSession,
 } from '../../../../lib/services/physicalTests';
+import { shareConvocationToFeed } from '../../../../lib/services/teamFeed';
 import { getUserClubId } from '../../../../lib/services/clubs';
 import { useActiveSeason } from '../../../../contexts/ActiveSeasonContext';
 import { haptics } from '../../../../lib/design/haptics';
@@ -41,7 +42,9 @@ import { AvailabilityPill } from '../../../../components/performance/Availabilit
 import { useAvailability } from '../../../../hooks/useAvailability';
 import { needsConvocationWarning } from '../../../../lib/availability';
 import { AttendancePicker } from '../../../../components/training/AttendancePicker';
+import { attendanceSortRank } from '../../../../components/training/attendance';
 import { InvitePlayersSheet } from '../../../../components/match/InvitePlayersSheet';
+import { TrainingFeedbackResponsesSheet } from '../../../../components/training/TrainingFeedbackResponsesSheet';
 import type { Training, Player, PlayerStatus } from '../../../../types';
 
 type SquadFilter = 'all' | 'outfield';
@@ -67,6 +70,7 @@ export default function TrainingDetailScreen() {
   const [training, setTraining] = useState<Training | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [attendance, setAttendance] = useState<Record<string, PlayerStatus>>({});
+  const [attendanceExcused, setAttendanceExcused] = useState<Record<string, boolean>>({});
   const [convoked, setConvoked] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -76,6 +80,8 @@ export default function TrainingDetailScreen() {
   const [clubPlayersWithTeams, setClubPlayersWithTeams] = useState<PlayerWithTeams[]>([]);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [openingTests, setOpeningTests] = useState(false);
+  const [sharingConvocation, setSharingConvocation] = useState(false);
+  const [responsesOpen, setResponsesOpen] = useState(false);
 
   // ── Chargement ────────────────────────────────────────────────────────────
 
@@ -95,6 +101,7 @@ export default function TrainingDetailScreen() {
       setTraining(t);
       setPlayers(pl);
       setAttendance(t.attendance ?? {});
+      setAttendanceExcused(t.attendance_excused ?? {});
       // Séance historique sans liste de convoqués : tout le groupe est réputé convoqué.
       const saved = t.convoked_players?.map((x) => x.id) ?? [];
       setConvoked(
@@ -141,10 +148,39 @@ export default function TrainingDetailScreen() {
   );
   const invitedSet = useMemo(() => new Set(invitedPlayerIds), [invitedPlayerIds]);
 
-  const visiblePlayers = useMemo(
-    () => (squadFilter === 'all' ? players : players.filter((p) => !isGoalkeeper(p))),
-    [players, squadFilter]
-  );
+  /**
+   * Poste des joueurs invités d'autres équipes, pour que le filtre « Sans les
+   * gardiens » s'applique aussi à eux — avant ce lookup, un gardien invité
+   * restait compté dans `counts` même filtre actif, faute de connaître son poste.
+   */
+  const invitedPlayerById = useMemo(() => {
+    const map = new Map<string, Player>();
+    clubPlayersWithTeams.forEach(({ player }) => map.set(player.id, player));
+    return map;
+  }, [clubPlayersWithTeams]);
+
+  const visibleInvitedPlayerIds = useMemo(() => {
+    if (squadFilter === 'all') return invitedPlayerIds;
+    return invitedPlayerIds.filter((id) => {
+      const player = invitedPlayerById.get(id);
+      return player ? !isGoalkeeper(player) : true;
+    });
+  }, [invitedPlayerIds, squadFilter, invitedPlayerById]);
+
+  const visiblePlayers = useMemo(() => {
+    const base = squadFilter === 'all' ? players : players.filter((p) => !isGoalkeeper(p));
+    return [...base].sort((a, b) => {
+      const aConv = !!convoked[a.id];
+      const bConv = !!convoked[b.id];
+      if (aConv !== bConv) return aConv ? -1 : 1;
+      if (aConv && bConv) {
+        const aRank = attendanceSortRank(attendance[a.id] ?? 'present');
+        const bRank = attendanceSortRank(attendance[b.id] ?? 'present');
+        if (aRank !== bRank) return aRank - bRank;
+      }
+      return (a.last_name || '').localeCompare(b.last_name || '', 'fr');
+    });
+  }, [players, squadFilter, convoked, attendance]);
 
   const displayName = useCallback(
     (playerId: string) => {
@@ -159,7 +195,7 @@ export default function TrainingDetailScreen() {
   const counts = useMemo(() => {
     const ids = [
       ...visiblePlayers.filter((p) => convoked[p.id]).map((p) => p.id),
-      ...invitedPlayerIds,
+      ...visibleInvitedPlayerIds,
     ];
     const by = (s: PlayerStatus) => ids.filter((id) => attendance[id] === s).length;
     const present = by('present');
@@ -171,7 +207,7 @@ export default function TrainingDetailScreen() {
       available: present + late,
       unavailable: by('absent') + by('injured'),
     };
-  }, [visiblePlayers, convoked, invitedPlayerIds, attendance]);
+  }, [visiblePlayers, convoked, visibleInvitedPlayerIds, attendance]);
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
@@ -305,13 +341,25 @@ export default function TrainingDetailScreen() {
         ...invitedPlayerIds,
       ];
       const cleaned: Record<string, PlayerStatus> = {};
+      const cleanedExcused: Record<string, boolean> = {};
       convokedPlayerIds.forEach((id) => {
         if (attendance[id]) cleaned[id] = attendance[id];
+        if (cleaned[id] === 'absent' || cleaned[id] === 'late') {
+          cleanedExcused[id] = !!attendanceExcused[id];
+        }
       });
-      await updateTrainingAttendance(trainingId, cleaned, convokedPlayerIds);
+      await updateTrainingAttendance(trainingId, cleaned, convokedPlayerIds, cleanedExcused);
       setAttendance(cleaned);
+      setAttendanceExcused(cleanedExcused);
       setTraining((t) =>
-        t ? { ...t, attendance: cleaned, convoked_players: convokedPlayerIds.map((id) => ({ id })) } : null
+        t
+          ? {
+              ...t,
+              attendance: cleaned,
+              attendance_excused: cleanedExcused,
+              convoked_players: convokedPlayerIds.map((id) => ({ id })),
+            }
+          : null
       );
       haptics.success();
     } catch (e) {
@@ -344,6 +392,21 @@ export default function TrainingDetailScreen() {
       Alert.alert('Erreur', e instanceof Error ? e.message : "Impossible d'envoyer les questionnaires.");
     } finally {
       setSendingQuestionnaires(false);
+    }
+  };
+
+  const shareConvocation = async () => {
+    if (!trainingId) return;
+    setSharingConvocation(true);
+    const r = await shareConvocationToFeed({ trainingId });
+    setSharingConvocation(false);
+    if (r.success) {
+      haptics.success();
+      Alert.alert('Partagé', 'La convocation est visible dans le fil d\'équipe.');
+    } else {
+      haptics.error();
+      const msg = r.error === 'no_convocation' ? 'Aucun joueur convoqué pour cette séance.' : (r.error ?? 'Impossible de partager');
+      Alert.alert('Erreur', msg);
     }
   };
 
@@ -413,39 +476,72 @@ export default function TrainingDetailScreen() {
             loading={openingTests}
             onPress={openPhysicalTests}
           />
+          {counts.convoked > 0 ? (
+            <Button
+              label="Partager la convocation"
+              icon="megaphone-outline"
+              variant="secondary"
+              block
+              loading={sharingConvocation}
+              onPress={shareConvocation}
+            />
+          ) : null}
         </Card>
 
-        <View style={[styles.statsRow, { gap: theme.space.md }]}>
-          <Card variant="flat" padding="sm" style={styles.flex}>
-            <Stat
-              value={String(counts.available)}
-              label="Disponibles"
-              unit={`sur ${counts.convoked}`}
-              valueColor={c.positive.default}
-              size="primary"
+        {players.length > 0 && (
+          <Section
+            title="Fin de séance"
+            subtitle="Crée un lien questionnaire pour chaque joueur présent ou en retard."
+          >
+            <Button
+              label={sendingQuestionnaires ? 'Envoi…' : 'Envoyer les questionnaires'}
+              icon="paper-plane-outline"
+              variant="secondary"
+              onPress={sendQuestionnaires}
+              loading={sendingQuestionnaires}
+              disabled={sendingQuestionnaires}
+              block
             />
-            <Text variant="caption" tone="tertiary">
-              {counts.present} présent{counts.present !== 1 ? 's' : ''} · {counts.late} retard
-              {counts.late !== 1 ? 's' : ''}
-            </Text>
-          </Card>
-          <Card variant="flat" padding="sm" style={styles.flex}>
-            <Stat
-              value={String(counts.unavailable)}
-              label="Indisponibles"
-              valueColor={counts.unavailable > 0 ? c.negative.default : undefined}
-              size="primary"
+            <Button
+              label="Voir les réponses"
+              icon="chatbox-ellipses-outline"
+              variant="ghost"
+              onPress={() => setResponsesOpen(true)}
+              block
             />
-            <Text variant="caption" tone="tertiary">
-              absents et blessés
-            </Text>
-          </Card>
-        </View>
+          </Section>
+        )}
 
         <Section
           title="Présences"
           subtitle="L'interrupteur convoque le joueur. Le statut se règle ensuite."
         >
+          <View style={[styles.statsRow, { gap: theme.space.md }]}>
+            <Card variant="flat" padding="sm" style={styles.flex}>
+              <Stat
+                value={String(counts.available)}
+                label="Disponibles"
+                unit={`sur ${counts.convoked}`}
+                valueColor={c.positive.default}
+                size="primary"
+              />
+              <Text variant="caption" tone="tertiary">
+                {counts.present} présent{counts.present !== 1 ? 's' : ''} · {counts.late} retard
+                {counts.late !== 1 ? 's' : ''}
+              </Text>
+            </Card>
+            <Card variant="flat" padding="sm" style={styles.flex}>
+              <Stat
+                value={String(counts.unavailable)}
+                label="Indisponibles"
+                valueColor={counts.unavailable > 0 ? c.negative.default : undefined}
+                size="primary"
+              />
+              <Text variant="caption" tone="tertiary">
+                absents et blessés
+              </Text>
+            </Card>
+          </View>
           {players.length === 0 ? (
             <EmptyState
               icon="people-outline"
@@ -527,6 +623,8 @@ export default function TrainingDetailScreen() {
                           value={attendance[p.id] ?? 'present'}
                           playerName={name}
                           onChange={(s) => setAttendance((prev) => ({ ...prev, [p.id]: s }))}
+                          excused={!!attendanceExcused[p.id]}
+                          onExcusedChange={(v) => setAttendanceExcused((prev) => ({ ...prev, [p.id]: v }))}
                         />
                       )}
                     </Card>
@@ -552,14 +650,24 @@ export default function TrainingDetailScreen() {
             title="Joueurs d'autres équipes"
             subtitle="Réglez leur statut comme pour le groupe."
           >
-            {invitedPlayerIds.map((playerId) => {
+            {visibleInvitedPlayerIds.length === 0 ? (
+              <EmptyState
+                icon="filter-outline"
+                title="Aucun joueur de champ"
+                description="Les gardiens invités sont masqués par le filtre."
+                compact
+              />
+            ) : (
+              visibleInvitedPlayerIds.map((playerId) => {
               const name = displayName(playerId);
+              const invitedPlayer = invitedPlayerById.get(playerId);
               return (
                 <Card key={playerId} variant="flat" padding="sm" style={styles.playerCard}>
                   <View style={styles.playerHeader}>
                     <Text variant="body" weight="600" numberOfLines={1} style={styles.flex}>
                       {name}
                     </Text>
+                    {invitedPlayer && isGoalkeeper(invitedPlayer) && <Badge label="GB" size="sm" />}
                     <Button
                       label="Retirer"
                       variant="ghost"
@@ -578,41 +686,35 @@ export default function TrainingDetailScreen() {
                     value={attendance[playerId] ?? 'present'}
                     playerName={name}
                     onChange={(s) => setAttendance((prev) => ({ ...prev, [playerId]: s }))}
+                    excused={!!attendanceExcused[playerId]}
+                    onExcusedChange={(v) => setAttendanceExcused((prev) => ({ ...prev, [playerId]: v }))}
                   />
                 </Card>
               );
-            })}
+            })
+            )}
           </Section>
         )}
 
         {players.length > 0 && (
-          <>
-            <Button
-              label={saving ? 'Enregistrement…' : 'Enregistrer les présences'}
-              onPress={saveAttendance}
-              loading={saving}
-              disabled={saving}
-              size="lg"
-              block
-            />
-
-            <Section
-              title="Fin de séance"
-              subtitle="Crée un lien questionnaire pour chaque joueur présent ou en retard."
-            >
-              <Button
-                label={sendingQuestionnaires ? 'Envoi…' : 'Envoyer les questionnaires'}
-                icon="paper-plane-outline"
-                variant="secondary"
-                onPress={sendQuestionnaires}
-                loading={sendingQuestionnaires}
-                disabled={sendingQuestionnaires}
-                block
-              />
-            </Section>
-          </>
+          <Button
+            label={saving ? 'Enregistrement…' : 'Enregistrer les présences'}
+            onPress={saveAttendance}
+            loading={saving}
+            disabled={saving}
+            size="lg"
+            block
+          />
         )}
       </ScrollView>
+
+      {trainingId && (
+        <TrainingFeedbackResponsesSheet
+          visible={responsesOpen}
+          onClose={() => setResponsesOpen(false)}
+          trainingId={trainingId}
+        />
+      )}
 
       <InvitePlayersSheet
         availability={availability}

@@ -6,7 +6,14 @@
  * « Dashboard » et « Analytics » sont des synonymes, et rien dans les libellés
  * ne disait que l'un portait l'assiduité et l'autre les stats de match.
  *
- * Les trois vues sont montées via un segmented control, sans changement de
+ * Deux segments, découpés par domaine plutôt que par granularité : Séance
+ * (entraînement — présence, thèmes, assiduité) et Matchs (tout ce qui est
+ * match — vue d'ensemble, joueurs, tracker — via les onglets internes
+ * d'`AnalyticsView`). Ancienne segmentation Équipe/Joueurs/Matchs à plat :
+ * « Équipe » mélangeait séance et match, « Matchs » n'était qu'un accès au
+ * tracker déjà présent dans `AnalyticsView` sous une autre forme.
+ *
+ * Les deux vues restent montées via un segmented control, sans changement de
  * route : l'état de chaque vue est conservé pendant la session, on ne recharge
  * pas en changeant de segment.
  *
@@ -22,21 +29,19 @@ import { useIsTablet } from '../../hooks/useIsTablet';
 import { Text } from '../../components/ui';
 import { TeamDashboardView } from '../../components/TeamDashboardView';
 import { AnalyticsView } from '../../components/AnalyticsView';
-import { TrackerAnalyticsView } from '../../components/TrackerAnalyticsView';
 import { MatchAnalyticsProvider } from '../../components/analytics/MatchAnalyticsContext';
 
-type Segment = 'equipe' | 'joueurs' | 'matchs';
+type Segment = 'seance' | 'matchs';
 
 const SEGMENTS: { key: Segment; label: string; hint: string }[] = [
-  { key: 'equipe', label: 'Équipe', hint: "Vue d'ensemble, assiduité, dynamique" },
-  { key: 'joueurs', label: 'Joueurs', hint: 'Statistiques individuelles et classements' },
-  { key: 'matchs', label: 'Matchs', hint: 'Matchs enregistrés au tracker' },
+  { key: 'seance', label: 'Séance', hint: 'Présence, thèmes, assiduité' },
+  { key: 'matchs', label: 'Matchs', hint: "Vue d'ensemble, joueurs, tracker" },
 ];
 
 export default function AnalyseScreen() {
   const { theme } = useTheme();
   const isTablet = useIsTablet();
-  const [segment, setSegment] = useState<Segment>('equipe');
+  const [segment, setSegment] = useState<Segment>('seance');
   const c = theme.colors;
 
   return (
@@ -76,19 +81,13 @@ export default function AnalyseScreen() {
       </View>
 
       {/*
-        Les trois vues restent montées : changer de segment ne recharge rien.
-        Corollaire : elles chargent toutes au montage. « Joueurs » et « Matchs »
-        lisaient les mêmes matchs et les mêmes événements, chacune de son côté —
-        soit deux fois le même N+1 à chaque ouverture de l'onglet. Le provider
-        charge une fois pour les deux.
+        Les deux vues restent montées : changer de segment ne recharge rien.
+        Corollaire : elles chargent toutes au montage.
       */}
       <View style={{ flex: 1 }}>
-        <Pane visible={segment === 'equipe'}><TeamDashboardView /></Pane>
+        <Pane visible={segment === 'seance'}><TeamDashboardView /></Pane>
         <MatchAnalyticsProvider>
-          <Pane visible={segment === 'joueurs'}><AnalyticsView /></Pane>
-          <Pane visible={segment === 'matchs'}>
-            <TrackerAnalyticsView title="Matchs enregistrés" showRecordButton />
-          </Pane>
+          <Pane visible={segment === 'matchs'}><AnalyticsView /></Pane>
         </MatchAnalyticsProvider>
       </View>
     </View>

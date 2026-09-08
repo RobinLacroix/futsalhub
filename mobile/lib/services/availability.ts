@@ -97,11 +97,13 @@ export async function getPainSignals(
   clubId: string,
   windowDays = 21,
   minReports = 3,
+  teamId?: string | null,
 ): Promise<PainSignalRow[]> {
   const { data, error } = await supabase.rpc('get_pain_signals', {
     p_club_id: clubId,
     p_window_days: windowDays,
     p_min_reports: minReports,
+    p_team_id: teamId ?? null,
   });
   if (error) throw error;
   return (data || []) as PainSignalRow[];

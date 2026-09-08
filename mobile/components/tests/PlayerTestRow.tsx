@@ -27,6 +27,7 @@ import { PlayerIdentity } from '../players/PlayerIdentity';
 import {
   formatTestValue,
   retainedValue,
+  testSecondaryReading,
   type PhysicalTestType,
 } from '../../lib/physicalTests';
 
@@ -79,6 +80,11 @@ function PlayerTestRowBase({
 
   const hasAnyValue = parsed.some((v) => v !== null);
 
+  const secondary = useMemo(
+    () => (retained !== null ? testSecondaryReading(testType, retained) : null),
+    [retained, testType],
+  );
+
   return (
     <View
       style={[
@@ -100,6 +106,7 @@ function PlayerTestRowBase({
         {retained !== null && (
           <Text variant="caption" tone="accent" numeric style={styles.retained}>
             retenu {formatTestValue(retained, testType)} {testType.unit}
+            {secondary ? ` · ${formatTestValue(secondary.value, { decimals: 1 })} ${secondary.unit}` : ''}
           </Text>
         )}
       </View>

@@ -228,17 +228,19 @@ export async function hasMatchEvents(matchId: string): Promise<boolean> {
 export interface MatchEventsAggregateRow {
   player_id: string;
   goals: number;
+  assists: number;
   yellow_cards: number;
   red_cards: number;
 }
 
 export async function getMatchEventsAggregate(matchId: string): Promise<MatchEventsAggregateRow[]> {
   const events = await getEventsByMatchId(matchId);
-  const byPlayer = new Map<string, { goals: number; yellow_cards: number; red_cards: number }>();
+  const byPlayer = new Map<string, { goals: number; assists: number; yellow_cards: number; red_cards: number }>();
   events.forEach((ev) => {
     if (!ev.player_id) return;
-    const cur = byPlayer.get(ev.player_id) ?? { goals: 0, yellow_cards: 0, red_cards: 0 };
+    const cur = byPlayer.get(ev.player_id) ?? { goals: 0, assists: 0, yellow_cards: 0, red_cards: 0 };
     if (ev.event_type === 'goal') cur.goals++;
+    if (ev.event_type === 'assist') cur.assists++;
     if (ev.event_type === 'yellow_card') cur.yellow_cards++;
     if (ev.event_type === 'red_card') cur.red_cards++;
     byPlayer.set(ev.player_id, cur);
@@ -246,6 +248,7 @@ export async function getMatchEventsAggregate(matchId: string): Promise<MatchEve
   return Array.from(byPlayer.entries()).map(([player_id, v]) => ({
     player_id,
     goals: v.goals,
+    assists: v.assists,
     yellow_cards: v.yellow_cards,
     red_cards: v.red_cards,
   }));

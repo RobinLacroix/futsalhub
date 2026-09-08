@@ -33,6 +33,7 @@ import {
   RPE_BAND_LABELS,
   RPE_BAND_RAMP,
   WELLNESS_LABELS,
+  buildSessionLoads,
   formatDelta,
   formatLoad,
   formatMonotony,
@@ -41,9 +42,10 @@ import {
   judgementBand,
   monotonyHint,
   rpeBand,
-  weekLabel,
+  sessionLabel,
   wellnessCarriesJudgement,
   wellnessDelta,
+  type TrainingLoadRow,
   type WeeklyLoad,
   type WellnessKey,
 } from '../../lib/trainingLoad';
@@ -72,28 +74,40 @@ function wellnessBand(
 
 export interface LoadSectionProps {
   weeks: WeeklyLoad[];
+  /**
+   * Séances brutes de la même fenêtre que `weeks`. L'histogramme RPE × durée
+   * lit ces points séance par séance — la monotonie et la contrainte, elles,
+   * restent hebdomadaires (`weeks`) : voir l'en-tête de `lib/trainingLoad.ts`.
+   */
+  rows: TrainingLoadRow[];
 }
 
 /** Hauteur, en pixels, réservée aux barres + à la bande cible. */
 const CHART_HEIGHT = 96;
 /** Repères de graduation, en fraction de l'échelle. Sobres : une échelle, pas un quadrillage. */
 const GRIDLINE_RATIOS = [0.25, 0.5, 0.75];
+/** Séances affichées dans l'histogramme — demandé explicitement à 6, pas une semaine. */
+const CHART_SESSIONS = 6;
 
-export function LoadSection({ weeks }: LoadSectionProps) {
+export function LoadSection({ weeks, rows }: LoadSectionProps) {
   const { theme } = useTheme();
   const c = theme.colors;
 
   const recent = useMemo(() => weeks.slice(-6), [weeks]);
+  const recentSessions = useMemo(
+    () => buildSessionLoads(rows).slice(-CHART_SESSIONS),
+    [rows],
+  );
   // L'échelle couvre aussi la cible : sinon une bande cible plus haute que
   // toutes les barres serait coupée en haut du graphique.
   const maxScale = useMemo(
     () =>
       Math.max(
         1,
-        ...recent.map((w) => w.load ?? 0),
-        ...recent.map((w) => w.targetLoadMax ?? 0),
+        ...recentSessions.map((s) => s.load ?? 0),
+        ...recentSessions.map((s) => s.targetLoadMax ?? 0),
       ),
-    [recent],
+    [recentSessions],
   );
   const current = recent.length > 0 ? recent[recent.length - 1] : null;
   const previous = recent.length > 1 ? recent[recent.length - 2] : null;
@@ -140,113 +154,126 @@ export function LoadSection({ weeks }: LoadSectionProps) {
       {/* ── Histogramme ──────────────────────────────────────────────────── */}
       <Card variant="raised" padding="md" style={{ gap: theme.space.sm }}>
         <Text variant="caption" tone="tertiary">
-          RPE × durée (Foster), unités arbitraires
+          RPE × durée (Foster), par séance — unités arbitraires
         </Text>
-        <View style={{ height: CHART_HEIGHT }}>
-          {/* Graduation légère : une échelle de lecture, pas un jugement. */}
-          {GRIDLINE_RATIOS.map((ratio) => (
-            <View
-              key={ratio}
-              style={{
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                bottom: ratio * CHART_HEIGHT,
-                borderTopWidth: StyleSheet.hairlineWidth,
-                borderColor: c.border.subtle,
-              }}
-            >
-              <Text
-                variant="caption"
-                tone="tertiary"
-                style={{ position: 'absolute', left: 0, bottom: 2, fontSize: 9, opacity: 0.7 }}
-              >
-                {formatLoad(ratio * maxScale)}
-              </Text>
-            </View>
-          ))}
-
-          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: '100%' }}>
-            {recent.map((week) => {
-              const barPx = week.load !== null ? Math.max(4, (week.load / maxScale) * CHART_HEIGHT) : 4;
-              const targetTopPx =
-                week.targetLoadMax !== null ? (week.targetLoadMax / maxScale) * CHART_HEIGHT : null;
-              const targetBottomPx =
-                week.targetLoadMin !== null ? (week.targetLoadMin / maxScale) * CHART_HEIGHT : null;
-              const weekReliable = isReliable(week.responseRate);
-              return (
+        {recentSessions.length === 0 ? (
+          <Text variant="caption" tone="tertiary">
+            Aucune séance sur la période.
+          </Text>
+        ) : (
+          <>
+            <View style={{ height: CHART_HEIGHT }}>
+              {/* Graduation légère : une échelle de lecture, pas un jugement. */}
+              {GRIDLINE_RATIOS.map((ratio) => (
                 <View
-                  key={week.weekStart}
-                  style={{ flex: 1, height: '100%' }}
-                  accessible
-                  accessibilityLabel={`${weekLabel(week.weekStart)} : ${formatLoad(week.load)}, ${formatRate(week.responseRate)} de réponses${week.isPeak ? ', pic de charge' : ''}${weekReliable ? '' : ', couverture insuffisante'}`}
+                  key={ratio}
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    right: 0,
+                    bottom: ratio * CHART_HEIGHT,
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                    borderColor: c.border.subtle,
+                  }}
                 >
-                  <View
-                    style={{
-                      position: 'absolute',
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      height: barPx,
-                      borderRadius: theme.radius.sm,
-                      // Accent et non rampe sémantique : une charge n'est ni bonne
-                      // ni mauvaise. Seul le pic se signale, en warning.
-                      backgroundColor:
-                        week.load === null
-                          ? c.border.subtle
-                          : week.isPeak
-                            ? c.warning.default
-                            : c.accent.default,
-                      opacity: weekReliable ? 1 : 0.35,
-                    }}
-                  />
-                  {/* Rendue APRÈS la barre : sinon une charge réalisée haute
-                      cache entièrement le pourtour de la bande cible en dessous. */}
-                  {targetTopPx !== null && targetBottomPx !== null && (
-                    <View
-                      style={{
-                        position: 'absolute',
-                        left: 0,
-                        right: 0,
-                        bottom: targetBottomPx,
-                        height: Math.max(2, targetTopPx - targetBottomPx),
-                        borderWidth: 1,
-                        borderStyle: 'dashed',
-                        borderColor: 'rgba(100,116,139,0.55)',
-                        borderRadius: theme.radius.sm,
-                      }}
-                    />
-                  )}
+                  <Text
+                    variant="caption"
+                    tone="tertiary"
+                    style={{ position: 'absolute', left: 0, bottom: 2, fontSize: 9, opacity: 0.7 }}
+                  >
+                    {formatLoad(ratio * maxScale)}
+                  </Text>
                 </View>
-              );
-            })}
-          </View>
-        </View>
-        <View style={{ flexDirection: 'row', gap: 6 }}>
-          {recent.map((week) => (
-            <Text
-              key={week.weekStart}
-              variant="caption"
-              tone="tertiary"
-              style={{ flex: 1, textAlign: 'center' }}
-              numberOfLines={1}
-            >
-              {weekLabel(week.weekStart).replace('sem. du ', '')}
-            </Text>
-          ))}
-        </View>
+              ))}
+
+              <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: '100%' }}>
+                {recentSessions.map((session) => {
+                  const barPx =
+                    session.load !== null ? Math.max(4, (session.load / maxScale) * CHART_HEIGHT) : 4;
+                  const targetTopPx =
+                    session.targetLoadMax !== null
+                      ? (session.targetLoadMax / maxScale) * CHART_HEIGHT
+                      : null;
+                  const targetBottomPx =
+                    session.targetLoadMin !== null
+                      ? (session.targetLoadMin / maxScale) * CHART_HEIGHT
+                      : null;
+                  const sessionReliable = isReliable(session.responseRate);
+                  return (
+                    <View
+                      key={session.training_id}
+                      style={{ flex: 1, height: '100%' }}
+                      accessible
+                      accessibilityLabel={`${sessionLabel(session.session_date)}${session.theme ? ` · ${session.theme}` : ''} : ${formatLoad(session.load)}, ${formatRate(session.responseRate)} de réponses${session.isPeak ? ', pic de charge' : ''}${sessionReliable ? '' : ', couverture insuffisante'}`}
+                    >
+                      <View
+                        style={{
+                          position: 'absolute',
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          height: barPx,
+                          borderRadius: theme.radius.sm,
+                          // Accent et non rampe sémantique : une charge n'est ni bonne
+                          // ni mauvaise. Seul le pic se signale, en warning.
+                          backgroundColor:
+                            session.load === null
+                              ? c.border.subtle
+                              : session.isPeak
+                                ? c.warning.default
+                                : c.accent.default,
+                          opacity: sessionReliable ? 1 : 0.35,
+                        }}
+                      />
+                      {/* Rendue APRÈS la barre : sinon une charge réalisée haute
+                          cache entièrement le pourtour de la bande cible en dessous. */}
+                      {targetTopPx !== null && targetBottomPx !== null && (
+                        <View
+                          style={{
+                            position: 'absolute',
+                            left: 0,
+                            right: 0,
+                            bottom: targetBottomPx,
+                            height: Math.max(2, targetTopPx - targetBottomPx),
+                            borderWidth: 1,
+                            borderStyle: 'dashed',
+                            borderColor: 'rgba(100,116,139,0.55)',
+                            borderRadius: theme.radius.sm,
+                          }}
+                        />
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 6 }}>
+              {recentSessions.map((session) => (
+                <Text
+                  key={session.training_id}
+                  variant="caption"
+                  tone="tertiary"
+                  style={{ flex: 1, textAlign: 'center' }}
+                  numberOfLines={1}
+                >
+                  {sessionLabel(session.session_date)}
+                </Text>
+              ))}
+            </View>
+          </>
+        )}
       </Card>
 
-      {recent.some((w) => w.isPeak) && (
+      {recentSessions.some((s) => s.isPeak) && (
         <Card variant="flat" padding="md">
           <Text variant="caption" color={c.warning.default} weight="600">
-            Pic de charge : plus de 1,5 fois la moyenne des 4 semaines précédentes. À rapprocher
-            des signalements de douleur de la même période.
+            Pic de charge : plus de 1,5 fois la moyenne des séances précédentes. À rapprocher des
+            signalements de douleur de la même période.
           </Text>
         </Card>
       )}
 
-      {recent.some((w) => !isReliable(w.responseRate)) && (
+      {recentSessions.some((s) => !isReliable(s.responseRate)) && (
         <Text variant="caption" tone="tertiary">
           Les barres pâles sont calculées sur moins de {Math.round(MIN_RESPONSE_RATE * 100)} % de
           réponses au questionnaire. Le chiffre existe, mais il ne représente pas le groupe.

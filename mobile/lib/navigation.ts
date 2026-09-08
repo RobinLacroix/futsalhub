@@ -79,6 +79,14 @@ export const PRIMARY_DESTINATIONS: readonly NavDestination[] = [
 /** Destinations secondaires, listées dans l'écran « Plus » et la sidebar iPad. */
 export const SECONDARY_DESTINATIONS: readonly NavDestination[] = [
   {
+    key: 'tracker',
+    label: 'Tracker',
+    route: '/(tabs)/tracker',
+    icon: 'videocam-outline',
+    iconActive: 'videocam',
+    description: 'Enregistrer un match, feuille de match',
+  },
+  {
     key: 'performance',
     label: 'Performance',
     route: '/(tabs)/performance',

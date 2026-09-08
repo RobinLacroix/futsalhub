@@ -28,6 +28,9 @@ export interface TeamFormData {
   level: string;
   color: string;
   mainCoachUserId?: string | null;
+  /** Réglables seulement en édition (une équipe qui vient d'être créée garde les valeurs par défaut). */
+  absenceNoticeMinutes?: number;
+  lateNoticeMinutes?: number;
 }
 
 export async function createTeam(clubId: string, data: TeamFormData): Promise<Team> {
@@ -52,6 +55,8 @@ export async function updateTeam(teamId: string, data: Partial<TeamFormData>): P
   if (data.category !== undefined) payload.category = data.category.trim();
   if (data.level !== undefined) payload.level = data.level.trim();
   if (data.color !== undefined) payload.color = data.color;
+  if (data.absenceNoticeMinutes !== undefined) payload.absence_notice_minutes = data.absenceNoticeMinutes;
+  if (data.lateNoticeMinutes !== undefined) payload.late_notice_minutes = data.lateNoticeMinutes;
   const { data: team, error } = await supabase
     .from('teams')
     .update(payload)
@@ -72,5 +77,18 @@ export async function updateTeam(teamId: string, data: Partial<TeamFormData>): P
 
 export async function deleteTeam(teamId: string): Promise<void> {
   const { error } = await supabase.from('teams').delete().eq('id', teamId);
+  if (error) throw error;
+}
+
+/** Équipe de landing par défaut de l'admin connecté (null = comportement automatique). */
+export async function getMyDefaultTeamId(): Promise<string | null> {
+  const { data, error } = await supabase.rpc('get_my_default_team_id');
+  if (error) throw error;
+  return (data as string | null) ?? null;
+}
+
+/** Enregistre (ou efface avec null) l'équipe de landing par défaut de l'admin connecté. */
+export async function setMyDefaultTeamId(teamId: string | null): Promise<void> {
+  const { error } = await supabase.rpc('set_my_default_team_id', { p_team_id: teamId });
   if (error) throw error;
 }

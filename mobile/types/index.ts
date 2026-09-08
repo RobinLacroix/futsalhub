@@ -7,6 +7,10 @@ export interface Team {
   level: string;
   color: string;
   club_id?: string;
+  /** Délai de prévenance (minutes) avant qu'un joueur ne puisse plus se déclarer absent lui-même. */
+  absence_notice_minutes?: number;
+  /** Délai de prévenance (minutes) avant qu'un joueur ne puisse plus se déclarer présent/en retard/blessé lui-même. */
+  late_notice_minutes?: number;
 }
 
 export interface Player {
@@ -20,6 +24,9 @@ export interface Player {
   number?: number;
   team_id?: string;
   sequence_time_limit?: number;
+  phone?: string | null;
+  parent_name?: string | null;
+  parent_phone?: string | null;
   /**
    * Compte utilisateur relié à la fiche, `null` tant que le joueur n'a pas
    * saisi son code de liaison. La colonne revenait déjà des `select('*')`, elle
@@ -48,7 +55,7 @@ export type PlayerStatus = 'present' | 'late' | 'absent' | 'injured';
 export interface PainReportZone {
   zone: string;
   side: 'L' | 'R' | 'C';
-  intensity: 1 | 2 | 3;
+  intensity: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
   mode: 'zone' | 'articulation';
 }
 
@@ -56,10 +63,11 @@ export interface PainReportGroup {
   report_group: string;
   reported_at: string;
   source: 'questionnaire' | 'spontane';
-  max_intensity: 1 | 2 | 3;
+  max_intensity: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
   note: string | null;
   onset: 'aigu' | 'chronique' | null;
   training_id: string | null;
+  match_id: string | null;
   zones: PainReportZone[];
 }
 
@@ -71,6 +79,41 @@ export interface ClubPainReportGroup extends PainReportGroup {
   number: number | null;
 }
 
+export interface TeamFeedPostTag {
+  player_id: string;
+  first_name: string;
+  last_name: string;
+}
+
+export type TeamFeedPostType = 'manual' | 'birthday' | 'convocation' | 'planning' | 'video';
+
+/** 1 ligne du fil d'équipe, telle que renvoyée par get_team_feed. */
+export interface TeamFeedPost {
+  id: string;
+  team_id: string;
+  author_user_id: string;
+  author_name: string;
+  content: string;
+  post_type: TeamFeedPostType;
+  /** Route in-app (convocation/planning) ou URL externe (vidéo). Null pour manual/birthday. */
+  link_url: string | null;
+  created_at: string;
+  edited_at: string | null;
+  comment_count: number;
+  tags: TeamFeedPostTag[];
+}
+
+/** 1 commentaire, tel que renvoyé par get_post_comments. */
+export interface TeamFeedComment {
+  id: string;
+  post_id: string;
+  author_user_id: string;
+  author_name: string;
+  content: string;
+  created_at: string;
+  edited_at: string | null;
+}
+
 export interface Training {
   id: string;
   date: string;
@@ -78,6 +121,8 @@ export interface Training {
   theme: string;
   key_principle?: string;
   attendance?: Record<string, PlayerStatus>;
+  /** Pertinent seulement quand attendance[playerId] est 'absent' ou 'late'. Absence de clé = non prévenu. */
+  attendance_excused?: Record<string, boolean>;
   /** Joueurs convoqués pour cette séance (ceux qui voient la séance dans leur calendrier). */
   convoked_players?: { id: string }[];
   team_id?: string;
@@ -106,6 +151,9 @@ export interface Match {
   fouls_opponent?: number;
   season?: string | null; // Saison de rattachement, ex. "2025-2026"
   coach_evaluation?: CoachEvaluation | null; // Évaluation qualitative coach (Volet A), NULL si non évalué
+  venue_address?: string | null;
+  meeting_time?: string | null;
+  convocation_message?: string | null;
 }
 
 // ==================== ÉVALUATION DE MATCH ====================
@@ -148,6 +196,14 @@ export interface RatingWeightsResult extends RatingWeights {
   is_custom: boolean;
 }
 
+// Volet C : note staff /10 par joueur et par match, saisie manuelle coach.
+// Strictement staff-only (table dédiée + RLS, jamais exposée au joueur).
+export interface MatchPlayerCoachNote {
+  match_id: string;
+  player_id: string;
+  note: number; // [0.5 ; 10.0], par pas de 0.5
+}
+
 // Échelle par défaut (miroir des DEFAULT de la table match_rating_weights).
 export const DEFAULT_RATING_WEIGHTS: RatingWeights = {
   w_goal: 0.8,
@@ -167,6 +223,7 @@ export const DEFAULT_RATING_WEIGHTS: RatingWeights = {
 export interface MatchPlayer {
   id: string;
   goals?: number;
+  assists?: number;
   yellow_cards?: number;
   red_cards?: number;
   time_played?: number;
@@ -200,15 +257,20 @@ export interface MatchEvent {
   created_at?: string;
 }
 
-export type SharedContentType = 'youtube' | 'link';
+export type SharedContentType = 'youtube' | 'link' | 'file';
 
 export interface SharedContent {
   id: string;
-  team_id: string;
+  club_id: string;
+  /** null = partagé à toutes les équipes du club (réservé aux admins) */
+  team_id: string | null;
   title: string;
   description?: string | null;
   content_type: SharedContentType;
-  url: string;
+  url: string | null;
+  file_path?: string | null;
+  file_size_bytes?: number | null;
+  file_mime_type?: string | null;
   folder_id?: string | null;
   created_by?: string | null;
   created_at: string;
@@ -216,7 +278,9 @@ export interface SharedContent {
 
 export interface SharedFolder {
   id: string;
-  team_id: string;
+  club_id: string;
+  /** null = dossier au niveau du club, visible par toutes les équipes */
+  team_id: string | null;
   name: string;
   parent_id: string | null;
   created_by?: string | null;

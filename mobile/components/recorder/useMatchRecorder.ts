@@ -52,7 +52,7 @@ import {
   deleteLastMatchEventByType,
   type GoalType,
 } from '../../lib/services/matchEvents';
-import { getPlayersByTeam } from '../../lib/services/players';
+import { getPlayersByTeam, getPlayersByIds } from '../../lib/services/players';
 import { getRatingWeights } from '../../lib/services/matchRatings';
 import { getOutboxLength } from '../../lib/offline/matchRecorderOutbox';
 import {
@@ -61,6 +61,7 @@ import {
   clearRecorderState,
 } from '../../lib/offline/matchRecorderState';
 import { parseMatchPlayers } from '../../utils/matchUtils';
+import { computePlayingTime } from '../analytics/aggregate';
 import { haptics } from '../../lib/design/haptics';
 import { DEFAULT_RATING_WEIGHTS } from '../../types';
 import type { Match, MatchEventType, Player, RatingWeights } from '../../types';
@@ -304,9 +305,10 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
     let cancelled = false;
     (async () => {
       try {
-        const [m, roster] = await Promise.all([
+        const [m, roster, events] = await Promise.all([
           getMatchById(matchId),
           activeTeamId ? getPlayersByTeam(activeTeamId) : Promise.resolve([]),
+          getEventsByMatchId(matchId),
         ]);
         if (cancelled || !m) return;
         setMatch(m);
@@ -314,18 +316,37 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
         const called = parseMatchPlayers(m);
         const ids = called.map((p) => p.id);
         const calledSet = new Set(ids);
+
+        // La convocation peut inclure des joueurs d'autres équipes (convocation
+        // cross-équipe faite depuis le calendrier) : ils n'apparaissent pas dans
+        // le roster de `activeTeamId`, donc invisibles sans ce complément.
+        const missingIds = ids.filter((id) => !roster.some((p) => p.id === id));
+        const extraPlayers = missingIds.length > 0 ? await getPlayersByIds(missingIds) : [];
+        if (cancelled) return;
+        const fullRoster = [...roster, ...extraPlayers];
+
         // Les joueurs partis restent visibles s'ils étaient convoqués : on ne
         // réécrit pas l'histoire d'un match déjà joué.
-        setPlayers(roster.filter((p) => p.status !== 'left' || calledSet.has(p.id)));
+        setPlayers(fullRoster.filter((p) => p.status !== 'left' || calledSet.has(p.id)));
         setPlayersOnField(ids.slice(0, FIELD_SIZE));
         setScoreUs(m.score_team ?? 0);
         setScoreOpponent(m.score_opponent ?? 0);
         setFoulsUs(m.fouls_team ?? 0);
         setFoulsOpponent(m.fouls_opponent ?? 0);
 
-        const playedByPlayer = new Map(called.map((mp) => [mp.id, mp.time_played ?? 0]));
+        // La feuille de match fait foi quand elle porte un temps de jeu — mais
+        // si personne n'en a (jamais renseigné, ou remis à zéro par un bug de
+        // reprise antérieur), on reconstruit depuis les events plutôt que
+        // d'afficher 00:00 pour tout le monde : même repli que `buildPlayerStats`
+        // côté Analyse (`components/analytics/aggregate.ts`), qui explique
+        // pourquoi Analyse peut afficher un temps de jeu correct alors que le
+        // tracker, lui, ne lisait jusqu'ici que la feuille brute.
+        const fromSheet = new Map(
+          called.filter((p) => (p.time_played ?? 0) > 0).map((p) => [p.id, p.time_played as number])
+        );
+        const playedByPlayer = fromSheet.size > 0 ? fromSheet : computePlayingTime(events);
         const states: Record<string, PlayerState> = {};
-        roster.forEach((p) => {
+        fullRoster.forEach((p) => {
           if (!calledSet.has(p.id)) return;
           const limit =
             (p as Player & { sequence_time_limit?: number }).sequence_time_limit ??
@@ -334,7 +355,6 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
         });
         setPlayerStates(states);
 
-        const events = await getEventsByMatchId(matchId);
         if (cancelled || events.length === 0) return;
 
         const last = events[events.length - 1];
@@ -415,8 +435,13 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
     };
   }, [step, matchId, activeTeamId]);
 
-  // Reprise après plantage : écrase ce qui vient d'être chargé depuis la base,
-  // parce que l'état local est plus récent que le dernier `updateMatch`.
+  // Reprise après plantage : l'instantané local peut être plus récent que le
+  // dernier `updateMatch` (crash pendant la saisie), mais peut aussi être
+  // périmé (autre appareil, match déjà finalisé) — `savedAt` n'étant comparé
+  // à rien côté base, on ne peut pas trancher en général. Le temps de jeu
+  // total, lui, ne peut que croître pendant un match : on garde donc le
+  // maximum entre la valeur rechargée depuis la base et celle de l'instantané,
+  // pour ne jamais faire reculer `totalTime` avec un snapshot périmé.
   useEffect(() => {
     if (step !== 'record' || !matchId) return;
     loadRecorderState(matchId)
@@ -432,7 +457,12 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
         setPlayerStates((prev) => {
           const merged = { ...prev };
           Object.entries(saved.playerStates).forEach(([id, st]) => {
-            if (merged[id]) merged[id] = { ...merged[id], ...st };
+            if (!merged[id]) return;
+            merged[id] = {
+              ...merged[id],
+              ...st,
+              totalTime: Math.max(merged[id].totalTime, st.totalTime),
+            };
           });
           return merged;
         });
@@ -900,11 +930,12 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
     try {
       const playerStats: Record<
         string,
-        { goals: number; yellow_cards: number; red_cards: number; time_played: number }
+        { goals: number; assists: number; yellow_cards: number; red_cards: number; time_played: number }
       > = {};
       Object.entries(playerStates).forEach(([id, st]) => {
         playerStats[id] = {
           goals: st.stats.goals ?? 0,
+          assists: st.stats.assists ?? 0,
           yellow_cards: st.yellowCards,
           red_cards: st.redCards,
           time_played: st.totalTime,

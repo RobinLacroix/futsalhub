@@ -36,6 +36,7 @@ import { useState } from 'react';
 import { View, StyleSheet, Share, Alert } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { createPlayerLinkCode } from '../../lib/services/playerConvocations';
+import { unlinkPlayerAccount } from '../../lib/services/players';
 import { Text, Button } from '../ui';
 import type { FMPalette } from './fmPalette';
 
@@ -45,13 +46,16 @@ export interface PlayerAccountLinkProps {
   playerName: string;
   /** Vrai si `players.user_id` est renseigné. */
   linked: boolean;
+  /** Appelé après un déliage réussi, pour que le parent rafraîchisse `player.user_id`. */
+  onUnlinked?: () => void;
   p: FMPalette;
 }
 
-export function PlayerAccountLink({ playerId, playerName, linked, p }: PlayerAccountLinkProps) {
+export function PlayerAccountLink({ playerId, playerName, linked, onUnlinked, p }: PlayerAccountLinkProps) {
   const [code, setCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [unlinking, setUnlinking] = useState(false);
 
   const generate = async () => {
     setError(null);
@@ -86,13 +90,44 @@ export function PlayerAccountLink({ playerId, playerName, linked, p }: PlayerAcc
     }
   };
 
+  const confirmUnlink = () => {
+    Alert.alert(
+      'Délier le compte ?',
+      `${playerName.split(' ')[0]} ne recevra plus ses convocations ni ses questionnaires tant qu'un nouveau code n'aura pas été généré et saisi.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Délier',
+          style: 'destructive',
+          onPress: async () => {
+            setUnlinking(true);
+            const result = await unlinkPlayerAccount(playerId);
+            setUnlinking(false);
+            if (result.ok) onUnlinked?.();
+            else Alert.alert('Erreur', result.error ?? 'Une erreur est survenue.');
+          },
+        },
+      ],
+    );
+  };
+
   if (linked) {
     return (
-      <View style={[styles.state, { backgroundColor: p.surface2, borderColor: p.positive }]}>
-        <Ionicons name="checkmark-circle" size={18} color={p.positive} />
-        <Text variant="callout" color={p.positive} weight="600" style={styles.flex}>
-          Compte lié
-        </Text>
+      <View style={styles.wrap}>
+        <View style={[styles.state, { backgroundColor: p.surface2, borderColor: p.positive }]}>
+          <Ionicons name="checkmark-circle" size={18} color={p.positive} />
+          <Text variant="callout" color={p.positive} weight="600" style={styles.flex}>
+            Compte lié
+          </Text>
+        </View>
+        <Button
+          label={unlinking ? 'Déliage…' : 'Délier le compte'}
+          icon="unlink-outline"
+          variant="ghost"
+          block
+          disabled={unlinking}
+          onPress={confirmUnlink}
+        />
       </View>
     );
   }

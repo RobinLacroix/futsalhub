@@ -35,6 +35,7 @@ export type MetricKey =
   | 'goals'
   | 'assist'
   | 'plusMinusGoals'
+  | 'plusMinusShots'
   | 'shot_on_target'
   | 'totalShots'
   | 'recovery'
@@ -62,6 +63,7 @@ export const METRICS: readonly MetricDef[] = [
   { key: 'goals',          short: 'B',    long: 'Buts',            higherIsBetter: true,  normalizable: true },
   { key: 'assist',         short: 'PD',   long: 'Passes déc.',     higherIsBetter: true,  normalizable: true },
   { key: 'plusMinusGoals', short: '+/-',  long: '+/- buts',        higherIsBetter: true,  normalizable: false },
+  { key: 'plusMinusShots', short: '+/-T', long: '+/- tirs',        higherIsBetter: true,  normalizable: false },
   { key: 'shot_on_target', short: 'TC',   long: 'Tirs cadrés',     higherIsBetter: true,  normalizable: true },
   { key: 'totalShots',     short: 'TT',   long: 'Tirs totaux',     higherIsBetter: true,  normalizable: true },
   { key: 'recovery',       short: 'Réc',  long: 'Récupérations',   higherIsBetter: true,  normalizable: true },
@@ -178,7 +180,7 @@ export function fmtTime(sec: number): string {
 export function fmtMetric(value: number | null, normalized: boolean, key: MetricKey): string {
   if (value == null) return '—';
   if (normalized) return value.toFixed(1);
-  if (key === 'plusMinusGoals') return value > 0 ? `+${value}` : String(value);
+  if (key === 'plusMinusGoals' || key === 'plusMinusShots') return value > 0 ? `+${value}` : String(value);
   return String(Math.round(value));
 }
 
@@ -197,6 +199,7 @@ export const SORT_OPTIONS: readonly SortOption[] = [
   { key: 'goals',            label: 'Buts' },
   { key: 'assist',           label: 'Passes décisives' },
   { key: 'plusMinusGoals',   label: '+/- buts' },
+  { key: 'plusMinusShots',   label: '+/- tirs' },
   { key: 'recovery',         label: 'Récupérations' },
   { key: 'ball_loss',        label: 'Pertes de balle' },
   { key: 'totalTimeSeconds', label: 'Temps de jeu' },

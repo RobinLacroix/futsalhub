@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCoachCalendarData } from '../lib/services/calendar';
+import { getMyDefaultTeamId } from '../lib/services/teams';
 import { supabase } from '../lib/supabase';
 import type { Team, Training, Match } from '../types';
 
@@ -43,14 +44,28 @@ export function ActiveTeamProvider({ children }: { children: React.ReactNode }) 
     return data;
   }, []);
 
-  const refetchWritableTeams = useCallback(async () => {
+  const fetchWritableTeamIds = useCallback(async (): Promise<string[]> => {
     try {
       const { data } = await supabase.rpc('get_my_writable_team_ids');
-      setWritableTeamIds((data as string[] | null) || []);
+      return (data as string[] | null) || [];
     } catch {
-      setWritableTeamIds([]);
+      return [];
     }
   }, []);
+
+  // Équipe de landing choisie par l'admin dans les paramètres (null = pas réglée).
+  const fetchDefaultTeamId = useCallback(async (): Promise<string | null> => {
+    try {
+      return await getMyDefaultTeamId();
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const refetchWritableTeams = useCallback(async () => {
+    const ids = await fetchWritableTeamIds();
+    setWritableTeamIds(ids);
+  }, [fetchWritableTeamIds]);
 
   const setActiveTeamId = useCallback(async (teamId: string) => {
     setActiveTeamIdState(teamId);
@@ -68,17 +83,30 @@ export function ActiveTeamProvider({ children }: { children: React.ReactNode }) 
       try {
         setLoading(true);
         setCalendarLoading(true);
-        const data = await loadCalendarForTeam(teamId);
+        const [data, writableIds, defaultTeamId] = await Promise.all([
+          loadCalendarForTeam(teamId),
+          fetchWritableTeamIds(),
+          fetchDefaultTeamId(),
+        ]);
         if (!mounted) return;
         setTeams(data.teams);
         setCalendarTrainings(data.trainings);
         setCalendarMatches(data.matches);
-        void refetchWritableTeams();
+        setWritableTeamIds(writableIds);
         const valid = data.teams.some((t) => t.id === teamId);
         if (teamId && valid) {
           setActiveTeamIdState(teamId);
         } else if (data.teams.length > 0) {
-          const firstId = data.teams[0].id;
+          // Rien de mémorisé (ou invalide) : équipe par défaut choisie par l'admin
+          // dans les paramètres si réglée et valide, sinon un coach doit atterrir
+          // sur une équipe qu'il encadre réellement, pas sur la première par ordre
+          // alphabétique du club (cf. get_coach_calendar_data qui renvoie TOUTES les
+          // équipes du club sans filtrer par assignation coach).
+          const adminDefault = defaultTeamId && data.teams.some((t) => t.id === defaultTeamId)
+            ? defaultTeamId
+            : null;
+          const preferred = data.teams.find((t) => writableIds.includes(t.id));
+          const firstId = adminDefault ?? (preferred ?? data.teams[0]).id;
           setActiveTeamIdState(firstId);
           AsyncStorage.setItem(ACTIVE_TEAM_KEY, firstId);
         }
@@ -98,7 +126,7 @@ export function ActiveTeamProvider({ children }: { children: React.ReactNode }) 
     };
     load();
     return () => { mounted = false; };
-  }, [loadCalendarForTeam, refetchWritableTeams]);
+  }, [loadCalendarForTeam, fetchWritableTeamIds]);
 
   const refetchCalendar = useCallback(async () => {
     if (!activeTeamId) return;

@@ -18,6 +18,7 @@ import {
 } from '../../lib/services/clubs';
 import { getTeamsByClubId } from '../../lib/services/teams';
 import { RatingScaleEditor } from '../../components/RatingScaleEditor';
+import { DefaultTeamEditor } from '../../components/DefaultTeamEditor';
 import { NotificationPreferencesEditor } from '../../components/NotificationPreferencesEditor';
 import {
   Text,
@@ -520,6 +521,7 @@ export default function SettingsScreen() {
 
         <NotificationPreferencesEditor />
         <RatingScaleEditor />
+        {isAdmin && <DefaultTeamEditor teams={teams} />}
 
         {/* ── Compte ───────────────────────────────────────────────────── */}
         <Card variant="raised" padding="lg" style={{ gap: theme.space.md }}>

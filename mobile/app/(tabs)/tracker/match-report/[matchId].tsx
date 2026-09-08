@@ -7,10 +7,11 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Dimensions,
+  Modal,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../../../lib/supabase';
-import { getMatchPlayerRatings, setMatchCoachEvaluation } from '../../../../lib/services/matchRatings';
+import { getMatchPlayerRatings, setMatchCoachEvaluation, getCoachNotes, setCoachNote } from '../../../../lib/services/matchRatings';
 import type { CoachEvaluation, MatchPlayerRating } from '../../../../types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -95,6 +96,13 @@ function ratingColor(rating: number): string {
   return '#EF4444';
 }
 
+// Volet C : note staff, grille de tap par pas de 0.5 (0.5 → 10).
+const COACH_NOTE_ROW_1 = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
+const COACH_NOTE_ROW_2 = [5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10];
+function formatCoachNote(n: number) {
+  return n % 1 === 0 ? n.toFixed(0) : n.toFixed(1);
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getResult(scoreTeam: number, scoreOpponent: number) {
@@ -169,6 +177,77 @@ function GoalTypeSection({ title, data }: { title: string; data: GoalsByType }) 
   );
 }
 
+// Volet C : badge de note staff (tap = ouvre la grille de saisie, staff-only).
+function CoachNoteButton({
+  value,
+  onChange,
+}: {
+  value: number | null;
+  onChange: (note: number | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  function pick(n: number) {
+    onChange(n);
+    setOpen(false);
+  }
+
+  return (
+    <>
+      <TouchableOpacity
+        onPress={() => setOpen(true)}
+        style={[styles.coachNoteBadge, value != null ? { backgroundColor: ratingColor(value) } : null]}
+      >
+        <Text style={[styles.coachNoteBadgeText, value == null ? styles.muted : { color: '#fff' }]}>
+          {value != null ? value.toFixed(1) : '—'}
+        </Text>
+      </TouchableOpacity>
+
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <TouchableOpacity style={styles.coachNoteOverlay} activeOpacity={1} onPress={() => setOpen(false)}>
+          <View style={styles.coachNoteSheet} onStartShouldSetResponder={() => true}>
+            <View style={styles.coachNoteSheetHeader}>
+              <Text style={styles.coachNoteSheetTitle}>Note staff</Text>
+              <Text style={styles.coachNoteSheetHint}>Visible staff uniquement, jamais le joueur</Text>
+            </View>
+            <View style={styles.coachNoteGrid}>
+              {COACH_NOTE_ROW_1.map(n => (
+                <TouchableOpacity
+                  key={n}
+                  onPress={() => pick(n)}
+                  style={[styles.coachNoteCell, value === n ? { backgroundColor: ratingColor(n) } : null]}
+                >
+                  <Text style={[styles.coachNoteCellText, value === n ? { color: '#fff' } : null]}>
+                    {formatCoachNote(n)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={styles.coachNoteGrid}>
+              {COACH_NOTE_ROW_2.map(n => (
+                <TouchableOpacity
+                  key={n}
+                  onPress={() => pick(n)}
+                  style={[styles.coachNoteCell, value === n ? { backgroundColor: ratingColor(n) } : null]}
+                >
+                  <Text style={[styles.coachNoteCellText, value === n ? { color: '#fff' } : null]}>
+                    {formatCoachNote(n)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {value != null && (
+              <TouchableOpacity onPress={() => { onChange(null); setOpen(false); }} style={styles.coachNoteClear}>
+                <Text style={styles.coachNoteClearText}>Effacer</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </>
+  );
+}
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function MatchReportScreen() {
@@ -183,6 +262,7 @@ export default function MatchReportScreen() {
   const [coachEval, setCoachEval] = useState<CoachEvaluation | null>(null);
   const [savingEval, setSavingEval] = useState(false);
   const [ratings, setRatings] = useState<Record<string, MatchPlayerRating>>({});
+  const [coachNotes, setCoachNotes] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (!matchId) return;
@@ -200,6 +280,27 @@ export default function MatchReportScreen() {
       setCoachEval(previous);
     } finally {
       setSavingEval(false);
+    }
+  }
+
+  // Volet C : enregistre ou efface (note = null) la note staff d'un joueur.
+  async function handleSetCoachNote(playerId: string, note: number | null) {
+    const previous = coachNotes[playerId] ?? null;
+    setCoachNotes(prev => {
+      const next = { ...prev };
+      if (note === null) delete next[playerId];
+      else next[playerId] = note;
+      return next;
+    });
+    try {
+      await setCoachNote(matchId as string, playerId, note);
+    } catch {
+      setCoachNotes(prev => {
+        const next = { ...prev };
+        if (previous === null) delete next[playerId];
+        else next[playerId] = previous;
+        return next;
+      });
     }
   }
 
@@ -221,6 +322,12 @@ export default function MatchReportScreen() {
       setRatings(Object.fromEntries(ratingRows.map(r => [r.player_id, r])));
     } catch {
       setRatings({});
+    }
+
+    try {
+      setCoachNotes(await getCoachNotes(matchId as string));
+    } catch {
+      setCoachNotes({});
     }
 
     if (m.team_id) {
@@ -355,6 +462,17 @@ export default function MatchReportScreen() {
     })
     .filter(p => p.timePlayed > 0 || p.goals > 0 || p.shotsOnTarget > 0 || p.recovery > 0)
     .sort((a, b) => b.timePlayed - a.timePlayed);
+
+  // Notes staff (Volet C) : basées sur les joueurs suivis au recorder si dispo,
+  // sinon repli sur les joueurs CONVOQUÉS (match.players, rempli aussi par la
+  // convocation manuelle côté calendrier) — jamais tout le roster de l'équipe.
+  const convokedIds = new Set((match.players ?? []).map(mp => mp.id));
+  const coachNoteRows = playerStats.length > 0
+    ? playerStats.map(p => ({ id: p.id, number: p.number, name: p.name }))
+    : players
+        .filter(p => convokedIds.has(p.id))
+        .map(p => ({ id: p.id, number: p.number, name: `${p.first_name} ${p.last_name}` }))
+        .sort((a, b) => a.number - b.number);
 
   const timelineW = screenW - 48;
 
@@ -555,6 +673,27 @@ export default function MatchReportScreen() {
         </View>
       )}
 
+      {/* Notes staff (Volet C) — indépendant du match recorder */}
+      {coachNoteRows.length > 0 && (
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>🔒 Notes staff</Text>
+          <Text style={styles.coachNoteHint}>
+            Visible staff uniquement, jamais le joueur.
+            {playerStats.length === 0 ? ' Match non suivi au match recorder : liste basée sur les joueurs convoqués.' : ''}
+          </Text>
+          {coachNoteRows.map((p, i) => (
+            <View key={p.id} style={[styles.coachNoteRow, i % 2 === 0 ? styles.tableRowEven : {}]}>
+              <Text style={[styles.tableCell, styles.colNum, styles.muted]}>{p.number}</Text>
+              <Text style={[styles.tableCell, styles.colName]} numberOfLines={1}>{p.name}</Text>
+              <CoachNoteButton
+                value={coachNotes[p.id] ?? null}
+                onChange={note => handleSetCoachNote(p.id, note)}
+              />
+            </View>
+          ))}
+        </View>
+      )}
+
       {/* Footer */}
       <Text style={styles.footer}>
         FutsalHub · Rapport généré le {new Date().toLocaleDateString('fr-FR')}
@@ -690,4 +829,53 @@ const styles = StyleSheet.create({
   evalLabel: { fontSize: 10, fontWeight: '700', textAlign: 'center' },
 
   footer: { textAlign: 'center', color: 'rgba(255,255,255,0.15)', fontSize: 10, marginTop: 8 },
+
+  // Volet C : badge de note staff + grille de saisie (Modal).
+  coachNoteBadge: {
+    minWidth: 32,
+    paddingVertical: 3,
+    paddingHorizontal: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderStyle: 'dashed',
+    alignItems: 'center',
+  },
+  coachNoteBadgeText: { fontSize: 11, fontWeight: '800' },
+  coachNoteOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  coachNoteSheet: {
+    backgroundColor: '#1A1A1D',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  coachNoteSheetHeader: { marginBottom: 12, alignItems: 'center' },
+  coachNoteSheetTitle: { fontSize: 14, fontWeight: '800', color: TEXT },
+  coachNoteSheetHint: { fontSize: 10, color: MUTED, marginTop: 2, textAlign: 'center' },
+  coachNoteGrid: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6, gap: 4 },
+  coachNoteCell: {
+    flex: 1,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  coachNoteCellText: { fontSize: 10, fontWeight: '700', color: TEXT },
+  coachNoteClear: { marginTop: 10, alignItems: 'center' },
+  coachNoteClearText: { fontSize: 11, color: MUTED },
+  coachNoteHint: { fontSize: 10, color: MUTED, marginBottom: 8 },
+  coachNoteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 7,
+    borderBottomWidth: 1,
+    borderColor: BORDER,
+  },
 });

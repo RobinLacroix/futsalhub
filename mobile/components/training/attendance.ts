@@ -42,3 +42,20 @@ export const ATTENDANCE_STATUSES: readonly AttendanceMeta[] = [
 export function attendanceMeta(status: PlayerStatus): AttendanceMeta {
   return ATTENDANCE_STATUSES.find((s) => s.value === status) ?? ATTENDANCE_STATUSES[0];
 }
+
+/**
+ * Rang de tri pour les listes de convoqués : présent, puis retard, puis
+ * blessé/absent regroupés (demande Robin, groupe séparé du tri de non-convoqués
+ * qui passe toujours en dernier). Distinct de l'ordre des puces
+ * `ATTENDANCE_STATUSES`, qui reste présent/retard/absent/blessé pour la saisie.
+ */
+export function attendanceSortRank(status: PlayerStatus): number {
+  switch (status) {
+    case 'present':
+      return 0;
+    case 'late':
+      return 1;
+    default:
+      return 2; // injured, absent
+  }
+}

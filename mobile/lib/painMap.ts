@@ -8,7 +8,7 @@
 export type PainSide = 'L' | 'R' | 'C';
 export type PainMode = 'zone' | 'articulation';
 export type PainView = 'front' | 'back';
-export type PainIntensity = 1 | 2 | 3;
+export type PainIntensity = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
 export interface PainShape {
   kind: 'ellipse' | 'rrect' | 'poly' | 'circle';
@@ -29,16 +29,25 @@ export interface PainZoneDef {
 
 export const PAIN_VIEWBOX = { w: 220, h: 470 } as const;
 
+// Demande du kiné (2026-08) : échelle 1-10 explicite plutôt que le cycle de
+// clics historique (plafonné à 3). Dégradé jaune → rouge sur les 10 paliers.
 export const INTENSITY_COLORS: Record<PainIntensity, string> = {
-  1: '#fbbf24', // jaune  — modérée
-  2: '#f97316', // orange — assez intense
-  3: '#dc2626', // rouge  — très intense
+  1: '#fde047',
+  2: '#facc15',
+  3: '#fbbf24',
+  4: '#f59e0b',
+  5: '#f97316',
+  6: '#ea580c',
+  7: '#dc2626',
+  8: '#dc2626',
+  9: '#b91c1c',
+  10: '#991b1b',
 };
 
+/** Le kiné veut le chiffre brut, pas un mot vague ("assez intense" ne veut rien dire sur 10). */
 export const INTENSITY_LABELS: Record<PainIntensity, string> = {
-  1: 'Modérée',
-  2: 'Assez intense',
-  3: 'Très intense',
+  1: '1/10', 2: '2/10', 3: '3/10', 4: '4/10', 5: '5/10',
+  6: '6/10', 7: '7/10', 8: '8/10', 9: '9/10', 10: '10/10',
 };
 
 export const BODY_STROKE = '#94a3b8';
@@ -150,7 +159,7 @@ export interface PainZonePayload {
 
 export function toPayload(selection: Record<string, PainIntensity>): PainZonePayload[] {
   return Object.entries(selection)
-    .filter(([, intensity]) => intensity >= 1 && intensity <= 3)
+    .filter(([, intensity]) => intensity >= 1 && intensity <= 10)
     .map(([id, intensity]) => {
       const z = ZONE_INDEX[id];
       return { zone: id, side: z?.side ?? 'C', intensity, mode: z?.mode ?? 'zone' };

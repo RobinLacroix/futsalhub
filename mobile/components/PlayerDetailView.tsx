@@ -48,7 +48,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { haptics } from '../lib/design/haptics';
 import { supabase } from '../lib/supabase';
 import { getPlayerPainReports, deleteMyPainReport } from '../lib/services/painReports';
-import PainReportModal from './PainReportModal';
+import PainReportModal, { type PainReportEditing } from './PainReportModal';
 import { INTENSITY_COLORS, INTENSITY_LABELS, zoneLabel } from '../lib/painMap';
 import { Text, Button, Badge, EmptyState, SkeletonList } from './ui';
 import { positionStyle, strongFootLabel } from './players/positions';
@@ -69,10 +69,16 @@ import type { PlayerFeedbackRow } from '../lib/services/feedback';
 // ─── Types publics ────────────────────────────────────────────────────────────
 
 export type { SessionStatus };
-export type TrainingSession = { date: string; status: SessionStatus };
+export type TrainingSession = {
+  date: string;
+  status: SessionStatus;
+  /** Pertinent seulement quand status est 'absent' ou 'late'. */
+  excused?: boolean;
+};
 export type PlayerStats = {
   matches_played: number;
   goals: number;
+  assists: number;
   training_attendance: number;
   attendance_percentage: number;
   victories: number;
@@ -91,6 +97,11 @@ export interface PlayerDetailViewProps {
   feedbackLoading: boolean;
   /** Note data par match, ordre chronologique. */
   ratingSeries?: { date: string; rating: number }[];
+  /**
+   * Note staff (Volet C), clé = match_id, superposée sur la courbe Auto-évaluation.
+   * STAFF-ONLY : ne jamais passer cette prop depuis l'écran joueur (isManager false).
+   */
+  coachNoteByMatch?: Record<string, number>;
   allSessions: TrainingSession[];
   initialEvents: PlayerEvent[];
   matchFilter: MatchTypeFilter;
@@ -101,6 +112,8 @@ export interface PlayerDetailViewProps {
   onEdit?: () => void;
   onAddToTeam?: (teamId: string) => void;
   onRemoveFromTeam?: (team: Team) => void;
+  /** Appelé après un déliage réussi du compte joueur, pour rafraîchir `player.user_id` côté appelant. */
+  onUnlinked?: () => void;
 }
 
 // ─── Aides ────────────────────────────────────────────────────────────────────
@@ -158,6 +171,7 @@ export function PlayerDetailView({
   feedbackRows,
   feedbackLoading,
   ratingSeries = [],
+  coachNoteByMatch,
   allSessions,
   initialEvents,
   matchFilter,
@@ -168,6 +182,7 @@ export function PlayerDetailView({
   onEdit,
   onAddToTeam,
   onRemoveFromTeam,
+  onUnlinked,
 }: PlayerDetailViewProps) {
   const { theme } = useTheme();
   const p = useMemo(() => fmPalette(theme.colors, theme.scheme), [theme]);
@@ -185,6 +200,7 @@ export function PlayerDetailView({
   const [assignModal, setAssignModal] = useState(false);
   const [painReports, setPainReports] = useState<PainReportGroup[]>([]);
   const [painModalOpen, setPainModalOpen] = useState(false);
+  const [editingPain, setEditingPain] = useState<PainReportGroup | null>(null);
 
   const loadPain = useCallback(
     () =>
@@ -278,12 +294,25 @@ export function PlayerDetailView({
   const totalMatches = stats ? stats.victories + stats.draws + stats.defeats : 0;
   const winPct = totalMatches > 0 ? Math.round((stats!.victories / totalMatches) * 100) : null;
 
+  // Une séance à venir n'a rien à dire sur l'assiduité : un joueur qui s'est déclaré
+  // absent par avance (ou une case laissée à 'present' par défaut avant que le coach
+  // ne pointe la séance) ne doit pas gonfler les compteurs ni le calendrier de la saison.
+  const pastSessions = useMemo(
+    () => allSessions.filter((s) => new Date(s.date).getTime() < Date.now()),
+    [allSessions]
+  );
+
   const attendance = useMemo(() => {
-    const recorded = allSessions.filter((s) => s.status !== 'not_recorded');
-    const by = (s: SessionStatus) => allSessions.filter((x) => x.status === s).length;
+    const recorded = pastSessions.filter((s) => s.status !== 'not_recorded');
+    const by = (s: SessionStatus) => pastSessions.filter((x) => x.status === s).length;
     const present = by('present');
     const late = by('late');
     const attended = present + late;
+    const absentOrLate = pastSessions.filter((s) => s.status === 'absent' || s.status === 'late');
+    const excused = absentOrLate.filter((s) => s.excused).length;
+    const unexcused = absentOrLate.length - excused;
+    const unexcusedAbsent = pastSessions.filter((s) => s.status === 'absent' && !s.excused).length;
+    const unexcusedLate = pastSessions.filter((s) => s.status === 'late' && !s.excused).length;
     return {
       recorded: recorded.length,
       present,
@@ -292,10 +321,14 @@ export function PlayerDetailView({
       injured: by('injured'),
       attended,
       pct: recorded.length > 0 ? Math.round((attended / recorded.length) * 100) : 0,
+      excused,
+      unexcused,
+      unexcusedAbsent,
+      unexcusedLate,
     };
-  }, [allSessions]);
+  }, [pastSessions]);
 
-  const monthGroups = useMemo(() => groupByMonth(allSessions), [allSessions]);
+  const monthGroups = useMemo(() => groupByMonth(pastSessions), [pastSessions]);
   const styles = useMemo(() => makeStyles(p), [p]);
 
   // ── Rendu ─────────────────────────────────────────────────────────────────
@@ -399,6 +432,26 @@ export function PlayerDetailView({
           </View>
         </View>
 
+        {isManager && (player.phone || player.parent_phone) && (
+          <View style={styles.contactRow}>
+            {player.phone && (
+              <View style={styles.contactItem}>
+                <Ionicons name="call-outline" size={13} color={p.onBrandMuted} />
+                <Text variant="caption" color={p.onBrandMuted}>{player.phone}</Text>
+              </View>
+            )}
+            {player.parent_phone && (
+              <View style={styles.contactItem}>
+                <Ionicons name="people-outline" size={13} color={p.onBrandMuted} />
+                <Text variant="caption" color={p.onBrandMuted}>
+                  {player.parent_name ? `${player.parent_name} · ` : 'Parent · '}
+                  {player.parent_phone}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
         {!isManager && (
           <Button
             label="Signaler une douleur"
@@ -451,7 +504,7 @@ export function PlayerDetailView({
               <View style={styles.kpiGrid}>
                 <KPIBlock p={p} label="Matchs" value={String(stats.matches_played)} />
                 <KPIBlock p={p} label="Buts" value={String(stats.goals)} color={p.accent} />
-                <KPIBlock p={p} label="Victoires" value={String(stats.victories)} color={p.positive} />
+                <KPIBlock p={p} label="Passes décisives" value={String(stats.assists)} color={p.accent} />
                 <KPIBlock
                   p={p}
                   label="Taux de victoire"
@@ -540,7 +593,10 @@ export function PlayerDetailView({
               compact
             />
           ) : (
-            <FeedbackLineChart rows={feedbackRows} />
+            <FeedbackLineChart
+              rows={feedbackRows}
+              coachNoteByMatch={isManager ? coachNoteByMatch : undefined}
+            />
           )}
         </FMSection>
 
@@ -573,11 +629,22 @@ export function PlayerDetailView({
             </View>
           </View>
 
-          {allSessions.length > 0 && (
+          {attendance.excused + attendance.unexcused > 0 && (
+            <>
+              <View style={[styles.divider, { backgroundColor: p.divider }]} />
+              <View style={styles.attLegend}>
+                <AttLegendItem p={p} color={p.positive} label="Absences/retards prévenus" value={attendance.excused} />
+                <AttLegendItem p={p} color={p.negative} label="Absences non prévenues" value={attendance.unexcusedAbsent} />
+                <AttLegendItem p={p} color={p.negative} label="Retards non prévenus" value={attendance.unexcusedLate} />
+              </View>
+            </>
+          )}
+
+          {pastSessions.length > 0 && (
             <>
               <View style={[styles.divider, { backgroundColor: p.divider }]} />
               <Text variant="caption" tone="tertiary">
-                {allSessions.length} séances cette saison
+                {pastSessions.length} séances cette saison
               </Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.calScroll}>
                 <View style={styles.calRow}>
@@ -734,7 +801,7 @@ export function PlayerDetailView({
           p={p}
           count={painReports.length}
           action={
-            painReports.length > 0 && painReports[0].max_intensity >= 3 ? (
+            painReports.length > 0 && painReports[0].max_intensity >= 7 ? (
               <Badge label="Intense récent" tone="negative" size="sm" icon="warning-outline" />
             ) : undefined
           }
@@ -745,7 +812,7 @@ export function PlayerDetailView({
             <View style={styles.painList}>
               {!isManager && (
                 <Text variant="caption" tone="tertiary">
-                  Glisse un signalement vers la gauche pour le supprimer.
+                  Glisse un signalement vers la gauche pour le modifier ou le supprimer.
                 </Text>
               )}
               {painReports.map((g) => {
@@ -760,7 +827,7 @@ export function PlayerDetailView({
                       </Text>
                     </View>
                     <View style={styles.painMeta}>
-                      <Badge label={g.source === 'questionnaire' ? 'Fin de séance' : 'Spontané'} size="sm" />
+                      <Badge label={g.source === 'questionnaire' ? (g.match_id ? 'Fin de match' : 'Fin de séance') : 'Spontané'} size="sm" />
                       {g.onset && <Badge label={g.onset === 'aigu' ? 'Aigu' : 'Chronique'} size="sm" />}
                     </View>
                     <View style={styles.painChips}>
@@ -790,17 +857,30 @@ export function PlayerDetailView({
                   <Swipeable
                     key={g.report_group}
                     renderRightActions={() => (
-                      <Pressable
-                        onPress={() => deletePain(g.report_group)}
-                        accessibilityRole="button"
-                        accessibilityLabel="Supprimer ce signalement"
-                        style={[styles.painDelete, { backgroundColor: p.negative }]}
-                      >
-                        <Ionicons name="trash-outline" size={18} color={p.onFill} />
-                        <Text variant="caption" color={p.onFill} weight="700">
-                          Supprimer
-                        </Text>
-                      </Pressable>
+                      <View style={styles.painActions}>
+                        <Pressable
+                          onPress={() => setEditingPain(g)}
+                          accessibilityRole="button"
+                          accessibilityLabel="Modifier ce signalement"
+                          style={[styles.painDelete, { backgroundColor: p.accent }]}
+                        >
+                          <Ionicons name="pencil-outline" size={18} color={p.onFill} />
+                          <Text variant="caption" color={p.onFill} weight="700">
+                            Modifier
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => deletePain(g.report_group)}
+                          accessibilityRole="button"
+                          accessibilityLabel="Supprimer ce signalement"
+                          style={[styles.painDelete, { backgroundColor: p.negative }]}
+                        >
+                          <Ionicons name="trash-outline" size={18} color={p.onFill} />
+                          <Text variant="caption" color={p.onFill} weight="700">
+                            Supprimer
+                          </Text>
+                        </Pressable>
+                      </View>
                     )}
                   >
                     {card}
@@ -867,6 +947,7 @@ export function PlayerDetailView({
               playerId={player.id}
               playerName={`${player.first_name} ${player.last_name}`}
               linked={!!player.user_id}
+              onUnlinked={onUnlinked}
               p={p}
             />
           </FMSection>
@@ -923,8 +1004,21 @@ export function PlayerDetailView({
 
       {!isManager && (
         <PainReportModal
-          visible={painModalOpen}
-          onClose={() => setPainModalOpen(false)}
+          visible={painModalOpen || !!editingPain}
+          editing={
+            editingPain
+              ? {
+                  reportGroup: editingPain.report_group,
+                  zones: editingPain.zones,
+                  note: editingPain.note,
+                  onset: editingPain.onset,
+                }
+              : null
+          }
+          onClose={() => {
+            setPainModalOpen(false);
+            setEditingPain(null);
+          }}
           onSubmitted={loadPain}
         />
       )}
@@ -1113,6 +1207,8 @@ const makeStyles = (p: FMPalette) =>
     },
 
     playerCard: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+    contactRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 10 },
+    contactItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
     numberRing: {
       width: 58,
       height: 58,
@@ -1239,6 +1335,7 @@ const makeStyles = (p: FMPalette) =>
       paddingVertical: 5,
     },
     painDot: { width: 7, height: 7, borderRadius: 4 },
+    painActions: { flexDirection: 'row' },
     painDelete: {
       justifyContent: 'center',
       alignItems: 'center',

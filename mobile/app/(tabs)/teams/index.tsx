@@ -40,6 +40,9 @@ const DEFAULT_FORM: TeamFormData = {
   color: DEFAULT_TEAM_COLOR,
 };
 
+const DEFAULT_ABSENCE_NOTICE_MINUTES = 360;
+const DEFAULT_LATE_NOTICE_MINUTES = 15;
+
 function memberLabel(m: ClubMemberWithUser): string {
   const name = [m.first_name, m.last_name].filter(Boolean).join(' ').trim();
   return name || m.email || m.user_id.slice(0, 8);
@@ -64,6 +67,8 @@ export default function TeamsScreen() {
   const [clubMembers, setClubMembers] = useState<ClubMemberWithUser[]>([]);
   const [mainCoachUserId, setMainCoachUserId] = useState<string | null>(null);
   const [teamCoaches, setTeamCoaches] = useState<Record<string, string>>({});
+  const [absenceNoticeText, setAbsenceNoticeText] = useState(String(DEFAULT_ABSENCE_NOTICE_MINUTES));
+  const [lateNoticeText, setLateNoticeText] = useState(String(DEFAULT_LATE_NOTICE_MINUTES));
 
   // ── Chargement ────────────────────────────────────────────────────────────
 
@@ -126,6 +131,8 @@ export default function TeamsScreen() {
         level: team.level || 'A',
         color: team.color || DEFAULT_TEAM_COLOR,
       });
+      setAbsenceNoticeText(String(team.absence_notice_minutes ?? DEFAULT_ABSENCE_NOTICE_MINUTES));
+      setLateNoticeText(String(team.late_notice_minutes ?? DEFAULT_LATE_NOTICE_MINUTES));
       setSheetVisible(true);
       if (!clubId) return;
       const [adminRes, membersRes, coachRes] = await Promise.all([
@@ -147,6 +154,8 @@ export default function TeamsScreen() {
     setEditingTeam(null);
     setForm(DEFAULT_FORM);
     setMainCoachUserId(null);
+    setAbsenceNoticeText(String(DEFAULT_ABSENCE_NOTICE_MINUTES));
+    setLateNoticeText(String(DEFAULT_LATE_NOTICE_MINUTES));
   }, []);
 
   const save = useCallback(async () => {
@@ -158,13 +167,30 @@ export default function TeamsScreen() {
       Alert.alert('Aucun club', "Créez un club avant d'ajouter une équipe.");
       return;
     }
+    const absenceNoticeMinutes = parseInt(absenceNoticeText, 10);
+    const lateNoticeMinutes = parseInt(lateNoticeText, 10);
+    if (editingTeam) {
+      if (
+        !Number.isFinite(absenceNoticeMinutes) || absenceNoticeMinutes < 0 || absenceNoticeMinutes > 20160 ||
+        !Number.isFinite(lateNoticeMinutes) || lateNoticeMinutes < 0 || lateNoticeMinutes > 20160
+      ) {
+        Alert.alert('Délai invalide', 'Saisissez un nombre de minutes entre 0 et 20160 (14 jours).');
+        return;
+      }
+    }
     setSaving(true);
     try {
       if (editingTeam) {
-        const updateData = { ...form };
+        const updateData = { ...form, absenceNoticeMinutes, lateNoticeMinutes };
         if (isAdmin && mainCoachUserId) updateData.mainCoachUserId = mainCoachUserId;
         await updateTeam(editingTeam.id, updateData);
-        setTeams((prev) => prev.map((t) => (t.id === editingTeam.id ? { ...t, ...form } : t)));
+        setTeams((prev) =>
+          prev.map((t) =>
+            t.id === editingTeam.id
+              ? { ...t, ...form, absence_notice_minutes: absenceNoticeMinutes, late_notice_minutes: lateNoticeMinutes }
+              : t
+          )
+        );
         if (isAdmin && mainCoachUserId) {
           const m = clubMembers.find((cm) => cm.user_id === mainCoachUserId);
           if (m) setTeamCoaches((prev) => ({ ...prev, [editingTeam.id]: memberLabel(m) }));
@@ -186,7 +212,7 @@ export default function TeamsScreen() {
     } finally {
       setSaving(false);
     }
-  }, [form, clubId, editingTeam, closeSheet, refetchTeams, isAdmin, mainCoachUserId, clubMembers]);
+  }, [form, clubId, editingTeam, closeSheet, refetchTeams, isAdmin, mainCoachUserId, clubMembers, absenceNoticeText, lateNoticeText]);
 
   const remove = useCallback(
     (team: Team) => {
@@ -431,6 +457,30 @@ export default function TeamsScreen() {
               })}
             </View>
           </Field>
+
+          {editingTeam && (
+            <Field
+              label="Délai de prévenance des joueurs"
+              hint="Au-delà de ce délai avant la séance, un joueur ne peut plus répondre lui-même."
+            >
+              <View style={styles.row}>
+                <Input
+                  label="Absence (min)"
+                  value={absenceNoticeText}
+                  onChangeText={setAbsenceNoticeText}
+                  keyboardType="number-pad"
+                  containerStyle={styles.flex}
+                />
+                <Input
+                  label="Retard (min)"
+                  value={lateNoticeText}
+                  onChangeText={setLateNoticeText}
+                  keyboardType="number-pad"
+                  containerStyle={styles.flex}
+                />
+              </View>
+            </Field>
+          )}
 
           {editingTeam && isAdmin && clubMembers.length > 0 && (
             <Field label="Entraîneur principal">

@@ -46,17 +46,22 @@ export interface CreateMatchInput {
   score_team: number;
   score_opponent: number;
   opponent_team?: string;
-  /** Optionnel : buts / cartons / temps de jeu par joueur (sinon 0 pour tous). */
-  playerStats?: Record<string, { goals: number; yellow_cards: number; red_cards: number; time_played?: number }>;
+  /** Optionnel : buts / passes déc. / cartons / temps de jeu par joueur (sinon 0 pour tous). */
+  playerStats?: Record<string, { goals: number; assists: number; yellow_cards: number; red_cards: number; time_played?: number }>;
+  venue_address?: string;
+  /** Distincte du coup d'envoi (`date`). */
+  meeting_time?: Date;
+  convocation_message?: string;
 }
 
 function toPlayersArray(
   convoquedIds: string[],
-  stats?: Record<string, { goals: number; yellow_cards: number; red_cards: number; time_played?: number }>
+  stats?: Record<string, { goals: number; assists: number; yellow_cards: number; red_cards: number; time_played?: number }>
 ): MatchPlayer[] {
   return convoquedIds.map((id) => ({
     id,
     goals: stats?.[id]?.goals ?? 0,
+    assists: stats?.[id]?.assists ?? 0,
     yellow_cards: stats?.[id]?.yellow_cards ?? 0,
     red_cards: stats?.[id]?.red_cards ?? 0,
     time_played: stats?.[id]?.time_played ?? 0,
@@ -77,6 +82,9 @@ export async function createMatch(teamId: string, input: CreateMatchInput): Prom
       score_opponent: input.score_opponent,
       opponent_team: input.opponent_team?.trim() || null,
       players: playersArray,
+      venue_address: input.venue_address?.trim() || null,
+      meeting_time: input.meeting_time ? input.meeting_time.toISOString() : null,
+      convocation_message: input.convocation_message?.trim() || null,
     })
     .select()
     .single();
@@ -100,6 +108,17 @@ export async function getMatchById(matchId: string): Promise<Match | null> {
 export async function deleteMatch(matchId: string): Promise<void> {
   const { error } = await supabase.from('matches').delete().eq('id', matchId);
   if (error) throw error;
+}
+
+/** Crée les tokens questionnaire pour tous les joueurs convoqués au match (post-match). */
+export async function sendQuestionnairesForMatch(matchId: string): Promise<{ ok: boolean; count?: number; error?: string }> {
+  const { data, error } = await supabase.rpc('create_feedback_tokens_for_match', {
+    p_match_id: matchId,
+  });
+  if (error) return { ok: false, error: error.message };
+  const r = data as { ok?: boolean; count?: number; error?: string } | null;
+  if (r?.ok) return { ok: true, count: r.count };
+  return { ok: false, error: (r?.error as string) || 'Erreur' };
 }
 
 export async function updateMatch(matchId: string, input: UpdateMatchInput): Promise<Match> {

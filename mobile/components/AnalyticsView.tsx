@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { View, ScrollView, Pressable, RefreshControl } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useRouter } from 'expo-router';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 import { useActiveTeam } from '../contexts/ActiveTeamContext';
@@ -8,13 +9,17 @@ import { useTheme, makeStyles } from '../contexts/ThemeContext';
 import { dataColor, deltaColor, type Theme, type ThemeColors } from '../lib/design/tokens';
 import { haptics } from '../lib/design/haptics';
 import { fmPalette } from './players/fmPalette';
-import { Text, Card, Stat, EmptyState, SkeletonStats } from './ui';
+import { Text, Card, Stat, EmptyState, SkeletonStats, Button } from './ui';
 import { MatchMomentsView } from './MatchMomentsView';
 import { PlayerStatsPanel } from './analytics/PlayerStatsPanel';
+import { GoalsByTypeTrendChart } from './analytics/GoalsByTypeTrendChart';
+import { PlayingTimeTrendChart } from './analytics/PlayingTimeTrendChart';
 import { abbrevName, fmtTime, type PlayerStats } from './analytics/playerStats';
 import { useMatchAnalytics } from './analytics/MatchAnalyticsContext';
 import { buildPlayerStats, totalShots } from './analytics/aggregate';
 import { useIsTablet } from '../hooks/useIsTablet';
+import { PlayerIdentity } from './players/PlayerIdentity';
+import { PlayerPickerSheet } from './performance/PlayerPickerSheet';
 import type { MatchEvent, Player } from '../types';
 
 /**
@@ -303,6 +308,7 @@ export function AnalyticsView() {
   const series = c.chartSeries;
   const { activeTeamId, activeTeam } = useActiveTeam();
   const isTablet = useIsTablet();
+  const router = useRouter();
 
   // ── Données ─────────────────────────────────────────────────────────────
   //
@@ -324,7 +330,9 @@ export function AnalyticsView() {
 
   const [filterLoc,  setFilterLoc]  = useState('all');
   const [filterComp, setFilterComp] = useState('all');
-  const [activeTab,  setActiveTab]  = useState<'overview' | 'stats' | 'coach'>('overview');
+  const [activeTab,  setActiveTab]  = useState<'equipe' | 'joueurs' | 'tracker'>('equipe');
+  const [playingTimePlayerId, setPlayingTimePlayerId] = useState('');
+  const [playingTimeSheetOpen, setPlayingTimeSheetOpen] = useState(false);
 
   // ── Filters ─────────────────────────────────────────────────────────────
 
@@ -342,6 +350,31 @@ export function AnalyticsView() {
     () => matches.filter(m => filteredMatchIds.has(m.id)),
     [matches, filteredMatchIds]
   );
+
+
+  // ── Tracker : matchs suivis, tri anti-chronologique ────────────────────────
+  const matchesWithEventCount = useMemo(
+    () =>
+      [...matches]
+        .sort((a, b) => (b.date as string).localeCompare(a.date as string))
+        .map((m) => ({ ...m, eventCount: (eventsByMatch[m.id] ?? []).length })),
+    [matches, eventsByMatch]
+  );
+
+  // ── Domicile / Extérieur ───────────────────────────────────────────────
+  //
+  // Vivait dans Analyse > Équipe côté Séance — c'est un résultat de match,
+  // pas une donnée de séance, et matches déjà sur les mêmes filtres Lieu/
+  // Compétition que le reste de cet onglet.
+
+  const homeAway = useMemo(() => {
+    const withScore = filteredMatches.filter(m => m.score_team != null && m.score_opponent != null);
+    const home = withScore.filter(m => (m.location ?? '').toLowerCase().includes('dom'));
+    const away = withScore.filter(m => !(m.location ?? '').toLowerCase().includes('dom'));
+    const wr = (arr: typeof withScore) =>
+      arr.length ? Math.round((arr.filter(m => (m.score_team as number) > (m.score_opponent as number)).length / arr.length) * 100) : null;
+    return { homeWR: wr(home), awayWR: wr(away) };
+  }, [filteredMatches]);
 
   // ── Team stats ──────────────────────────────────────────────────────────
 
@@ -399,6 +432,16 @@ export function AnalyticsView() {
         avgRatingByPlayer,
       }),
     [eventsByMatch, matches, filteredMatchIds, allPlayers, clubPlayerIds, avgRatingByPlayer]
+  );
+
+  const playingTimeEligiblePlayers = useMemo(() => {
+    const withTime = new Set(playerStatsList.filter(p => p.totalTimeSeconds > 0).map(p => p.playerId));
+    return allPlayers.filter(p => withTime.has(p.id));
+  }, [allPlayers, playerStatsList]);
+
+  const playingTimePlayer = useMemo(
+    () => playingTimeEligiblePlayers.find(p => p.id === playingTimePlayerId) ?? null,
+    [playingTimeEligiblePlayers, playingTimePlayerId]
   );
 
   // ── Sorting ─────────────────────────────────────────────────────────────
@@ -665,9 +708,9 @@ export function AnalyticsView() {
             >
               {(
                 [
-                  { key: 'overview', label: "Vue d'ensemble", icon: 'bar-chart-outline' },
-                  { key: 'stats',    label: 'Stats détaillées', icon: 'grid-outline' },
-                  { key: 'coach',    label: 'Coach IA',         icon: 'sparkles-outline' },
+                  { key: 'equipe',  label: 'Équipe',  icon: 'bar-chart-outline' },
+                  { key: 'joueurs', label: 'Joueurs', icon: 'people-outline' },
+                  { key: 'tracker', label: 'Tracker', icon: 'videocam-outline' },
                 ] as const
               ).map(tab => {
                 const active = activeTab === tab.key;
@@ -700,8 +743,8 @@ export function AnalyticsView() {
               })}
             </View>
 
-            {/* ── Tab: Vue d'ensemble ── */}
-            {activeTab === 'overview' && (
+            {/* ── Tab: Équipe ── */}
+            {activeTab === 'equipe' && (
               <>
                 <SectionHeader label="Vue d'ensemble" />
                 <View style={[s.kpiGrid, { paddingHorizontal: 14 }]}>
@@ -726,6 +769,26 @@ export function AnalyticsView() {
                     </Card>
                   ))}
                 </View>
+
+                {(homeAway.homeWR !== null || homeAway.awayWR !== null) && (
+                  <>
+                    <SectionHeader label="Domicile / Extérieur" />
+                    <View style={s.homeAwayRow}>
+                      {homeAway.homeWR !== null && (
+                        <View style={[s.homeAwayChip, { backgroundColor: c.positive.subtle }]}>
+                          <Text variant="caption" weight="600" color={c.positive.default}>Domicile</Text>
+                          <Text variant="headline" weight="800" color={c.positive.default}>{homeAway.homeWR}% V</Text>
+                        </View>
+                      )}
+                      {homeAway.awayWR !== null && (
+                        <View style={[s.homeAwayChip, { backgroundColor: c.warning.subtle }]}>
+                          <Text variant="caption" weight="600" color={c.warning.default}>Extérieur</Text>
+                          <Text variant="headline" weight="800" color={c.warning.default}>{homeAway.awayWR}% V</Text>
+                        </View>
+                      )}
+                    </View>
+                  </>
+                )}
 
                 {goalsByType.some(g => g.scored > 0 || g.conceded > 0) && (
                   <>
@@ -777,6 +840,75 @@ export function AnalyticsView() {
                   </>
                 )}
 
+                <SectionHeader label="Évolution des buts par type" />
+                <GoalsByTypeTrendChart
+                  matches={filteredMatches}
+                  eventsByMatch={eventsByMatch}
+                  filteredMatchIds={filteredMatchIds}
+                />
+
+                <SectionHeader label="Moments du match" />
+                <MatchMomentsView
+                  matches={matches}
+                  eventsByMatch={eventsByMatch}
+                  filteredMatchIds={filteredMatchIds}
+                />
+
+                <ComboRankingTable allStats={allComboStats} playerById={playerByIdForRanking} />
+
+                <View style={s.coachHeader} accessibilityRole="header">
+                  <View style={[s.secAccent, { backgroundColor: c.accent.default }]} />
+                  <Text variant="caption" tone="secondary" weight="700">
+                    Analyse du coach adjoint
+                  </Text>
+                  <View
+                    style={[s.algoBadge, { backgroundColor: c.accent.subtle, borderColor: c.accent.border }]}
+                  >
+                    <Text variant="caption" weight="700" tone="accent">
+                      Algo
+                    </Text>
+                  </View>
+                </View>
+                {(insights.length > 0 || comboInsightCards.length > 0) ? (
+                  <>
+                    <View style={s.insightsBlock}>
+                      {insights.map((ins, i) => (
+                        <CoachInsightCard key={`g-${i}`} insight={ins} />
+                      ))}
+                    </View>
+                    {comboInsightCards.length > 0 && (
+                      <>
+                        <View style={s.comboDividerRow}>
+                          <View style={[s.comboDividerLine, { backgroundColor: c.border.subtle }]} />
+                          <Text variant="caption" tone="accent" weight="700">
+                            Combinaisons — résumé
+                          </Text>
+                          <View style={[s.comboDividerLine, { backgroundColor: c.border.subtle }]} />
+                        </View>
+                        <View style={s.insightsBlock}>
+                          {comboInsightCards.map((ins, i) => (
+                            <CoachInsightCard key={`c-${i}`} insight={ins} />
+                          ))}
+                        </View>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <View style={[s.emptyBlock, { backgroundColor: c.bg.surface, borderColor: c.border.subtle }]}>
+                    <EmptyState
+                      icon="sparkles-outline"
+                      title="Pas assez de données"
+                      description="Suivez davantage de matchs en direct pour que le coach adjoint puisse générer des analyses."
+                      compact
+                    />
+                  </View>
+                )}
+              </>
+            )}
+
+            {/* ── Tab: Joueurs ── */}
+            {activeTab === 'joueurs' && (
+              <>
                 {playerStatsList.length > 0 && (
                   <>
                     <SectionHeader label="Meilleurs joueurs" />
@@ -832,18 +964,6 @@ export function AnalyticsView() {
                   </>
                 )}
 
-                <SectionHeader label="Moments du match" />
-                <MatchMomentsView
-                  matches={matches}
-                  eventsByMatch={eventsByMatch}
-                  filteredMatchIds={filteredMatchIds}
-                />
-              </>
-            )}
-
-            {/* ── Tab: Stats détaillées ── */}
-            {activeTab === 'stats' && (
-              <>
                 <SectionHeader label="Statistiques joueurs" />
                 <PlayerStatsPanel
                   rows={playerStatsList}
@@ -853,58 +973,100 @@ export function AnalyticsView() {
                       : 'Aucun match enregistré avec le Tracker.'
                   }
                 />
-                <ComboRankingTable allStats={allComboStats} playerById={playerByIdForRanking} />
+
+                <SectionHeader label="Temps de jeu" />
+                {playingTimeEligiblePlayers.length === 0 ? (
+                  <EmptyState
+                    icon="people-outline"
+                    title="Aucun joueur"
+                    description="Aucun joueur n'a de temps de jeu enregistré sur les matchs de cette équipe."
+                    compact
+                  />
+                ) : (
+                  <Card
+                    variant="raised"
+                    padding="md"
+                    onPress={() => setPlayingTimeSheetOpen(true)}
+                    accessibilityLabel={
+                      playingTimePlayer
+                        ? `Joueur : ${playingTimePlayer.first_name} ${playingTimePlayer.last_name}. Appuyer pour changer`
+                        : 'Choisir un joueur'
+                    }
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.sm, marginBottom: theme.space.md }}
+                  >
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      {playingTimePlayer ? (
+                        <PlayerIdentity
+                          firstName={playingTimePlayer.first_name}
+                          lastName={playingTimePlayer.last_name}
+                          number={playingTimePlayer.number}
+                        />
+                      ) : (
+                        <Text variant="body" tone="tertiary">Choisir un joueur</Text>
+                      )}
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={c.text.tertiary} />
+                  </Card>
+                )}
+                {playingTimePlayerId && (
+                  <PlayingTimeTrendChart
+                    matches={filteredMatches}
+                    eventsByMatch={eventsByMatch}
+                    filteredMatchIds={filteredMatchIds}
+                    playerId={playingTimePlayerId}
+                  />
+                )}
               </>
             )}
 
-            {/* ── Tab: AI Coach Adjoint ── */}
-            {activeTab === 'coach' && (
+            {/* ── Tab: Tracker ── */}
+            {activeTab === 'tracker' && (
               <>
-                {(insights.length > 0 || comboInsightCards.length > 0) ? (
-                  <>
-                    <View style={s.coachHeader} accessibilityRole="header">
-                      <View style={[s.secAccent, { backgroundColor: c.accent.default }]} />
-                      <Text variant="caption" tone="secondary" weight="700">
-                        Analyse du coach adjoint
-                      </Text>
-                      <View
-                        style={[s.algoBadge, { backgroundColor: c.accent.subtle, borderColor: c.accent.border }]}
-                      >
-                        <Text variant="caption" weight="700" tone="accent">
-                          Algo
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={s.insightsBlock}>
-                      {insights.map((ins, i) => (
-                        <CoachInsightCard key={`g-${i}`} insight={ins} />
-                      ))}
-                    </View>
-                    {comboInsightCards.length > 0 && (
-                      <>
-                        <View style={s.comboDividerRow}>
-                          <View style={[s.comboDividerLine, { backgroundColor: c.border.subtle }]} />
-                          <Text variant="caption" tone="accent" weight="700">
-                            Combinaisons — résumé
-                          </Text>
-                          <View style={[s.comboDividerLine, { backgroundColor: c.border.subtle }]} />
-                        </View>
-                        <View style={s.insightsBlock}>
-                          {comboInsightCards.map((ins, i) => (
-                            <CoachInsightCard key={`c-${i}`} insight={ins} />
-                          ))}
-                        </View>
-                      </>
-                    )}
-                  </>
-                ) : (
+                <View style={s.trackerBtnBlock}>
+                  <Button
+                    label="Enregistrer un match"
+                    icon="videocam"
+                    onPress={() => router.push('/(tabs)/tracker/record' as any)}
+                    block
+                  />
+                </View>
+                <SectionHeader label="Matchs suivis" />
+                {matchesWithEventCount.length === 0 ? (
                   <View style={[s.emptyBlock, { backgroundColor: c.bg.surface, borderColor: c.border.subtle }]}>
                     <EmptyState
-                      icon="sparkles-outline"
-                      title="Pas assez de données"
-                      description="Suivez davantage de matchs en direct pour que le coach adjoint puisse générer des analyses."
+                      icon="videocam-outline"
+                      title="Aucun match"
+                      description="Créez un match dans le Calendrier pour pouvoir le suivre en direct."
                       compact
                     />
+                  </View>
+                ) : (
+                  <View style={s.trackerList}>
+                    {matchesWithEventCount.slice(0, 15).map(m => (
+                      <Pressable
+                        key={m.id}
+                        onPress={() => router.push(`/(tabs)/tracker/record?matchId=${m.id}` as any)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${m.title || m.opponent_team || 'Match'}, ${m.score_team} à ${m.score_opponent}`}
+                      >
+                        {({ pressed }) => (
+                          <Card style={[s.trackerCard, pressed && { opacity: 0.7 }]}>
+                            <View style={s.flex1}>
+                              <Text variant="headline" numberOfLines={1}>
+                                {m.title || m.opponent_team || 'Match'}
+                              </Text>
+                              <Text variant="caption" tone="tertiary">
+                                {m.competition} · {m.eventCount} événement{m.eventCount !== 1 ? 's' : ''}
+                              </Text>
+                            </View>
+                            <Text variant="headline" tone="accent" numeric style={s.trackerScore}>
+                              {m.score_team} - {m.score_opponent}
+                            </Text>
+                            <Ionicons name="chevron-forward" size={20} color={c.text.tertiary} />
+                          </Card>
+                        )}
+                      </Pressable>
+                    ))}
                   </View>
                 )}
               </>
@@ -914,6 +1076,14 @@ export function AnalyticsView() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <PlayerPickerSheet
+        visible={playingTimeSheetOpen}
+        onClose={() => setPlayingTimeSheetOpen(false)}
+        players={playingTimeEligiblePlayers}
+        selectedId={playingTimePlayerId}
+        onSelect={setPlayingTimePlayerId}
+      />
     </View>
   );
 }
@@ -1429,6 +1599,10 @@ const useStyles = makeStyles((t) => ({
   },
   comboDividerLine: { flex: 1, height: 1 },
 
+  // ── Domicile / Extérieur ─────────────────────────────────────────────────
+  homeAwayRow: { flexDirection: 'row', gap: t.space.sm, paddingHorizontal: t.space.lg, marginBottom: t.space.xs },
+  homeAwayChip: { flex: 1, borderRadius: t.radius.md, padding: t.space.md, alignItems: 'center', gap: 2 },
+
   // ── Buts par type ────────────────────────────────────────────────────────
   goalsTypeBlock: { paddingHorizontal: t.space.lg, gap: t.space.sm },
   goalsTypeCard: { gap: t.space.md },
@@ -1436,6 +1610,12 @@ const useStyles = makeStyles((t) => ({
   goalsTypeRowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   progressBg: { height: 6, borderRadius: 3, overflow: 'hidden' },
   progressFill: { height: '100%', borderRadius: 3 },
+
+  // ── Tracker ──────────────────────────────────────────────────────────────
+  trackerBtnBlock: { paddingHorizontal: t.space.lg, paddingTop: t.space.md, marginBottom: t.space.sm },
+  trackerList: { paddingHorizontal: t.space.lg, gap: t.space.sm, marginBottom: t.space.xxl },
+  trackerCard: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm },
+  trackerScore: { marginRight: t.space.sm },
 
   // ── Meilleurs joueurs ────────────────────────────────────────────────────
   topsRow: { paddingHorizontal: t.space.lg, gap: t.space.sm },

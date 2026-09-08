@@ -140,6 +140,8 @@ function ThemedRoot() {
         <Stack.Screen name="join-club" options={{ title: 'Rejoindre le club' }} />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="(player-tabs)" />
+        <Stack.Screen name="player-settings" options={{ title: 'Réglages' }} />
+        <Stack.Screen name="join-staff-code" options={{ title: 'Rejoindre le staff' }} />
         {/* Vérification visuelle du design system. Non listée en navigation. */}
         <Stack.Screen name="design-gallery" options={{ title: 'Design system' }} />
       </Stack>

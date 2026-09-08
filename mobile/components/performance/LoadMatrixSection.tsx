@@ -15,27 +15,26 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { View, ScrollView, type LayoutChangeEvent } from 'react-native';
+import { View, ScrollView, Pressable, type LayoutChangeEvent } from 'react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Text, Card, ChipGroup, EmptyState, type ChipOption } from '../ui';
 import {
   MATRIX_METRIC_LABELS,
-  RPE_BAND_RAMP,
-  RPE_DELTA_RAMP,
   buildPlayerMatrix,
   formatDelta,
-  rpeBand,
-  rpeDeltaIntensity,
-  rpeDeltaTone,
+  rpeAbsoluteBand,
   teamAverageRow,
   type MatrixCell,
   type MatrixMetric,
   type MatrixRow,
+  type RpeAbsoluteBand,
 } from '../../lib/trainingLoad';
 import type { ThemeColors } from '../../lib/design/tokens';
 
 export interface LoadMatrixSectionProps {
   rows: MatrixRow[];
+  /** Bascule vers la vue individuelle de ce joueur au tap sur son nom. */
+  onSelectPlayer?: (playerId: string) => void;
 }
 
 const METRIC_CHIPS: readonly ChipOption<MatrixMetric>[] = (
@@ -58,7 +57,22 @@ function judgementColor(value: number, c: ThemeColors): string {
   return c.negative.default;
 }
 
-export function LoadMatrixSection({ rows }: LoadMatrixSectionProps) {
+/** Couleurs de `rpeAbsoluteBand` : mêmes tons que la heatmap de `TeamDashboardView` (`metricColor`). */
+function rpeAbsoluteColor(band: RpeAbsoluteBand, c: ThemeColors): string {
+  if (band === 'faible') return c.accent.default;
+  if (band === 'optimal') return c.positive.default;
+  if (band === 'eleve') return c.warning.default;
+  return c.negative.default;
+}
+
+const RPE_LEGEND: readonly { label: string; band: RpeAbsoluteBand }[] = [
+  { label: '<4 Faible', band: 'faible' },
+  { label: '4-7 Optimal', band: 'optimal' },
+  { label: '>7 Élevé', band: 'eleve' },
+  { label: '>8.5 Surm.', band: 'surmenage' },
+];
+
+export function LoadMatrixSection({ rows, onSelectPlayer }: LoadMatrixSectionProps) {
   const { theme } = useTheme();
   const c = theme.colors;
   const [metric, setMetric] = useState<MatrixMetric>('rpe');
@@ -97,12 +111,25 @@ export function LoadMatrixSection({ rows }: LoadMatrixSectionProps) {
         <View style={{ width: NAME_WIDTH }}>
           <View style={{ height: HEADER_H }} />
           {matrix.players.map((player) => (
-            <View key={player.player_id} style={{ height: ROW_H, justifyContent: 'center' }}>
-              <Text variant="caption" weight="600" numberOfLines={1}>
-                {player.number != null ? `${player.number}. ` : ''}
+            <Pressable
+              key={player.player_id}
+              onPress={onSelectPlayer ? () => onSelectPlayer(player.player_id) : undefined}
+              style={{ height: ROW_H, justifyContent: 'center' }}
+              accessibilityLabel={
+                onSelectPlayer
+                  ? `Voir la charge individuelle de ${player.first_name} ${player.last_name}`
+                  : undefined
+              }
+            >
+              <Text
+                variant="caption"
+                weight="600"
+                numberOfLines={1}
+                style={onSelectPlayer ? { textDecorationLine: 'underline' } : undefined}
+              >
                 {player.first_name} {player.last_name}
               </Text>
-            </View>
+            </Pressable>
           ))}
           {team && (
             <View
@@ -202,6 +229,27 @@ export function LoadMatrixSection({ rows }: LoadMatrixSectionProps) {
         </ScrollView>
       </Card>
 
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+        {(metric === 'rpe'
+          ? RPE_LEGEND.map((l) => ({ label: l.label, color: rpeAbsoluteColor(l.band, c) }))
+          : [
+              { label: '≥7 Bien', color: c.positive.default },
+              { label: '5-6 Moyen', color: c.warning.default },
+              { label: '<5 Alerte', color: c.negative.default },
+              { label: 'N/A', color: c.text.tertiary },
+            ]
+        ).map((l) => (
+          <View
+            key={l.label}
+            style={{ borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: `${l.color}1a` }}
+          >
+            <Text variant="caption" weight="600" style={{ color: l.color, fontSize: 10 }}>
+              {l.label}
+            </Text>
+          </View>
+        ))}
+      </View>
+
       <Text variant="caption" tone="tertiary">
         Case grise = absent ou repos. Case claire avec un tiret = convoqué mais questionnaire non
         répondu.{metric === 'rpe' ? ' Le petit chiffre est l’écart au RPE cible de la séance.' : ''}
@@ -244,27 +292,17 @@ function MatrixCellView({
   }
 
   if (metric === 'rpe') {
-    if (cell.delta === null) {
-      const band = rpeBand(cell.value);
-      return (
-        <View style={[boxStyle, { backgroundColor: `${RPE_BAND_RAMP[band]}33` }]}>
-          <Text variant="caption" weight="700" numeric>
-            {cell.value}
-          </Text>
-        </View>
-      );
-    }
-    const tone = rpeDeltaTone(cell.delta);
-    const color = tone === 'in_zone' ? c.text.tertiary : RPE_DELTA_RAMP[tone][rpeDeltaIntensity(cell.delta)];
-    const bg = tone === 'in_zone' ? c.bg.sunken : `${color}26`;
+    const color = rpeAbsoluteColor(rpeAbsoluteBand(cell.value), c);
     return (
-      <View style={[boxStyle, { backgroundColor: bg }]}>
-        <Text variant="caption" tone="tertiary" style={{ fontSize: 10, lineHeight: 12 }} numeric>
+      <View style={[boxStyle, { backgroundColor: `${color}26` }]}>
+        <Text variant="caption" weight="700" style={{ color, fontSize: 15, lineHeight: 17 }} numeric>
           {digits === 1 ? cell.value.toFixed(1) : cell.value}
         </Text>
-        <Text variant="caption" weight="700" style={{ color, lineHeight: 14 }} numeric>
-          {formatDelta(cell.delta, digits === 1 ? 1 : 0)}
-        </Text>
+        {cell.delta !== null && (
+          <Text variant="caption" tone="tertiary" style={{ fontSize: 9, lineHeight: 11 }} numeric>
+            {formatDelta(cell.delta, digits === 1 ? 1 : 0)}
+          </Text>
+        )}
       </View>
     );
   }

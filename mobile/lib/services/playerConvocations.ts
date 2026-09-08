@@ -10,10 +10,17 @@ export interface MyConvolutionRow {
   feedback_url: string | null;
   /** true = convoqué par une autre équipe (affichage couleur) */
   is_other_team?: boolean;
+  /** Délai de prévenance de l'équipe de la séance (minutes), réglable par son coach. */
+  absence_notice_minutes: number;
+  late_notice_minutes: number;
 }
 
 export interface MyPendingFeedbackRow {
-  training_id: string;
+  /** Nul quand `kind === 'match'`. */
+  training_id: string | null;
+  /** Nul quand `kind === 'training'`. */
+  match_id: string | null;
+  kind: 'training' | 'match';
   training_date: string;
   theme: string | null;
   token: string;
@@ -30,6 +37,8 @@ function mapTrainingRow(row: Record<string, unknown>): MyConvolutionRow {
     feedback_token: (row.feedback_token as string) ?? null,
     feedback_url: (row.feedback_url as string) ?? null,
     is_other_team: Boolean((row as Record<string, unknown>).is_other_team),
+    absence_notice_minutes: Number(row.absence_notice_minutes ?? 360),
+    late_notice_minutes: Number(row.late_notice_minutes ?? 15),
   };
 }
 
@@ -61,6 +70,7 @@ export async function getMyCalendarEvents(): Promise<{
       opponent_team: (row.opponent_team as string) ?? null,
       team_name: (row.team_name as string) ?? null,
       is_other_team: Boolean(row.is_other_team),
+      is_convoked: Boolean(row.is_convoked),
     })),
   };
 }
@@ -127,7 +137,9 @@ export async function getMyPendingFeedbackTokens(): Promise<MyPendingFeedbackRow
   if (error) throw error;
   const baseUrl = process.env.EXPO_PUBLIC_SITE_URL || '';
   return (data ?? []).map((row: Record<string, unknown>) => ({
-    training_id: row.training_id as string,
+    training_id: (row.training_id as string) ?? null,
+    match_id: (row.match_id as string) ?? null,
+    kind: (row.kind as 'training' | 'match') ?? 'training',
     training_date: row.training_date as string,
     theme: (row.theme as string) ?? null,
     token: row.token as string,
@@ -173,6 +185,8 @@ export interface MyUpcomingMatchRow {
   opponent_team: string | null;
   team_name: string | null;
   is_other_team?: boolean;
+  /** false = match de l'équipe où le joueur n'est pas (encore) convoqué. */
+  is_convoked?: boolean;
 }
 
 /** Diagnostic : pourquoi les convocations sont vides (à appeler quand liste vide). */

@@ -121,19 +121,30 @@ Pour mettre la **même** version que celle que vous enverrez à l’App Store (b
    ```
 3. Dans **App Store Connect** → FutsalHub → version de l’app : choisir le build reçu, remplir fiche (description, captures, confidentialité, etc.) et envoyer en **soumission pour révision**.
 
-### Google Play (Android)
+### Google Play (Android) — distribution aux testeurs en test fermé
+
+Le compte de service Google (clé JSON, accès API Play Console) est déjà créé côté Google Cloud. Placer le fichier JSON dans `mobile/.secrets/google-play-service-account.json` (dossier gitignoré, jamais commité). `eas.json` le référence déjà via `serviceAccountKeyPath`.
+
+Les testeurs (emails ajoutés dans Play Console → Test → **Tests fermés**) sont sur la track par défaut, dont le nom technique côté API est `alpha` — c'est la valeur configurée dans `eas.json` (`submit.production.android.track`). Si un jour une track de test fermé personnalisée est créée à la place, remplacer `"alpha"` par le nom exact de cette track dans `eas.json`.
 
 1. Build production Android (AAB) :
    ```bash
-   eas build --profile production --platform android
+   cd mobile && eas build --profile production --platform android
    ```
-2. Soumettre :
+2. Soumettre à la track de test fermé :
    ```bash
-   eas submit --platform android --latest
+   eas submit --platform android --profile production --latest
    ```
-   Indiquer le **track** (internal / alpha / beta / production) si demandé (défaut dans `eas.json` : `internal`).
+   Avec la clé de compte de service configurée, cette commande est non-interactive : elle envoie directement le dernier AAB vers la track `alpha`.
 
-3. Dans **Google Play Console** : créer la fiche de l’application si besoin, uploader le AAB (ou le faire via EAS Submit), remplir contenu et politique, puis lancer la mise en production ou une track de test.
+   Pour enchaîner build + submit en une commande :
+   ```bash
+   eas build --profile production --platform android --auto-submit
+   ```
+
+3. Dans **Google Play Console** → Test → Tests fermés : la nouvelle version apparaît en cours de traitement (quelques minutes), puis passe en "Disponible pour les testeurs". Les testeurs déjà invités reçoivent la mise à jour automatiquement sur l'app installée (pas de nouvelle invitation à renvoyer) — sauf ceux qui n'ont pas encore rejoint via le lien d'inscription au programme de test, à leur (re)transmettre au besoin.
+
+4. Le premier envoi sur une track de test fermé déclenche une **revue de contenu Google** (peut prendre de quelques heures à 1-2 jours) avant que le build soit livré aux testeurs. Les envois suivants sur la même track sont en général quasi instantanés.
 
 ---
 

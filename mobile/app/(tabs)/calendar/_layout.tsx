@@ -4,6 +4,7 @@ import { useIsTablet } from '../../../hooks/useIsTablet';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { SeasonHeaderButton } from '../../../components/SeasonHeaderButton';
 import { AddEventButton } from '../../../components/calendar/AddEventButton';
+import { SharePlanningButton } from '../../../components/calendar/SharePlanningButton';
 
 /**
  * ## Le header n'est masqué que sur la racine
@@ -45,6 +46,7 @@ export default function CalendarLayout() {
           headerRight: () => (
             <View style={styles.headerRight}>
               <SeasonHeaderButton />
+              <SharePlanningButton />
               <AddEventButton />
             </View>
           ),
