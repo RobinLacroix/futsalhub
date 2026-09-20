@@ -4860,23 +4860,34 @@
   // cf PLAN_INTEGRATION_EDITEUR_TACTIQUE_PHASE0_2026-09.md). Verification
   // d'origine stricte : meme origine que la page (outil servi en statique par
   // Next.js sous /tools/tactics/, meme domaine que la webapp).
-  //   -> INIT  { teamId, drillId, drill|null, roster, teamColors }
+  //   -> INIT           { teamId, drillId, drill|null, roster, teamColors }
+  //   -> CONTEXT_UPDATE { teamId, roster, teamColors }  (equipe active corrigee
+  //                        apres coup cote parent, cf useActiveTeam qui se
+  //                        resout en deux temps — jamais de drill ici, ne
+  //                        doit pas ecraser une edition deja en cours)
   //   -> SAVED { drillId }              (confirme une sauvegarde, donne l'id definitif)
   //   -> SAVE_ERROR { message }
   //   <- SAVE  { drillId|null, drill }  (null = nouvelle entree)
   //   <- CLOSE {}
+  function applyEmbeddedContext(msg) {
+    embeddedTeamId = msg.teamId || null;
+    if (msg.teamColors && !drill.teams) drill.teams = JSON.parse(JSON.stringify(msg.teamColors));
+    if (Array.isArray(msg.roster)) { roster = msg.roster; renderRoster(); }
+    fillTeamsPanel();
+  }
   (function initEmbedded() {
     if (!embedded) return;
     window.addEventListener("message", function (ev) {
       if (ev.origin !== window.location.origin || !ev.data) return;
       var msg = ev.data;
       if (msg.type === "INIT") {
-        embeddedTeamId = msg.teamId || null;
         embeddedDrillId = msg.drillId || null;
         if (msg.drill) { applyDrill(msg.drill); currentDrillId = embeddedDrillId; }
-        if (msg.teamColors && !drill.teams) drill.teams = JSON.parse(JSON.stringify(msg.teamColors));
-        if (Array.isArray(msg.roster)) { roster = msg.roster; renderRoster(); }
-        fillTeamsPanel(); render(); syncJSON(); refreshLibrary();
+        applyEmbeddedContext(msg);
+        render(); syncJSON(); refreshLibrary();
+      } else if (msg.type === "CONTEXT_UPDATE") {
+        applyEmbeddedContext(msg);
+        render(); syncJSON();
       } else if (msg.type === "SAVED") {
         embeddedDrillId = msg.drillId || embeddedDrillId;
         currentDrillId = embeddedDrillId;

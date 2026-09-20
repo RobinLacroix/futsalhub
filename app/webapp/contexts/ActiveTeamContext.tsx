@@ -37,6 +37,15 @@ export function ActiveTeamProvider({ children }: { children: React.ReactNode }) 
   const fetchTeams = useCallback(async () => {
     try {
       setLoading(true);
+      // Attendre la restauration de session AVANT le premier appel : sans ça,
+      // fetchTeams() (lancé immediatement au montage, cf useEffect plus bas)
+      // peut partir avant que le client Supabase ait fini de relire le
+      // storage, et s'exécute alors côté serveur comme le rôle "anon" (qui
+      // n'a pas les mêmes droits que "authenticated", cf has_club_access) —
+      // pas une erreur de droits, une course perdue au tout premier appel.
+      // getSession() force le SDK à terminer son initialisation ; l'appel
+      // lui-même est bon marché une fois la session déjà en mémoire.
+      await supabase.auth.getSession();
       const [teamsRes, writableRes] = await Promise.all([
         supabase.from('teams').select('*').order('name'),
         supabase.rpc('get_my_writable_team_ids'),
