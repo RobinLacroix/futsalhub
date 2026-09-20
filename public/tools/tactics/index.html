@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Éditeur de procédés — FutsalHub (proto)</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+  :root{
+    --bg:#101214; --surface:#16181b; --surface-2:#1c1f23; --line:#24272b; --line-strong:#5f666f;
+    --text:#e9ebe6; --muted:#8b9086; --accent:#2fd992; --accent-ink:#062015;
+    --home:#1e63d6; --away:#d63b2f; --support:#e0a021; --danger:#ef4444; --danger-ink:#2a0a08;
+    --radius:8px; --radius-lg:12px; --ease:cubic-bezier(.2,.7,.3,1);
+    --shadow-md:0 8px 20px rgba(0,0,0,.35);
+    --shadow-lg:0 16px 40px rgba(0,0,0,.5);
+    --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    --font-sans:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  .hidden{display:none!important}
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
+  }
+  ::selection{background:var(--accent);color:var(--accent-ink)}
+  /* One pager : la page occupe exactement la fenetre et ne defile jamais. Le
+     terrain prend toute la hauteur restante, les controles sont dockes autour,
+     et ce qui n'est pas l'edition du procede (modelisation de seance, JSON)
+     vit dans un tiroir lateral qui defile pour son propre compte. */
+  body{margin:0;font-family:var(--font-sans);background:var(--bg);color:var(--text);font-size:14px;line-height:1.55;height:100vh;overflow:hidden;display:flex;flex-direction:column}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+  header{flex:none;padding:11px 20px;background:var(--surface);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;box-shadow:0 1px 0 rgba(0,0,0,.3)}
+  header .mark{width:9px;height:9px;border-radius:2px;background:var(--accent);flex:none;box-shadow:0 0 0 3px rgba(47,217,146,.14)}
+  header h1{font-size:14px;margin:0;font-weight:600;font-family:var(--font-mono);letter-spacing:.02em;text-transform:uppercase}
+  header .sub{font-size:12px;color:var(--muted)}
+  header .navlink{margin-left:auto;font-size:13px;color:var(--accent);text-decoration:none;position:relative;padding-bottom:2px}
+  header .navlink::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:var(--accent);transform:scaleX(0);transform-origin:right;transition:transform .2s var(--ease)}
+  header .navlink:hover::after{transform:scaleX(1);transform-origin:left}
+  .wrap{max-width:none;margin:0;padding:10px 14px;flex:1;min-height:0;display:flex;flex-direction:column;gap:8px}
+  .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;margin-bottom:14px}
+  .toolbar .group{display:flex;gap:6px;align-items:center;padding-right:10px;border-right:1px solid var(--line)}
+  .toolbar .group:last-child{border-right:none}
+  .toolbar label{font-size:12px;color:var(--muted)}
+  button{font:inherit;background:var(--surface-2);border:1px solid var(--line-strong);border-radius:6px;padding:6px 10px;cursor:pointer;color:var(--text);transition:background .15s var(--ease),border-color .15s var(--ease),transform .1s var(--ease),filter .15s var(--ease)}
+  button:hover{background:#22262b;border-color:#70787f}
+  button:active{transform:scale(.96)}
+  button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+  button.primary:hover{filter:brightness(1.1)}
+  button.danger{color:#ff8f85;border-color:#5a2c28;background:transparent}
+  button.danger:hover{background:rgba(239,68,68,.12);border-color:var(--danger)}
+  button.success{color:var(--accent);border-color:#1f4a38;background:transparent}
+  button.success:hover{background:rgba(47,217,146,.12);border-color:var(--accent)}
+  button.icon-btn{width:36px;height:36px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none}
+  button.icon-btn svg{width:16px;height:16px}
+  button svg{display:block}
+  button:disabled{opacity:.35;cursor:not-allowed;transform:none!important}
+  button:disabled:hover{background:var(--surface-2);border-color:var(--line-strong)}
+  .canvas-toolbar{display:flex;align-items:center;gap:6px;margin-bottom:10px}
+  .canvas-toolbar .sep{width:1px;align-self:stretch;background:var(--line);margin:0 2px}
+  .roster-list{display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto;margin-bottom:8px}
+  .roster-chip{display:flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);font-size:12px;transition:border-color .15s var(--ease)}
+  .roster-chip:hover{border-color:var(--accent)}
+  .roster-chip:has(.rc-hit.primary){border-color:var(--accent);background:rgba(47,217,146,.14)}
+  .roster-chip .rc-hit{display:flex;align-items:center;gap:6px;flex:1;min-width:0;background:none;border:none;padding:0;cursor:pointer;color:var(--text);font:inherit;text-align:left}
+  .roster-chip .rc-hit:hover{background:none}
+  .roster-chip .rc-label{font-family:var(--font-mono);font-weight:600;color:var(--accent);min-width:22px}
+  .roster-chip .rc-role{flex:1;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .roster-chip .rc-del{width:20px;height:20px;padding:0;font-size:12px;line-height:1;border:none;background:transparent;color:var(--muted);flex:none}
+  .roster-chip .rc-del:hover{color:#ff8f85;background:transparent;border-color:transparent}
+  .roster-empty{color:var(--muted);font-size:11px;margin-bottom:8px}
+  .roster-add{display:flex;gap:4px}
+  .roster-add input:first-child{width:44px}
+  .roster-add input:last-child{flex:1;min-width:0}
+  input,select,textarea{font:inherit;border:1px solid var(--line-strong);border-radius:6px;padding:6px 8px;background:var(--surface-2);color:var(--text);transition:border-color .15s var(--ease)}
+  input::placeholder,textarea::placeholder{color:#5c6169}
+  input:hover,select:hover,textarea:hover{border-color:#767e86}
+  input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+  input[type=number]{width:64px;font-family:var(--font-mono)}
+  input[type=color]{background:var(--surface-2);cursor:pointer}
+  .workspace{display:flex;gap:10px;align-items:stretch;flex:1;min-height:0;margin-bottom:0}
+  .canvas-card,.panel,.form-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px}
+  .canvas-card{position:relative;flex:1;min-width:0;min-height:0;order:1;display:flex;flex-direction:column;gap:8px}
+  /* Le terrain absorbe la hauteur restante ; preserveAspectRatio s'occupe du
+     letterboxing, donc il reste centre quel que soit le format de la fenetre. */
+  .canvas-card>svg#pitch{flex:1;min-height:0;height:100%}
+  .canvas-card>.seqbar,.canvas-card>.playbar,.canvas-card>.tl-wrap,.canvas-card>.canvas-toolbar{flex:none}
+  /* Panneau d'inspection : flotte au-dessus du terrain (coin haut-gauche) au lieu
+     de reserver une colonne fixe en permanence — le terrain recupere toute la
+     largeur disponible ; le panneau n'apparait que quand un element est
+     selectionne (voir showInspector/hideInspectors dans editor.js). */
+  .inspector-col{position:absolute;top:12px;left:12px;z-index:15;width:238px;max-width:calc(100% - 24px);max-height:calc(100% - 24px);overflow-y:auto;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+  .inspector-col>*{pointer-events:auto}
+  .inspector-col::-webkit-scrollbar{width:6px}
+  .inspector-col::-webkit-scrollbar-thumb{background:#33383e;border-radius:8px}
+  .inspector-col{scrollbar-width:thin;scrollbar-color:#33383e transparent}
+  .inspector-drag-handle{display:flex;align-items:center;justify-content:center;height:16px;cursor:grab;color:var(--muted);background:var(--surface-2);border:1px solid var(--line-strong);border-radius:8px;box-shadow:var(--shadow-md);touch-action:none}
+  .inspector-drag-handle:hover{color:var(--text)}
+  .inspector-drag-handle svg{width:14px;height:14px;flex:none}
+  .inspector-drag-handle.dragging{cursor:grabbing;color:var(--accent)}
+  .toolrail{flex:none;width:64px;display:flex;flex-direction:column;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:10px 8px;order:2}
+  .toolrail>.rail-btn,.tool-item>.rail-btn{width:44px;height:44px;padding:0;display:flex;align-items:center;justify-content:center}
+  .toolrail .rail-btn svg{width:22px;height:22px;overflow:visible}
+  .rail-sep{height:1px;background:var(--line);margin:2px 0}
+  .tool-item{position:relative}
+  .flyout{position:absolute;right:100%;top:0;margin-right:8px;width:190px;max-height:calc(100vh - 40px);overflow-y:auto;background:var(--surface-2);border:1px solid var(--line-strong);border-radius:8px;padding:10px;box-shadow:0 12px 28px rgba(0,0,0,.45);z-index:30}
+  .tool-item.top-bar .flyout{right:auto;left:0;top:100%;margin-right:0;margin-top:8px}
+  /* Variante pour un declencheur dans la barre du bas (.io) : ouvrir vers le
+     bas comme .top-bar n'a pas de place, la barre est deja collee au bord
+     inferieur de l'ecran (cf #exportSettingsToggle, remonte par Robin :
+     le menu s'ouvrait hors-ecran, illisible et impossible a modifier). */
+  .tool-item.bottom-bar .flyout{right:0;left:auto;top:auto;bottom:100%;margin-right:0;margin-top:0;margin-bottom:8px}
+  @keyframes popIn{from{opacity:0;transform:translateY(-4px) scale(.98)}to{opacity:1;transform:none}}
+  .flyout:not(.hidden){animation:popIn .14s var(--ease)}
+  .inspector:not(.hidden){animation:popIn .14s var(--ease)}
+  .flyout h4{margin:0 0 8px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-family:var(--font-mono)}
+  .flyout .row{display:flex;gap:6px;margin-bottom:6px;align-items:center}
+  .flyout select{flex:1;min-width:0}
+  .flyout input[type=range]{flex:1;min-width:0;width:0;accent-color:var(--accent)}
+  .flyout input[type=file]{max-width:100%}
+  .seance-model{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:4px 12px 12px;margin-bottom:14px}
+  .seance-model>summary{cursor:pointer;font-size:13px;font-weight:600;padding:10px 2px;list-style:none;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
+  .seance-model>summary::-webkit-details-marker{display:none}
+  .seance-model>summary::before{content:"▸";display:inline-block;margin-right:6px;transition:transform .15s var(--ease);color:var(--accent)}
+  .seance-model[open]>summary::before{transform:rotate(90deg)}
+  .seance-model .form-card,.seance-model .panel{border:none;padding:10px 0 0;margin:0}
+  svg#pitch{width:100%;height:auto;display:block;border-radius:6px;touch-action:none;user-select:none}
+  /* Panneau calques : flotte au-dessus du terrain, cote oppose a l'inspecteur. */
+  /* Sélecteurs visuels du terrain (revêtement, lignes) : on choisit un rendu en
+     le voyant, pas en lisant une liste déroulante. */
+  .pitch-section{margin:10px 0 4px;font-size:10px;color:var(--muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.05em}
+  .thumb-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .thumb{padding:0;border:1px solid var(--line-strong);border-radius:6px;overflow:hidden;background:var(--surface);cursor:pointer;display:block;line-height:0}
+  .thumb:hover{border-color:#70787f}
+  .thumb.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+  .thumb svg{width:100%;height:auto;display:block}
+  .thumb-label{display:block;font-size:9px;color:var(--muted);text-align:center;padding:2px 1px 3px;line-height:1.2;font-family:var(--font-sans)}
+  .thumb.active .thumb-label{color:var(--text)}
+  /* Materiel : fond sombre pour que le blanc du mini-but et de l'echelle
+     ressorte, comme sur le terrain. */
+  .equip-grid .thumb{background:#1a1d16}
+  .equip-grid .thumb:hover{border-color:var(--accent)}
+  .layers-panel{position:absolute;top:12px;right:12px;z-index:16;width:250px;max-height:calc(100% - 24px);display:flex;flex-direction:column;background:var(--surface-2);border:1px solid var(--line-strong);border-radius:8px;padding:10px;box-shadow:var(--shadow-lg)}
+  .layers-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .layers-head .icon-btn{width:24px;height:24px}
+  .layers-list{display:flex;flex-direction:column;gap:4px;overflow-y:auto;min-height:0}
+  .layer-row{display:flex;align-items:center;gap:6px;padding:3px 4px;border:1px solid transparent;border-radius:6px}
+  .layer-row:hover{background:rgba(255,255,255,.04)}
+  .layer-row.active{border-color:var(--accent);background:rgba(47,217,146,.12)}
+  .layer-swatch{width:10px;height:10px;border-radius:3px;flex:none;box-shadow:0 0 0 1px rgba(0,0,0,.4)}
+  .layer-name{flex:1;min-width:0;display:flex;align-items:baseline;gap:6px;background:none;border:none;padding:0;color:var(--text);font:inherit;font-size:12px;text-align:left;cursor:pointer;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .layer-name:hover{background:none}
+  .layer-kind{font-size:10px;color:var(--muted);flex:none}
+  .icon-btn.layer-move{width:22px;height:22px;font-size:11px;line-height:1}
+  .seqbar{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap}
+  /* Barre unique sous le terrain : variante, lecture et séquence tenaient sur
+     trois rangées empilées, soit environ 230px pris au terrain. Les groupes
+     restent des blocs distincts (#simpleSeqbar doit pouvoir être masqué seul
+     en mode avancé) mais partagent une seule ligne, qui se replie aux petites
+     largeurs. */
+  .dock{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;flex:none;margin-top:10px}
+  .dock-group{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .dock>*+*{border-left:1px solid var(--line);padding-left:14px}
+  .dock>.seqbar{margin-top:0}
+  .dock #scrub{flex:1 1 140px;min-width:90px;accent-color:var(--accent)}
+  .dock-group:has(#scrub){flex:1 1 240px;min-width:170px}
+  .dock #stepLabel{margin:0}
+  .seqlabel{font-size:11px;color:var(--muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.03em}
+  .seq-steps{display:flex;gap:6px;flex-wrap:wrap}
+  .step-chip{padding:5px 10px;border:1px solid var(--line-strong);border-radius:6px;cursor:pointer;font-size:12px;font-family:var(--font-mono);background:var(--surface-2);transition:transform .12s var(--ease),background .15s var(--ease),border-color .15s var(--ease)}
+  .step-chip:hover{border-color:var(--accent);transform:translateY(-1px)}
+  .step-chip.active{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+  /* Timeline du mode avance (SPEC_TIMELINE_AVANCEE) : pistes groupees par type
+     d'objet, repliables, avec des clips positionnes/dimensionnes au prorata de
+     leur startMs/durationMs sur la largeur disponible. Glisser le corps d'un
+     clip decale son debut ; sa poignee droite change sa duree (Milestone 5). */
+  .tl-wrap{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;margin-top:10px}
+  .tl-toprow{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+  .tl-ruler{position:relative;height:18px;margin-left:150px;border-bottom:1px solid var(--line-strong);font-size:10px;color:var(--muted);font-family:var(--font-mono);cursor:pointer}
+  .tl-ruler span{position:absolute;top:0}
+  .tl-guide{position:absolute;top:0;bottom:0;width:1px;border-left:1px dashed var(--line-strong)}
+  .tl-cursor{position:absolute;top:0;bottom:0;width:0;border-left:2px solid var(--accent);pointer-events:none;z-index:4}
+  .tl-group{margin-top:4px}
+  .tl-grouphead{display:flex;align-items:center;height:28px;background:var(--surface-2);border-radius:6px;padding:0 8px;font-size:11px;color:var(--text);cursor:pointer;user-select:none}
+  .tl-grouphead:hover{border-color:var(--accent)}
+  .tl-grouphead .car{color:var(--muted);margin-right:6px;font-size:9px;flex:none}
+  .tl-grouphead .cnt{color:var(--muted);margin-left:4px}
+  .tl-mini{flex:1;height:12px;margin-left:130px;position:relative;background:var(--bg);border-radius:3px;overflow:hidden}
+  .tl-mini .blob{position:absolute;top:2px;height:8px;border-radius:2px;opacity:.85}
+  .tl-track{display:flex;align-items:center;height:30px;position:relative;border-top:1px solid var(--line);padding-left:14px}
+  .tl-label{width:136px;flex:none;font-size:11px;color:var(--text);padding-right:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tl-lane{flex:1;position:relative;height:100%}
+  .tl-clip{position:absolute;top:5px;height:20px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;color:var(--accent-ink);box-shadow:0 1px 3px rgba(0,0,0,.4);white-space:nowrap;overflow:hidden;padding:0 4px;cursor:grab;touch-action:none}
+  .tl-clip:active{cursor:grabbing}
+  .tl-clip-handle{position:absolute;top:0;right:0;bottom:0;width:6px;cursor:ew-resize;background:rgba(0,0,0,.18)}
+  .tl-clip-handle:hover{background:rgba(0,0,0,.32)}
+  .tl-clip-handle-left{position:absolute;top:0;left:0;bottom:0;width:6px;cursor:ew-resize;background:rgba(0,0,0,.18)}
+  .tl-clip-handle-left:hover{background:rgba(0,0,0,.32)}
+  .tl-clip.selected{outline:2px solid var(--sel,#ffd21f);outline-offset:1px}
+  .tl-lane{cursor:copy}
+  .tl-group-header{display:flex;align-items:center;gap:6px;padding:8px 14px 6px;cursor:pointer;user-select:none;border-top:1px solid var(--line)}
+  .tl-group-header:hover{background:rgba(255,255,255,.03)}
+  .tl-group-chevron{font-size:9px;color:var(--muted);width:8px;flex:none}
+  .tl-group-title{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim,#8b96a5)}
+  .tl-group-count{font-size:10px;color:var(--muted)}
+  .tl-track-summary .tl-lane{opacity:.8}
+  .tl-clip-mini{pointer-events:none}
+  .tl-clip-inspector{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--surface-2);border:1px solid var(--line-strong);border-radius:8px;padding:8px 10px;margin-bottom:8px}
+  .tl-num{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.03em}
+  .tl-num input{font-family:var(--font-mono)}
+  .variant-chip{display:flex;align-items:center;gap:6px;padding:5px 6px 5px 10px}
+  .variant-chip input{background:transparent;border:none;color:inherit;font:inherit;padding:0;width:auto;min-width:40px}
+  .variant-chip.active input{color:var(--accent-ink)}
+  .variant-chip .vc-del{width:16px;height:16px;padding:0;line-height:1;font-size:11px;border:none;background:transparent;color:inherit;opacity:.6;flex:none}
+  .variant-chip .vc-del:hover{opacity:1;background:transparent}
+  .playbar{display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap}
+  .playbar input[type=range]{flex:1;min-width:80px;accent-color:var(--accent)}
+  .panel h3{font-size:12px;margin:0 0 8px;font-weight:600;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
+  .panel .filters{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+  .panel .filters button{padding:3px 8px;font-size:12px}
+  .panel .filters button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+  #leversPanel{max-height:520px;overflow-y:auto;padding-right:6px;overscroll-behavior:contain}
+  #leversPanel::-webkit-scrollbar{width:8px}
+  #leversPanel::-webkit-scrollbar-thumb{background:#33383e;border-radius:8px}
+  #leversPanel::-webkit-scrollbar-thumb:hover{background:#454b52}
+  #leversPanel::-webkit-scrollbar-track{background:transparent}
+  #leversPanel{scrollbar-width:thin;scrollbar-color:#33383e transparent}
+  .lever{border:1px solid var(--line);border-radius:6px;padding:8px;margin-bottom:6px;font-size:12px;cursor:pointer;background:var(--surface);transition:border-color .15s var(--ease),background .15s var(--ease),transform .12s var(--ease)}
+  .lever:hover{border-color:var(--accent);background:var(--surface-2);transform:translateX(2px)}
+  .lever .meca{font-weight:500}
+  .lever .induit{color:var(--muted);margin-top:2px}
+  .lever .tag{display:inline-block;font-size:10px;padding:1px 6px;border-radius:10px;background:var(--surface-2);color:var(--muted);margin-bottom:4px;font-family:var(--font-mono)}
+  .lever .tag.defensive{background:#3a1f1f;color:#ff9d8f}
+  .lever .tag.offensive{background:#182333;color:#8ec2ff}
+  .inspector{background:var(--surface-2);border:1px solid var(--line-strong);border-radius:var(--radius-lg);padding:12px;font-size:12px;box-shadow:var(--shadow-lg)}
+  .ctx-menu{position:fixed;z-index:200;background:var(--surface-2);border:1px solid var(--line-strong);border-radius:8px;padding:4px;box-shadow:var(--shadow-lg);display:flex;flex-direction:column;min-width:220px;animation:popIn .12s var(--ease)}
+  .ctx-menu button{background:transparent;border:none;text-align:left;padding:8px 10px;border-radius:6px;font-size:12px;color:var(--text);cursor:pointer;white-space:nowrap}
+  .ctx-menu button:hover{background:var(--surface)}
+  .inspector .row{display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+  .inspector input[type=color]{width:32px;padding:2px;height:26px}
+  .inspector input[type=range]{flex:1;min-width:70px;accent-color:var(--accent)}
+  .inspector .swatch-label{color:var(--muted);min-width:52px}
+  .form-card{margin-bottom:14px}
+  .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+  .field{display:flex;flex-direction:column;gap:3px}
+  .field label{font-size:11px;color:var(--muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.03em}
+  .field input,.field select,.field textarea{width:100%}
+  .lists{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+  .list-block h4{font-size:12px;margin:0 0 6px;font-weight:600;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
+  .list-row{display:flex;gap:6px;margin-bottom:5px}
+  .list-row input{flex:1}
+  .meca-row{display:grid;grid-template-columns:1fr 1fr auto;gap:6px;margin-bottom:5px}
+  .io{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px;margin-bottom:14px}
+  .io .btns{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .io-sep{width:1px;align-self:stretch;background:var(--line);margin:0 2px}
+  /* Pas de overflow:hidden ici : le menu deroulant des reglages d'export est
+     imbrique dans le dernier item du groupe et serait rogne par le clip. Les
+     coins arrondis sont donc poses directement sur le 1er/dernier bouton
+     plutot que sur le conteneur. */
+  .btn-group{display:flex;gap:0;border:1px solid var(--line-strong);border-radius:6px}
+  .btn-group button,.btn-group .tool-item{border-radius:0}
+  .btn-group>button,.btn-group>.tool-item>button{border:none;border-right:1px solid var(--line-strong)}
+  .btn-group>*:last-child,.btn-group>.tool-item:last-child>button{border-right:none}
+  .btn-group>*:first-child,.btn-group>.tool-item:first-child>button{border-top-left-radius:5px;border-bottom-left-radius:5px}
+  .btn-group>*:last-child,.btn-group>.tool-item:last-child>button{border-top-right-radius:5px;border-bottom-right-radius:5px}
+  #jsonAdvanced{margin-bottom:30px}
+  button:has(svg){display:inline-flex;align-items:center;gap:6px}
+  button svg{width:14px;height:14px;flex:none}
+  textarea#json{width:100%;height:120px;font-family:var(--font-mono);font-size:12px}
+  .status{font-size:12px;margin-left:8px;font-family:var(--font-mono)}
+  .status.ok{color:var(--accent)} .status.err{color:var(--danger)}
+  .hint{font-size:12px;color:var(--muted);margin:2px 0 10px}
+  /* Aide : le meme texte qu'avant, mais a la demande. En permanence dans le flux
+     il coutait un cinquieme de la hauteur d'ecran pour une information qu'on lit
+     une fois. */
+  .help-pop{position:relative}
+  .help-pop>summary{list-style:none;width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;background:var(--surface-2);border:1px solid var(--line-strong);border-radius:6px;cursor:pointer;font-weight:600;color:var(--muted)}
+  .help-pop>summary::-webkit-details-marker{display:none}
+  .help-pop>summary:hover{color:var(--text);border-color:#70787f}
+  .help-pop[open]>summary{color:var(--accent);border-color:var(--accent)}
+  .help-pop .help-body{position:absolute;top:calc(100% + 8px);left:0;z-index:40;width:420px;max-width:70vw;background:var(--surface-2);border:1px solid var(--line-strong);border-radius:8px;padding:12px;box-shadow:var(--shadow-lg)}
+  .help-pop .help-body .hint{margin:0}
+  .help-pop.up .help-body{top:auto;bottom:calc(100% + 8px)}
+  /* Tiroir : tout ce qui n'est pas l'edition du procede lui-meme. Ouvert par un
+     <details> natif. Le panneau, en position fixed, recouvre son propre
+     <summary> (meme coin haut-droit) : sans bouton de fermeture dedie, le
+     tiroir ouvert devient impossible a refermer au clic (cf layersClose, meme
+     probleme deja resolu pour le panneau des calques). */
+  .drawer{margin-left:auto}
+  .drawer>summary{list-style:none;font-size:13px;color:var(--muted);cursor:pointer;padding:6px 10px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2)}
+  .drawer>summary::-webkit-details-marker{display:none}
+  .drawer>summary:hover{color:var(--text);border-color:#70787f}
+  .drawer[open]>summary{color:var(--accent);border-color:var(--accent)}
+  .drawer-panel{position:fixed;top:0;right:0;bottom:0;width:min(460px,92vw);z-index:60;background:var(--surface);border-left:1px solid var(--line);box-shadow:var(--shadow-lg);padding:16px;overflow-y:auto}
+  .drawer-panel .drawer-head{display:flex;align-items:center;justify-content:space-between;margin:0 0 12px}
+  .drawer-panel>h2{font-size:13px;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 12px}
+  .drawer-panel .drawer-head>h2{margin:0}
+
+  /* Panneau de modification au clic droit : mêmes réglages que l'inspecteur,
+     mais posés sous le curseur, là où on vient de cliquer. */
+  .edit-pop{position:fixed;z-index:90;width:268px;max-height:calc(100vh - 24px);overflow-y:auto;background:var(--surface-2);border:1px solid var(--line-strong);border-radius:10px;box-shadow:0 18px 40px rgba(0,0,0,.55)}
+  .edit-pop h3{margin:0;padding:12px 14px 10px;font-size:14px;font-weight:600;border-bottom:1px solid var(--line)}
+  /* Le titre sert de poignee : le panneau se pose ou on clique, ce qui cache
+     parfois la vue qu'on voulait justement regarder. */
+  .edit-pop h3.ep-drag-handle{cursor:grab;user-select:none;touch-action:none}
+  .edit-pop h3.ep-drag-handle.dragging{cursor:grabbing;background:var(--surface)}
+  .edit-pop h3.ep-title-row{display:flex;align-items:center;gap:8px;overflow:hidden}
+  /* Bouton verrou : dans le titre, pousse a droite par margin-left:auto — le
+     titre lui-meme est un simple noeud texte, pas un element, donc pas
+     cible-able par un selecteur CSS pour porter le flex:1. */
+  .ep-lock-toggle{flex:none;margin-left:auto;width:26px;height:26px;padding:0;display:flex;align-items:center;justify-content:center;color:var(--muted);cursor:pointer}
+  .ep-lock-toggle:hover{color:var(--text)}
+  .ep-lock-toggle.on{color:#e0a021;border-color:#e0a021;background:rgba(224,160,33,.14)}
+  .ep-sect{border-bottom:1px solid var(--line);padding:9px 14px 11px}
+  .ep-sect:last-of-type{border-bottom:none}
+  .ep-sect h4{margin:0 0 8px;font-size:12px;font-weight:600;color:var(--text)}
+  .ep-row{display:flex;align-items:center;gap:9px;min-height:30px}
+  /* Rangee dont le contenu peut passer sur plusieurs lignes (icones du
+     porteur du ballon) : le libelle s'aligne en haut plutot qu'au centre du
+     bloc entier. */
+  .ep-row:has(.ep-icon-row){align-items:flex-start}
+  .ep-row:has(.ep-icon-row)>.ep-lab{padding-top:6px}
+  .ep-row+.ep-row{margin-top:5px}
+  .ep-row>label,.ep-row>.ep-lab{flex:none;width:74px;font-size:12px;color:var(--muted)}
+  .ep-row>input[type=range]{flex:1;min-width:0}
+  .ep-row>select{flex:1;min-width:0}
+  .ep-num{width:44px;text-align:center;padding:4px 2px;font-size:12px}
+  .ep-seg{display:flex;gap:6px;flex:1}
+  .ep-seg button{flex:1;display:flex;align-items:center;justify-content:center;height:30px;padding:0}
+  .ep-seg button.on{border-color:var(--accent);background:rgba(47,217,146,.16);color:var(--accent)}
+  /* Choix par icone (style de trait, remplissage, tete de fleche, type de
+     fleche, porteur du ballon, forme du jeton) : remplace les menus deroulants
+     textuels partout ou une image dit la meme chose qu'un mot. */
+  .ep-icon-row{display:flex;gap:6px;flex:1;flex-wrap:wrap}
+  .ep-icon-btn{flex:0 0 auto;min-width:34px;height:32px;padding:0 5px;display:flex;align-items:center;justify-content:center;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface);cursor:pointer}
+  .ep-icon-btn:hover{border-color:#70787f}
+  .ep-icon-btn.on{border-color:var(--accent);background:rgba(47,217,146,.16)}
+  .ep-icon-btn svg{display:block;pointer-events:none}
+  /* Interrupteur : un <button> plutot qu'une case, pour la meme cible tactile
+     que la reference et un etat lisible de loin. */
+  .ep-sw{margin-left:auto;width:38px;height:21px;padding:0;border-radius:999px;background:var(--surface);border:1px solid var(--line-strong);position:relative;flex:none}
+  .ep-sw::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:var(--muted);transition:left .15s var(--ease),background .15s var(--ease)}
+  .ep-sw[aria-pressed="true"]{background:var(--accent);border-color:var(--accent)}
+  .ep-sw[aria-pressed="true"]::after{left:20px;background:var(--accent-ink)}
+  .ep-foot{padding:10px 14px 12px;border-top:1px solid var(--line)}
+  /* Selecteurs limites aux enfants DIRECTS de .ep-foot : une version large
+     (descendant "button+button") attrapait aussi Copier/Couper, cote a cote
+     dans leur propre rangee, et leur donnait un margin-top involontaire —
+     d'ou le desalignement vertical signale par Robin. */
+  .ep-foot>button{width:100%}
+  .ep-foot>*+*{margin-top:8px}
+
+  /* Identite d'equipe : un bloc par equipe dans le flyout du rail. */
+  .team-block{border:1px solid var(--line);border-radius:6px;padding:7px 8px;margin-bottom:8px;background:rgba(255,255,255,.02)}
+  .team-head{display:flex;align-items:center;gap:7px;margin-bottom:6px}
+  .team-head input{flex:1;min-width:0;font-size:12px;font-weight:600;padding:3px 6px}
+  .team-swatch{width:14px;height:14px;border-radius:50%;flex:none;border:1.5px solid rgba(255,255,255,.85);box-shadow:0 0 0 1px rgba(0,0,0,.4)}
+
+  /* Bibliotheque : ecran plein qui recouvre l'editeur. Pas une page separee,
+     pour garder le one-pager et l'etat de l'editeur intact derriere. */
+  .lib-overlay{position:fixed;inset:0;z-index:80;background:var(--bg);display:flex;flex-direction:column}
+  .lib-top{flex:none;display:flex;align-items:center;gap:12px;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--surface)}
+  .lib-top h2{margin:0;font-size:16px;font-weight:600;letter-spacing:-.01em}
+  .lib-top .lib-count{font-size:12px;color:var(--muted);font-family:var(--font-mono)}
+  .lib-search{margin-left:auto;width:min(260px,32vw)}
+  .lib-filters{flex:none;display:flex;align-items:center;gap:6px;padding:10px 22px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .lib-chip{font-size:12px;padding:4px 11px;border-radius:999px;background:transparent;border:1px solid var(--line-strong);color:var(--muted)}
+  .lib-chip:hover{color:var(--text);border-color:#70787f}
+  .lib-chip.active{background:rgba(47,217,146,.14);border-color:var(--accent);color:var(--accent)}
+  .lib-body{flex:1;min-height:0;display:flex}
+  .lib-main{flex:1;min-width:0;overflow-y:auto;padding:18px 22px 28px}
+  .lib-side{flex:none;width:186px;border-right:1px solid var(--line);padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
+  .lib-side-head{font-size:11px;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding:0 6px 6px}
+  .lib-folders{display:flex;flex-direction:column;gap:2px}
+  .lib-folder{display:flex;align-items:center;gap:5px;border-radius:6px;padding:0 4px 0 8px;color:var(--muted);font-size:12px;cursor:pointer;border:1px solid transparent;background:transparent;text-align:left;min-height:28px}
+  .lib-folder:hover{background:var(--surface);color:var(--text)}
+  .lib-folder.active{background:rgba(47,217,146,.13);border-color:var(--accent);color:var(--accent)}
+  .lib-folder .fname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lib-folder .fcount{font-family:var(--font-mono);font-size:10px;opacity:.75}
+  .lib-folder .fbtn{opacity:0;width:18px;height:18px;padding:0;font-size:11px;line-height:1;border:none;background:transparent;color:inherit;flex:none}
+  .lib-folder:hover .fbtn{opacity:.7}
+  .lib-folder .fbtn:hover{opacity:1;background:transparent}
+  .lib-folder-add{margin-top:8px;font-size:12px;padding:5px 8px;border-style:dashed;color:var(--muted)}
+  .lib-folder-add:hover{color:var(--accent);border-color:var(--accent)}
+  .lib-card-folder{width:100%;font-size:11px;padding:3px 5px;margin-top:5px}
+  .lib-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:14px}
+  .lib-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;transition:border-color .15s var(--ease),transform .1s var(--ease)}
+  .lib-card:hover{border-color:var(--line-strong);transform:translateY(-1px)}
+  .lib-card.current{border-color:var(--accent)}
+  .lib-thumb{display:block;width:100%;padding:0;border:none;border-bottom:1px solid var(--line);background:#0b0d0f;cursor:pointer;line-height:0;border-radius:0}
+  .lib-thumb:hover{background:#0b0d0f;border-color:var(--line)}
+  .lib-thumb svg{width:100%;height:auto;display:block}
+  .lib-thumb .lib-thumb-na{display:block;padding:34px 0;color:var(--muted);font-size:11px;line-height:1.4;text-align:center}
+  .lib-meta{padding:9px 11px 10px;display:flex;flex-direction:column;gap:3px;flex:1}
+  .lib-title{font-size:13px;font-weight:600;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lib-sub{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lib-badge{display:block;max-width:100%;font-size:10px;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.04em;color:var(--muted);border:1px solid var(--line-strong);border-radius:4px;padding:0 5px;align-self:flex-start;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lib-actions{display:flex;gap:4px;padding:0 9px 9px}
+  .lib-actions button{flex:none;padding:4px 8px;font-size:11px}
+  .lib-actions button.open{flex:1}
+  .lib-new{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:190px;border:1px dashed var(--line-strong);border-radius:var(--radius);background:transparent;color:var(--muted);font-size:13px}
+  .lib-new:hover{border-color:var(--accent);color:var(--accent);background:rgba(47,217,146,.06)}
+  .lib-empty{color:var(--muted);font-size:13px;padding:40px 0;text-align:center}
+
+  @media (max-width:900px){
+    .workspace{flex-direction:column}
+    .canvas-card{order:0;width:100%}
+    .toolrail{order:1;width:100%;flex-direction:row;flex-wrap:wrap}
+    .toolrail>.rail-btn,.tool-item>.rail-btn{width:44px;height:44px}
+    .rail-sep{width:1px;height:auto;align-self:stretch;margin:0 2px}
+    .flyout{right:auto;left:0;top:100%;margin-right:0;margin-top:8px}
+    .lists{grid-template-columns:1fr}
+  }
+  @media (max-width:480px){
+    body{font-size:15px}
+  }
+</style>
+</head>
+<body>
+<header>
+  <span class="mark" aria-hidden="true"></span>
+  <h1>Éditeur de procédés</h1>
+  <span class="sub">FutsalHub · prototype de conception sans IA — chaque procédé alimente la bibliothèque</span>
+  <button id="libOpenBtn" style="margin-left:auto" title="Bibliothèque des procédés enregistrés (L)"><svg viewBox="0 0 20 20" width="14" height="14" style="vertical-align:-2px"><rect x="3" y="4" width="4" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="1.4" /><rect x="8.5" y="4" width="4" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M14.4 5.2l2.4.7-2.6 9.6-2.4-.7z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg> Bibliothèque</button>
+  <a class="navlink" href="seance.html" style="margin-left:0">Assembleur de séances →</a>
+  <details class="drawer" id="seanceDrawer" style="margin-left:0">
+    <summary>Séance &amp; données</summary>
+    <div class="drawer-panel">
+      <div class="drawer-head">
+        <h2>Séance &amp; données</h2>
+        <button type="button" class="icon-btn" id="drawerClose" title="Fermer" aria-label="Fermer">✕</button>
+      </div>
+    <details class="seance-model" open>
+      <summary>Modélisation de séance</summary>
+      <div class="form-card">
+        <div class="form-grid">
+          <div class="field"><label>Terrain (m)</label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input type="number" id="pitchLen" value="40" min="10" max="42" title="Longueur (m)" style="width:56px" />
+              <span>×</span>
+              <input type="number" id="pitchWid" value="20" min="10" max="25" title="Largeur (m)" style="width:56px" />
+              <select id="pitchMark" title="Marquages">
+                <option value="minimal">minimal</option>
+                <option value="full" selected>terrain complet</option>
+              </select>
+            </div>
+          </div>
+          <div class="field"><label>Catégorie</label><select id="mCategory"><option value="entrainement" selected>Procédé d'entraînement</option><option value="cpa">CPA</option><option value="animation">Animation</option></select></div>
+          <div class="field" id="mSubcategoryField"><label>Sous-catégorie</label><select id="mSubcategory"></select></div>
+          <div class="field"><label>Titre</label><input id="mTitle" placeholder="Ex: Forcer le pressing..." /></div>
+          <div class="field"><label>Thème</label><input id="mTheme" placeholder="Ex: Sortie de pression" /></div>
+          <div class="field" id="fieldPhaseCible"><label>Phase de jeu à faire émerger</label><input id="mPhaseCible" placeholder="Ex: sortie de pression sous pression haute" /></div>
+          <div class="field" id="fieldObjectif"><label>Objectif</label><input id="mObjectif" placeholder="Ce que l'exercice doit produire" /></div>
+          <div class="field" id="fieldNbJoueurs"><label>Nb joueurs</label><input type="number" id="mNbJoueurs" value="8" min="1" /></div>
+          <div class="field" id="fieldDuree"><label>Durée (min)</label><input type="number" id="mDuree" value="20" min="1" /></div>
+          <div class="field" id="fieldIntensite"><label>Intensité</label><select id="mIntensite"><option>faible</option><option>moderee</option><option selected>elevee</option></select></div>
+          <div class="field" id="fieldFormeJouee"><label>Type</label><select id="mFormeJouee"><option value="true" selected>forme jouée</option><option value="false">exercice analytique</option></select></div>
+        </div>
+  
+        <div class="lists" id="listsBlock">
+          <div class="list-block"><h4>Scoring</h4><div id="scoringList"></div><button data-addlist="scoring">+ règle de score</button></div>
+          <div class="list-block"><h4>Comportements attendus</h4><div id="comportementsList"></div><button data-addlist="comportements">+ comportement</button></div>
+          <div class="list-block" style="grid-column:1/3"><h4>Mécanismes inducteurs (règle → ce que ça induit)</h4><div id="mecanismesList"></div><button data-addmeca>+ mécanisme</button></div>
+          <div class="list-block"><h4>Variables + (complexifier)</h4><div id="varPlusList"></div><button data-addlist="varPlus">+ variable</button></div>
+          <div class="list-block"><h4>Variables − (simplifier)</h4><div id="varMinusList"></div><button data-addlist="varMinus">+ variable</button></div>
+        </div>
+      </div>
+  
+      <div class="panel" style="margin-top:14px" id="leversPanelWrap">
+        <h3>Tes leviers tactiques</h3>
+        <div class="filters" id="leverFilters">
+          <button data-ph="all" class="on">Tous</button>
+          <button data-ph="offensive">Offensif</button>
+          <button data-ph="defensive">Défensif</button>
+        </div>
+        <div class="hint">Clique un levier pour l'ajouter aux mécanismes.</div>
+        <div id="leversPanel"></div>
+      </div>
+    </details>
+    <details class="seance-model" id="jsonAdvanced">
+      <summary>Avancé — JSON</summary>
+      <div class="btns" style="margin-bottom:8px">
+        <button class="primary" id="exportBtn">Exporter JSON</button>
+        <button id="copyBtn">Copier</button>
+        <button id="importBtn">Importer depuis le JSON ci-dessous</button>
+        <button id="loadExample">Charger un exemple</button>
+      </div>
+      <textarea id="json" placeholder="Le JSON du procédé apparaît ici. Colle un JSON puis 'Importer' pour l'éditer."></textarea>
+    </details>
+    </div>
+  </details>
+</header>
+
+<div class="wrap">
+  <div class="workspace">
+    <div class="canvas-card">
+    <div class="inspector-col" id="inspectorCol">
+      <div class="inspector-drag-handle hidden" id="inspectorDragHandle" title="Glisser pour déplacer le panneau" aria-label="Déplacer le panneau"><svg viewBox="0 0 20 6"><circle cx="4" cy="3" r="1.3" fill="currentColor" /><circle cx="10" cy="3" r="1.3" fill="currentColor" /><circle cx="16" cy="3" r="1.3" fill="currentColor" /></svg></div>
+      <div class="inspector hidden" id="inspector">
+        <div class="row"><strong>Élément sélectionné</strong></div>
+        <div class="row"><label>Label</label><input id="selLabel" maxlength="4" style="width:56px" /><label>Rôle</label><input id="selRole" placeholder="ex: pivot" style="width:90px" /></div>
+        <div class="row" id="selStyleRow" style="display:none">
+          <span class="swatch-label">Couleur</span><input type="color" id="selColor" /><button id="selColorReset" title="Revenir à la couleur d'équipe">Défaut</button>
+        </div>
+        <div class="row" id="selStyleRow2" style="display:none">
+          <span class="swatch-label">Taille</span><input type="range" id="selSize" min="0.7" max="1.6" step="0.1" value="0.9" /><span id="selSizeVal" style="min-width:28px">0.9×</span>
+        </div>
+        <div class="row" id="selStyleRow3" style="display:none">
+          <span class="swatch-label">Forme</span>
+          <select id="selShape"><option value="circle">rond</option><option value="square">carré</option><option value="triangle">triangle</option><option value="diamond">losange</option><option value="body">corps orienté</option></select>
+        </div>
+        <div class="row" id="selCurveRow" style="display:none">
+          <button id="selCurve" title="Lisse la trajectoire de ce point à travers toutes ses images clés (Catmull-Rom)" aria-pressed="false">Courbe lissée</button>
+        </div>
+        <div class="row" id="selArrowWidthRow" style="display:none" title="Épaisseur de la flèche de mouvement qui part de cette étape">
+          <span class="swatch-label">Épaisseur flèche</span><input type="range" id="selArrowWidth" min="1" max="7" step="0.5" value="2" /><span id="selArrowWidthVal" style="min-width:28px">2.0</span>
+        </div>
+        <div class="row" id="selAerialRow" style="display:none" title="Le ballon quitte le sol sur cette passe : effet de hauteur a la lecture/export, flèche a double trait">
+          <button id="selAerial" aria-pressed="false">Passe en l'air</button>
+        </div>
+        <div class="row" id="ballCarrierRow" style="display:none"><label>Ballon porté par</label><select id="ballCarrier"></select></div>
+        <div class="row"><button class="danger" id="delEntity">Supprimer</button></div>
+      </div>
+      <div class="inspector hidden" id="zoneInspector">
+        <div class="row"><strong>Zone sélectionnée</strong> <span id="zoneDims" style="color:var(--muted)"></span></div>
+        <div class="row"><label>Nom</label><input id="zoneLabel" placeholder="ex: Zone de finition" style="width:150px" />
+          <label>Type</label><select id="zoneKind"><option value="area">zone</option><option value="target">cible</option><option value="corridor">couloir</option><option value="neutral">neutre</option></select></div>
+        <div class="row"><label>Couleur</label><input type="color" id="zoneColor" value="#ffffff" style="width:44px;padding:2px;height:30px" /><button id="zoneColorReset">Défaut</button></div>
+        <div class="row"><span class="swatch-label">Contour</span>
+          <select id="zoneStroke" style="flex:1"><option value="dash">pointillé</option><option value="solid">continu</option></select>
+        </div>
+        <div class="row"><span class="swatch-label">Épaisseur</span><input type="range" id="zoneStrokeWidth" min="0.5" max="6" step="0.5" value="1.5" style="flex:1" /><span id="zoneStrokeWidthVal" style="min-width:28px">1.5</span></div>
+        <div class="row"><span class="swatch-label">Remplissage</span>
+          <select id="zoneFill" style="flex:1"><option value="solid">plein</option><option value="hatch">hachuré</option><option value="none">aucun</option></select>
+        </div>
+        <div class="row" id="zoneFillOpacityRow"><span class="swatch-label">Opacité</span><input type="range" id="zoneFillOpacity" min="0" max="1" step="0.02" value="0.28" style="flex:1" /><span id="zoneFillOpacityVal" style="min-width:28px">0.28</span></div>
+        <div class="row"><button class="danger" id="delZone" style="width:100%">Supprimer</button></div>
+      </div>
+      <div class="inspector hidden" id="arrowInspector">
+        <div class="row"><strong>Flèche sélectionnée</strong></div>
+        <div class="row"><label>Type</label><select id="arrowType"><option value="pass">passe</option><option value="run">course</option><option value="dribble">conduite</option><option value="shot">tir</option></select>
+          <label>Label</label><input id="arrowLabel" placeholder="ex: passe dans le dos" style="width:150px" /></div>
+        <div class="row"><span class="swatch-label">Épaisseur</span><input type="range" id="arrowWidth" min="1" max="7" step="0.5" value="2" /><span id="arrowWidthVal" style="min-width:28px">2.0</span></div>
+        <div class="row"><button class="danger" id="delArrow">Supprimer la flèche</button></div>
+      </div>
+      <div class="inspector hidden" id="lineInspector">
+        <div class="row"><strong>Trait sélectionné</strong></div>
+        <div class="row"><span class="swatch-label">Couleur</span><input type="color" id="lineColor" value="#ffffff" /></div>
+        <div class="row"><span class="swatch-label">Épaisseur</span><input type="range" id="lineWidth" min="1" max="7" step="0.5" value="2" /><span id="lineWidthVal" style="min-width:28px">2.0</span></div>
+        <div class="row"><label><input type="checkbox" id="lineDash" /> Pointillé</label>
+          <label title="Fleche a double trait, meme convention que la passe en l'air"><input type="checkbox" id="lineAerial" /> En l'air</label>
+        </div>
+        <div class="row"><span class="swatch-label">Tête</span>
+          <select id="lineHead"><option value="none">aucune</option><option value="arrow">flèche</option><option value="bar">barre (bloc)</option></select>
+        </div>
+        <div class="row" style="color:var(--muted);font-size:11px">Glisse les carrés pour les extrémités, le rond pour courber.</div>
+        <div class="row"><button class="danger" id="delLine">Supprimer</button></div>
+      </div>
+      <div class="inspector hidden" id="textInspector">
+        <div class="row"><strong>Texte sélectionné</strong></div>
+        <div class="row"><textarea id="textContent" placeholder="Ton texte (Entrée = retour à la ligne)" rows="2" style="width:100%;resize:vertical"></textarea></div>
+        <div class="row"><span class="swatch-label">Couleur</span><input type="color" id="textColor" value="#ffffff" /></div>
+        <div class="row"><span class="swatch-label">Taille</span><input type="range" id="textSize" min="8" max="28" step="1" value="13" /><span id="textSizeVal" style="min-width:32px">13px</span></div>
+        <div class="row"><label><input type="checkbox" id="textOutline" checked /> Contour</label></div>
+        <div class="row">
+          <span class="swatch-label">Aligner</span>
+          <button class="icon-btn" id="textAlignLeft" title="Aligné à gauche" aria-label="Aligné à gauche" aria-pressed="false"><svg viewBox="0 0 20 20"><line x1="3" y1="5" x2="17" y2="5" stroke="currentColor" stroke-width="2" stroke-linecap="round" /><line x1="3" y1="10" x2="12" y2="10" stroke="currentColor" stroke-width="2" stroke-linecap="round" /><line x1="3" y1="15" x2="15" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg></button>
+          <button class="icon-btn" id="textAlignCenter" title="Centré" aria-label="Centré" aria-pressed="true"><svg viewBox="0 0 20 20"><line x1="3" y1="5" x2="17" y2="5" stroke="currentColor" stroke-width="2" stroke-linecap="round" /><line x1="5" y1="10" x2="15" y2="10" stroke="currentColor" stroke-width="2" stroke-linecap="round" /><line x1="4" y1="15" x2="16" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg></button>
+          <button class="icon-btn" id="textAlignRight" title="Aligné à droite" aria-label="Aligné à droite" aria-pressed="false"><svg viewBox="0 0 20 20"><line x1="3" y1="5" x2="17" y2="5" stroke="currentColor" stroke-width="2" stroke-linecap="round" /><line x1="8" y1="10" x2="17" y2="10" stroke="currentColor" stroke-width="2" stroke-linecap="round" /><line x1="5" y1="15" x2="17" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg></button>
+          <button class="icon-btn" id="textBold" title="Gras" aria-label="Gras" aria-pressed="true" style="font-weight:700">G</button>
+        </div>
+        <div class="row" style="color:var(--muted);font-size:11px">Glisse le texte pour le déplacer.</div>
+        <div class="row"><button class="danger" id="delText">Supprimer</button></div>
+      </div>
+      <div class="inspector hidden" id="pulseInspector">
+        <div class="row"><strong>Pulse sélectionné</strong></div>
+        <div class="row"><span class="swatch-label">Couleur</span><input type="color" id="pulseColor" value="#ff3b30" /></div>
+        <div class="row"><span class="swatch-label">Taille</span><input type="range" id="pulseSize" min="0.6" max="2.5" step="0.1" value="1" /><span id="pulseSizeVal" style="min-width:28px">1.0×</span></div>
+        <div class="row" style="color:var(--muted);font-size:11px">Glisse le point pour le déplacer. Clignote en continu, en édition comme à l'export.</div>
+        <div class="row"><button class="danger" id="delPulse">Supprimer</button></div>
+      </div>
+      <div class="inspector hidden" id="multiInspector">
+        <div class="row"><strong id="multiCount">0 éléments sélectionnés</strong></div>
+        <div class="row" style="color:var(--muted);font-size:11px">Glisse un des éléments sélectionnés pour déplacer tout le groupe.</div>
+        <div class="row"><button class="danger" id="delMulti">Tout supprimer</button></div>
+      </div>
+    </div>
+
+      <div class="canvas-toolbar">
+        <button class="icon-btn" id="undoBtn" title="Annuler (Ctrl/Cmd+Z)" aria-label="Annuler" disabled><svg viewBox="0 0 20 20"><path d="M6 5 L2.5 8.5 L6 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /><path d="M2.5 8.5 H12 a4.5 4.5 0 0 1 0 9 H7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg></button>
+        <button class="icon-btn" id="redoBtn" title="Rétablir (Ctrl/Cmd+Maj+Z)" aria-label="Rétablir" disabled><svg viewBox="0 0 20 20"><path d="M14 5 L17.5 8.5 L14 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /><path d="M17.5 8.5 H8 a4.5 4.5 0 0 0 0 9 H13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg></button>
+        <div class="sep" aria-hidden="true"></div>
+        <button class="icon-btn danger" id="resetBtn" title="Terrain vierge (efface tout, annulable)" aria-label="Réinitialiser le terrain"><svg viewBox="0 0 20 20"><path d="M4 6 h12 M8 6 V4 h4 v2 M6 6 l.8 10 h6.4 l.8-10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+        <details class="help-pop"><summary title="Aide et raccourcis" aria-label="Aide et raccourcis">?</summary><div class="help-body"><div class="hint">Clique une icône puis le terrain pour placer (glisse pour une zone). Clique un élément pour le sélectionner/déplacer, le vide pour désélectionner — glisse sur le vide pour une zone de sélection. Maj+clic = ajouter/retirer de la sélection multiple ; glisse un élément déjà sélectionné pour déplacer tout le groupe. Maj pendant un glisser ou en posant un joueur l'aligne sur les autres et sur les axes du terrain (le repère en pointillé montre l'alignement retenu) et, sur un glisser, bride aussi le mouvement à l'axe horizontal ou vertical. Sur un joueur « corps orienté », la poignée de pivot tourne le corps, Maj par pas de 15°, double-clic pour revenir à 0°. Un objet verrouillé (K, ou le cadenas dans son panneau) reste sélectionnable et modifiable, seul son déplacement est bloqué. Raccourcis : Suppr, Cmd/Ctrl+C/V, Ctrl+glisser = dupliquer, Ctrl+Maj+glisser = dupliquer aligné, Maj+glisser/pose = aligner (+ déplacer sur l'axe en glissant), Ctrl/Cmd+Z = annuler, Ctrl/Cmd+Maj+Z = rétablir, L = bibliothèque, K = verrouiller/déverrouiller, Échap = annuler l'outil.</div></div></details>
+        <div class="sep" aria-hidden="true"></div>
+        <button class="icon-btn" id="layersToggle" title="Calques : qui passe devant qui" aria-label="Calques"><svg viewBox="0 0 20 20"><path d="M10 3 L17 7 L10 11 L3 7 Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M3 11 L10 15 L17 11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></button>
+        <div class="sep" aria-hidden="true"></div>
+        <div class="tool-item top-bar">
+          <button class="icon-btn" id="pitchToggle" title="Terrain : couleur, image, motif" aria-label="Éditer le terrain"><svg viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="1.5" /><line x1="10" y1="4" x2="10" y2="16" stroke="currentColor" stroke-width="1.5" /></svg></button>
+          <div class="flyout hidden" id="pitchFlyout" style="width:288px">
+            <h4>Terrain</h4>
+            <div class="pitch-section">Revêtement</div>
+            <div class="thumb-pick" data-target="pitchSurface"><div class="thumb-grid"><button type="button" class="thumb" data-thumb="flat"><svg viewBox="0 0 60 36"><rect x="1" y="1" width="58" height="34" rx="3" fill="#2f8f4e"/><rect x="1" y="1" width="58" height="34" rx="3" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="1"/></svg><span class="thumb-label">uni</span></button><button type="button" class="thumb" data-thumb="stripes"><svg viewBox="0 0 60 36"><rect x="1" y="1" width="58" height="34" rx="3" fill="#2f8f4e"/><rect x="1" y="1" width="12" height="34" fill="#36a05a"/><rect x="13" y="1" width="12" height="34" fill="#2a8046"/><rect x="25" y="1" width="12" height="34" fill="#36a05a"/><rect x="37" y="1" width="12" height="34" fill="#2a8046"/><rect x="49" y="1" width="12" height="34" fill="#36a05a"/><rect x="1" y="1" width="58" height="34" rx="3" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="1"/></svg><span class="thumb-label">bandes</span></button><button type="button" class="thumb" data-thumb="checker"><svg viewBox="0 0 60 36"><rect x="1" y="1" width="58" height="34" rx="3" fill="#2f8f4e"/><rect x="1" y="1" width="15" height="17" fill="#36a05a"/><rect x="16" y="1" width="15" height="17" fill="#2a8046"/><rect x="31" y="1" width="15" height="17" fill="#36a05a"/><rect x="46" y="1" width="15" height="17" fill="#2a8046"/><rect x="1" y="18" width="15" height="17" fill="#2a8046"/><rect x="16" y="18" width="15" height="17" fill="#36a05a"/><rect x="31" y="18" width="15" height="17" fill="#2a8046"/><rect x="46" y="18" width="15" height="17" fill="#36a05a"/><rect x="1" y="1" width="58" height="34" rx="3" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="1"/></svg><span class="thumb-label">damier</span></button><button type="button" class="thumb" data-thumb="wood"><svg viewBox="0 0 60 36"><rect x="1" y="1" width="58" height="34" rx="3" fill="#cc9a5c"/><rect x="1" y="1" width="58" height="6" fill="#d9a869"/><rect x="1" y="7" width="58" height="6" fill="#c08f52"/><rect x="1" y="13" width="58" height="6" fill="#cf9c5e"/><rect x="1" y="19" width="58" height="6" fill="#b8854b"/><rect x="1" y="25" width="58" height="6" fill="#d9a869"/><rect x="1" y="31" width="58" height="6" fill="#c08f52"/><line x1="20" y1="1" x2="20" y2="7" stroke="rgba(60,35,10,.35)" stroke-width="0.7"/><line x1="38" y1="7" x2="38" y2="13" stroke="rgba(60,35,10,.35)" stroke-width="0.7"/><line x1="14" y1="13" x2="14" y2="19" stroke="rgba(60,35,10,.35)" stroke-width="0.7"/><line x1="46" y1="19" x2="46" y2="25" stroke="rgba(60,35,10,.35)" stroke-width="0.7"/><line x1="28" y1="25" x2="28" y2="31" stroke="rgba(60,35,10,.35)" stroke-width="0.7"/><line x1="34" y1="31" x2="34" y2="37" stroke="rgba(60,35,10,.35)" stroke-width="0.7"/><rect x="1" y="1" width="58" height="34" rx="3" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="1"/></svg><span class="thumb-label">parquet</span></button></div></div>
+            <div class="row hidden"><span class="swatch-label">Surface</span>
+              <select id="pitchSurface">
+                <option value="flat">couleur unie</option>
+                <option value="stripes">bandes</option>
+                <option value="checker">damier</option>
+                <option value="wood">parquet (bois)</option>
+              </select>
+            </div>
+            <div class="pitch-section">Lignes de repère</div>
+            <div class="thumb-pick" data-target="pitchPattern"><div class="thumb-grid"><button type="button" class="thumb" data-thumb="none"><svg viewBox="0 0 60 36"><rect x="1" y="1" width="58" height="34" rx="3" fill="#2f8f4e"/><rect x="1" y="1" width="58" height="34" rx="3" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="1"/></svg><span class="thumb-label">aucun</span></button><button type="button" class="thumb" data-thumb="corridors3"><svg viewBox="0 0 60 36"><rect x="1" y="1" width="58" height="34" rx="3" fill="#2f8f4e"/><line x1="1" y1="10" x2="59" y2="10" stroke="rgba(255,255,255,.8)" stroke-width="1" stroke-dasharray="3 2"/><line x1="1" y1="26" x2="59" y2="26" stroke="rgba(255,255,255,.8)" stroke-width="1" stroke-dasharray="3 2"/><rect x="1" y="1" width="58" height="34" rx="3" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="1"/></svg><span class="thumb-label">3 couloirs</span></button><button type="button" class="thumb" data-thumb="zones3"><svg viewBox="0 0 60 36"><rect x="1" y="1" width="58" height="34" rx="3" fill="#2f8f4e"/><line x1="20" y1="1" x2="20" y2="35" stroke="rgba(255,255,255,.8)" stroke-width="1" stroke-dasharray="3 2"/><line x1="39" y1="1" x2="39" y2="35" stroke="rgba(255,255,255,.8)" stroke-width="1" stroke-dasharray="3 2"/><rect x="1" y="1" width="58" height="34" rx="3" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="1"/></svg><span class="thumb-label">3 zones</span></button><button type="button" class="thumb" data-thumb="grid"><svg viewBox="0 0 60 36"><rect x="1" y="1" width="58" height="34" rx="3" fill="#2f8f4e"/><line x1="1" y1="10" x2="59" y2="10" stroke="rgba(255,255,255,.8)" stroke-width="1" stroke-dasharray="3 2"/><line x1="1" y1="26" x2="59" y2="26" stroke="rgba(255,255,255,.8)" stroke-width="1" stroke-dasharray="3 2"/><line x1="20" y1="1" x2="20" y2="35" stroke="rgba(255,255,255,.8)" stroke-width="1" stroke-dasharray="3 2"/><line x1="39" y1="1" x2="39" y2="35" stroke="rgba(255,255,255,.8)" stroke-width="1" stroke-dasharray="3 2"/><rect x="1" y="1" width="58" height="34" rx="3" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="1"/></svg><span class="thumb-label">couloirs + zones</span></button><button type="button" class="thumb" data-thumb="zones4"><svg viewBox="0 0 60 36"><rect x="1" y="1" width="58" height="34" rx="3" fill="#2f8f4e"/><line x1="15" y1="1" x2="15" y2="35" stroke="rgba(255,255,255,.8)" stroke-width="1" stroke-dasharray="3 2"/><line x1="30" y1="1" x2="30" y2="35" stroke="rgba(255,255,255,.8)" stroke-width="1" stroke-dasharray="3 2"/><line x1="44" y1="1" x2="44" y2="35" stroke="rgba(255,255,255,.8)" stroke-width="1" stroke-dasharray="3 2"/><rect x="1" y="1" width="58" height="34" rx="3" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="1"/></svg><span class="thumb-label">4 zones</span></button></div></div>
+            <div class="row hidden"><span class="swatch-label">Motif</span>
+              <select id="pitchPattern">
+                <option value="none">aucun</option>
+                <option value="corridors3">3 couloirs</option>
+                <option value="zones3">3 zones</option>
+                <option value="grid">couloirs + zones</option>
+                <option value="zones4">4 zones</option>
+              </select>
+            </div>
+            <div class="row" id="pitchColorRow"><span class="swatch-label">Couleur</span><input type="color" id="pitchColor" value="#2f8f4e" /><button id="pitchColorReset">Défaut</button></div>
+            <div class="row"><span class="swatch-label">Extérieur</span><input type="color" id="pitchOuterColor" value="#171a15" /><button id="pitchOuterColorReset">Défaut</button></div>
+            <div class="row"><span class="swatch-label">Lignes</span><input type="color" id="pitchLineColor" value="#eafff0" /><button id="pitchLineColorReset">Défaut</button></div>
+            <div class="row" style="color:var(--muted);font-size:11px">Une seule couleur pour tous les tracés : touche, but, surface de but, médiane, cercle central, points de penalty. Seul le remplissage de la surface de but se règle à part.</div>
+            <div class="row"><span class="swatch-label">Surface de but</span><input type="color" id="pitchGoalAreaColor" value="#eafff0" /><button id="pitchGoalAreaReset">Défaut</button></div>
+            <div class="row"><span class="swatch-label">Opacité</span><input type="range" id="pitchGoalAreaOpacity" min="0" max="1" step="0.02" value="0.16" style="flex:1" /></div>
+            <div class="row"><input type="file" id="pitchImageFile" accept="image/*" style="width:100%" /></div>
+            <div class="row"><button id="pitchImageClear" style="width:100%">Retirer l'image</button></div>
+            <div class="row"><span class="swatch-label">Échelle</span><input type="range" id="pitchImgScale" min="0.5" max="2.5" step="0.01" value="1" /><span id="pitchImgScaleVal" style="min-width:38px">1.00×</span></div>
+            <div class="row"><span class="swatch-label">Horiz.</span><input type="range" id="pitchImgOffX" min="-300" max="300" step="5" value="0" /></div>
+            <div class="row"><span class="swatch-label">Vert.</span><input type="range" id="pitchImgOffY" min="-300" max="300" step="5" value="0" /></div>
+            <div class="row"><button id="pitchImgReset" style="width:100%">Réinitialiser l'ajustement</button></div>
+            <div class="row" style="color:var(--muted);font-size:11px">L'image de fond couvre tout le canvas et remplace les couleurs ci-dessus.</div>
+            <div class="row"><span class="swatch-label">Logo centre</span><input type="file" id="pitchLogoFile" accept="image/*" style="width:100%" /></div>
+            <div class="row"><button id="pitchLogoClear" style="width:100%">Retirer le logo</button></div>
+            <div class="row" style="color:var(--muted);font-size:11px">Logo affiché dans le rond central, découpé en cercle.</div>
+
+            <div class="row" style="color:var(--muted);font-size:11px">Motif fixe, non modifiable — pour un tracé déplaçable, utilise Zones.</div>
+            <div class="row"><span class="swatch-label">Vue</span>
+              <select id="pitchView">
+                <option value="full">terrain entier</option>
+                <option value="half-left">demi (but gauche)</option>
+                <option value="half-right">demi (but droit)</option>
+              </select>
+            </div>
+            <div class="row" style="color:var(--muted);font-size:11px">Demi-terrain : zoom en mode portrait, but en haut.</div>
+            <div class="row"><button id="pitchFlip" style="width:100%" title="Miroir horizontal : rejoue la même situation de l'autre côté">⇄ Retourner le terrain</button></div>
+          </div>
+        </div>
+        <div class="tool-item top-bar">
+          <button class="icon-btn" id="teamsToggle" title="Équipes : maillot, contour, numéro, forme du jeton" aria-label="Éditer les équipes"><svg viewBox="0 0 20 20"><circle cx="7" cy="7" r="3.2" fill="none" stroke="currentColor" stroke-width="1.5" /><circle cx="13.5" cy="12.5" r="3.2" fill="none" stroke="currentColor" stroke-width="1.5" /></svg></button>
+          <div class="flyout hidden" id="teamsFlyout" style="width:268px">
+            <h4>Équipes</h4>
+            <div class="team-block" data-team="home">
+              <div class="team-head"><span class="team-swatch" id="teamSwatch_home"></span><input id="team_home_name" value="Nous" aria-label="Nom de l'équipe" /></div>
+              <div class="row"><span class="swatch-label">Maillot</span><input type="color" id="team_home_fill" value="#1e63d6" /></div>
+              <div class="row"><span class="swatch-label">Contour</span><input type="color" id="team_home_stroke" value="#ffffff" /></div>
+              <div class="row"><span class="swatch-label">Numéro</span><input type="color" id="team_home_text" value="#ffffff" /></div>
+              <div class="row"><span class="swatch-label">Jeton</span><select id="team_home_shape"><option value="circle">rond</option><option value="square">carré</option><option value="triangle">triangle</option><option value="diamond">losange</option><option value="body">corps orienté</option></select></div>
+              <div class="row"><span class="swatch-label">Taille</span><input type="range" id="team_home_size" min="0.7" max="1.6" step="0.1" value="0.9" style="flex:1" /><span id="team_home_sizeVal" style="min-width:32px">0.9×</span></div>
+            </div>
+            <div class="team-block" data-team="away">
+              <div class="team-head"><span class="team-swatch" id="teamSwatch_away"></span><input id="team_away_name" value="Adversaire" aria-label="Nom de l'équipe" /></div>
+              <div class="row"><span class="swatch-label">Maillot</span><input type="color" id="team_away_fill" value="#d63b2f" /></div>
+              <div class="row"><span class="swatch-label">Contour</span><input type="color" id="team_away_stroke" value="#ffffff" /></div>
+              <div class="row"><span class="swatch-label">Numéro</span><input type="color" id="team_away_text" value="#ffffff" /></div>
+              <div class="row"><span class="swatch-label">Jeton</span><select id="team_away_shape"><option value="circle">rond</option><option value="square">carré</option><option value="triangle">triangle</option><option value="diamond">losange</option><option value="body">corps orienté</option></select></div>
+              <div class="row"><span class="swatch-label">Taille</span><input type="range" id="team_away_size" min="0.7" max="1.6" step="0.1" value="0.9" style="flex:1" /><span id="team_away_sizeVal" style="min-width:32px">0.9×</span></div>
+            </div>
+            <div class="team-block" data-team="support">
+              <div class="team-head"><span class="team-swatch" id="teamSwatch_support"></span><input id="team_support_name" value="Appuis" aria-label="Nom de l'équipe" /></div>
+              <div class="row"><span class="swatch-label">Maillot</span><input type="color" id="team_support_fill" value="#e0a021" /></div>
+              <div class="row"><span class="swatch-label">Contour</span><input type="color" id="team_support_stroke" value="#ffffff" /></div>
+              <div class="row"><span class="swatch-label">Numéro</span><input type="color" id="team_support_text" value="#ffffff" /></div>
+              <div class="row"><span class="swatch-label">Jeton</span><select id="team_support_shape"><option value="square">carré</option><option value="circle">rond</option><option value="triangle">triangle</option><option value="diamond">losange</option><option value="body">corps orienté</option></select></div>
+              <div class="row"><span class="swatch-label">Taille</span><input type="range" id="team_support_size" min="0.7" max="1.6" step="0.1" value="0.9" style="flex:1" /><span id="team_support_sizeVal" style="min-width:32px">0.9×</span></div>
+            </div>
+            <div class="row" style="color:var(--muted);font-size:11px">Un jeton recoloré à la main garde sa couleur.</div>
+            <div class="row"><button id="teamsApplyPreset" style="flex:1" title="Reprendre l'identité enregistrée par défaut">Appliquer le défaut</button><button id="teamsSavePreset" style="flex:1" title="Réutiliser cette identité dans les prochains procédés">Définir par défaut</button></div>
+            <div class="row"><button id="teamsReset" style="width:100%">Couleurs d'usine</button></div>
+          </div>
+        </div>
+      </div>
+      <svg id="pitch" viewBox="0 0 700 440" xmlns="http://www.w3.org/2000/svg"></svg>
+
+      <div class="layers-panel hidden" id="layersPanel">
+        <div class="layers-head">
+          <span class="seqlabel">Calques</span>
+          <button class="icon-btn" id="layersClose" title="Fermer" aria-label="Fermer les calques">✕</button>
+        </div>
+        <div class="layers-list" id="layersList"></div>
+        <div class="hint" style="margin:6px 0 0">Le haut de la liste est ce qui passe devant.</div>
+      </div>
+      <div class="dock">
+        <div class="dock-group">
+          <span class="seqlabel">Variante</span>
+          <div class="seq-steps" id="variantTabs"></div>
+          <button id="addVariant" class="icon-btn success" title="Dupliquer la variante courante (pour faire diverger la suite)" aria-label="Nouvelle variante"><svg viewBox="0 0 20 20"><line x1="10" y1="4" x2="10" y2="16" stroke="currentColor" stroke-width="2" /><line x1="4" y1="10" x2="16" y2="10" stroke="currentColor" stroke-width="2" /></svg></button>
+        </div>
+        <div class="dock-group">
+          <button id="playBtn"><svg id="playIcon" viewBox="0 0 20 20"><polygon points="6,4 16,10 6,16" fill="currentColor" /></svg> <span id="playLabel">Lecture</span></button>
+          <input type="range" id="scrub" min="0" max="1000" value="0" step="1" title="Défilement de la séquence" />
+          <select id="playSpeed">
+            <option value="0.25">0.25×</option>
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2×</option>
+          </select>
+          <span id="stepLabel" class="hint"></span>
+        </div>
+      <div class="seqbar" id="simpleSeqbar">
+        <span class="seqlabel">Séquence</span>
+        <div class="seq-steps" id="seqSteps"></div>
+        <button id="addStep" class="icon-btn success" title="Dupliquer l'étape courante (l'insère juste après)" aria-label="Dupliquer l'étape"><svg viewBox="0 0 20 20"><line x1="10" y1="4" x2="10" y2="16" stroke="currentColor" stroke-width="2" /><line x1="4" y1="10" x2="16" y2="10" stroke="currentColor" stroke-width="2" /></svg></button>
+        <button id="dupStepEnd" class="icon-btn" title="Dupliquer l'étape courante et l'ajouter à la fin de la séquence" aria-label="Dupliquer l'étape et l'ajouter à la fin"><svg viewBox="0 0 20 20"><rect x="2" y="4" width="8" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="1.5" /><rect x="5" y="7" width="8" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M14 6 L17.5 10 L14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+        <button id="delStep" class="icon-btn danger" title="Supprimer l'étape courante" aria-label="Supprimer l'étape"><svg viewBox="0 0 20 20"><line x1="5" y1="5" x2="15" y2="15" stroke="currentColor" stroke-width="2" /><line x1="15" y1="5" x2="5" y2="15" stroke="currentColor" stroke-width="2" /></svg></button>
+        <span class="seqlabel">Durée</span>
+        <input type="number" id="stepDur" min="0.2" step="0.1" value="1.5" style="width:66px" title="Durée de transition vers l'étape suivante (s)" />
+        <span class="seqlabel">s</span>
+        <span class="io-sep" aria-hidden="true" style="margin-left:auto"></span>
+        <button id="advToggle" title="Mode avancé : timeline libre, chaque déplacement indépendant (bêta — entités uniquement pour l'instant)">Mode avancé</button>
+      </div>
+      </div>
+      <div class="tl-wrap hidden" id="advTimeline">
+        <div class="tl-toprow">
+          <span class="seqlabel">Timeline avancée</span>
+          <details class="help-pop up"><summary title="Aide de la timeline" aria-label="Aide de la timeline">?</summary><div class="help-body"><div class="hint">Glisse un clip pour le décaler, sa poignée droite pour sa durée — ou clique une piste vide pour créer un déplacement. Clique un clip pour en régler les valeurs précises, Maj+clic pour en sélectionner plusieurs et les décaler ou les aligner ensemble.</div></div></details>
+          <button id="advToggleBack" class="icon-btn" title="Revenir au mode simple" aria-label="Revenir au mode simple" style="margin-left:auto"><svg viewBox="0 0 20 20"><path d="M5 3.5 L15.5 12 L11 12.8 L13.5 17.5 L11.3 18.6 L8.8 13.9 L5.8 16.8 Z" fill="currentColor" /></svg></button>
+        </div>
+        <div class="tl-clip-inspector hidden" id="advClipInspector">
+          <span class="seqlabel" id="advClipInspectorLabel">Clip</span>
+          <label class="tl-num">Début (temps) <input type="number" id="advClipStart" min="0" step="0.1" style="width:60px" /> s</label>
+          <label class="tl-num">Durée <input type="number" id="advClipDur" min="0.15" step="0.1" style="width:60px" /> s</label>
+          <span class="io-sep" aria-hidden="true"></span>
+          <label class="tl-num" title="Position au debut du clip — c'est l'arrivee du clip precedent (ou le point de depart initial si c'est le premier) : la modifier ici deplace aussi ce clip precedent">Départ X <input type="number" id="advClipFromX" step="0.1" style="width:64px" /> m</label>
+          <label class="tl-num">Y <input type="number" id="advClipFromY" step="0.1" style="width:64px" /> m</label>
+          <label class="tl-num">Arrivée X <input type="number" id="advClipX" step="0.1" style="width:64px" /> m</label>
+          <label class="tl-num">Y <input type="number" id="advClipY" step="0.1" style="width:64px" /> m</label>
+          <button id="advClipDelete" class="icon-btn danger" title="Supprimer ce clip" aria-label="Supprimer ce clip"><svg viewBox="0 0 20 20"><line x1="5" y1="5" x2="15" y2="15" stroke="currentColor" stroke-width="2" /><line x1="15" y1="5" x2="5" y2="15" stroke="currentColor" stroke-width="2" /></svg></button>
+        </div>
+        <div class="tl-clip-inspector hidden" id="advClipMultiBar">
+          <span class="seqlabel" id="advClipMultiLabel">Clips sélectionnés</span>
+          <button id="advClipAlign" title="Aligner le début de tous les clips sélectionnés sur le plus précoce">Aligner les débuts</button>
+          <button id="advClipMultiDelete" class="icon-btn danger" title="Supprimer les clips sélectionnés" aria-label="Supprimer les clips sélectionnés"><svg viewBox="0 0 20 20"><line x1="5" y1="5" x2="15" y2="15" stroke="currentColor" stroke-width="2" /><line x1="15" y1="5" x2="5" y2="15" stroke="currentColor" stroke-width="2" /></svg></button>
+        </div>
+        <div class="tl-ruler" id="advRuler"></div>
+        <div id="advTracks"></div>
+      </div>
+    </div>
+
+    <div class="toolrail" id="toolrail">
+      <button class="rail-btn" id="selectToolBtn" title="Sélection (Échap)" aria-label="Outil sélection"><svg viewBox="0 0 20 20"><path d="M5 3.5 L15.5 12 L11 12.8 L13.5 17.5 L11.3 18.6 L8.8 13.9 L5.8 16.8 Z" fill="currentColor" stroke="var(--bg)" stroke-width="0.6" stroke-linejoin="round" /></svg></button>
+      <div class="rail-sep"></div>
+      <button class="rail-btn" data-add="home" title="Joueur (nous)"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="var(--home)" stroke="#fff" stroke-width="1.5" /></svg></button>
+      <button class="rail-btn" data-add="away" title="Adversaire"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="var(--away)" stroke="#fff" stroke-width="1.5" /></svg></button>
+      <button class="rail-btn" data-add="support" title="Appui / joker"><svg viewBox="0 0 20 20"><rect x="4" y="4" width="12" height="12" rx="3" fill="var(--support)" stroke="#fff" stroke-width="1.5" /></svg></button>
+      <button class="rail-btn" data-add="ball" title="Ballon"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="6" fill="#fff" stroke="currentColor" stroke-width="1.5" /></svg></button>
+      <button class="rail-btn" data-add="goal" title="But"><svg viewBox="0 0 20 20"><rect x="5" y="3" width="6" height="14" fill="currentColor" opacity="0.12" /><line x1="7.7" y1="3" x2="7.7" y2="17" stroke="currentColor" stroke-width="0.7" opacity="0.6" /><line x1="5" y1="7.7" x2="11" y2="7.7" stroke="currentColor" stroke-width="0.7" opacity="0.6" /><line x1="5" y1="12.3" x2="11" y2="12.3" stroke="currentColor" stroke-width="0.7" opacity="0.6" /><line x1="11" y1="3" x2="11" y2="17" stroke="currentColor" stroke-width="2.5" /><line x1="5" y1="3" x2="11" y2="3" stroke="currentColor" stroke-width="1.3" /><line x1="5" y1="17" x2="11" y2="17" stroke="currentColor" stroke-width="1.3" /><line x1="5" y1="3" x2="5" y2="17" stroke="currentColor" stroke-width="1.3" /></svg></button>
+      <div class="tool-item">
+        <button class="rail-btn" id="equipToggle" title="Matériel : plot, coupelle, piquet, cerceau, haie, échelle, mini-but"><svg viewBox="0 0 20 20"><polygon points="10,4 4,17 16,17" fill="#ff8c1a" stroke="currentColor" stroke-width="1" /></svg></button>
+        <div class="flyout hidden" id="equipFlyout" style="width:232px">
+          <h4>Matériel</h4>
+          <div class="thumb-grid equip-grid">
+            <button type="button" class="thumb" data-add="cone" title="Plot"><svg viewBox="0 0 40 30"><polygon points="20,6 12,24 28,24" fill="#ff8c1a" stroke="#12140f" stroke-width="1.2" /></svg><span class="thumb-label">plot</span></button>
+            <button type="button" class="thumb" data-add="saucer" title="Coupelle plate"><svg viewBox="0 0 40 30"><circle cx="20" cy="15" r="9" fill="#f2c14e" stroke="#12140f" stroke-width="1.2" /><circle cx="20" cy="15" r="4.3" fill="#c29b3e" /></svg><span class="thumb-label">coupelle</span></button>
+            <button type="button" class="thumb" data-add="pole" title="Piquet / mannequin"><svg viewBox="0 0 40 30"><circle cx="20" cy="15" r="7" fill="#e8503a" stroke="#fff" stroke-width="2" /><circle cx="20" cy="15" r="2.8" fill="#fff" /></svg><span class="thumb-label">piquet</span></button>
+            <button type="button" class="thumb" data-add="hoop" title="Cerceau (0,6 m)"><svg viewBox="0 0 40 30"><circle cx="20" cy="15" r="9" fill="none" stroke="#12140f" stroke-width="5" /><circle cx="20" cy="15" r="9" fill="none" stroke="#3fc2d6" stroke-width="3" /></svg><span class="thumb-label">cerceau</span></button>
+            <button type="button" class="thumb" data-add="hurdle" title="Haie basse (0,5 m)"><svg viewBox="0 0 40 30"><line x1="9" y1="9" x2="9" y2="21" stroke="#12140f" stroke-width="2.4" /><line x1="31" y1="9" x2="31" y2="21" stroke="#12140f" stroke-width="2.4" /><line x1="9" y1="15" x2="31" y2="15" stroke="#12140f" stroke-width="7" /><line x1="9" y1="15" x2="31" y2="15" stroke="#f2c14e" stroke-width="4.4" /></svg><span class="thumb-label">haie</span></button>
+            <button type="button" class="thumb" data-add="ladder" title="Échelle de rythme (4 m)"><svg viewBox="0 0 40 30"><rect x="4" y="10" width="32" height="10" fill="#000" fill-opacity="0.18" /><line x1="4" y1="10" x2="36" y2="10" stroke="#e6e2d6" stroke-width="2" /><line x1="4" y1="20" x2="36" y2="20" stroke="#e6e2d6" stroke-width="2" /><line x1="4" y1="10" x2="4" y2="20" stroke="#e6e2d6" stroke-width="1.6" /><line x1="12" y1="10" x2="12" y2="20" stroke="#e6e2d6" stroke-width="1.6" /><line x1="20" y1="10" x2="20" y2="20" stroke="#e6e2d6" stroke-width="1.6" /><line x1="28" y1="10" x2="28" y2="20" stroke="#e6e2d6" stroke-width="1.6" /><line x1="36" y1="10" x2="36" y2="20" stroke="#e6e2d6" stroke-width="1.6" /></svg><span class="thumb-label">échelle</span></button>
+            <button type="button" class="thumb" data-add="minigoal" title="Mini-but / porte réduite (1,2 m)"><svg viewBox="0 0 40 30"><rect x="11" y="8" width="18" height="11" fill="#000" fill-opacity="0.22" /><line x1="17" y1="8" x2="17" y2="19" stroke="#f4f4f1" stroke-opacity="0.5" stroke-width="0.8" /><line x1="23" y1="8" x2="23" y2="19" stroke="#f4f4f1" stroke-opacity="0.5" stroke-width="0.8" /><line x1="11" y1="13.5" x2="29" y2="13.5" stroke="#f4f4f1" stroke-opacity="0.5" stroke-width="0.8" /><line x1="11" y1="8" x2="29" y2="8" stroke="#f4f4f1" stroke-width="2" /><line x1="11" y1="8" x2="11" y2="19" stroke="#f4f4f1" stroke-width="2" /><line x1="29" y1="8" x2="29" y2="19" stroke="#f4f4f1" stroke-width="2" /><circle cx="11" cy="19" r="2" fill="#f4f4f1" /><circle cx="29" cy="19" r="2" fill="#f4f4f1" /></svg><span class="thumb-label">mini-but</span></button>
+          </div>
+          <div class="row" style="color:var(--muted);font-size:11px;margin-top:6px">Cerceau, haie, échelle et mini-but sont à l'échelle réelle du terrain. Haie, échelle et mini-but se pivotent une fois posés.</div>
+        </div>
+      </div>
+      <button class="rail-btn" id="lineToggle" title="Trait libre (droit ou courbé)"><svg viewBox="0 0 20 20"><line x1="3" y1="16" x2="14" y2="5" stroke="currentColor" stroke-width="2" /><path d="M14,5 L9,6.5 L12.5,10 Z" fill="currentColor" /></svg></button>
+      <button class="rail-btn" id="textToggle" title="Texte libre"><svg viewBox="0 0 20 20"><text x="10" y="15" font-size="14" font-family="Arial" font-weight="bold" text-anchor="middle" fill="currentColor">T</text></svg></button>
+      <button class="rail-btn" id="pulseToggle" title="Pulse : met un point en évidence (clignote, live et à l'export)"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="3" fill="currentColor" /><circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="1.6" opacity="0.55" /></svg></button>
+      <div class="rail-sep"></div>
+      <div class="tool-item">
+        <button class="rail-btn" id="rosterToggle" title="Effectif (trousseau de joueurs)"><svg viewBox="0 0 20 20"><path d="M7 3 L4.5 5 L6 7.3 L7.3 6.3 V17 H12.7 V6.3 L14 7.3 L15.5 5 L13 3 Q11.5 4.3 10 4.3 Q8.5 4.3 7 3 Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg></button>
+        <div class="flyout hidden" id="rosterFlyout">
+          <h4>Effectif</h4>
+          <div class="roster-list" id="rosterList"></div>
+          <div class="roster-add">
+            <input type="text" id="rosterNum" maxlength="3" placeholder="N°" title="Numéro" />
+            <input type="text" id="rosterRole" maxlength="20" placeholder="Poste (optionnel)" title="Poste" />
+            <button class="icon-btn" id="rosterAddBtn" title="Ajouter au trousseau" aria-label="Ajouter"><svg viewBox="0 0 20 20"><line x1="10" y1="4" x2="10" y2="16" stroke="currentColor" stroke-width="2" /><line x1="4" y1="10" x2="16" y2="10" stroke="currentColor" stroke-width="2" /></svg></button>
+          </div>
+          <div class="row" style="color:var(--muted);font-size:11px;margin-top:6px">Clique un numéro pour l'armer, puis clique le terrain pour le placer.</div>
+        </div>
+      </div>
+      <div class="rail-sep"></div>
+      <div class="tool-item">
+        <button class="rail-btn" id="zonesToggle" title="Zones"><svg viewBox="0 0 20 20"><rect x="3" y="5" width="14" height="10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 2" /></svg></button>
+        <div class="flyout hidden" id="zonesFlyout">
+          <h4>Zones</h4>
+          <div class="row">
+            <select id="drawKind" title="Type de zone à dessiner">
+              <option value="area">zone</option>
+              <option value="target">cible</option>
+              <option value="corridor">couloir</option>
+              <option value="neutral">neutre</option>
+            </select>
+          </div>
+          <div class="row" style="gap:4px">
+            <button class="rail-btn" id="drawRect" title="Rectangle" style="width:auto;flex:1"><svg viewBox="0 0 20 20"><rect x="3" y="5" width="14" height="10" fill="none" stroke="currentColor" stroke-width="1.5" /></svg></button>
+            <button class="rail-btn" id="drawEllipse" title="Disque (Cercle si Maj)" style="width:auto;flex:1"><svg viewBox="0 0 20 20"><ellipse cx="10" cy="10" rx="7" ry="5" fill="none" stroke="currentColor" stroke-width="1.5" /></svg></button>
+            <button class="rail-btn" id="drawPoly" title="Libre — clique pour poser les points, referme près du départ ou Entrée" style="width:auto;flex:1"><svg viewBox="0 0 20 20"><polygon points="3,15 8,4 17,8 13,17" fill="none" stroke="currentColor" stroke-width="1.5" /></svg></button>
+          </div>
+          <div class="row" style="color:var(--muted);font-size:11px">Libre : Échap pour annuler.</div>
+          <div class="row"><button id="clearZones" class="danger" style="width:100%">Effacer les zones</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <div class="io">
+    <div class="btns">
+      <button class="primary" id="saveLibBtn" title="Enregistrer ce procédé dans la bibliothèque locale (réutilisable dans l'assembleur de séances)"><svg viewBox="0 0 20 20"><path d="M4 3h10l3 3v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /><path d="M6 3v5h7V3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /><rect x="6.5" y="11" width="7" height="5" fill="none" stroke="currentColor" stroke-width="1.4" /></svg> Enregistrer</button>
+      <button id="saveAsLibBtn" title="Enregistrer comme un nouveau procédé, sans écraser celui d'origine">Enregistrer sous…</button>
+      <span class="io-current" id="libCurrent" style="font-size:12px;color:var(--muted);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+      <span class="io-sep" aria-hidden="true"></span>
+      <div class="btn-group" role="group" aria-label="Exporter">
+        <button id="pngBtn" title="Image PNG de l'étape courante"><svg viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="1.4" /><circle cx="7" cy="8" r="1.4" fill="currentColor" /><path d="M4 15l4.5-5 3 3.2L15 9l1 2v3.5a1 1 0 0 1-1 1H4z" fill="currentColor" /></svg> PNG</button>
+        <button id="gifBtn" title="GIF animé de la séquence complète"><svg viewBox="0 0 20 20"><rect x="3" y="5" width="14" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.4" /><line x1="7" y1="5" x2="7" y2="15" stroke="currentColor" stroke-width="1.4" /><line x1="13" y1="5" x2="13" y2="15" stroke="currentColor" stroke-width="1.4" /></svg> GIF</button>
+        <button id="mp4Btn" title="Vidéo MP4 de la séquence complète — premier export : télécharge l'encodeur (~25 Mo, une fois, puis mis en cache)"><svg viewBox="0 0 20 20"><rect x="3" y="5" width="11" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M14 8.3 L17 6.3 V13.7 L14 11.7 Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg> MP4</button>
+        <div class="tool-item bottom-bar">
+          <button class="icon-btn" id="exportSettingsToggle" title="Réglages d'export (fps, variantes)" aria-label="Réglages d'export"><svg viewBox="0 0 20 20"><path d="M10 6.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M10 2.5v2M10 15.5v2M17.5 10h-2M4.5 10h-2M15.4 4.6l-1.4 1.4M6 12.6l-1.4 1.4M15.4 15.4l-1.4-1.4M6 7.4 4.6 6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg></button>
+          <div class="flyout hidden" id="exportSettingsFlyout" style="width:210px">
+            <h4>Réglages d'export</h4>
+            <div class="row"><span class="swatch-label">fps</span>
+              <select id="gifFps" title="Images par seconde (GIF et MP4)">
+                <option value="8">8</option>
+                <option value="12" selected>12</option>
+                <option value="15">15</option>
+                <option value="24">24</option>
+                <option value="30">30</option>
+                <option value="60">60</option>
+              </select>
+            </div>
+            <div class="row"><span class="swatch-label">Qualité</span>
+              <select id="exportQuality" title="Résolution de l'image exportée (PNG, GIF, MP4)">
+                <option value="1" selected>Standard</option>
+                <option value="1.5">Haute</option>
+                <option value="2">Très haute</option>
+              </select>
+            </div>
+            <div class="row"><span class="swatch-label">Vitesse</span>
+              <select id="exportSpeed" title="Vitesse de lecture de l'animation exportée (GIF, MP4)">
+                <option value="0.5">0.5×</option>
+                <option value="1" selected>1× (normal)</option>
+                <option value="2">2×</option>
+                <option value="4">4×</option>
+              </select>
+            </div>
+            <div class="row" id="mp4AllVariantsWrap" style="display:none"><label><input type="checkbox" id="mp4AllVariants" /> MP4 : toutes les variantes</label></div>
+          </div>
+        </div>
+      </div>
+      <span class="status" id="status"></span>
+    </div>
+  </div>
+
+</div>
+
+<!-- Encodeur MP4 (chargé une fois, à la demande, seulement quand "MP4 animé" est cliqué) -->
+<div class="lib-overlay hidden" id="libOverlay" role="dialog" aria-modal="true" aria-label="Bibliothèque des procédés">
+  <div class="lib-top">
+    <h2>Bibliothèque</h2>
+    <span class="lib-count" id="libCount"></span>
+    <input class="lib-search" id="libSearch" type="search" placeholder="Rechercher un titre, un thème…" aria-label="Rechercher" />
+    <button id="libCloseBtn" title="Fermer (Échap)">Fermer</button>
+  </div>
+  <div class="lib-filters" id="libFilters">
+    <button class="lib-chip active" data-cat="">Tous</button>
+    <button class="lib-chip" data-cat="entrainement">Procédés d'entraînement</button>
+    <button class="lib-chip" data-cat="cpa">CPA</button>
+    <button class="lib-chip" data-cat="animation">Animations</button>
+  </div>
+  <div class="lib-body">
+    <aside class="lib-side">
+      <div class="lib-side-head">Dossiers</div>
+      <div class="lib-folders" id="libFolders"></div>
+      <button id="libFolderAdd" class="lib-folder-add">+ Nouveau dossier</button>
+    </aside>
+    <div class="lib-main">
+      <div class="lib-grid" id="libGrid"></div>
+    </div>
+  </div>
+</div>
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
+<script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
+<script src="knowledge.js?v=117"></script>
+<script src="gif-encoder.js?v=117"></script>
+<script src="render-core.js?v=139"></script>
+<script src="store.js?v=130"></script>
+<script src="editor.js?v=147"></script>
+</body>
+</html>

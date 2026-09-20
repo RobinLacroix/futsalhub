@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Assembleur de séances — FutsalHub (proto)</title>
+<style>
+  :root{
+    --bg:#f4f5f3; --surface:#fff; --line:#e2e4df; --text:#1c1e1a; --muted:#6b6f66;
+    --accent:#1d9e75; --warn:#b8791d; --danger:#d63b2f; --pitch:#2f8f4e; --radius:8px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5}
+  header{padding:14px 20px;background:var(--surface);border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:12px}
+  header h1{font-size:16px;margin:0;font-weight:600}
+  header .sub{font-size:12px;color:var(--muted)}
+  header .nav{margin-left:auto;font-size:13px}
+  header .nav a{color:var(--accent);text-decoration:none}
+  header .nav a:hover{text-decoration:underline}
+  .wrap{max-width:1080px;margin:0 auto;padding:16px 20px 60px}
+  button{font:inherit;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer;color:var(--text)}
+  button:hover{background:#eef0ec}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  button.danger{color:var(--danger);border-color:#eecac6}
+  button.mini-btn{padding:3px 8px;font-size:12px}
+  input,select,textarea{font:inherit;border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:var(--surface);color:var(--text)}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:14px}
+  .card h2{font-size:14px;margin:0 0 10px;font-weight:600}
+  .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+  .field{display:flex;flex-direction:column;gap:3px}
+  .field label{font-size:12px;color:var(--muted)}
+  .field input,.field select{width:100%}
+
+  /* Résumé / garde-fous */
+  .summary{display:flex;flex-wrap:wrap;gap:16px;align-items:center}
+  .summary .total{font-size:15px;font-weight:600}
+  .summary .total.ok{color:var(--accent)} .summary .total.off{color:var(--warn)}
+  .warnings{margin:8px 0 0;padding:0;list-style:none;font-size:12px}
+  .warnings li{padding:3px 0;color:var(--warn)}
+  .warnings li.err{color:var(--danger)}
+  .warnings li.ok{color:var(--accent)}
+
+  /* Blocs */
+  .blocks{display:flex;flex-direction:column;gap:12px}
+  .block{display:grid;grid-template-columns:260px 1fr;gap:14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:12px}
+  .block .mini-wrap{display:flex;flex-direction:column;gap:6px}
+  svg.mini{width:100%;height:auto;display:block;border-radius:6px;background:var(--pitch)}
+  .mini-empty{width:100%;aspect-ratio:34/20;border:1px dashed var(--line);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px;text-align:center;padding:8px}
+  .block .body{display:flex;flex-direction:column;gap:8px}
+  .block .rowline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .block .rowline label{font-size:12px;color:var(--muted)}
+  .block select.role{font-weight:600}
+  .block .drill-title{font-size:13px;color:var(--muted)}
+  .block textarea{width:100%;min-height:44px;resize:vertical}
+  .block .order{display:flex;gap:4px;margin-left:auto}
+  .addbar{margin-top:12px;display:flex;gap:8px;align-items:center}
+  .io{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .io select{min-width:200px}
+  .status{font-size:12px;margin-left:6px}
+  .status.ok{color:var(--accent)} .status.err{color:var(--danger)}
+  .hint{font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Assembleur de séances</h1>
+  <span class="sub">FutsalHub · enchaîne tes procédés de la bibliothèque en une séance</span>
+  <span class="nav"><a href="index.html">← Éditeur de procédés</a></span>
+</header>
+
+<div class="wrap">
+  <!-- Bandeau séance -->
+  <div class="card">
+    <h2>Séance</h2>
+    <div class="form-grid">
+      <div class="field"><label>Titre</label><input id="sTitle" placeholder="Ex: Sortie de pression sous pressing haut" /></div>
+      <div class="field"><label>Thème</label><input id="sTheme" placeholder="Ex: Sortie de pression" /></div>
+      <div class="field"><label>Phase de jeu ciblée</label><input id="sPhase" placeholder="Ex: relance sous pression haute" /></div>
+      <div class="field"><label>Objectif</label><input id="sObjectif" placeholder="Ce que la séance doit produire" /></div>
+      <div class="field"><label>Effectif</label><input id="sEffectif" placeholder="Ex: 12 joueurs + GK" /></div>
+      <div class="field"><label>Durée cible (min)</label><input type="number" id="sDuree" value="90" min="10" /></div>
+      <div class="field"><label>Intensité</label><select id="sIntensite"><option value="faible">faible</option><option value="moderee">modérée</option><option value="elevee" selected>élevée</option></select></div>
+      <div class="field"><label>Tags philosophie (séparés par ,)</label><input id="sTags" placeholder="jeu de position, largeur, transitions" /></div>
+    </div>
+  </div>
+
+  <!-- Résumé / garde-fous -->
+  <div class="card">
+    <div class="summary">
+      <span class="total" id="totalLabel">Total 0 min / cible 90 min</span>
+      <span class="hint" id="blockCount"></span>
+    </div>
+    <ul class="warnings" id="warnings"></ul>
+  </div>
+
+  <!-- Blocs -->
+  <div class="card">
+    <h2>Trame de la séance</h2>
+    <p class="hint">La trame type est pré-remplie (échauffement → rondo → jeu d'intro → situation → jeu de fin → match). Choisis un procédé de la bibliothèque pour chaque bloc, ajuste durée et intention, réordonne ou retire les blocs.</p>
+    <div class="blocks" id="blocks"></div>
+    <div class="addbar">
+      <button id="addBlock">+ Ajouter un bloc</button>
+      <button id="resetTrame" class="mini-btn">Réinitialiser la trame type</button>
+    </div>
+  </div>
+
+  <!-- IO -->
+  <div class="card">
+    <h2>Séance : enregistrer, charger, exporter</h2>
+    <div class="io">
+      <button class="primary" id="saveSessBtn">💾 Enregistrer la séance</button>
+      <label class="hint">Séances</label>
+      <select id="sessSelect"></select>
+      <button id="loadSessBtn">Charger</button>
+      <button id="delSessBtn" class="danger">Supprimer</button>
+    </div>
+    <div class="io" style="margin-top:8px">
+      <button id="exportBtn">Exporter JSON</button>
+      <button id="printBtn">🖨 Fiche imprimable (PDF)</button>
+      <button id="newBtn">Nouvelle séance</button>
+      <span class="status" id="status"></span>
+    </div>
+  </div>
+</div>
+
+<script src="render-core.js"></script>
+<script src="store.js"></script>
+<script src="seance.js"></script>
+</body>
+</html>
