@@ -18,6 +18,13 @@
   var curKf = 0, playing = false, rafId = null, selAnno = null, selLine = null, selText = null, selPulse = null, playSpeed = 1;
   var polyDraft = null; // dessin en cours d'une zone libre (jonction de traits)
   var currentDrillId = null; // id du procede en cours dans la bibliotheque (null = non enregistre)
+  // Embarque dans la webapp (iframe de app/webapp/library/schematics) : la
+  // sauvegarde/le chargement passent par le parent (postMessage) au lieu de
+  // DrillStore/localStorage, qui restent la source de verite en usage
+  // standalone (cf PLAN_INTEGRATION_EDITEUR_TACTIQUE_PHASE0_2026-09.md,
+  // etape 3). teamId/embeddedDrillId arrivent avec le message INIT.
+  var embedded = window.parent !== window;
+  var embeddedTeamId = null, embeddedDrillId = null;
   // Selection multiple : [{kind:'entity'|'zone'|'line'|'text'|'pulse', ref}]. Active
   // des qu'on utilise Maj+clic ou une zone de selection ; independante des variables
   // selEntity/selZone/... qui restent la source de verite pour la selection simple
@@ -2679,7 +2686,18 @@
     var ov = document.getElementById("libOverlay");
     if (ov && !ov.classList.contains("hidden")) { renderFolderList(); renderLibraryGrid(); }
   }
+  // Poste une demande de sauvegarde au parent (webapp) au lieu d'ecrire dans
+  // DrillStore : en contexte embarque, le parent est seul a parler a Supabase
+  // (cf PLAN_INTEGRATION_EDITEUR_TACTIQUE_PHASE0_2026-09.md, etape 3). asNew
+  // force la creation d'une nouvelle entree (equivalent embarque de "Enregistrer sous...").
+  function saveToParent(asNew) {
+    syncJSON();
+    if (!drill.meta.title) { flash("Donne un titre au procédé avant de l'enregistrer", false); return; }
+    flash("Enregistrement…", true);
+    window.parent.postMessage({ type: "SAVE", drillId: asNew ? null : embeddedDrillId, drill: cleanDrill() }, window.location.origin);
+  }
   function saveToLibrary() {
+    if (embedded) { saveToParent(false); return; }
     if (!window.DrillStore || !DrillStore.available()) { flash("Stockage local indisponible", false); return; }
     syncJSON();
     if (!drill.meta.title) { flash("Donne un titre au procédé avant de l'enregistrer", false); return; }
@@ -2690,6 +2708,7 @@
   // Detache le procede courant de son entree de bibliotheque : le prochain
   // enregistrement en cree une nouvelle au lieu d'ecraser l'originale.
   function saveAsToLibrary() {
+    if (embedded) { saveToParent(true); return; }
     if (!window.DrillStore || !DrillStore.available()) { flash("Stockage local indisponible", false); return; }
     syncJSON();
     if (!drill.meta.title) { flash("Donne un titre au procédé avant de l'enregistrer", false); return; }
@@ -4835,6 +4854,44 @@
         if (rec && rec.drill) { applyDrill(rec.drill); currentDrillId = id; flash("Procédé ouvert depuis la bibliothèque", true); }
       }
     } catch (e) { /* pas de handshake */ }
+  })();
+
+  // Pont postMessage avec la webapp (iframe de app/webapp/library/schematics,
+  // cf PLAN_INTEGRATION_EDITEUR_TACTIQUE_PHASE0_2026-09.md). Verification
+  // d'origine stricte : meme origine que la page (outil servi en statique par
+  // Next.js sous /tools/tactics/, meme domaine que la webapp).
+  //   -> INIT  { teamId, drillId, drill|null, roster, teamColors }
+  //   -> SAVED { drillId }              (confirme une sauvegarde, donne l'id definitif)
+  //   -> SAVE_ERROR { message }
+  //   <- SAVE  { drillId|null, drill }  (null = nouvelle entree)
+  //   <- CLOSE {}
+  (function initEmbedded() {
+    if (!embedded) return;
+    window.addEventListener("message", function (ev) {
+      if (ev.origin !== window.location.origin || !ev.data) return;
+      var msg = ev.data;
+      if (msg.type === "INIT") {
+        embeddedTeamId = msg.teamId || null;
+        embeddedDrillId = msg.drillId || null;
+        if (msg.drill) { applyDrill(msg.drill); currentDrillId = embeddedDrillId; }
+        if (msg.teamColors && !drill.teams) drill.teams = JSON.parse(JSON.stringify(msg.teamColors));
+        if (Array.isArray(msg.roster)) { roster = msg.roster; renderRoster(); }
+        fillTeamsPanel(); render(); syncJSON(); refreshLibrary();
+      } else if (msg.type === "SAVED") {
+        embeddedDrillId = msg.drillId || embeddedDrillId;
+        currentDrillId = embeddedDrillId;
+        refreshLibrary();
+        flash("Enregistré ✓", true);
+      } else if (msg.type === "SAVE_ERROR") {
+        flash("Échec de l'enregistrement" + (msg.message ? " : " + msg.message : ""), false);
+      }
+    });
+    document.body.classList.add("embedded");
+    var closeBtn = document.getElementById("embeddedCloseBtn");
+    if (closeBtn) closeBtn.addEventListener("click", function () {
+      window.parent.postMessage({ type: "CLOSE" }, window.location.origin);
+    });
+    window.parent.postMessage({ type: "READY" }, window.location.origin);
   })();
 
   // ---- panneau calques ----
