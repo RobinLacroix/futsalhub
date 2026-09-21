@@ -7,7 +7,7 @@
 // dédié (/webapp/library/sessions), ouvert dans un nouvel onglet.
 
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, ExternalLink } from 'lucide-react';
+import { RefreshCw, ExternalLink, Trash2 } from 'lucide-react';
 import { sessionsService, type TrainingSessionRecord } from '@/lib/services/sessionsService';
 
 interface SessionPickerProps {
@@ -19,6 +19,7 @@ interface SessionPickerProps {
 export function SessionPicker({ clubId, value, onChange }: SessionPickerProps) {
   const [sessions, setSessions] = useState<TrainingSessionRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchSessions = useCallback(async () => {
     if (!clubId) return;
@@ -38,6 +39,22 @@ export function SessionPicker({ clubId, value, onChange }: SessionPickerProps) {
   }, [fetchSessions]);
 
   const selected = sessions.find((s) => s.id === value);
+
+  const handleDelete = async () => {
+    if (!selected) return;
+    if (!window.confirm(`Supprimer définitivement la séance « ${selected.name || 'sans titre'} » ? Les trainings qui la référencent la perdront (rien d'autre n'est touché).`)) return;
+    setDeleting(true);
+    try {
+      await sessionsService.deleteSession(selected.id);
+      onChange(null);
+      await fetchSessions();
+    } catch (err) {
+      console.error('SessionPicker: erreur de suppression', err);
+      window.alert('Échec de la suppression de la séance.');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <div>
@@ -66,6 +83,15 @@ export function SessionPicker({ clubId, value, onChange }: SessionPickerProps) {
           className="p-2 text-gray-600 hover:text-gray-800 border border-gray-300 rounded-md hover:bg-gray-50"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+        </button>
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={!selected || deleting}
+          title="Supprimer cette séance"
+          className="p-2 text-red-600 hover:text-red-800 border border-red-300 rounded-md hover:bg-red-50 disabled:opacity-40 disabled:cursor-default"
+        >
+          <Trash2 className="h-4 w-4" />
         </button>
         <a
           href={selected ? `/webapp/library/sessions?session=${selected.id}` : '/webapp/library/sessions'}
