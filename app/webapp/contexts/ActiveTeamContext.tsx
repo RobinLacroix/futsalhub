@@ -9,6 +9,7 @@ export interface Team {
   category: string;
   level: string;
   color: string;
+  club_id: string;
 }
 
 interface ActiveTeamContextValue {
