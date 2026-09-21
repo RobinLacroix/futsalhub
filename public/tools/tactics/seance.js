@@ -1,46 +1,56 @@
 /*
- * Assembleur de seances : enchaine des procedes (Drills) de la bibliotheque en une
- * Session { meta, blocks[] } conforme au schema partage (voir src/schema.ts).
+ * Assembleur de seances : enchaine des training_procedures (fiches pedagogiques
+ * de la bibliotheque du club) en une Session { name, meta, blocks[] }.
  *
- * Reutilise sans dupliquer :
- *   - DrillRender (render-core.js) pour les miniatures statiques ;
- *   - DrillStore (store.js) pour la bibliotheque de procedes et la persistance des seances.
+ * Fonctionne UNIQUEMENT embarque dans la webapp (iframe de
+ * app/webapp/library/sessions, cf PLAN_ASSEMBLEUR_SEANCE_PHASE2_2026-09.md) —
+ * pas de mode standalone, pas de bibliotheque locale : la liste des seances
+ * vit cote Supabase (training_sessions), la liste des procedes vient du parent
+ * (table training_procedures) a chaque INIT/CONTEXT_UPDATE.
  *
- * Un bloc = { role, intentionPedagogique, drillId, drill }. drillId est interne
- * (lien vers la bibliotheque pour "editer" / rafraichir) ; a l'export on ne garde
- * que { role, intentionPedagogique, drill } pour rester conforme au schema Session.
+ * Un bloc = { id, type, duration, procedureId, intentionPedagogique }. Liste
+ * libre (ajout/suppression/reordonnancement, doublons de type possibles) —
+ * pas de trame fixe. type reprend l'enum training_type (Echauffement /
+ * Exercice / Situation / Jeu).
+ *
+ * Pont postMessage (meme origine, cf editor.js pour le patron d'origine) :
+ *   -> INIT           { clubId, sessionId, session|null, procedures }
+ *   -> CONTEXT_UPDATE { clubId, procedures }
+ *   -> SAVED          { sessionId }
+ *   -> SAVE_ERROR     { message }
+ *   <- READY {}
+ *   <- SAVE  { session: SessionJSON }
+ *   <- CLOSE {}
  */
 (function () {
   "use strict";
-  var R = window.DrillRender, S = window.DrillStore;
-  var NS = "http://www.w3.org/2000/svg";
 
-  // Trame pedagogique de Robin, dans l'ordre. Les blocs sont editables/reordonnables.
-  var ROLES = [
-    { id: "echauffement", label: "Échauffement" },
-    { id: "rondo", label: "Rondo / Toro" },
-    { id: "jeu-introduction", label: "Jeu d'introduction" },
-    { id: "situation", label: "Situation" },
-    { id: "jeu-fin", label: "Jeu de fin" },
-    { id: "match", label: "Match" }
+  var TYPES = [
+    { id: "Echauffement", label: "Échauffement" },
+    { id: "Exercice", label: "Exercice" },
+    { id: "Situation", label: "Situation" },
+    { id: "Jeu", label: "Jeu" }
   ];
-  var TRAME = ["echauffement", "rondo", "jeu-introduction", "situation", "jeu-fin", "match"];
-  var EXPECTED = ["situation", "match"]; // coeur d'une seance : au moins une situation + un match
+  // Coeur d'une seance (heritage de la trame de Robin : au moins une situation
+  // + un jeu/match) — garde-fou souple, pas une contrainte de structure.
+  var EXPECTED = ["Situation", "Jeu"];
 
+  var clubId = null, sessionId = null, procedures = [];
   var session = defaultSession();
-  var currentSessionId = null;
 
-  function roleLabel(id) { for (var i = 0; i < ROLES.length; i++) if (ROLES[i].id === id) return ROLES[i].label; return id; }
+  function typeLabel(id) { for (var i = 0; i < TYPES.length; i++) if (TYPES[i].id === id) return TYPES[i].label; return id; }
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
-  function hasDrill(b) { return !!(b && b.drill); }
-  function blockDur(b) { return hasDrill(b) ? (b.drill.meta.dureeMin || 0) : 0; }
-  function computeTotal() { return session.blocks.reduce(function (s, b) { return s + blockDur(b); }, 0); }
+  function newBlockId() { return "b" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  function hasProc(b) { return !!(b && b.procedureId); }
+  function findProc(id) { for (var i = 0; i < procedures.length; i++) if (procedures[i].id === id) return procedures[i]; return null; }
+  function computeTotal() { return session.blocks.reduce(function (s, b) { return s + (b.duration || 0); }, 0); }
 
   function defaultSession() {
     return {
-      meta: { title: "", theme: "", phaseCible: "", objectif: "", effectif: "", dureeTotaleMin: 90, intensite: "elevee", philosophyTags: [] },
-      blocks: TRAME.map(function (r) { return { role: r, intentionPedagogique: "", drillId: null, drill: null }; })
+      name: "",
+      meta: { theme: "", phaseCible: "", objectif: "", effectif: "", dureeTotaleMin: 90, intensite: "elevee", philosophyTags: [] },
+      blocks: []
     };
   }
 
@@ -58,28 +68,6 @@
   }
   function flash(msg, ok) { var s = document.getElementById("status"); s.textContent = msg; s.className = "status " + (ok ? "ok" : "err"); }
 
-  // ---- bibliotheque de procedes ----
-  function drillOptionsInto(sel, selectedId) {
-    var items = S ? S.listDrills() : [];
-    sel.innerHTML = "";
-    sel.appendChild(h("option", { value: "" }, ["— choisir un procédé —"]));
-    items.forEach(function (it) {
-      var lbl = (it.title || "(sans titre)") + (it.theme ? " · " + it.theme : "") + " · " + (it.dureeMin || 0) + "'";
-      sel.appendChild(h("option", { value: it.id }, [lbl]));
-    });
-    sel.value = selectedId || "";
-    return items.length;
-  }
-
-  // ---- miniature (rendu statique via le moteur partage) ----
-  function miniature(drill) {
-    var svg = document.createElementNS(NS, "svg");
-    svg.setAttribute("class", "mini");
-    svg.setAttribute("xmlns", NS);
-    try { R.renderStatic(svg, drill, 0); } catch (e) { /* drill invalide : miniature vide */ }
-    return svg;
-  }
-
   // ---- rendu des blocs ----
   function renderBlocks() {
     var host = document.getElementById("blocks");
@@ -89,34 +77,32 @@
   }
 
   function blockCard(b, i) {
-    // colonne miniature
-    var miniWrap = h("div", { class: "mini-wrap" });
-    if (hasDrill(b)) miniWrap.appendChild(miniature(b.drill));
-    else miniWrap.appendChild(h("div", { class: "mini-empty" }, ["Aucun procédé sélectionné"]));
+    var p = hasProc(b) ? findProc(b.procedureId) : null;
 
-    // selecteur de procede
-    var picker = h("select", {
-      onchange: function (e) { setBlockDrill(i, e.target.value); }
-    });
-    var count = drillOptionsInto(picker, b.drillId);
-    miniWrap.appendChild(picker);
-    if (!count) miniWrap.appendChild(h("div", { class: "hint" }, ["Bibliothèque vide — crée des procédés dans l'éditeur."]));
+    // colonne miniature (illustration de la fiche procede, si elle en a une)
+    var thumb = p && p.image_url
+      ? h("div", { class: "thumb" }, [(function () { var img = document.createElement("img"); img.src = p.image_url; img.alt = ""; return img; })()])
+      : h("div", { class: "thumb empty" }, [hasProc(b) ? "Aucune illustration" : "Aucun procédé sélectionné"]);
+
+    var picker = h("select", { onchange: function (e) { setBlockProcedure(i, e.target.value); } });
+    var count = procedureOptionsInto(picker, b.procedureId);
+    var side = h("div", { class: "side" }, [thumb, picker]);
+    if (!count) side.appendChild(h("div", { class: "hint" }, ["Bibliothèque vide — crée des procédés dans la bibliothèque."]));
 
     // colonne corps
-    var roleSel = h("select", { class: "role", onchange: function (e) { b.role = e.target.value; refreshSummary(); } },
-      ROLES.map(function (r) { return h("option", { value: r.id }, [r.label]); }));
-    roleSel.value = b.role;
+    var typeSel = h("select", { class: "type", onchange: function (e) { b.type = e.target.value; refreshSummary(); } },
+      TYPES.map(function (t) { return h("option", { value: t.id }, [t.label]); }));
+    typeSel.value = b.type;
 
     var durInput = h("input", {
-      type: "number", min: "1", style: "width:70px",
-      value: String(blockDur(b)), disabled: hasDrill(b) ? null : "disabled",
-      oninput: function (e) { if (hasDrill(b)) { b.drill.meta.dureeMin = parseInt(e.target.value, 10) || 0; refreshSummary(); } }
+      type: "number", min: "0", style: "width:70px", value: String(b.duration || 0),
+      oninput: function (e) { b.duration = parseInt(e.target.value, 10) || 0; refreshSummary(); }
     });
 
-    var editBtn = h("button", {
-      class: "mini-btn", disabled: b.drillId ? null : "disabled",
-      onclick: function () { if (b.drillId) window.open("index.html?drill=" + encodeURIComponent(b.drillId), "_blank"); }
-    }, ["Éditer"]);
+    var schemaBtn = h("button", {
+      class: "mini-btn", disabled: (p && p.schematic_id) ? null : "disabled",
+      onclick: function () { if (p && p.schematic_id) window.open("/webapp/library/schematics?schematic=" + encodeURIComponent(p.schematic_id), "_blank"); }
+    }, ["Voir le schéma"]);
 
     var order = h("div", { class: "order" }, [
       h("button", { class: "mini-btn", title: "Monter", disabled: i === 0 ? "disabled" : null, onclick: function () { moveBlock(i, -1); } }, ["↑"]),
@@ -125,14 +111,14 @@
     ]);
 
     var line1 = h("div", { class: "rowline" }, [
-      h("label", null, ["Rôle"]), roleSel,
+      h("label", null, ["Type"]), typeSel,
       h("label", null, ["Durée"]), durInput, h("span", { class: "hint" }, ["min"]),
-      editBtn, order
+      schemaBtn, order
     ]);
 
-    var title = hasDrill(b)
-      ? h("div", { class: "drill-title" }, [(b.drill.meta.title || "(sans titre)") + (b.drill.meta.theme ? " — " + b.drill.meta.theme : "")])
-      : h("div", { class: "drill-title" }, ["—"]);
+    var title = p
+      ? h("div", { class: "proc-title" }, [(p.title || "(sans titre)") + (p.theme ? " — " + p.theme : "")])
+      : h("div", { class: "proc-title" }, ["—"]);
 
     var intention = h("textarea", {
       placeholder: "Intention pédagogique du bloc (poser la problématique, correctifs, validation…)",
@@ -141,16 +127,29 @@
     intention.value = b.intentionPedagogique || "";
 
     var body = h("div", { class: "body" }, [line1, title, intention]);
-    return h("div", { class: "block" }, [miniWrap, body]);
+    return h("div", { class: "block" }, [side, body]);
+  }
+
+  // ---- bibliotheque de procedes (injectee par le parent) ----
+  function procedureOptionsInto(sel, selectedId) {
+    sel.innerHTML = "";
+    sel.appendChild(h("option", { value: "" }, ["— choisir un procédé —"]));
+    procedures.forEach(function (it) {
+      var lbl = (it.title || "(sans titre)") + (it.theme ? " · " + it.theme : "") + " · " + (it.duration_minutes || 0) + "'";
+      sel.appendChild(h("option", { value: it.id }, [lbl]));
+    });
+    sel.value = selectedId || "";
+    return procedures.length;
   }
 
   // ---- actions blocs ----
-  function setBlockDrill(i, id) {
+  function setBlockProcedure(i, id) {
     var b = session.blocks[i];
-    if (!id) { b.drillId = null; b.drill = null; renderBlocks(); return; }
-    var rec = S.getDrill(id);
-    if (!rec || !rec.drill) { flash("Procédé introuvable", false); return; }
-    b.drillId = id; b.drill = clone(rec.drill);
+    if (!id) { b.procedureId = null; renderBlocks(); return; }
+    var p = findProc(id);
+    if (!p) { flash("Procédé introuvable", false); return; }
+    b.procedureId = id;
+    if (p.duration_minutes) b.duration = p.duration_minutes;
     renderBlocks();
   }
   function moveBlock(i, dir) {
@@ -160,20 +159,7 @@
     renderBlocks();
   }
   function removeBlock(i) { session.blocks.splice(i, 1); renderBlocks(); }
-  function addBlock() { session.blocks.push({ role: "situation", intentionPedagogique: "", drillId: null, drill: null }); renderBlocks(); }
-  function resetTrame() { session.blocks = defaultSession().blocks; renderBlocks(); flash("Trame type réinitialisée", true); }
-
-  // Rafraichit les procedes embarques depuis la bibliotheque (apres edition dans l'editeur).
-  function refreshEmbeddedDrills() {
-    if (!S) return;
-    var changed = false;
-    session.blocks.forEach(function (b) {
-      if (!b.drillId) return;
-      var rec = S.getDrill(b.drillId);
-      if (rec && rec.drill) { b.drill = clone(rec.drill); changed = true; }
-    });
-    if (changed) renderBlocks();
-  }
+  function addBlock() { session.blocks.push({ id: newBlockId(), type: "Exercice", duration: 15, procedureId: null, intentionPedagogique: "" }); renderBlocks(); }
 
   // ---- garde-fous / resume ----
   function refreshSummary() {
@@ -181,31 +167,29 @@
     var tl = document.getElementById("totalLabel");
     tl.textContent = "Total " + total + " min / cible " + target + " min";
     tl.className = "total " + (Math.abs(total - target) <= 5 ? "ok" : "off");
-    document.getElementById("blockCount").textContent = session.blocks.length + " bloc(s) · " + session.blocks.filter(hasDrill).length + " avec procédé";
+    document.getElementById("blockCount").textContent = session.blocks.length + " bloc(s) · " + session.blocks.filter(hasProc).length + " avec procédé";
 
     var w = document.getElementById("warnings"); w.innerHTML = "";
     var msgs = [];
-    // blocs sans procede
-    var empty = session.blocks.filter(function (b) { return !hasDrill(b); }).length;
-    if (empty) msgs.push({ t: "err", m: empty + " bloc(s) sans procédé assigné." });
-    // roles attendus manquants
-    var present = {}; session.blocks.forEach(function (b) { present[b.role] = true; });
-    EXPECTED.forEach(function (r) { if (!present[r]) msgs.push({ t: "warn", m: "Rôle attendu manquant : " + roleLabel(r) + "." }); });
-    // ecart duree
+    var empty = session.blocks.filter(function (b) { return !hasProc(b); }).length;
+    if (empty) msgs.push({ t: "warn", m: empty + " bloc(s) sans procédé assigné." });
+    var present = {}; session.blocks.forEach(function (b) { present[b.type] = true; });
+    EXPECTED.forEach(function (t) { if (!present[t]) msgs.push({ t: "warn", m: "Type attendu manquant : " + typeLabel(t) + "." }); });
     if (target && Math.abs(total - target) > 10) msgs.push({ t: "warn", m: "Écart de " + (total - target > 0 ? "+" : "") + (total - target) + " min avec la durée cible." });
-    // coherence thematique
     if (session.meta.theme) {
-      var off = session.blocks.filter(function (b) { return hasDrill(b) && b.drill.meta.theme && norm(b.drill.meta.theme) !== norm(session.meta.theme); });
+      var off = session.blocks.filter(function (b) { var p = hasProc(b) ? findProc(b.procedureId) : null; return p && p.theme && norm(p.theme) !== norm(session.meta.theme); });
       if (off.length) msgs.push({ t: "warn", m: off.length + " procédé(s) d'un thème différent de la séance (« " + session.meta.theme + " »)." });
     }
-    if (!msgs.length) msgs.push({ t: "ok", m: "Séance cohérente : trame complète, durées et thème alignés." });
+    if (!session.blocks.length) msgs.push({ t: "err", m: "Aucun bloc — ajoute au moins un bloc à la séance." });
+    if (!msgs.length) msgs.push({ t: "ok", m: "Séance cohérente : durées et thème alignés." });
     msgs.forEach(function (x) { w.appendChild(h("li", { class: x.t === "err" ? "err" : x.t === "ok" ? "ok" : "" }, [x.m])); });
   }
   function norm(s) { return String(s).trim().toLowerCase(); }
 
   // ---- bandeau meta ----
   function bindMeta() {
-    map("sTitle", "title"); map("sTheme", "theme"); map("sPhase", "phaseCible"); map("sObjectif", "objectif"); map("sEffectif", "effectif");
+    document.getElementById("sTitle").addEventListener("input", function (e) { session.name = e.target.value; });
+    map("sTheme", "theme"); map("sPhase", "phaseCible"); map("sObjectif", "objectif"); map("sEffectif", "effectif");
     document.getElementById("sDuree").addEventListener("input", function (e) { session.meta.dureeTotaleMin = parseInt(e.target.value, 10) || 0; refreshSummary(); });
     document.getElementById("sIntensite").addEventListener("change", function (e) { session.meta.intensite = e.target.value; });
     document.getElementById("sTags").addEventListener("input", function (e) { session.meta.philosophyTags = e.target.value.split(",").map(function (s) { return s.trim(); }).filter(Boolean); });
@@ -213,7 +197,7 @@
   }
   function fillMeta() {
     var m = session.meta;
-    document.getElementById("sTitle").value = m.title || "";
+    document.getElementById("sTitle").value = session.name || "";
     document.getElementById("sTheme").value = m.theme || "";
     document.getElementById("sPhase").value = m.phaseCible || "";
     document.getElementById("sObjectif").value = m.objectif || "";
@@ -223,21 +207,23 @@
     document.getElementById("sTags").value = (m.philosophyTags || []).join(", ");
   }
 
-  // ---- IO : Session conforme au schema (sans drillId interne) ----
+  // ---- IO ----
   function cleanSession() {
     return {
+      id: sessionId,
+      name: session.name,
       meta: clone(Object.assign({}, session.meta, { dureeTotaleMin: computeTotal() || session.meta.dureeTotaleMin })),
-      blocks: session.blocks.filter(hasDrill).map(function (b) {
-        return { role: b.role, intentionPedagogique: b.intentionPedagogique || "", drill: clone(b.drill) };
+      blocks: session.blocks.map(function (b) {
+        return { id: b.id, type: b.type, duration: b.duration || 0, procedureId: b.procedureId || null, intentionPedagogique: b.intentionPedagogique || "" };
       })
     };
   }
   function validate() {
     var e = [];
-    if (!session.meta.title) e.push("titre");
+    if (!session.name) e.push("titre");
     if (!session.meta.theme) e.push("thème");
     if (!session.meta.objectif) e.push("objectif");
-    if (!session.blocks.filter(hasDrill).length) e.push("au moins un procédé");
+    if (!session.blocks.length) e.push("au moins un bloc");
     return e;
   }
 
@@ -246,83 +232,53 @@
     if (errs.length) { flash("À compléter : " + errs.join(", "), false); return; }
     var blob = new Blob([JSON.stringify(cleanSession(), null, 2)], { type: "application/json" });
     var a = document.createElement("a"); a.href = URL.createObjectURL(blob);
-    a.download = (session.meta.title || "seance").toLowerCase().replace(/[^a-z0-9]+/g, "-") + ".json";
+    a.download = (session.name || "seance").toLowerCase().replace(/[^a-z0-9]+/g, "-") + ".json";
     a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
     flash("Séance exportée ✓", true);
   }
 
-  function saveToLibrary() {
-    if (!S || !S.available()) { flash("Stockage local indisponible", false); return; }
-    if (!session.meta.title) { flash("Donne un titre à la séance avant d'enregistrer", false); return; }
-    var payload = { meta: clone(session.meta), blocks: session.blocks.map(function (b) { return { role: b.role, intentionPedagogique: b.intentionPedagogique || "", drillId: b.drillId, drill: b.drill ? clone(b.drill) : null }; }) };
-    payload.meta.dureeTotaleMin = computeTotal() || payload.meta.dureeTotaleMin;
-    currentSessionId = S.saveSession(payload, currentSessionId);
-    refreshSessionList(currentSessionId);
-    flash("Séance enregistrée ✓", true);
+  function saveSession() {
+    var errs = validate();
+    if (errs.length) { flash("À compléter avant d'enregistrer : " + errs.join(", "), false); return; }
+    window.parent.postMessage({ type: "SAVE", session: cleanSession() }, window.location.origin);
   }
-  function loadFromLibrary(id) {
-    if (!S) return;
-    id = id || document.getElementById("sessSelect").value;
-    if (!id) { flash("Choisis une séance", false); return; }
-    var rec = S.getSession(id);
-    if (!rec || !rec.session) { flash("Séance introuvable", false); return; }
-    var s = rec.session;
-    session = { meta: Object.assign(defaultSession().meta, s.meta || {}), blocks: (s.blocks || []).map(function (b) { return { role: b.role, intentionPedagogique: b.intentionPedagogique || "", drillId: b.drillId || null, drill: b.drill || null }; }) };
-    currentSessionId = id;
-    fillMeta(); renderBlocks(); refreshSessionList(id);
-    flash("Séance chargée ✓", true);
-  }
-  function deleteFromLibrary() {
-    if (!S) return;
-    var id = document.getElementById("sessSelect").value;
-    if (!id) { flash("Choisis une séance à supprimer", false); return; }
-    S.deleteSession(id);
-    if (currentSessionId === id) currentSessionId = null;
-    refreshSessionList(); flash("Séance supprimée", true);
-  }
-  function refreshSessionList(selectId) {
-    var sel = document.getElementById("sessSelect"); if (!sel || !S) return;
-    var items = S.listSessions(); sel.innerHTML = "";
-    if (!items.length) { sel.appendChild(h("option", { value: "" }, ["(aucune séance)"])); return; }
-    items.forEach(function (it) { sel.appendChild(h("option", { value: it.id }, [(it.title || "(sans titre)") + " · " + (it.dureeTotaleMin || 0) + "'"])); });
-    sel.value = selectId || "";
-  }
-  function newSession() { session = defaultSession(); currentSessionId = null; fillMeta(); renderBlocks(); flash("Nouvelle séance", true); }
 
   // ---- fiche imprimable (HTML -> PDF via impression navigateur) ----
   function printFiche() {
     var errs = validate();
     if (errs.length) { flash("À compléter avant impression : " + errs.join(", "), false); return; }
     var m = session.meta, total = computeTotal();
-    var blocksHTML = session.blocks.filter(hasDrill).map(function (b) {
-      var d = b.drill, mini = miniature(d);
-      var rules = d.rules || {};
-      function list(arr, title) { return (arr && arr.length) ? "<div class='sub'><b>" + title + "</b><ul>" + arr.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul></div>" : ""; }
-      var meca = (rules.mecanismes && rules.mecanismes.length) ? "<div class='sub'><b>Mécanismes</b><ul>" + rules.mecanismes.map(function (x) { return "<li>" + esc(x.regle) + " → " + esc(x.induit) + "</li>"; }).join("") + "</ul></div>" : "";
+    var blocksHTML = session.blocks.map(function (b) {
+      var p = hasProc(b) ? findProc(b.procedureId) : null;
+      var img = p && p.image_url ? "<div class='fmini'><img src='" + esc(p.image_url) + "' alt='' /></div>" : "";
+      var info = p
+        ? "<div class='finfo'>"
+          + (p.objectives ? "<p><b>Objectifs :</b> " + esc(p.objectives) + "</p>" : "")
+          + (p.instructions ? "<p><b>Consignes :</b> " + esc(p.instructions) + "</p>" : "")
+          + (p.variants ? "<p><b>Variantes :</b> " + esc(p.variants) + "</p>" : "")
+          + (p.corrections ? "<p><b>Corrections :</b> " + esc(p.corrections) + "</p>" : "")
+          + "</div>"
+        : "<div class='finfo'><p class='hint'>(bloc libre, sans procédé associé)</p></div>";
       return "<section class='fb'>"
-        + "<div class='fh'><span class='role'>" + esc(roleLabel(b.role)) + "</span><span class='dur'>" + (d.meta.dureeMin || 0) + " min</span></div>"
-        + "<h3>" + esc(d.meta.title || "(sans titre)") + "</h3>"
+        + "<div class='fh'><span class='role'>" + esc(typeLabel(b.type)) + "</span><span class='dur'>" + (b.duration || 0) + " min</span></div>"
+        + "<h3>" + esc(p ? (p.title || "(sans titre)") : "Bloc libre") + "</h3>"
         + (b.intentionPedagogique ? "<p class='intent'>" + esc(b.intentionPedagogique) + "</p>" : "")
-        + "<div class='fbody'><div class='fmini'>" + mini.outerHTML + "</div><div class='finfo'>"
-        + (d.meta.objectif ? "<p><b>Objectif :</b> " + esc(d.meta.objectif) + "</p>" : "")
-        + list(rules.scoring, "Scoring") + list(rules.comportements, "Comportements attendus") + meca
-        + "<div class='vars'>" + list(rules.variablesPlus, "Variables +") + list(rules.variablesMinus, "Variables −") + "</div>"
-        + "</div></div></section>";
+        + "<div class='fbody" + (img ? "" : " no-img") + "'>" + img + info + "</div>"
+        + "</section>";
     }).join("");
 
-    var doc = "<!doctype html><html lang='fr'><head><meta charset='utf-8'><title>" + esc(m.title) + "</title><style>"
+    var doc = "<!doctype html><html lang='fr'><head><meta charset='utf-8'><title>" + esc(session.name) + "</title><style>"
       + "*{box-sizing:border-box} body{font-family:-apple-system,Arial,sans-serif;color:#1c1e1a;margin:24px;font-size:12px;line-height:1.45}"
       + "h1{font-size:20px;margin:0 0 4px} .meta{color:#555;margin:0 0 16px;font-size:12px}"
       + ".meta b{color:#1c1e1a} .tags{color:#1d9e75}"
       + ".fb{border:1px solid #ddd;border-radius:8px;padding:12px;margin-bottom:12px;page-break-inside:avoid}"
       + ".fh{display:flex;justify-content:space-between;align-items:center} .fh .role{background:#eef0ec;border-radius:10px;padding:2px 10px;font-weight:600}"
       + ".fh .dur{color:#555;font-weight:600} h3{margin:6px 0} .intent{color:#555;font-style:italic;margin:0 0 8px}"
-      + ".fbody{display:grid;grid-template-columns:300px 1fr;gap:14px;align-items:start}"
-      + ".fmini svg{width:100%;height:auto;border-radius:6px;background:#2f8f4e} .finfo p{margin:0 0 6px}"
-      + ".sub{margin:6px 0} .sub b{display:block} .sub ul{margin:2px 0 0 16px;padding:0} .vars{display:grid;grid-template-columns:1fr 1fr;gap:10px}"
+      + ".fbody{display:grid;grid-template-columns:200px 1fr;gap:14px;align-items:start} .fbody.no-img{grid-template-columns:1fr}"
+      + ".fmini img{width:100%;border-radius:6px;object-fit:cover} .finfo p{margin:0 0 6px} .finfo .hint{color:#888;font-style:italic}"
       + "@media print{body{margin:12mm}}"
       + "</style></head><body>"
-      + "<h1>" + esc(m.title) + "</h1>"
+      + "<h1>" + esc(session.name) + "</h1>"
       + "<p class='meta'><b>Thème :</b> " + esc(m.theme) + (m.phaseCible ? " · <b>Phase :</b> " + esc(m.phaseCible) : "")
       + " · <b>Objectif :</b> " + esc(m.objectif)
       + (m.effectif ? " · <b>Effectif :</b> " + esc(m.effectif) : "")
@@ -337,16 +293,49 @@
     flash("Fiche générée (fenêtre d'impression)", true);
   }
 
+  // ---- pont postMessage avec la webapp ----
+  function applyProcedures(list) { procedures = Array.isArray(list) ? list : []; }
+  function applySessionData(s) {
+    session = {
+      name: s.name || "",
+      meta: Object.assign(defaultSession().meta, s.meta || {}),
+      blocks: (s.blocks || []).map(function (b) {
+        return { id: b.id || newBlockId(), type: b.type || "Exercice", duration: b.duration || 0, procedureId: b.procedureId || null, intentionPedagogique: b.intentionPedagogique || "" };
+      })
+    };
+  }
+
+  window.addEventListener("message", function (ev) {
+    if (ev.origin !== window.location.origin || !ev.data) return;
+    var msg = ev.data;
+    if (msg.type === "INIT") {
+      clubId = msg.clubId || null;
+      sessionId = msg.sessionId || null;
+      applyProcedures(msg.procedures);
+      if (msg.session) applySessionData(msg.session);
+      fillMeta(); renderBlocks();
+    } else if (msg.type === "CONTEXT_UPDATE") {
+      clubId = msg.clubId || clubId;
+      applyProcedures(msg.procedures);
+      renderBlocks();
+    } else if (msg.type === "SAVED") {
+      sessionId = msg.sessionId || sessionId;
+      flash("Enregistré ✓", true);
+    } else if (msg.type === "SAVE_ERROR") {
+      flash("Échec de l'enregistrement" + (msg.message ? " : " + msg.message : ""), false);
+    }
+  });
+
+  document.getElementById("closeBtn").addEventListener("click", function () {
+    window.parent.postMessage({ type: "CLOSE" }, window.location.origin);
+  });
+
   // ---- wire up ----
   document.getElementById("addBlock").addEventListener("click", addBlock);
-  document.getElementById("resetTrame").addEventListener("click", resetTrame);
-  document.getElementById("saveSessBtn").addEventListener("click", saveToLibrary);
-  document.getElementById("loadSessBtn").addEventListener("click", function () { loadFromLibrary(); });
-  document.getElementById("delSessBtn").addEventListener("click", deleteFromLibrary);
+  document.getElementById("saveBtn").addEventListener("click", saveSession);
   document.getElementById("exportBtn").addEventListener("click", exportJSON);
   document.getElementById("printBtn").addEventListener("click", printFiche);
-  document.getElementById("newBtn").addEventListener("click", newSession);
-  window.addEventListener("focus", refreshEmbeddedDrills); // rafraichit les minis apres edition d'un procede
 
-  bindMeta(); fillMeta(); renderBlocks(); refreshSessionList(currentSessionId);
+  bindMeta(); fillMeta(); renderBlocks();
+  window.parent.postMessage({ type: "READY" }, window.location.origin);
 })();
