@@ -25,6 +25,13 @@
   // etape 3). teamId/embeddedDrillId arrivent avec le message INIT.
   var embedded = window.parent !== window;
   var embeddedTeamId = null, embeddedDrillId = null;
+  // Bibliotheque embarquee (schematics + schematic_folders reels de l'equipe
+  // active, cf message LIBRARY dans applyEmbeddedContext) — remplace DrillStore
+  // comme source pour le panneau bibliotheque quand embedded. Les mutations
+  // (creer/renommer/supprimer un dossier, ranger/dupliquer/supprimer un
+  // schema) passent par LIBRARY_ACTION vers le parent, seul a parler a
+  // Supabase ; le parent repond LIBRARY_UPDATE avec l'etat a jour.
+  var embeddedLibrary = { folders: [], schematics: [] };
   // Selection multiple : [{kind:'entity'|'zone'|'line'|'text'|'pulse', ref}]. Active
   // des qu'on utilise Maj+clic ou une zone de selection ; independante des variables
   // selEntity/selZone/... qui restent la source de verite pour la selection simple
@@ -2675,6 +2682,43 @@
   // libFolder : null = tous, "" = sans dossier, sinon l'id d'un dossier.
   var libQuery = "", libCat = "", libFolder = null;
 
+  // ---- acces bibliotheque unifie : DrillStore (standalone) ou
+  // embeddedLibrary (embarque, donnees reelles Supabase) ----
+  function libListDrills() {
+    if (embedded) {
+      return embeddedLibrary.schematics.map(function (rec) {
+        var m = (rec.data && rec.data.meta) || {};
+        return {
+          id: rec.id, updatedAt: rec.updated_at ? +new Date(rec.updated_at) : 0,
+          title: m.title || rec.name || "", theme: m.theme || "",
+          category: m.category || "entrainement", subcategory: m.subcategory || "",
+          dureeMin: m.dureeMin || 0, nbJoueurs: m.nbJoueurs || 0,
+          keyframes: (rec.data && rec.data.keyframes && rec.data.keyframes.length) || 0,
+          folderId: rec.folder_id || null
+        };
+      }).sort(function (a, b) { return b.updatedAt - a.updatedAt; });
+    }
+    return (window.DrillStore && DrillStore.listDrills()) || [];
+  }
+  function libListFolders() {
+    if (embedded) return embeddedLibrary.folders.map(function (f) { return { id: f.id, name: f.name }; });
+    return (window.DrillStore && DrillStore.listFolders()) || [];
+  }
+  function libGetDrillRecord(id) {
+    if (embedded) {
+      var rec = null;
+      embeddedLibrary.schematics.some(function (r) { if (r.id === id) { rec = r; return true; } return false; });
+      return rec ? { id: rec.id, drill: rec.data, folderId: rec.folder_id } : null;
+    }
+    return (window.DrillStore && DrillStore.getDrill(id)) || null;
+  }
+  // Poste une mutation au parent (embarque uniquement) ; le parent ecrit en
+  // base puis renvoie LIBRARY_UPDATE avec l'etat a jour (pas de mutation
+  // optimiste locale — le panneau se rafraichit a la reponse).
+  function libAction(action, payload) {
+    window.parent.postMessage({ type: "LIBRARY_ACTION", action: action, payload: payload }, window.location.origin);
+  }
+
   // Etiquette du procede courant dans la barre d'actions : dit si ce qu'on edite
   // vient de la bibliotheque ou n'y a jamais ete enregistre.
   function refreshLibrary() {
@@ -2717,21 +2761,29 @@
     flash("Copie enregistrée dans la bibliothèque ✓", true);
   }
   function loadFromLibrary(id) {
-    if (!window.DrillStore || !id) return;
-    var rec = DrillStore.getDrill(id);
+    if (!id) return;
+    var rec = libGetDrillRecord(id);
     if (!rec || !rec.drill) { flash("Procédé introuvable", false); return; }
     applyDrill(rec.drill); currentDrillId = id; refreshLibrary();
     flash("Chargé depuis la bibliothèque ✓", true);
   }
   function deleteFromLibrary(id, title) {
-    if (!window.DrillStore || !id) return;
+    if (!id) return;
     if (!window.confirm("Supprimer définitivement « " + (title || "ce procédé") + " » de la bibliothèque ?")) return;
+    if (embedded) {
+      libAction("deleteSchematic", { id: id });
+      if (currentDrillId === id) currentDrillId = null;
+      return;
+    }
+    if (!window.DrillStore) return;
     DrillStore.deleteDrill(id);
     if (currentDrillId === id) currentDrillId = null;
     renderFolderList(); refreshLibrary(); flash("Supprimé de la bibliothèque", true);
   }
   function duplicateInLibrary(id) {
-    if (!window.DrillStore || !id) return;
+    if (!id) return;
+    if (embedded) { libAction("duplicateSchematic", { id: id }); return; }
+    if (!window.DrillStore) return;
     var rec = DrillStore.getDrill(id);
     if (!rec || !rec.drill) return;
     var copy = JSON.parse(JSON.stringify(rec.drill));
@@ -2744,8 +2796,8 @@
     renderFolderList(); renderLibraryGrid(); flash("Procédé dupliqué ✓", true);
   }
   function exportFromLibrary(id) {
-    if (!window.DrillStore || !id) return;
-    var rec = DrillStore.getDrill(id);
+    if (!id) return;
+    var rec = libGetDrillRecord(id);
     if (!rec || !rec.drill) return;
     var blob = new Blob([JSON.stringify(rec.drill, null, 2)], { type: "application/json" });
     var a = document.createElement("a"); a.href = URL.createObjectURL(blob);
@@ -2783,8 +2835,8 @@
   // pour rester un reperage stable du contenu, pas un resultat de filtre.
   function renderFolderList() {
     var box = document.getElementById("libFolders");
-    if (!box || !window.DrillStore) return;
-    var all = DrillStore.listDrills(), folders = DrillStore.listFolders();
+    if (!box || (!embedded && !window.DrillStore)) return;
+    var all = libListDrills(), folders = libListFolders();
     box.innerHTML = "";
     function row(key, name, count, folderId) {
       var b = document.createElement("button");
@@ -2799,16 +2851,18 @@
         ren.addEventListener("click", function (ev) {
           ev.stopPropagation();
           var nn = window.prompt("Renommer le dossier", name);
-          if (nn && nn.trim()) { DrillStore.renameFolder(folderId, nn); renderFolderList(); renderLibraryGrid(); }
+          if (!nn || !nn.trim()) return;
+          if (embedded) { libAction("renameFolder", { id: folderId, name: nn }); return; }
+          if (window.DrillStore) { DrillStore.renameFolder(folderId, nn); renderFolderList(); renderLibraryGrid(); }
         });
         var del = document.createElement("button");
         del.type = "button"; del.className = "fbtn"; del.textContent = "×"; del.title = "Supprimer le dossier (les procédés sont conservés)";
         del.addEventListener("click", function (ev) {
           ev.stopPropagation();
           if (!window.confirm("Supprimer le dossier « " + name + " » ?\nLes procédés qu'il contient sont conservés et retournent dans « Sans dossier ».")) return;
-          DrillStore.deleteFolder(folderId);
           if (libFolder === folderId) libFolder = null;
-          renderFolderList(); renderLibraryGrid();
+          if (embedded) { libAction("deleteFolder", { id: folderId }); return; }
+          if (window.DrillStore) { DrillStore.deleteFolder(folderId); renderFolderList(); renderLibraryGrid(); }
         });
         b.appendChild(ren); b.appendChild(del);
       }
@@ -2823,9 +2877,9 @@
   }
   function renderLibraryGrid() {
     var grid = document.getElementById("libGrid");
-    if (!grid || !window.DrillStore) return;
-    var all = DrillStore.listDrills();
-    var folders = DrillStore.listFolders();
+    if (!grid || (!embedded && !window.DrillStore)) return;
+    var all = libListDrills();
+    var folders = libListFolders();
     var items = all.filter(libMatches);
     var count = document.getElementById("libCount");
     if (count) count.textContent = items.length === all.length ? all.length + " procédé" + (all.length > 1 ? "s" : "") : items.length + " / " + all.length;
@@ -2851,7 +2905,7 @@
     }
 
     items.forEach(function (it) {
-      var rec = DrillStore.getDrill(it.id);
+      var rec = libGetDrillRecord(it.id);
       var card = document.createElement("div");
       card.className = "lib-card" + (it.id === currentDrillId ? " current" : "");
 
@@ -2891,8 +2945,8 @@
       });
       fsel.value = it.folderId || "";
       fsel.addEventListener("change", function () {
-        DrillStore.setDrillFolder(it.id, fsel.value || null);
-        renderFolderList(); renderLibraryGrid();
+        if (embedded) { libAction("setFolder", { schematicId: it.id, folderId: fsel.value || null }); return; }
+        if (window.DrillStore) { DrillStore.setDrillFolder(it.id, fsel.value || null); renderFolderList(); renderLibraryGrid(); }
       });
       meta.appendChild(fsel);
       card.appendChild(meta);
@@ -4830,6 +4884,8 @@
   document.getElementById("libFolderAdd").addEventListener("click", function () {
     var name = window.prompt("Nom du nouveau dossier");
     if (!name || !name.trim()) return;
+    if (embedded) { libAction("createFolder", { name: name }); return; }
+    if (!window.DrillStore) return;
     var id = DrillStore.createFolder(name);
     if (id) libFolder = id;
     renderFolderList(); renderLibraryGrid();
@@ -4857,23 +4913,30 @@
   })();
 
   // Pont postMessage avec la webapp (iframe de app/webapp/library/schematics,
-  // cf PLAN_INTEGRATION_EDITEUR_TACTIQUE_PHASE0_2026-09.md). Verification
-  // d'origine stricte : meme origine que la page (outil servi en statique par
-  // Next.js sous /tools/tactics/, meme domaine que la webapp).
-  //   -> INIT           { teamId, drillId, drill|null, roster, teamColors }
-  //   -> CONTEXT_UPDATE { teamId, roster, teamColors }  (equipe active corrigee
-  //                        apres coup cote parent, cf useActiveTeam qui se
-  //                        resout en deux temps — jamais de drill ici, ne
+  // cf PLAN_INTEGRATION_EDITEUR_TACTIQUE_PHASE0_2026-09.md + ajout bibliotheque/
+  // dossiers, 2026-09). Verification d'origine stricte : meme origine que la
+  // page (outil servi en statique par Next.js sous /tools/tactics/, meme
+  // domaine que la webapp).
+  //   -> INIT           { teamId, drillId, drill|null, roster, teamColors, library:{folders,schematics} }
+  //   -> CONTEXT_UPDATE { teamId, roster, teamColors, library }  (equipe active
+  //                        corrigee apres coup cote parent, cf useActiveTeam qui
+  //                        se resout en deux temps — jamais de drill ici, ne
   //                        doit pas ecraser une edition deja en cours)
-  //   -> SAVED { drillId }              (confirme une sauvegarde, donne l'id definitif)
-  //   -> SAVE_ERROR { message }
-  //   <- SAVE  { drillId|null, drill }  (null = nouvelle entree)
-  //   <- CLOSE {}
+  //   -> SAVED          { drillId }     (confirme une sauvegarde, donne l'id definitif)
+  //   -> SAVE_ERROR     { message }
+  //   -> LIBRARY_UPDATE { folders, schematics }  (reponse a une LIBRARY_ACTION,
+  //                        ou rafraichissement pousse par le parent)
+  //   <- SAVE           { drillId|null, drill }  (null = nouvelle entree)
+  //   <- CLOSE          {}
+  //   <- LIBRARY_ACTION { action, payload }  (createFolder/renameFolder/
+  //                        deleteFolder/setFolder/deleteSchematic/duplicateSchematic)
   function applyEmbeddedContext(msg) {
     embeddedTeamId = msg.teamId || null;
     if (msg.teamColors && !drill.teams) drill.teams = JSON.parse(JSON.stringify(msg.teamColors));
     if (Array.isArray(msg.roster)) { roster = msg.roster; renderRoster(); }
+    if (msg.library) { embeddedLibrary = { folders: msg.library.folders || [], schematics: msg.library.schematics || [] }; }
     fillTeamsPanel();
+    refreshLibrary();
   }
   (function initEmbedded() {
     if (!embedded) return;
@@ -4884,7 +4947,7 @@
         embeddedDrillId = msg.drillId || null;
         if (msg.drill) { applyDrill(msg.drill); currentDrillId = embeddedDrillId; }
         applyEmbeddedContext(msg);
-        render(); syncJSON(); refreshLibrary();
+        render(); syncJSON();
       } else if (msg.type === "CONTEXT_UPDATE") {
         applyEmbeddedContext(msg);
         render(); syncJSON();
@@ -4895,6 +4958,9 @@
         flash("Enregistré ✓", true);
       } else if (msg.type === "SAVE_ERROR") {
         flash("Échec de l'enregistrement" + (msg.message ? " : " + msg.message : ""), false);
+      } else if (msg.type === "LIBRARY_UPDATE") {
+        embeddedLibrary = { folders: msg.folders || [], schematics: msg.schematics || [] };
+        refreshLibrary();
       }
     });
     document.body.classList.add("embedded");

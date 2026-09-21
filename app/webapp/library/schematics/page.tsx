@@ -9,13 +9,17 @@
 // Ce composant est le SEUL point de contact avec Supabase pour cet éditeur :
 // l'iframe ne voit jamais de session ni de clé. Protocole postMessage
 // (même origine, /tools/tactics/ est servi par cette même app Next.js) :
-//   -> INIT           { teamId, drillId, drill|null, roster, teamColors }
-//   -> CONTEXT_UPDATE { teamId, roster, teamColors }
+//   -> INIT           { teamId, drillId, drill|null, roster, teamColors, library }
+//   -> CONTEXT_UPDATE { teamId, roster, teamColors, library }
 //   -> SAVED          { drillId }
 //   -> SAVE_ERROR     { message }
-//   <- READY {}
-//   <- SAVE  { drillId: string|null, drill: unknown }
-//   <- CLOSE {}
+//   -> LIBRARY_UPDATE { folders, schematics }
+//   <- READY          {}
+//   <- SAVE           { drillId: string|null, drill: unknown }
+//   <- CLOSE          {}
+//   <- LIBRARY_ACTION { action, payload }  (bibliothèque/dossiers, ajout
+//                        2026-09 après la Phase 2 — cf editor.js pour le
+//                        détail des 6 actions)
 //
 // Deux courses distinctes a respecter (les deux reproduites et corrigees en
 // session — ne pas "simplifier" sans revalider les deux) :
@@ -40,6 +44,7 @@ import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
 import { schematicsService } from '@/lib/services/schematicsService';
+import { schematicFoldersService } from '@/lib/services/schematicFoldersService';
 import { playersService } from '@/lib/services/playersService';
 
 const TACTICS_TOOL_SRC = '/tools/tactics/index.html';
@@ -66,6 +71,16 @@ function SchematicsPageContent() {
     iframeRef.current?.contentWindow?.postMessage(message, window.location.origin);
   }, []);
 
+  // Bibliothèque (dossiers + schémas) de l'équipe active — alimente le
+  // panneau "Bibliothèque" de l'éditeur embarqué (cf editor.js embeddedLibrary).
+  const fetchLibrary = useCallback(async (teamId: string) => {
+    const [folders, schematics] = await Promise.all([
+      schematicFoldersService.getFoldersByTeam(teamId),
+      schematicsService.getSchematicsByTeamId(teamId),
+    ]);
+    return { folders, schematics };
+  }, []);
+
   // Effectif + couleurs de l'équipe active -> format attendu par l'outil.
   const buildContext = useCallback(async (team: NonNullable<typeof activeTeam>) => {
     // label = numéro affiché sur le jeton, role = poste, texte libre —
@@ -81,8 +96,9 @@ function SchematicsPageContent() {
     // ses propres valeurs par défaut pour le reste (cf teamDefault() dans
     // editor.js). Gap connu, documenté dans la spec §3.5/§4.
     const teamColors = team.color ? { home: { fill: team.color } } : null;
-    return { teamId: team.id, roster, teamColors };
-  }, []);
+    const library = await fetchLibrary(team.id);
+    return { teamId: team.id, roster, teamColors, library };
+  }, [fetchLibrary]);
 
   // Point d'entrée unique appelé (a) quand READY arrive, (b) quand activeTeam
   // change — couvre les deux ordres d'arrivée possibles (cf en-tête de
@@ -151,12 +167,38 @@ function SchematicsPageContent() {
         });
       } else if (msg.type === 'CLOSE') {
         router.push('/webapp/library');
+      } else if (msg.type === 'LIBRARY_ACTION') {
+        if (!activeTeam) return;
+        const action = (msg as { action?: string }).action;
+        const payload = (msg as { payload?: Record<string, unknown> }).payload || {};
+        const run = async () => {
+          if (action === 'createFolder') {
+            await schematicFoldersService.createFolder(activeTeam.id, String(payload.name || ''));
+          } else if (action === 'renameFolder') {
+            await schematicFoldersService.renameFolder(String(payload.id), String(payload.name || ''));
+          } else if (action === 'deleteFolder') {
+            await schematicFoldersService.deleteFolder(String(payload.id));
+          } else if (action === 'setFolder') {
+            await schematicsService.setSchematicFolder(String(payload.schematicId), (payload.folderId as string | null) || null);
+          } else if (action === 'deleteSchematic') {
+            await schematicsService.deleteSchematic(String(payload.id));
+          } else if (action === 'duplicateSchematic') {
+            await schematicsService.duplicateSchematic(String(payload.id));
+          }
+        };
+        run()
+          .catch((err) => console.error('schematics: échec LIBRARY_ACTION ' + action, err))
+          .finally(() => {
+            fetchLibrary(activeTeam.id)
+              .then(({ folders, schematics }) => sendToIframe({ type: 'LIBRARY_UPDATE', folders, schematics }))
+              .catch((err) => console.error('schematics: échec de rafraîchissement de la bibliothèque', err));
+          });
       }
     }
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [activeTeam, schematicId, trySendContext, sendToIframe, router]);
+  }, [activeTeam, schematicId, trySendContext, sendToIframe, router, fetchLibrary]);
 
   // Reagit aux changements d'activeTeam (résolution tardive de l'équipe par
   // défaut, ou changement explicite par le coach) — no-op tant que READY

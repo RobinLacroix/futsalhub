@@ -14,6 +14,7 @@ export interface SchematicRecord {
   team_id: string;
   name: string;
   data: SchematicData;
+  folder_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -111,5 +112,66 @@ export const schematicsService = {
       .eq('id', id);
 
     if (error) throw error;
+  },
+
+  /**
+   * Récupère les schémas d'UNE équipe précise (filtré, contrairement à
+   * getSchematicsByTeam ci-dessus qui ignore volontairement team_id pour
+   * d'autres usages). Utilisé par la bibliothèque embarquée de l'éditeur
+   * (Phase 0 + ajout bibliothèque/dossiers), scopée strictement à l'équipe
+   * active.
+   */
+  async getSchematicsByTeamId(teamId: string): Promise<SchematicRecord[]> {
+    const { data, error } = await supabase
+      .from('schematics')
+      .select('*')
+      .eq('team_id', teamId)
+      .order('updated_at', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  /**
+   * Range (ou dérange, folderId = null) un schéma dans un dossier.
+   */
+  async setSchematicFolder(id: string, folderId: string | null): Promise<void> {
+    const { error } = await supabase
+      .from('schematics')
+      .update({ folder_id: folderId })
+      .eq('id', id);
+
+    if (error) throw error;
+  },
+
+  /**
+   * Duplique un schéma (même équipe, même dossier, titre suffixé) — copie
+   * indépendante, pas une référence.
+   */
+  async duplicateSchematic(id: string): Promise<SchematicRecord> {
+    const { data: source, error: fetchError } = await supabase
+      .from('schematics')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (fetchError) throw fetchError;
+
+    // source.data est en réalité au format "drill" natif (Phase 1), pas
+    // SchematicData (ancien format circuits/sequences) — le service ne
+    // valide pas la forme du jsonb, cf schematics/page.tsx.
+    const copyData: unknown = JSON.parse(JSON.stringify(source.data));
+    const { data, error } = await supabase
+      .from('schematics')
+      .insert({
+        team_id: source.team_id,
+        name: (source.name || 'Sans titre') + ' (copie)',
+        data: copyData,
+        folder_id: source.folder_id,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
   },
 };
