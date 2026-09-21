@@ -392,6 +392,20 @@
     .edit-pop .ep-sw[aria-pressed="true"]::after{left:22px}
     .ep-foot>button{min-height:44px}
     .ep-lock-toggle,.ep-sheet-close{width:40px;height:40px}
+    /* Bibliotheque (SPEC_PHASE3_TABLETTE §2.6) : Ouvrir/Dupliquer/JSON/×
+       etaient dimensionnes pour un clic precis desktop (~22px de haut, sous
+       le minimum 44×44pt). Le selecteur de dossier par carte est dans le
+       meme cas. */
+    .lib-actions{gap:6px}
+    .lib-actions button{min-height:44px;padding:4px 10px;font-size:12px}
+    .lib-card-folder{min-height:44px;font-size:12px}
+    /* Renommer/supprimer un dossier (.fbtn) n'apparaissait qu'au survol —
+       un geste qui n'existe pas au doigt, ce qui les rendait invisibles ET
+       trop petits (18×18) sur pointeur tactile. Specificite ".lib-side
+       .lib-folder .fbtn" volontairement plus elevee que la regle de base
+       (".lib-folder .fbtn", 2 classes) pour gagner quel que soit l'ordre
+       dans la feuille de style — elle vit plus bas dans le fichier. */
+    .lib-side .lib-folder .fbtn{opacity:1;width:32px;height:32px;font-size:14px}
   }
 
   /* Identite d'equipe : un bloc par equipe dans le flyout du rail. */
