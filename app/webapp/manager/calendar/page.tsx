@@ -11,8 +11,6 @@ import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
 import moment from 'moment';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import { format } from 'date-fns';
-import Image from 'next/image';
-import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
 // Envoi best-effort — ne bloque jamais en cas d'échec
@@ -36,9 +34,7 @@ import { useActiveSeasonContext } from '../../contexts/ActiveSeasonContext';
 import { useUserClub } from '../../hooks/useUserClub';
 import { useTheme } from '../../contexts/ThemeContext';
 import { playersService } from '@/lib/services/playersService';
-import { schematicsService, type SchematicData } from '@/lib/services/schematicsService';
 import { createTokensForTraining, getFeedbackLinksForTraining } from '@/lib/services/trainingFeedbackService';
-import { SchematicPreview } from '../../library/components/SchematicPreview';
 import {
   X,
   AlertCircle,
@@ -46,20 +42,15 @@ import {
   Trophy,
   ChevronLeft,
   ChevronRight,
-  GripVertical,
   Plus,
   Trash2,
-  Layout,
-  ExternalLink,
-  Search,
-  Filter,
   Copy,
   CheckCircle2,
   Clock,
   XCircle,
   Bandage
 } from 'lucide-react';
-import { DurationSlider } from './components/DurationSlider';
+import { SessionPicker } from './components/SessionPicker';
 import { ConvocationControls } from './components/ConvocationControls';
 import { TrainingFeedbackResponsesModal } from './TrainingFeedbackResponsesModal';
 import { OtherTeamPlayersModal } from './OtherTeamPlayersModal';
@@ -188,13 +179,6 @@ interface MatchFormData {
 
 type TrainingTheme = 'Offensif' | 'Défensif' | 'Transition' | 'Supériorité';
 
-interface SessionPart {
-  id: string;
-  type: 'Echauffement' | 'Exercice' | 'Situation' | 'Jeu';
-  duration: number; // en minutes
-  procedureId?: string | null;
-}
-
 interface TrainingFormData {
   date: Date;
   location: string;
@@ -207,8 +191,7 @@ interface TrainingFormData {
     };
   };
   // Page 2
-  sessionDuration?: number; // durée totale en minutes
-  sessionParts?: SessionPart[]; // organisation de la séance
+  sessionId?: string | null; // référence vers training_sessions (assembleur de séance, Phase 2)
   targetRpeMin?: number; // RPE cible, borne basse (1-10)
   targetRpeMax?: number; // RPE cible, borne haute (1-10)
 }
@@ -284,8 +267,7 @@ const trainingSchema = yup.object().shape({
       );
     }
   ),
-  sessionDuration: yup.number().min(45).max(150).optional(),
-  sessionParts: yup.array().optional(),
+  sessionId: yup.string().nullable().optional(),
   targetRpeMin: yup.number().min(1).max(10).optional(),
   targetRpeMax: yup.number().min(1).max(10).optional()
     .test('rpe-order', 'Le RPE max doit être supérieur ou égal au RPE min', function (value) {
@@ -376,7 +358,6 @@ function PlayerStatusSelector({
 
 export default function CalendarPage() {
   const t = useT();
-  const router = useRouter();
   const { activeTeam, teams } = useActiveTeam();
   const { activeSeason } = useActiveSeasonContext();
   const { club } = useUserClub();
@@ -408,13 +389,6 @@ export default function CalendarPage() {
 
   // État pour la pagination du formulaire d'entraînement
   const [trainingFormPage, setTrainingFormPage] = useState(1);
-  const [availableProcedures, setAvailableProcedures] = useState<any[]>([]);
-  const [selectedProcedureForPart, setSelectedProcedureForPart] = useState<{ partId: string; procedureId: string | null } | null>(null);
-  const [draggedPartId, setDraggedPartId] = useState<string | null>(null);
-  const [viewingProcedure, setViewingProcedure] = useState<any | null>(null);
-  const [procedureDetailSchematic, setProcedureDetailSchematic] = useState<any | null>(null);
-  const [procedureSearchTerm, setProcedureSearchTerm] = useState('');
-  const [procedureFilterTheme, setProcedureFilterTheme] = useState<string | null>(null);
   const [feedbackLinks, setFeedbackLinks] = useState<{ player_name: string; url: string }[]>([]);
   const [feedbackLinksLoading, setFeedbackLinksLoading] = useState(false);
   // Joueurs d'autres équipes (convocations exceptionnelles)
@@ -463,32 +437,9 @@ export default function CalendarPage() {
       theme: 'Offensif',
       key_principle: '',
       players: {},
-      sessionDuration: undefined,
-      sessionParts: [] // Ne pas préremplir - l'utilisateur créera sa propre organisation
+      sessionId: null
     }
   });
-
-  // Charger les procédés depuis la librairie
-  useEffect(() => {
-    const fetchProcedures = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('training_procedures')
-          .select('*')
-          .is('archived_at', null)
-          .order('created_at', { ascending: false });
-        
-        if (error) throw error;
-        setAvailableProcedures(data || []);
-      } catch (err) {
-        console.error('Erreur lors du chargement des procédés:', err);
-      }
-    };
-    
-    if (isTrainingModalOpen) {
-      fetchProcedures();
-    }
-  }, [isTrainingModalOpen]);
 
   useEffect(() => {
     if (!isTrainingModalOpen || !isEditing || editingEvent?.type !== 'training' || !editingEvent?.id) {
@@ -927,8 +878,7 @@ export default function CalendarPage() {
       theme: 'Offensif',
       key_principle: '',
       players: {},
-      sessionDuration: undefined,
-      sessionParts: [] // Ne pas préremplir
+      sessionId: null
     });
     setTrainingFormPage(1);
     setIsTrainingModalOpen(true);
@@ -1140,8 +1090,7 @@ export default function CalendarPage() {
         key_principle: event.key_principle,
         players: playersData,
         // Charger les données de la page 2 si disponibles
-        sessionDuration: (event as any).session_duration || undefined,
-        sessionParts: (event as any).session_parts || undefined,
+        sessionId: (event as any).session_id || null,
         targetRpeMin: (event as any).target_rpe_min || undefined,
         targetRpeMax: (event as any).target_rpe_max || undefined
       };
@@ -1150,7 +1099,7 @@ export default function CalendarPage() {
       resetTraining(formData);
       setIsTrainingModalOpen(true);
       // Si on a des données de session, afficher directement la page 2
-      if (formData.sessionDuration || (formData.sessionParts && formData.sessionParts.length > 0)) {
+      if (formData.sessionId) {
         setTrainingFormPage(2);
       }
     }
@@ -1272,15 +1221,7 @@ export default function CalendarPage() {
       };
 
       // Ajouter les données de la page 2 si disponibles
-      if (data.sessionDuration) {
-        trainingData.session_duration = data.sessionDuration;
-      }
-      if (data.sessionParts && data.sessionParts.length > 0) {
-        trainingData.session_parts = data.sessionParts;
-      } else if (data.sessionParts && data.sessionParts.length === 0) {
-        // Si sessionParts est un tableau vide, le mettre à null pour nettoyer
-        trainingData.session_parts = null;
-      }
+      trainingData.session_id = data.sessionId || null;
       trainingData.target_rpe_min = data.targetRpeMin ?? null;
       trainingData.target_rpe_max = data.targetRpeMax ?? null;
 
@@ -1538,12 +1479,7 @@ export default function CalendarPage() {
         };
 
         // Ajouter les données de la page 2 si disponibles
-        if (data.sessionDuration) {
-          trainingData.session_duration = data.sessionDuration;
-        }
-        if (data.sessionParts && data.sessionParts.length > 0) {
-          trainingData.session_parts = data.sessionParts; // Stockage en JSONB
-        }
+        if (data.sessionId) trainingData.session_id = data.sessionId;
         if (data.targetRpeMin != null) trainingData.target_rpe_min = data.targetRpeMin;
         if (data.targetRpeMax != null) trainingData.target_rpe_max = data.targetRpeMax;
 
@@ -3037,44 +2973,8 @@ export default function CalendarPage() {
                       Comment souhaitez-vous organiser votre séance ?
                     </h3>
 
-                    {/* Durée de séance et Nombre de joueurs côte à côte */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Durée de la séance */}
-                      <div>
-                        <label className="block text-xs font-medium text-gray-800 mb-1">
-                          Durée de la séance (minutes)
-                        </label>
-                        <Controller
-                          name="sessionDuration"
-                          control={trainingControl}
-                          render={({ field: { value, onChange } }) => {
-                            const duration = value || 60;
-                            return (
-                              <div className="space-y-1.5">
-                                <input
-                                  type="range"
-                                  min="45"
-                                  max="150"
-                                  value={duration}
-                                  onChange={(e) => {
-                                    const newDuration = parseInt(e.target.value) || 60;
-                                    onChange(newDuration);
-                                  }}
-                                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-                                />
-                                <div className="flex justify-between items-center">
-                                  <span className="text-xs text-gray-600">45 min</span>
-                                  <span className="text-sm font-semibold text-blue-600">{duration} min</span>
-                                  <span className="text-xs text-gray-600">150 min</span>
-                                </div>
-                              </div>
-                            );
-                          }}
-                        />
-                      </div>
-
-                      {/* Nombre de joueurs présents */}
-                      <div>
+                    {/* Nombre de joueurs présents */}
+                    <div>
                         <label className="block text-xs font-medium text-gray-800 mb-1">
                           Nombre de joueurs présents
                         </label>
@@ -3145,7 +3045,6 @@ export default function CalendarPage() {
                             );
                           }}
                         />
-                      </div>
                     </div>
 
                     {/* RPE cible : fourchette d'intensité visée pour la séance, à comparer
@@ -3192,470 +3091,13 @@ export default function CalendarPage() {
                       )}
                     </div>
 
-                    {/* Organisation de la séance */}
-                    <div>
-                      <label className="block text-xs font-medium text-gray-800 mb-1.5">
-                        Organisation de la séance
-                      </label>
-                      
-                      <div className="space-y-2 mb-3">
-                        {(watchTraining('sessionParts') || []).map((part: SessionPart, index: number) => {
-                          const typeColors: Record<string, string> = {
-                            Echauffement: 'bg-green-100 text-green-800 border-green-300',
-                            Exercice: 'bg-orange-100 text-orange-800 border-orange-300',
-                            Situation: 'bg-blue-100 text-blue-800 border-blue-300',
-                            Jeu: 'bg-purple-100 text-purple-800 border-purple-300'
-                          };
-                          
-                          const selectedProcedure = availableProcedures.find(p => p.id === part.procedureId);
-                          const isDragging = draggedPartId === part.id;
-                          
-                          // Calculer l'heure de début et de fin en fonction de l'ordre
-                          const currentParts = watchTraining('sessionParts') || [];
-                          const startTime = currentParts.slice(0, index).reduce((sum: number, p: SessionPart) => sum + p.duration, 0);
-                          const endTime = startTime + part.duration;
-                          
-                          // Formater les heures (0:00 - 1:30 format)
-                          const formatTime = (minutes: number) => {
-                            const hours = Math.floor(minutes / 60);
-                            const mins = Math.floor(minutes % 60);
-                            if (hours > 0) {
-                              return mins > 0 ? `${hours}h${mins}` : `${hours}h`;
-                            }
-                            return `${mins}mn`;
-                          };
-                          
-                          return (
-                            <div
-                              key={part.id}
-                              draggable
-                              onDragStart={(e) => {
-                                setDraggedPartId(part.id);
-                                e.dataTransfer.effectAllowed = 'move';
-                                e.dataTransfer.setData('text/plain', part.id);
-                              }}
-                              onDragOver={(e) => {
-                                e.preventDefault();
-                                e.dataTransfer.dropEffect = 'move';
-                              }}
-                              onDrop={(e) => {
-                                e.preventDefault();
-                                const draggedId = e.dataTransfer.getData('text/plain');
-                                if (draggedId !== part.id) {
-                                  const currentParts = watchTraining('sessionParts') || [];
-                                  const draggedIndex = currentParts.findIndex((p: SessionPart) => p.id === draggedId);
-                                  const dropIndex = currentParts.findIndex((p: SessionPart) => p.id === part.id);
-                                  
-                                  if (draggedIndex !== -1 && dropIndex !== -1) {
-                                    const newParts = [...currentParts];
-                                    const [removed] = newParts.splice(draggedIndex, 1);
-                                    newParts.splice(dropIndex, 0, removed);
-                                    setTrainingValue('sessionParts', newParts);
-                                  }
-                                }
-                                setDraggedPartId(null);
-                              }}
-                              onDragEnd={() => {
-                                setDraggedPartId(null);
-                              }}
-                              className={`flex flex-col sm:flex-row sm:items-center gap-2 p-2 rounded-lg border cursor-move transition-all ${
-                                typeColors[part.type] || 'bg-gray-100'
-                              } ${isDragging ? 'opacity-50 scale-95' : 'hover:shadow-md'}`}
-                            >
-                              <div className="flex items-center gap-2 flex-1">
-                                <GripVertical className="h-4 w-4 text-gray-600 cursor-grab active:cursor-grabbing" />
-                                <div className="flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2">
-                                  <span className="text-sm font-medium">{part.type}</span>
-                                  <span className="text-xs text-gray-600">
-                                    {formatTime(startTime)} - {formatTime(endTime)}
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                  <label className="text-xs text-gray-600">Durée:</label>
-                                  <input
-                                    type="number"
-                                    min="5"
-                                    max={watchTraining('sessionDuration') || 60}
-                                    value={Math.round(part.duration)}
-                                    onChange={(e) => {
-                                      const newDuration = Math.max(5, Math.min(parseInt(e.target.value) || 5, watchTraining('sessionDuration') || 60));
-                                      const currentParts = watchTraining('sessionParts') || [];
-                                      const updated = currentParts.map((p: SessionPart) =>
-                                        p.id === part.id ? { ...p, duration: newDuration } : p
-                                      );
-                                      setTrainingValue('sessionParts', updated);
-                                    }}
-                                    className="fm-input" style={{ width: 56, padding: '3px 6px', fontSize: '0.75rem' }}
-                                  />
-                                </div>
-                              </div>
-                              
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (selectedProcedure) {
-                                      // Afficher les détails du procédé
-                                      setViewingProcedure(selectedProcedure);
-                                      // Charger le schéma si présent
-                                      if (selectedProcedure.schematic_id && activeTeam?.id) {
-                                        schematicsService.getSchematicById(selectedProcedure.schematic_id)
-                                          .then((schematic) => {
-                                            if (schematic && schematic.data) {
-                                              setProcedureDetailSchematic(schematic.data);
-                                            } else {
-                                              setProcedureDetailSchematic(null);
-                                            }
-                                          })
-                                          .catch((err) => {
-                                            console.error('Erreur lors du chargement du schéma pour la prévisualisation:', err);
-                                            setProcedureDetailSchematic(null);
-                                          });
-                                      } else {
-                                        setProcedureDetailSchematic(null);
-                                      }
-                                    } else {
-                                      // Charger un nouveau procédé
-                                      setSelectedProcedureForPart({ partId: part.id, procedureId: part.procedureId || null });
-                                    }
-                                  }}
-                                  className="px-2 py-0.5 text-xs font-medium bg-white rounded hover:bg-gray-50 border"
-                                >
-                                  {selectedProcedure ? selectedProcedure.title : 'Charger un procédé'}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const currentParts = watchTraining('sessionParts') || [];
-                                    const updated = currentParts.filter((p: SessionPart) => p.id !== part.id);
-                                    setTrainingValue('sessionParts', updated);
-                                  }}
-                                  className="p-0.5 text-red-600 hover:text-red-800"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Ajouter un type d'exercice */}
-                      <div className="flex gap-2 mb-2">
-                        <select
-                          id="newPartType"
-                          className="fm-input"
-                          defaultValue="Jeu"
-                        >
-                          <option value="Echauffement">Echauffement</option>
-                          <option value="Exercice">Exercice</option>
-                          <option value="Situation">Situation</option>
-                          <option value="Jeu">Jeu</option>
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const select = document.getElementById('newPartType') as HTMLSelectElement;
-                            const newType = select.value as 'Echauffement' | 'Exercice' | 'Situation' | 'Jeu';
-                            const currentParts = watchTraining('sessionParts') || [];
-                            const totalDuration = watchTraining('sessionDuration') || 60;
-                            const currentTotal = currentParts.reduce((sum: number, p: SessionPart) => sum + p.duration, 0);
-                            const remaining = totalDuration - currentTotal;
-                            const newDuration = remaining > 0 ? Math.min(remaining, 20) : 10;
-                            
-                            // Demander la durée par défaut (10 min pour échauffement, 15 pour les autres)
-                            const defaultDuration = newType === 'Echauffement' ? 10 : 15;
-                            const newPart: SessionPart = {
-                              id: Date.now().toString(),
-                              type: newType,
-                              duration: defaultDuration,
-                              procedureId: null
-                            };
-                            
-                            setTrainingValue('sessionParts', [...currentParts, newPart]);
-                          }}
-                          className="px-3 py-1 text-xs font-medium text-green-700 bg-green-50 border border-green-300 rounded-md hover:bg-green-100"
-                        >
-                          <Plus className="h-3.5 w-3.5 inline mr-1" />
-                          Ajouter
-                        </button>
-                      </div>
-
-                      {/* Réglette unique pour toutes les jonctions */}
-                      {(watchTraining('sessionParts') || []).length > 1 && (
-                        <div className="mt-3 space-y-1.5">
-                          <h4 className="text-xs font-medium text-gray-800">
-                            Ajustez ici la durée de chaque partie de la séance
-                          </h4>
-                          <div className="relative h-12 bg-gray-200 rounded-lg overflow-hidden">
-                            {(watchTraining('sessionParts') || []).map((part: SessionPart, index: number) => {
-                              const totalDuration = watchTraining('sessionDuration') || 60;
-                              const currentParts = watchTraining('sessionParts') || [];
-                              
-                              // Calculer la position de début en additionnant les durées des segments précédents
-                              const startTime = currentParts.slice(0, index).reduce((sum: number, p: SessionPart) => sum + p.duration, 0);
-                              const leftPercent = (startTime / totalDuration) * 100;
-                              const width = (part.duration / totalDuration) * 100;
-                              
-                              // Couleurs pour les segments — catégorielles (chartSeries), indices
-                              // distincts de ceux d'entraînement/match (0 et 2) pour ne pas les confondre.
-                              const partColors: Record<string, string> = {
-                                Echauffement: t.chartSeries[1],
-                                Exercice: t.chartSeries[4],
-                                Situation: t.chartSeries[5],
-                                Jeu: t.chartSeries[3],
-                              };
-
-                              return (
-                                <div
-                                  key={part.id}
-                                  className="absolute h-full flex items-center justify-center"
-                                  style={{
-                                    left: `${leftPercent}%`,
-                                    width: `${width}%`,
-                                    backgroundColor: partColors[part.type] || t.textMuted,
-                                    opacity: 0.8
-                                  }}
-                                >
-                                  <span className="text-xs font-medium text-white px-2">
-                                    {part.type} (~{Math.round(part.duration)}mn)
-                                  </span>
-                                </div>
-                              );
-                            })}
-                            
-                            {/* Poignées pour chaque jonction */}
-                            {(watchTraining('sessionParts') || []).slice(0, -1).map((part: SessionPart, index: number) => {
-                              const nextPart = (watchTraining('sessionParts') || [])[index + 1];
-                              const totalDuration = watchTraining('sessionDuration') || 60;
-                              const currentParts = watchTraining('sessionParts') || [];
-                              
-                              // Calculer la position de la poignée (fin du procédé actuel = début du suivant)
-                              const startTime = currentParts.slice(0, index + 1).reduce((sum: number, p: SessionPart) => sum + p.duration, 0);
-                              const positionPercent = (startTime / totalDuration) * 100;
-                              
-                              return (
-                                <div
-                                  key={`handle-${part.id}`}
-                                  className="absolute top-0 bottom-0 w-2 cursor-ew-resize z-10 flex items-center justify-center bg-gray-800 hover:bg-gray-900 transition-colors"
-                                  style={{
-                                    left: `${positionPercent}%`,
-                                    transform: 'translateX(-50%)'
-                                  }}
-                                  onMouseDown={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    const slider = e.currentTarget.parentElement;
-                                    if (!slider) return;
-                                    
-                                    const sliderRect = slider.getBoundingClientRect();
-                                    const startX = e.clientX;
-                                    const startPartDuration = part.duration;
-                                    const startNextDuration = nextPart.duration;
-                                    const totalAdjacent = startPartDuration + startNextDuration;
-                                    
-                                    const handleMove = (moveEvent: MouseEvent) => {
-                                      moveEvent.preventDefault();
-                                      const deltaX = moveEvent.clientX - startX;
-                                      const deltaPercent = (deltaX / sliderRect.width) * 100;
-                                      const deltaMinutes = (deltaPercent / 100) * totalDuration;
-                                      
-                                      // Calculer les nouvelles durées
-                                      const newPartDuration = startPartDuration + deltaMinutes;
-                                      const newNextDuration = startNextDuration - deltaMinutes;
-                                      
-                                      // Vérifier les contraintes (minimum 5 minutes pour chaque)
-                                      if (newPartDuration >= 5 && newNextDuration >= 5) {
-                                        const updated = currentParts.map((p: SessionPart) => {
-                                          if (p.id === part.id) {
-                                            return { ...p, duration: Math.round(newPartDuration * 10) / 10 };
-                                          }
-                                          if (p.id === nextPart.id) {
-                                            return { ...p, duration: Math.round(newNextDuration * 10) / 10 };
-                                          }
-                                          return p;
-                                        });
-                                        setTrainingValue('sessionParts', updated);
-                                      }
-                                    };
-                                    
-                                    const handleUp = () => {
-                                      document.removeEventListener('mousemove', handleMove);
-                                      document.removeEventListener('mouseup', handleUp);
-                                    };
-                                    
-                                    document.addEventListener('mousemove', handleMove);
-                                    document.addEventListener('mouseup', handleUp);
-                                  }}
-                                >
-                                  <GripVertical className="h-6 w-6 text-white" />
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
+                    <Controller
+                      name="sessionId"
+                      control={trainingControl}
+                      render={({ field: { value, onChange } }) => (
+                        <SessionPicker clubId={activeTeam?.club_id} value={value} onChange={onChange} />
                       )}
-                      
-                      {/* Message si aucune partie n'est définie */}
-                      {(watchTraining('sessionParts') || []).length === 0 && (
-                        <div className="text-center py-8 text-gray-600 border-2 border-dashed border-gray-400 rounded-lg">
-                          <p className="text-sm">Aucune partie définie. Ajoutez des parties pour organiser votre séance.</p>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Modal pour sélectionner un procédé */}
-                    {selectedProcedureForPart && (() => {
-                      const targetPartType = (watchTraining('sessionParts') || []).find((sp: SessionPart) => sp.id === selectedProcedureForPart.partId)?.type;
-                      const filteredProcedures = availableProcedures.filter((p) => {
-                        // Filtrer par type du procédé de la partie
-                        if (p.type !== targetPartType) return false;
-                        
-                        // Filtrer par recherche (titre et objectifs)
-                        if (procedureSearchTerm.trim()) {
-                          const searchLower = procedureSearchTerm.toLowerCase();
-                          const matchesTitle = p.title?.toLowerCase().includes(searchLower);
-                          const matchesObjectives = p.objectives?.toLowerCase().includes(searchLower);
-                          if (!matchesTitle && !matchesObjectives) return false;
-                        }
-                        
-                        // Filtrer par thème
-                        if (procedureFilterTheme && p.theme !== procedureFilterTheme) return false;
-                        
-                        return true;
-                      });
-
-                      const themes = ['Offensif', 'Defensif', 'Transition', 'CPA'] as const;
-
-                      return (
-                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-60 p-4">
-                          <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
-                            {/* Header */}
-                            <div className="flex justify-between items-center px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
-                              <h3 className="text-xl font-bold text-gray-900">Sélectionner un procédé</h3>
-                              <button
-                                onClick={() => {
-                                  setSelectedProcedureForPart(null);
-                                  setProcedureSearchTerm('');
-                                  setProcedureFilterTheme(null);
-                                }}
-                                className="text-gray-600 hover:text-gray-800 transition-colors p-1 rounded-lg hover:bg-white"
-                              >
-                                <X className="h-5 w-5" />
-                              </button>
-                            </div>
-
-                            {/* Barre de recherche et filtres */}
-                            <div className="px-6 py-4 border-b bg-gray-50 space-y-3">
-                              {/* Barre de recherche */}
-                              <div className="relative">
-                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-600" />
-                                <input
-                                  type="text"
-                                  placeholder="Rechercher par titre ou objectifs..."
-                                  value={procedureSearchTerm}
-                                  onChange={(e) => setProcedureSearchTerm(e.target.value)}
-                                  className="fm-input" style={{ paddingLeft: 40 }}
-                                />
-                              </div>
-
-                              {/* Filtres par thème */}
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <Filter className="h-4 w-4 text-gray-600" />
-                                <span className="text-sm font-medium text-gray-800">Filtrer par thème:</span>
-                                <button
-                                  onClick={() => setProcedureFilterTheme(null)}
-                                  className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
-                                    procedureFilterTheme === null
-                                      ? 'bg-blue-600 text-white shadow-md'
-                                      : 'bg-white text-gray-800 border border-gray-400 hover:bg-gray-100'
-                                  }`}
-                                >
-                                  Tous
-                                </button>
-                                {themes.map((theme) => (
-                                  <button
-                                    key={theme}
-                                    onClick={() => setProcedureFilterTheme(procedureFilterTheme === theme ? null : theme)}
-                                    className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
-                                      procedureFilterTheme === theme
-                                        ? 'bg-blue-600 text-white shadow-md'
-                                        : 'bg-white text-gray-800 border border-gray-400 hover:bg-gray-100'
-                                    }`}
-                                  >
-                                    {theme}
-                                  </button>
-                                ))}
-                              </div>
-
-                              {/* Compteur de résultats */}
-                              <div className="text-sm text-gray-600">
-                                {filteredProcedures.length} procédé{filteredProcedures.length !== 1 ? 's' : ''} trouvé{filteredProcedures.length !== 1 ? 's' : ''}
-                              </div>
-                            </div>
-
-                            {/* Liste des procédés */}
-                            <div className="flex-1 overflow-y-auto p-6">
-                              {filteredProcedures.length === 0 ? (
-                                <div className="text-center py-12 text-gray-600">
-                                  <Search className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-                                  <p className="text-sm font-medium">Aucun procédé trouvé</p>
-                                  <p className="text-xs mt-1">Essayez de modifier vos critères de recherche ou filtres</p>
-                                </div>
-                              ) : (
-                                <div className="grid grid-cols-1 gap-3">
-                                  {filteredProcedures.map((procedure) => (
-                                    <button
-                                      key={procedure.id}
-                                      type="button"
-                                      onClick={() => {
-                                        const currentParts = watchTraining('sessionParts') || [];
-                                        const updated = currentParts.map((p: SessionPart) =>
-                                          p.id === selectedProcedureForPart.partId
-                                            ? { ...p, procedureId: procedure.id }
-                                            : p
-                                        );
-                                        setTrainingValue('sessionParts', updated);
-                                        setSelectedProcedureForPart(null);
-                                        setProcedureSearchTerm('');
-                                        setProcedureFilterTheme(null);
-                                      }}
-                                      className="w-full text-left p-4 rounded-xl border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all bg-white group"
-                                    >
-                                      <div className="flex items-start justify-between gap-3">
-                                        <div className="flex-1 min-w-0">
-                                          <div className="font-semibold text-gray-900 text-base mb-2 group-hover:text-blue-600 transition-colors">
-                                            {procedure.title}
-                                          </div>
-                                          <div className="flex items-center gap-2 mb-2 flex-wrap">
-                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
-                                              {procedure.type}
-                                            </span>
-                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
-                                              {procedure.theme}
-                                            </span>
-                                            {procedure.duration_minutes && (
-                                              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                                                {procedure.duration_minutes} min
-                                              </span>
-                                            )}
-                                          </div>
-                                          {procedure.objectives && (
-                                            <p className="text-sm text-gray-600 line-clamp-2 mt-2">
-                                              {procedure.objectives}
-                                            </p>
-                                          )}
-                                        </div>
-                                      </div>
-                                    </button>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
+                    />
                   </>
                 )}
               </form>
@@ -3694,154 +3136,6 @@ export default function CalendarPage() {
                   </>
                 )}
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de détails du procédé */}
-      {viewingProcedure && (
-        <div className="fm-overlay">
-          <div className="fm-modal" style={{ maxWidth: '90vw', width: '100%' }}>
-            <div className="fm-modal-header">
-              <div>
-                <div className="fm-modal-title" style={{ marginBottom: 8 }}>
-                  <div className="fm-modal-title-bar" />
-                  {viewingProcedure.title}
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, paddingLeft: 16 }}>
-                  <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, background: t.accentSubtle, color: t.accent }}>
-                    {viewingProcedure.theme}
-                  </span>
-                  <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, background: `${t.chartSeries[5]}1A`, color: t.chartSeries[5] }}>
-                    {viewingProcedure.type}
-                  </span>
-                  {viewingProcedure.duration_minutes && (
-                    <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, background: t.rowOdd, color: t.textMuted }}>
-                      {viewingProcedure.duration_minutes} min
-                    </span>
-                  )}
-                  {viewingProcedure.min_players && (
-                    <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, background: t.rowOdd, color: t.textMuted }}>
-                      {viewingProcedure.min_players} joueurs min.
-                    </span>
-                  )}
-                </div>
-              </div>
-              <button
-                className="fm-modal-close"
-                onClick={() => { setViewingProcedure(null); setProcedureDetailSchematic(null); }}
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="fm-modal-body">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Colonne gauche : Texte */}
-                <div className="space-y-4">
-                  {viewingProcedure.image_url && (
-                    <div className="relative w-full h-40 rounded-xl overflow-hidden border border-gray-200">
-                      <Image
-                        src={viewingProcedure.image_url}
-                        alt={`Illustration pour ${viewingProcedure.title}`}
-                        fill
-                        className="object-cover"
-                      />
-                    </div>
-                  )}
-
-                  <section>
-                    <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wide">
-                      Objectifs
-                    </h3>
-                    <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">{viewingProcedure.objectives}</p>
-                  </section>
-
-                  <section>
-                    <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wide">
-                      Consignes / Règles
-                    </h3>
-                    <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">{viewingProcedure.instructions}</p>
-                  </section>
-
-                  {viewingProcedure.variants && (
-                    <section>
-                      <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wide">
-                        Variantes
-                      </h3>
-                      <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">{viewingProcedure.variants}</p>
-                    </section>
-                  )}
-
-                  {viewingProcedure.corrections && (
-                    <section>
-                      <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wide">
-                        Correctifs / Comportements attendus
-                      </h3>
-                      <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">{viewingProcedure.corrections}</p>
-                    </section>
-                  )}
-
-                  {(viewingProcedure.field_dimensions || viewingProcedure.duration_minutes || viewingProcedure.min_players) && (
-                    <section className="grid gap-3 sm:grid-cols-3">
-                      {viewingProcedure.field_dimensions && (
-                        <div className="bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
-                          <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                            Dimension du terrain
-                          </div>
-                          <div className="mt-1 text-sm text-gray-800">{viewingProcedure.field_dimensions}</div>
-                        </div>
-                      )}
-                      {viewingProcedure.duration_minutes && (
-                        <div className="bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
-                          <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                            Durée indicative
-                          </div>
-                          <div className="mt-1 text-sm text-gray-800">{viewingProcedure.duration_minutes} minutes</div>
-                        </div>
-                      )}
-                      {viewingProcedure.min_players && (
-                        <div className="bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
-                          <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                            Nombre de joueurs minimum
-                          </div>
-                          <div className="mt-1 text-sm text-gray-800">{viewingProcedure.min_players}</div>
-                        </div>
-                      )}
-                    </section>
-                  )}
-                </div>
-
-                {/* Colonne droite : Schéma */}
-                <div className="space-y-4">
-                  {viewingProcedure.schematic_id && procedureDetailSchematic && (
-                    <section>
-                      <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wide mb-2">
-                        Schéma tactique
-                      </h3>
-                      <SchematicPreview data={procedureDetailSchematic} />
-                      <button
-                        onClick={() => router.push(`/webapp/library/schematics?schematic=${viewingProcedure.schematic_id}`)}
-                        className="mt-2 w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-                      >
-                        <Layout className="h-3 w-3" />
-                        Ouvrir dans l'éditeur
-                        <ExternalLink className="h-3 w-3" />
-                      </button>
-                    </section>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="fm-modal-footer">
-              <button
-                className="fm-btn fm-btn-primary"
-                onClick={() => { setViewingProcedure(null); setProcedureDetailSchematic(null); }}
-              >
-                Fermer
-              </button>
             </div>
           </div>
         </div>

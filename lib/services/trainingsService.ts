@@ -223,25 +223,25 @@ export const trainingsService = {
   },
 
   /**
-   * Compte le nombre de fois qu'un procédé a été utilisé dans les entraînements
+   * Compte le nombre de fois qu'un procédé est utilisé dans les séances
+   * (training_sessions.blocks, cf. Phase 2 — remplace le comptage historique
+   * sur trainings.session_parts, qui ne reçoit plus d'écriture depuis la
+   * bascule vers l'assembleur de séance réutilisable).
    */
   async getProcedureUsageCount(procedureId: string): Promise<number> {
-    // Récupérer tous les entraînements qui ont des session_parts
     const { data, error } = await supabase
-      .from('trainings')
-      .select('session_parts')
-      .not('session_parts', 'is', null);
+      .from('training_sessions')
+      .select('blocks');
 
     if (error) throw error;
 
     if (!data || data.length === 0) return 0;
 
-    // Compter les occurrences du procedureId dans tous les session_parts
     let count = 0;
-    data.forEach(training => {
-      if (training.session_parts && Array.isArray(training.session_parts)) {
-        training.session_parts.forEach((part: any) => {
-          if (part.procedureId === procedureId) {
+    data.forEach(session => {
+      if (session.blocks && Array.isArray(session.blocks)) {
+        session.blocks.forEach((block: any) => {
+          if (block.procedureId === procedureId) {
             count++;
           }
         });
