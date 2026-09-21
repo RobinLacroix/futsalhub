@@ -332,6 +332,17 @@
     svg.style.cursor = pendingTool ? "crosshair" : "default";
     svg.setAttribute("viewBox", "0 0 " + g.W + " " + g.H); // vue pleine par defaut ; recadree ci-dessous si demi-terrain
     setupRenderTarget(g);
+    // En layout colonne (tablette/telephone, cf @media max-width:900px), le
+    // terrain n'a plus de hauteur de conteneur fiable a partir de laquelle
+    // resoudre un height:100% (flex-column intrinseque) — d'ou un svg de
+    // hauteur 0 avant ce correctif. aspect-ratio le dimensionne depuis sa
+    // seule largeur, quel que soit le viewBox actif (plein terrain, demi-
+    // terrain portrait, ou config longueur/largeur personnalisee) : on le lit
+    // sur le viewBox deja resolu ci-dessus plutot que de dupliquer le calcul
+    // W/H ici. Sans effet en layout desktop (largeur ET hauteur deja fixees
+    // par ailleurs, cf CSS).
+    var vb = svg.viewBox.baseVal;
+    if (vb && vb.width && vb.height) svg.style.aspectRatio = vb.width + " / " + vb.height;
     R.drawPitchBase(rt, drill, g);
     // Instant de reference pour la fenetre de presence des zones/traits/
     // pulses (Phase 2, cf visibleAt) : le curseur/clip edite en mode avance,
@@ -794,11 +805,15 @@
   // valider un deplacement nul. Ca laisse Maj+glisser (alignement sur l'axe,
   // verifie a chaque pointermove par l'appelant) totalement intact : des qu'un
   // seul pointermove arrive, ce n'est plus un "clic", donc plus une bascule.
-  function dragLoop(onMove, onDrop, selInfo) {
+  // touchTarget {kind, ref, x, y} : uniquement pour faire apparaitre le bouton
+  // flottant de modification tactile (cf showTouchFab) si le geste s'avere
+  // etre un tap et non un vrai glisser — n'affecte ni la selection ni les
+  // donnees, contrairement a selInfo.
+  function dragLoop(onMove, onDrop, selInfo, touchTarget) {
     pushHistory();
     var moved = false;
     function move(mv) { moved = true; onMove(mv); }
-    function up() {
+    function up(uv) {
       document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
       if (selInfo && !moved) toggleMultiSelect(selInfo.kind, selInfo.ref);
       else if (onDrop) onDrop();
@@ -806,6 +821,15 @@
       // ici couvre tous les glissers, pas seulement ceux qui ont un onDrop.
       dragGuides = null; snapDisabled = true;
       render(); syncJSON(); if (selZone) refreshZoneDims();
+      // Tap (pas glisser) sur pointeur tactile : le doigt a pu trembler un peu
+      // sans intention de deplacer (drag-threshold) — on tolere quelques px
+      // plutot que de se fier au booleen "moved", qui bascule au premier
+      // pointermove meme infime.
+      if (touchTarget && isTouchPrimary() && !multiSel.length) {
+        var dx = (uv ? uv.clientX : touchTarget.x) - touchTarget.x, dy = (uv ? uv.clientY : touchTarget.y) - touchTarget.y;
+        if (Math.hypot(dx, dy) < 8) { showTouchFab(touchTarget.x, touchTarget.y, touchTarget.kind, touchTarget.ref); return; }
+      }
+      hideTouchFab();
     }
     document.addEventListener("pointermove", move);
     document.addEventListener("pointerup", up);
@@ -1102,6 +1126,58 @@
   function onOutsideEditPop(ev) {
     if (editPopEl && editPopEl.contains(ev.target)) return;
     closeEditPop();
+  }
+  // Appareil a pointeur imprecis (tactile) : le clic droit n'existe pas, donc
+  // pas de contextmenu pour ouvrir le panneau de modification. Signal unique
+  // (media query) plutot que le type du dernier evenement pointeur, pour que
+  // le comportement soit stable pendant tout le geste (cf SPEC_PHASE3_TABLETTE
+  // §2.2) au lieu de changer selon qu'un pointermove individuel a ete tague
+  // souris ou tactile.
+  function isTouchPrimary() { return !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches); }
+  // ---- bouton flottant "modifier" (remplace le clic droit au doigt) ----
+  // Remplace le clic droit sur pointeur tactile : un tap qui selectionne sans
+  // deplacer fait apparaitre ce bouton pres du doigt, qui ouvre le meme
+  // panneau que le clic droit (openEditPop). Separe clairement "je selectionne"
+  // de "je deplace" — un vrai glisser ne le fait jamais apparaitre.
+  var touchFabEl = null;
+  function hideTouchFab() {
+    if (touchFabEl) { touchFabEl.remove(); touchFabEl = null; }
+    document.removeEventListener("pointerdown", onOutsideTouchFab, true);
+  }
+  function onOutsideTouchFab(ev) {
+    if (touchFabEl && touchFabEl.contains(ev.target)) return;
+    hideTouchFab();
+  }
+  function icoEditPencil() {
+    var s = icoSvg(16, 16);
+    s.appendChild(el("path", { d: "M 2.5 13.5 L 3.2 10.4 L 10.6 3 A 1.4 1.4 0 0 1 12.6 3 L 13 3.4 A 1.4 1.4 0 0 1 13 5.4 L 5.6 12.8 Z", fill: "none", stroke: "currentColor", "stroke-width": 1.4, "stroke-linejoin": "round" }));
+    s.appendChild(el("path", { d: "M 9.4 4.2 L 11.8 6.6", stroke: "currentColor", "stroke-width": 1.4 }));
+    return s;
+  }
+  function showTouchFab(x, y, kind, ref) {
+    hideTouchFab();
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "touch-fab";
+    b.title = "Modifier";
+    b.setAttribute("aria-label", "Modifier");
+    b.appendChild(icoEditPencil());
+    b.addEventListener("pointerdown", function (ev) { ev.stopPropagation(); });
+    b.addEventListener("click", function (ev) {
+      ev.stopPropagation();
+      hideTouchFab();
+      openEditPop(ref, x, y, kind === "entity" ? null : kind);
+    });
+    document.body.appendChild(b);
+    touchFabEl = b;
+    // Pose au-dessus et a droite du point tape, jamais sous le doigt qui vient
+    // de relacher (cf spec : "jamais superpose au doigt").
+    var fw = b.offsetWidth, fh = b.offsetHeight;
+    var left = Math.max(6, Math.min(x + 12, window.innerWidth - fw - 6));
+    var top = Math.max(6, Math.min(y - fh - 16, window.innerHeight - fh - 6));
+    b.style.left = left + "px";
+    b.style.top = top + "px";
+    setTimeout(function () { document.addEventListener("pointerdown", onOutsideTouchFab, true); }, 0);
   }
   function epEl(tag, cls, text) {
     var n = document.createElement(tag);
@@ -1637,8 +1713,12 @@
 
   var lastPopXY = { x: 0, y: 0 };
   function openEditPop(ref, x, y, kind) {
-    closeEditPop(); closeContextMenu();
+    closeEditPop(); closeContextMenu(); hideTouchFab();
     lastPopXY = { x: x, y: y };
+    // Pointeur tactile : le panneau se pose en tiroir plein-largeur depuis le
+    // bas plutot que sous le doigt (cf SPEC_PHASE3_TABLETTE §2.2/§2.3 — mêmes
+    // reglages, presentes en pleine largeur, cibles agrandies via CSS).
+    var isSheet = isTouchPrimary();
     var pop = kind === "zone" ? buildZoneEditPop(ref)
       : kind === "line" ? buildLineEditPop(ref)
       : kind === "text" ? buildTextEditPop(ref)
@@ -1728,12 +1808,29 @@
     foot.appendChild(db);
     pop.appendChild(foot);
 
+    if (isSheet) {
+      pop.classList.add("ep-sheet");
+      // Pas de poignee de glisser-deplacer en tiroir (position fixe) ; une
+      // fermeture explicite remplace la croix habituelle du coin, absente ici.
+      var h3s = pop.querySelector("h3");
+      if (h3s) {
+        var closeBtn = epEl("button", "ep-sheet-close", "✕");
+        closeBtn.type = "button";
+        closeBtn.title = "Fermer";
+        closeBtn.setAttribute("aria-label", "Fermer");
+        closeBtn.addEventListener("pointerdown", function (ev) { ev.stopPropagation(); });
+        closeBtn.addEventListener("click", function (ev) { ev.stopPropagation(); closeEditPop(); });
+        h3s.appendChild(closeBtn);
+      }
+    }
     document.body.appendChild(pop);
     editPopEl = pop;
-    var pw = pop.offsetWidth, ph = pop.offsetHeight;
-    pop.style.left = Math.max(6, Math.min(x, window.innerWidth - pw - 10)) + "px";
-    pop.style.top = Math.max(6, Math.min(y, window.innerHeight - ph - 10)) + "px";
-    wireEditPopDrag(pop);
+    if (!isSheet) {
+      var pw = pop.offsetWidth, ph = pop.offsetHeight;
+      pop.style.left = Math.max(6, Math.min(x, window.innerWidth - pw - 10)) + "px";
+      pop.style.top = Math.max(6, Math.min(y, window.innerHeight - ph - 10)) + "px";
+      wireEditPopDrag(pop);
+    }
     // Meme precaution que le menu contextuel : laisser le clic droit courant se
     // terminer avant d'armer la fermeture au clic exterieur.
     setTimeout(function () {
@@ -1843,7 +1940,7 @@
       holdChain.forEach(function (ent) { ent.x = target.x; ent.y = target.y; });
       ballHoldChain.forEach(function (ent) { ent.x = carried.x; ent.y = carried.y; });
       render();
-    }, onDrop, ev.shiftKey ? { kind: "entity", ref: target } : null);
+    }, onDrop, ev.shiftKey ? { kind: "entity", ref: target } : null, { kind: "entity", ref: target, x: ev.clientX, y: ev.clientY });
   }
 
   function onZoneDown(ev, z) {
@@ -1868,7 +1965,7 @@
         var m = clientToMeters(mv), dx = m.x - start.x, dy = m.y - start.y;
         target.pts = origPts.map(function (p) { return { x: clamp(round1(p.x + dx), 0, drill.pitch.length), y: clamp(round1(p.y + dy), 0, drill.pitch.width) }; });
         render();
-      }, null, selInfo);
+      }, null, selInfo, { kind: "zone", ref: target, x: ev.clientX, y: ev.clientY });
       return;
     }
     var ox = target.x, oy = target.y;
@@ -1879,7 +1976,7 @@
       target.x = clamp(round1(nx), 0, drill.pitch.length - target.w);
       target.y = clamp(round1(ny), 0, drill.pitch.width - target.h);
       render();
-    }, null, selInfo);
+    }, null, selInfo, { kind: "zone", ref: target, x: ev.clientX, y: ev.clientY });
   }
 
   function onResizeDown(ev, z, corner) {
@@ -1922,7 +2019,7 @@
       ln.x2 = clamp(round1(ox2 + dx), 0, drill.pitch.length); ln.y2 = clamp(round1(oy2 + dy), 0, drill.pitch.width);
       if (octrls.length) ln.ctrls = octrls.map(function (p) { return { x: round1(p.x + dx), y: round1(p.y + dy) }; });
       render();
-    }, null, ev.shiftKey ? { kind: "line", ref: ln } : null);
+    }, null, ev.shiftKey ? { kind: "line", ref: ln } : null, { kind: "line", ref: ln, x: ev.clientX, y: ev.clientY });
   }
   function onLineEndDown(ev, ln, which) {
     if (isLocked(ln.id)) return;
@@ -2012,7 +2109,7 @@
       tx.x = clamp(round1(ox + (m.x - start.x)), 0, drill.pitch.length);
       tx.y = clamp(round1(oy + (m.y - start.y)), 0, drill.pitch.width);
       render();
-    }, null, ev.shiftKey ? { kind: "text", ref: tx } : null);
+    }, null, ev.shiftKey ? { kind: "text", ref: tx } : null, { kind: "text", ref: tx, x: ev.clientX, y: ev.clientY });
   }
   function placeText(ev) {
     var m = clientToMeters(ev);
@@ -2039,7 +2136,7 @@
       pu.x = clamp(round1(ox + (m.x - start.x)), 0, drill.pitch.length);
       pu.y = clamp(round1(oy + (m.y - start.y)), 0, drill.pitch.width);
       render();
-    }, null, ev.shiftKey ? { kind: "pulse", ref: pu } : null);
+    }, null, ev.shiftKey ? { kind: "pulse", ref: pu } : null, { kind: "pulse", ref: pu, x: ev.clientX, y: ev.clientY });
   }
   function placePulse(ev) {
     var m = clientToMeters(ev);
@@ -2357,6 +2454,7 @@
     document.getElementById("pulseInspector").classList.add("hidden");
     document.getElementById("multiInspector").classList.add("hidden");
     var h = document.getElementById("inspectorDragHandle"); if (h) h.classList.add("hidden");
+    hideTouchFab();
   }
 
   // ---- keyboard ----
@@ -5051,6 +5149,21 @@
       list.appendChild(row);
     });
   }
+  // Regroupement des barres d'outils tablette/telephone (SPEC_PHASE3_TABLETTE
+  // §2.4) : chaque bouton "Plus" bascule .show sur son propre .sec-group (CSS
+  // s'en charge : display:none par defaut sous 900px, display:contents une
+  // fois .show pose — donc aucun effet au-dessus de 900px, cf regle de base).
+  (function wireToolbarOverflow() {
+    [["tbMoreBtn", "tbSecGroup"], ["railMoreBtn", "railSecGroup"], ["ioMoreBtn", "ioSecGroup"]].forEach(function (pair) {
+      var btn = document.getElementById(pair[0]), group = document.getElementById(pair[1]);
+      if (!btn || !group) return;
+      btn.addEventListener("click", function () {
+        var open = !group.classList.contains("show");
+        group.classList.toggle("show", open);
+        btn.setAttribute("aria-expanded", open ? "true" : "false");
+      });
+    });
+  })();
   (function wireLayersPanel() {
     var toggle = document.getElementById("layersToggle");
     var panel = document.getElementById("layersPanel");
