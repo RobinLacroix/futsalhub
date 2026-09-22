@@ -50,6 +50,8 @@ const HIDDEN_ROUTE_TITLES: Record<string, string> = {
   settings: 'Paramètres',
   share: 'Partage',
   notifications: 'Notifications',
+  'library/index': 'Bibliothèque',
+  'sessions/index': 'Séances',
 };
 
 /**
@@ -89,6 +91,10 @@ const HIDDEN_ROUTES = [
   'share',
   'join-club-staff',
   'notifications',
+  'library/index',
+  'library/[schematicId]',
+  'sessions/index',
+  'sessions/[sessionId]',
 ] as const;
 
 function TabsLayoutContent() {
