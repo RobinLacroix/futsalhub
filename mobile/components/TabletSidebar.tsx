@@ -29,7 +29,7 @@
  */
 
 import React from 'react';
-import { View, Pressable } from 'react-native';
+import { View, Pressable, ScrollView } from 'react-native';
 import { useRouter, useSegments } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useIsTablet, LAYOUT } from '../hooks/useIsTablet';
@@ -146,7 +146,12 @@ export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {
         )}
       </View>
 
-      <View style={s.nav} accessibilityRole="tablist">
+      <ScrollView
+        style={s.nav}
+        contentContainerStyle={s.navContent}
+        showsVerticalScrollIndicator={false}
+        accessibilityRole="tablist"
+      >
         {NAV_ITEMS.map((item) => {
           const active = isActive(segments as string[], item);
           const badge = item.path === '/(tabs)/calendar' ? counts.absence_report + counts.injury
@@ -207,7 +212,7 @@ export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {
             </Pressable>
           );
         })}
-      </View>
+      </ScrollView>
 
       <View style={[s.footer, !isExpanded && s.footerCollapsed]}>
         {isExpanded && (
@@ -280,8 +285,11 @@ const useStyles = makeStyles((t) => ({
   },
   nav: {
     flex: 1,
+  },
+  navContent: {
     paddingTop: t.space.lg,
     paddingHorizontal: t.space.md,
+    paddingBottom: t.space.md,
   },
   navItem: {
     flexDirection: 'row',
