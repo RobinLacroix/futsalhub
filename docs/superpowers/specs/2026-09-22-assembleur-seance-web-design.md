@@ -83,7 +83,11 @@ export interface TrainingSessionRecord {
 | 5 | JeuOriente | 15 min |
 | 6 | MatchLibre | 15 min |
 
-**Champs supprimés** : `SessionMeta.theme` était déjà présent (conservé) ; `SessionMeta.objectif` et `SessionMeta.philosophyTags` disparaissent — `objectif` est remplacé par le couple principe/moyen (plus précis), `philosophyTags` n'a jamais eu d'UI ni web ni mobile pour le lire ou l'écrire (champ mort, vérifié par grep avant suppression).
+**Champs supprimés** : `SessionMeta.theme` était déjà présent (conservé) ; `SessionMeta.objectif`, `SessionMeta.philosophyTags`, `SessionMeta.phaseCible` et `SessionMeta.intensite` disparaissent.
+- `objectif` est remplacé par le couple principe/moyen (plus précis).
+- `philosophyTags` n'a jamais eu d'UI ni web ni mobile pour le lire ou l'écrire (champ mort, vérifié par grep avant suppression).
+- `phaseCible` ("Phase de jeu ciblée", texte libre) est le même type de champ redondant que "phase de jeu à faire émerger" déjà retiré des fiches procédé plus tôt cette semaine — même verdict ici.
+- `intensite` (faible/modérée/élevée) est redondant avec `targetRpeMin`/`targetRpeMax` ("RPE cible", 1-10) déjà en place au niveau de l'entraînement dans le calendrier (`app/webapp/manager/calendar/page.tsx:195-196`) — plus précis, pas dupliqué au niveau de la séance.
 
 ## Migration des données existantes
 
