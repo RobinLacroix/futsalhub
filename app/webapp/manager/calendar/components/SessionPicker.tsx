@@ -94,7 +94,7 @@ export function SessionPicker({ clubId, value, onChange }: SessionPickerProps) {
           <Trash2 className="h-4 w-4" />
         </button>
         <a
-          href={selected ? `/webapp/library/sessions?session=${selected.id}` : '/webapp/library/sessions'}
+          href={selected ? `/webapp/library/sessions/${selected.id}` : '/webapp/library/sessions/new'}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-300 rounded-md hover:bg-green-100 whitespace-nowrap"
