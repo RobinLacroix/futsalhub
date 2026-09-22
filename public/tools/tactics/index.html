@@ -425,6 +425,10 @@
   .lib-chip{font-size:12px;padding:4px 11px;border-radius:999px;background:transparent;border:1px solid var(--line-strong);color:var(--muted)}
   .lib-chip:hover{color:var(--text);border-color:#70787f}
   .lib-chip.active{background:rgba(47,217,146,.14);border-color:var(--accent);color:var(--accent)}
+  /* Groupes de chips du panneau "Séance & données" (Bloc/Format/Phase de
+     jeu/Intensité/Principes) — même style que .lib-chip, hors de #libOverlay. */
+  .chip-group{display:flex;flex-wrap:wrap;gap:6px}
+  .chip-group .lib-chip{cursor:pointer}
   .lib-body{flex:1;min-height:0;display:flex}
   .lib-main{flex:1;min-width:0;overflow-y:auto;padding:18px 22px 28px}
   .lib-side{flex:none;width:186px;border-right:1px solid var(--line);padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
@@ -452,7 +456,9 @@
   .lib-meta{padding:9px 11px 10px;display:flex;flex-direction:column;gap:3px;flex:1}
   .lib-title{font-size:13px;font-weight:600;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .lib-sub{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .lib-badge{display:block;max-width:100%;font-size:10px;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.04em;color:var(--muted);border:1px solid var(--line-strong);border-radius:4px;padding:0 5px;align-self:flex-start;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lib-badge-row{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
+  .lib-badge{display:block;max-width:100%;font-size:10px;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.04em;color:var(--muted);border:1px solid var(--line-strong);border-radius:4px;padding:0 5px;align-self:flex-start;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lib-badge-team{color:var(--accent);border-color:var(--accent);background:rgba(47,217,146,.1)}
   .lib-actions{display:flex;gap:4px;padding:0 9px 9px}
   .lib-actions button{flex:none;padding:4px 8px;font-size:11px}
   .lib-actions button.open{flex:1}
@@ -546,7 +552,7 @@
   <h1>Éditeur de procédés</h1>
   <span class="sub">FutsalHub · prototype de conception sans IA — chaque procédé alimente la bibliothèque</span>
   <button id="libOpenBtn" style="margin-left:auto" title="Bibliothèque des procédés enregistrés (L)"><svg viewBox="0 0 20 20" width="14" height="14" style="vertical-align:-2px"><rect x="3" y="4" width="4" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="1.4" /><rect x="8.5" y="4" width="4" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M14.4 5.2l2.4.7-2.6 9.6-2.4-.7z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg> Bibliothèque</button>
-  <a class="navlink hide-embedded" href="seance.html" style="margin-left:0">Assembleur de séances →</a>
+  <a class="navlink hide-embedded" href="/webapp/library/sessions" target="_blank" style="margin-left:0">Assembleur de séances →</a>
   <button id="embeddedCloseBtn" class="show-embedded-only" style="margin-left:auto" title="Fermer et revenir à FutsalHub"><svg viewBox="0 0 20 20" width="14" height="14" style="vertical-align:-2px"><line x1="5" y1="5" x2="15" y2="15" stroke="currentColor" stroke-width="1.6" /><line x1="15" y1="5" x2="5" y2="15" stroke="currentColor" stroke-width="1.6" /></svg> Fermer</button>
   <details class="drawer" id="seanceDrawer" style="margin-left:0">
     <summary>Séance &amp; données</summary>
@@ -557,6 +563,13 @@
       </div>
     <details class="seance-model" open>
       <summary>Modélisation de séance</summary>
+      <!-- Un seul formulaire (recadrage 2026-09-22) : les mêmes champs que
+           "+ Nouveau procédé" côté /webapp/library, toujours visibles ici
+           aussi — écrivent dans la fiche liée (training_procedures), pas
+           dans schematics.data. Statut de liaison en texte seul : pas de
+           bouton séparé, la fiche s'enregistre avec le schéma (cf editor.js
+           sendProcedureSave, appelé depuis le handler SAVED). -->
+      <p id="procedureLinkStatus" style="font-size:12px;color:var(--muted);margin:0 0 10px"></p>
       <div class="form-card">
         <div class="form-grid">
           <div class="field"><label>Terrain (m)</label>
@@ -573,13 +586,31 @@
           <div class="field"><label>Catégorie</label><select id="mCategory"><option value="entrainement" selected>Procédé d'entraînement</option><option value="cpa">CPA</option><option value="animation">Animation</option></select></div>
           <div class="field" id="mSubcategoryField"><label>Sous-catégorie</label><select id="mSubcategory"></select></div>
           <div class="field"><label>Titre</label><input id="mTitle" placeholder="Ex: Forcer le pressing..." /></div>
-          <div class="field"><label>Thème</label><input id="mTheme" placeholder="Ex: Sortie de pression" /></div>
-          <div class="field" id="fieldPhaseCible"><label>Phase de jeu à faire émerger</label><input id="mPhaseCible" placeholder="Ex: sortie de pression sous pression haute" /></div>
-          <div class="field" id="fieldObjectif"><label>Objectif</label><input id="mObjectif" placeholder="Ce que l'exercice doit produire" /></div>
+
+          <div class="field" id="fieldBloc" style="grid-column:1/-1"><label>Bloc</label><div class="chip-group" id="mBlocChips"></div></div>
+          <div class="field" id="fieldFormat" style="grid-column:1/-1"><label>Format</label><div class="chip-group" id="mFormatChips"></div></div>
+          <div class="field" id="fieldPhaseDeJeu" style="grid-column:1/-1"><label>Phase de jeu</label><div class="chip-group" id="mPhaseDeJeuChips"></div></div>
+          <div class="field" id="fieldIntensite" style="grid-column:1/-1"><label>Niveau d'intensité</label><div class="chip-group" id="mIntensiteChips"></div></div>
+
+          <div class="field" id="fieldPrincipes" style="grid-column:1/-1">
+            <label>Principes associés</label>
+            <div class="chip-group" id="mPrincipesTags" style="margin-bottom:6px"></div>
+            <input id="mPrincipeInput" placeholder="Déséquilibre collectif, Pressing… (Entrée pour ajouter)" list="principes-datalist" />
+            <datalist id="principes-datalist">
+              <option value="Déséquilibre collectif"></option>
+              <option value="Conservation"></option>
+              <option value="Transition"></option>
+              <option value="Pressing"></option>
+              <option value="CPA"></option>
+              <option value="Supériorité"></option>
+            </datalist>
+          </div>
+
+          <div class="field" id="fieldRapportNumerique"><label>Rapport numérique</label><input id="mRapportNumerique" placeholder="3v2, 4v3+GK…" /></div>
+          <div class="field" id="fieldDescription" style="grid-column:1/-1"><label>Description</label><textarea id="mDescription" rows="2" placeholder="Présentation libre du procédé, contexte, intro…"></textarea></div>
+          <div class="field" id="fieldObjectif" style="grid-column:1/-1"><label>Objectif</label><input id="mObjectif" placeholder="Ce que l'exercice doit produire" /></div>
           <div class="field" id="fieldNbJoueurs"><label>Nb joueurs</label><input type="number" id="mNbJoueurs" value="8" min="1" /></div>
           <div class="field" id="fieldDuree"><label>Durée (min)</label><input type="number" id="mDuree" value="20" min="1" /></div>
-          <div class="field" id="fieldIntensite"><label>Intensité</label><select id="mIntensite"><option>faible</option><option>moderee</option><option selected>elevee</option></select></div>
-          <div class="field" id="fieldFormeJouee"><label>Type</label><select id="mFormeJouee"><option value="true" selected>forme jouée</option><option value="false">exercice analytique</option></select></div>
         </div>
   
         <div class="lists" id="listsBlock">
@@ -1018,15 +1049,25 @@
   <div class="lib-top">
     <h2>Bibliothèque</h2>
     <span class="lib-count" id="libCount"></span>
-    <input class="lib-search" id="libSearch" type="search" placeholder="Rechercher un titre, un thème…" aria-label="Rechercher" />
+    <input class="lib-search" id="libSearch" type="search" placeholder="Rechercher un titre, un thème, une équipe…" aria-label="Rechercher" />
     <button id="libCloseBtn" title="Fermer (Échap)">Fermer</button>
   </div>
+  <!-- Bloc pedagogique du procede (place dans la seance) — remplace
+       l'ancien filtre par categorie de schema (entrainement/cpa/animation,
+       qui reste un reglage du dessin lui-meme, pas de la bibliotheque). -->
   <div class="lib-filters" id="libFilters">
     <button class="lib-chip active" data-cat="">Tous</button>
-    <button class="lib-chip" data-cat="entrainement">Procédés d'entraînement</button>
-    <button class="lib-chip" data-cat="cpa">CPA</button>
-    <button class="lib-chip" data-cat="animation">Animations</button>
+    <button class="lib-chip" data-cat="Échauffement">Échauffement</button>
+    <button class="lib-chip" data-cat="Problématisation">Problématisation</button>
+    <button class="lib-chip" data-cat="Situation isolée">Situation isolée</button>
+    <button class="lib-chip" data-cat="Analytique">Analytique</button>
+    <button class="lib-chip" data-cat="Jeu orienté">Jeu orienté</button>
+    <button class="lib-chip" data-cat="Match libre">Match libre</button>
   </div>
+  <!-- Reconstruite dynamiquement (renderTeamFilters, editor.js) : les noms
+       d'equipe ne sont pas une liste fixe comme les categories. Masquee tant
+       qu'il n'y a pas au moins 2 equipes distinctes dans la bibliotheque. -->
+  <div class="lib-filters" id="libTeamFilters"></div>
   <div class="lib-body">
     <aside class="lib-side">
       <div class="lib-side-head">Dossiers</div>
@@ -1044,6 +1085,6 @@
 <script src="gif-encoder.js?v=117"></script>
 <script src="render-core.js?v=139"></script>
 <script src="store.js?v=130"></script>
-<script src="editor.js?v=147"></script>
+<script src="editor.js?v=154"></script>
 </body>
 </html>
