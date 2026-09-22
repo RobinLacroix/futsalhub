@@ -28,8 +28,8 @@
  * avait mis fin à la divergence entre la sidebar, la tab bar et l'écran « Plus ».
  */
 
-import React from 'react';
-import { View, Pressable, ScrollView } from 'react-native';
+import React, { useState } from 'react';
+import { View, Pressable, ScrollView, NativeSyntheticEvent, NativeScrollEvent, LayoutChangeEvent } from 'react-native';
 import { useRouter, useSegments } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useIsTablet, LAYOUT } from '../hooks/useIsTablet';
@@ -61,10 +61,13 @@ type NavItem = {
  * plus sa propre liste : c'est ce qui l'avait fait diverger de la tab bar et de
  * l'accueil. « Plus » n'a pas lieu d'être sur tablette, où la place ne manque
  * pas : ses destinations sont listées directement.
+ *
+ * `settings` en est retiré : Robin la veut en permanence visible (pied de
+ * sidebar, hors zone défilante) plutôt que noyée dans la liste — cf pied.
  */
 const NAV_ITEMS: NavItem[] = [
   ...PRIMARY_DESTINATIONS.filter((d) => d.key !== 'more'),
-  ...SECONDARY_DESTINATIONS,
+  ...SECONDARY_DESTINATIONS.filter((d) => d.key !== 'settings'),
 ].map((d) => ({
   name: d.label,
   path: d.route,
@@ -92,10 +95,24 @@ export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {
   const { isPlayer, setAppRole } = useAppRole();
   const { counts, markRead } = useNotifications();
   const { isRecordingActive, setSuppressExitGuard } = useMatchRecorderExitGuard();
+  // Indique qu'il reste des destinations sous la ligne de flottaison de la
+  // zone défilante (aucune indication n'existait avant, cf retour de Robin :
+  // rien ne montrait qu'on pouvait descendre pour voir la suite de la liste).
+  const [navContentHeight, setNavContentHeight] = useState(0);
+  const [navViewportHeight, setNavViewportHeight] = useState(0);
+  const [navScrolledToBottom, setNavScrolledToBottom] = useState(false);
 
   if (!isTablet) return null;
 
   const c = theme.colors;
+  const navOverflowing = navContentHeight > navViewportHeight + 1;
+  const showScrollHint = navOverflowing && !navScrolledToBottom;
+
+  const onNavScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    setNavScrolledToBottom(contentOffset.y + layoutMeasurement.height >= contentSize.height - 4);
+  };
+  const onNavViewportLayout = (e: LayoutChangeEvent) => setNavViewportHeight(e.nativeEvent.layout.height);
 
   const handleSwitchToPlayer = async () => {
     await setAppRole('player');
@@ -136,22 +153,48 @@ export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {
     <View style={[s.sidebar, { width: sidebarWidth }]}>
       <View style={[s.header, !isExpanded && s.headerCollapsed]}>
         {isExpanded ? (
-          <Text variant="title">FutsalHub</Text>
+          <>
+            <Text variant="title">FutsalHub</Text>
+            {/* Bascule déplacée ici depuis le pied (retour de Robin : en pied,
+                dans sa propre ligne, elle prenait trop de place sur tablette).
+                Repliée, c'est le logo lui-même qui bascule (cf ci-dessous) —
+                un seul geste "taper le coin haut-gauche" dans les deux sens. */}
+            <Pressable
+              onPress={onToggle}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="Réduire le menu"
+              accessibilityState={{ expanded: true }}
+              style={({ pressed }) => [s.headerToggleBtn, pressed && s.pressed]}
+            >
+              <Ionicons name="chevron-back" size={20} color={c.text.secondary} />
+            </Pressable>
+          </>
         ) : (
-          <View style={s.logoIcon} accessibilityLabel="FutsalHub">
+          <Pressable
+            onPress={onToggle}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Déployer le menu"
+            accessibilityState={{ expanded: false }}
+            style={({ pressed }) => [s.logoIcon, pressed && s.pressed]}
+          >
             <Text variant="headline" tone="onFill">
               F
             </Text>
-          </View>
+          </Pressable>
         )}
       </View>
 
-      <ScrollView
-        style={s.nav}
-        contentContainerStyle={s.navContent}
-        showsVerticalScrollIndicator={false}
-        accessibilityRole="tablist"
-      >
+      <View style={s.navWrap} onLayout={onNavViewportLayout}>
+        <ScrollView
+          contentContainerStyle={s.navContent}
+          showsVerticalScrollIndicator={false}
+          accessibilityRole="tablist"
+          onScroll={onNavScroll}
+          onContentSizeChange={(_, h) => setNavContentHeight(h)}
+          scrollEventThrottle={32}
+        >
         {NAV_ITEMS.map((item) => {
           const active = isActive(segments as string[], item);
           const badge = item.path === '/(tabs)/calendar' ? counts.absence_report + counts.injury
@@ -212,7 +255,15 @@ export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {
             </Pressable>
           );
         })}
-      </ScrollView>
+        </ScrollView>
+        {showScrollHint && (
+          <View style={s.scrollHint} pointerEvents="none">
+            <View style={[s.scrollHintPill, { backgroundColor: c.bg.elevated, borderColor: c.border.subtle }]}>
+              <Ionicons name="chevron-down" size={14} color={c.text.tertiary} />
+            </View>
+          </View>
+        )}
+      </View>
 
       <View style={[s.footer, !isExpanded && s.footerCollapsed]}>
         {isExpanded && (
@@ -229,26 +280,13 @@ export function TabletSidebar({ isExpanded, onToggle }: TabletSidebarProps) {
             {footerAction('swap-horizontal-outline', "Changer d'équipe", () =>
               router.push('/(tabs)/choose-team')
             )}
-            {footerAction('log-out-outline', 'Déconnexion', () => void handleSignOut())}
           </>
         )}
-        {!isExpanded &&
-          footerAction('log-out-outline', 'Déconnexion', () => void handleSignOut(), false)}
-
-        <Pressable
-          onPress={onToggle}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel={isExpanded ? 'Réduire le menu' : 'Déployer le menu'}
-          accessibilityState={{ expanded: isExpanded }}
-          style={({ pressed }) => [s.toggleBtn, pressed && s.pressed]}
-        >
-          <Ionicons
-            name={isExpanded ? 'chevron-back' : 'chevron-forward'}
-            size={22}
-            color={c.text.secondary}
-          />
-        </Pressable>
+        {/* Paramètres : à la demande de Robin, toujours visible (hors zone
+            défilante) plutôt que noyé dans la liste des destinations
+            secondaires — même traitement replié/déployé que Déconnexion. */}
+        {footerAction('settings-outline', 'Paramètres', () => router.push('/(tabs)/settings'), isExpanded)}
+        {footerAction('log-out-outline', 'Déconnexion', () => void handleSignOut(), isExpanded)}
       </View>
     </View>
   );
@@ -266,6 +304,9 @@ const useStyles = makeStyles((t) => ({
     justifyContent: 'space-between',
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: t.space.xl,
     paddingBottom: t.space.lg,
     borderBottomWidth: 1,
@@ -273,7 +314,14 @@ const useStyles = makeStyles((t) => ({
   },
   headerCollapsed: {
     paddingHorizontal: t.space.md,
+    justifyContent: 'center',
+  },
+  headerToggleBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: t.radius.sm,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   logoIcon: {
     width: 36,
@@ -283,13 +331,29 @@ const useStyles = makeStyles((t) => ({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  nav: {
+  navWrap: {
     flex: 1,
   },
   navContent: {
     paddingTop: t.space.lg,
     paddingHorizontal: t.space.md,
     paddingBottom: t.space.md,
+  },
+  scrollHint: {
+    position: 'absolute',
+    bottom: t.space.xs,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  scrollHintPill: {
+    width: 26,
+    height: 18,
+    borderRadius: t.radius.pill,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...t.elevation.raised,
   },
   navItem: {
     flexDirection: 'row',
@@ -327,13 +391,6 @@ const useStyles = makeStyles((t) => ({
     paddingHorizontal: t.space.md,
     borderRadius: t.radius.sm,
     gap: 6,
-  },
-  toggleBtn: {
-    minWidth: 44,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: t.space.sm,
   },
   badge: {
     position: 'absolute',
