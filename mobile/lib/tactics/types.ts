@@ -45,15 +45,83 @@ export interface DrillEntity {
   [key: string]: unknown;
 }
 
+/**
+ * Zone (tranche 2) : `drill.zones`, au niveau du drill (pas par étape,
+ * contrairement aux traits/textes/pulses). Création mobile limitée au
+ * rectangle (shape "rect") — ellipse et polygone restent lisibles/réécrits
+ * tels quels si déjà présents (créés côté web), mais pas créables ici cette
+ * tranche (écart assumé, cf conversation — pas de dessin libre au doigt).
+ */
+export interface DrillZone {
+  id: string;
+  kind: 'area' | 'target' | 'corridor' | 'neutral';
+  shape: 'rect' | 'ellipse' | 'polygon';
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+  pts?: Array<{ x: number; y: number }>;
+  label?: string;
+  color?: string;
+  stroke?: 'solid' | 'dash';
+  strokeWidth?: number;
+  fill?: 'solid' | 'hatch' | 'none';
+  fillOpacity?: number;
+  [key: string]: unknown;
+}
+
+/**
+ * Trait libre (tranche 2). Création mobile limitée au trait droit (`ctrls`
+ * vide) — un trait courbé déjà créé côté web reste affiché/déplaçable tel
+ * quel (les points de courbure suivent le trait), mais pas éditable/ajoutable
+ * ici cette tranche.
+ */
+export interface DrillLine {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color?: string;
+  width?: number;
+  dash?: boolean;
+  aerial?: boolean;
+  head?: 'none' | 'arrow' | 'bar';
+  ctrls?: Array<{ x: number; y: number }>;
+  [key: string]: unknown;
+}
+
+export interface DrillText {
+  id: string;
+  x: number;
+  y: number;
+  text: string;
+  color?: string;
+  size?: number;
+  outline?: boolean;
+  align?: 'left' | 'center' | 'right';
+  bold?: boolean;
+  [key: string]: unknown;
+}
+
+export interface DrillPulse {
+  id: string;
+  x: number;
+  y: number;
+  color?: string;
+  size?: number;
+  [key: string]: unknown;
+}
+
 export interface DrillKeyframe {
   label: string;
   durationMs: number;
   entities: DrillEntity[];
-  /** Traits/textes/pulses/flèches : passthrough, non édités tranche 1. */
+  /** Flèches : dérivées automatiquement des déplacements entre étapes côté web — jamais éditées à la main, passthrough. */
   annotations: unknown[];
-  lines: unknown[];
-  texts: unknown[];
-  pulses: unknown[];
+  lines: DrillLine[];
+  texts: DrillText[];
+  pulses: DrillPulse[];
 }
 
 export interface DrillTeamStyle {
@@ -75,7 +143,7 @@ export interface DrillVariant {
 export interface Drill {
   meta: Record<string, unknown>;
   pitch: DrillPitch;
-  zones: unknown[];
+  zones: DrillZone[];
   keyframes: DrillKeyframe[];
   variants: DrillVariant[];
   activeVariantIndex: number;
