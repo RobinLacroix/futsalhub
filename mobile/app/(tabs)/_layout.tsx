@@ -73,6 +73,7 @@ const HIDDEN_ROUTES = [
   'feed/new-post',
   'feed/[postId]',
   'calendar/training/[trainingId]',
+  'calendar/training/[trainingId]/schematic/[schematicId]',
   'calendar/training/edit/[trainingId]',
   'calendar/matchDetail/[matchId]',
   'calendar/new',
