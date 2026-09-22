@@ -476,13 +476,6 @@ export default function TrainingDetailScreen() {
             loading={openingTests}
             onPress={openPhysicalTests}
           />
-          <Button
-            label="Nouveau schéma tactique"
-            icon="football-outline"
-            variant="secondary"
-            block
-            onPress={() => router.push(`/(tabs)/calendar/training/${trainingId}/schematic/new` as never)}
-          />
           {counts.convoked > 0 ? (
             <Button
               label="Partager la convocation"
