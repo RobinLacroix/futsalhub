@@ -3145,6 +3145,7 @@ Les statistiques des joueurs ont été sauvegardées dans la base de données.
           {activeView === 'summary' && (
             <LiveSummary
               matchData={matchData}
+              events={localEvents}
               getTeamStats={getTeamStats}
               getTopPlayers={getTopPlayers}
               getTopPlayersByTotalShots={getTopPlayersByTotalShots}

@@ -19,9 +19,10 @@ export {
   getFeedbackLinksForTraining,
   getPlayerTrainingFeedback,
   getTeamFeedbackForLastSessions,
-  getTrainingFeedbackResponses
+  getTrainingFeedbackResponses,
+  getMatchMvpVotes
 } from './trainingFeedbackService';
-export type { PlayerTrainingFeedbackRow, TeamFeedbackRow, TrainingFeedbackResponse } from './trainingFeedbackService';
+export type { PlayerTrainingFeedbackRow, TeamFeedbackRow, TrainingFeedbackResponse, FeedbackSessionTeammate, MatchMvpRanking } from './trainingFeedbackService';
 export {
   getMyConvocations,
   setMyTrainingAttendance,

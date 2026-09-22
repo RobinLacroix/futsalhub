@@ -35,6 +35,7 @@ export default function FeedbackSessionPage() {
     physical_form: INITIAL,
     pleasure: INITIAL
   });
+  const [mvpVote, setMvpVote] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -53,11 +54,15 @@ export default function FeedbackSessionPage() {
     return () => { cancelled = true; };
   }, [token]);
 
+  const isMatch = session != null && !('error' in session) && session.kind === 'match';
+  const canSubmit = !isMatch || !!mvpVote;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canSubmit) return;
     setSubmitting(true);
     setSubmitError(null);
-    const result = await submitTrainingFeedback(token, values);
+    const result = await submitTrainingFeedback(token, values, mvpVote);
     if (result.success) {
       const zones = toPayload(pain);
       if (zones.length > 0) {
@@ -130,6 +135,37 @@ export default function FeedbackSessionPage() {
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-8">
+          {session.kind === 'match' && (
+            <div>
+              <div className="flex justify-between items-baseline mb-2">
+                <label className="text-sm font-medium text-slate-200">
+                  Meilleur joueur du match
+                </label>
+                <span className="text-xs font-semibold text-amber-400 uppercase tracking-wide">Obligatoire</span>
+              </div>
+              <p className="text-slate-400 text-xs mb-3">Tu ne peux pas voter pour toi-même.</p>
+              <div className="space-y-2">
+                {(session.teammates ?? []).map(mate => (
+                  <button
+                    key={mate.id}
+                    type="button"
+                    onClick={() => setMvpVote(mate.id)}
+                    className={`w-full text-left px-4 py-3 rounded-xl border text-sm font-medium transition-colors ${
+                      mvpVote === mate.id
+                        ? 'bg-blue-600 border-blue-500 text-white'
+                        : 'bg-slate-800 border-slate-700 text-slate-200'
+                    }`}
+                  >
+                    {mate.name}
+                  </button>
+                ))}
+                {(session.teammates ?? []).length === 0 && (
+                  <p className="text-slate-500 text-sm">Aucun coéquipier à désigner pour ce match.</p>
+                )}
+              </div>
+            </div>
+          )}
+
           {(Object.keys(LABELS) as FeedbackKeys[]).map(key => (
             <div key={key}>
               <div className="flex justify-between items-center mb-2">
@@ -182,10 +218,10 @@ export default function FeedbackSessionPage() {
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || !canSubmit}
             className="w-full py-4 rounded-xl bg-blue-600 text-white font-semibold text-lg active:bg-blue-700 disabled:opacity-50"
           >
-            {submitting ? 'Envoi en cours...' : 'Envoyer mes réponses'}
+            {submitting ? 'Envoi en cours...' : !canSubmit ? 'Choisis le meilleur joueur du match' : 'Envoyer mes réponses'}
           </button>
         </form>
       </div>

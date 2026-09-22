@@ -238,6 +238,7 @@ export default function PlayerProfilePage() {
     victories: number;
     draws: number;
     defeats: number;
+    mvp_count: number;
   } | null>(null);
 
   const [feedbackHistory, setFeedbackHistory] = useState<PlayerTrainingFeedbackRow[]>([]);
@@ -652,11 +653,12 @@ export default function PlayerProfilePage() {
       </div>
 
       {/* ── Stats hero bar ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         {[
           { label: 'Matchs joués', value: stats?.matches_played ?? '—', color: T.text },
           { label: 'Buts',         value: stats?.goals          ?? '—', color: '#d97706' },
           { label: 'Passes déc.',  value: stats?.assists         ?? '—', color: '#0d9488' },
+          { label: 'MVP',          value: stats?.mvp_count       ?? '—', color: '#f59e0b' },
           { label: 'Victoires',    value: stats?.victories       ?? '—', color: '#16a34a' },
           { label: 'Nuls',         value: stats?.draws           ?? '—', color: '#64748b' },
           { label: 'Défaites',     value: stats?.defeats         ?? '—', color: '#dc2626' },

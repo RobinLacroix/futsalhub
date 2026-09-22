@@ -1,11 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable react/no-unescaped-entities */
 import { AlertTriangle, ArrowRight, Clock, RefreshCw, Target, Trophy } from 'lucide-react';
-import type { MatchData, Player, TeamStats } from '../types';
+import type { LocalMatchEvent, MatchData, Player, TeamStats } from '../types';
 import { formatClock } from '../utils';
+import { MatchMomentumChart } from '../../components/MatchMomentumChart';
+import { currentAbsoluteMinute, lastEventAbsoluteMinute } from '@/lib/matchMomentum';
 
 interface LiveSummaryProps {
   matchData: MatchData;
+  events: LocalMatchEvent[];
   getTeamStats: () => TeamStats;
   getTopPlayers: (statKey: keyof Player['stats'], limit?: number) => Player[];
   getTopPlayersByTotalShots: (limit?: number) => Player[];
@@ -14,20 +17,49 @@ interface LiveSummaryProps {
 
 export default function LiveSummary({
   matchData,
+  events,
   getTeamStats,
   getTopPlayers,
   getTopPlayersByTotalShots,
   getTopPlayersByTime,
 }: LiveSummaryProps) {
+  // Plancher sur le dernier event réel : si `currentHalf`/`matchTime` a
+  // régressé (reprise après plantage, restauration concurrente...), le
+  // graphique ne doit jamais tronquer une mi-temps déjà enregistrée. Voir la
+  // note de `lastEventAbsoluteMinute` dans `lib/matchMomentum.ts`.
+  const upToMinute = Math.max(
+    currentAbsoluteMinute(events, matchData.currentHalf, matchData.matchTime),
+    lastEventAbsoluteMinute(events),
+  );
+
   return (
     <div className="space-y-3">
+      {/* Momentum du match (live) */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 border border-gray-200 dark:border-gray-700">
+        <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+          <Trophy className="h-5 w-5 text-amber-500" />
+          Momentum du match
+        </h2>
+        <MatchMomentumChart
+          events={events}
+          upToMinute={upToMinute}
+          teamName="Nous"
+          opponentName={matchData.selectedMatch?.opponent_team || 'Adversaire'}
+          usColor="#10B981"
+          opponentColor="#EF4444"
+          gridColor="#9CA3AF"
+          textColor="#9CA3AF"
+          live
+        />
+      </div>
+
       {/* Statistiques générales */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 border border-gray-200 dark:border-gray-700">
         <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
           <Trophy className="h-5 w-5 text-blue-600 dark:text-blue-400" />
           Bilan du Match
         </h2>
-        
+
         {/* Statistiques des tirs */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
           {/* Notre équipe */}

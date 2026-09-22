@@ -55,6 +55,11 @@ export async function sendQuestionnairesForTraining(trainingId: string): Promise
  * Récupère les infos d'une séance par token (pour la page questionnaire).
  * Utilise l'RPC qui peut être appelée sans auth.
  */
+export interface FeedbackSessionTeammate {
+  id: string;
+  name: string;
+}
+
 export async function getFeedbackSessionByToken(token: string): Promise<{
   kind: 'training' | 'match';
   training_id?: string;
@@ -63,6 +68,8 @@ export async function getFeedbackSessionByToken(token: string): Promise<{
   training_date: string;
   theme: string | null;
   player_name: string | null;
+  /** Coéquipiers votables pour le MVP (hors soi-même), présent seulement si kind === 'match'. */
+  teammates?: FeedbackSessionTeammate[];
 } | { error: string } | null> {
   const { data, error } = await supabase.rpc('get_feedback_session_by_token', {
     p_token: token
@@ -82,15 +89,19 @@ export async function getFeedbackSessionByToken(token: string): Promise<{
     training_date: string;
     theme: string | null;
     player_name: string | null;
+    teammates?: FeedbackSessionTeammate[];
   };
 }
 
 /**
  * Soumet le questionnaire de feedback (appelable sans auth avec le token).
+ * `mvpVotePlayerId` est obligatoire côté RPC pour un questionnaire de match
+ * (ignoré pour une séance) : un joueur convoqué désigné, jamais soi-même.
  */
 export async function submitTrainingFeedback(
   token: string,
-  values: { auto_evaluation: number; rpe: number; physical_form: number; pleasure: number; comment?: string | null }
+  values: { auto_evaluation: number; rpe: number; physical_form: number; pleasure: number; comment?: string | null },
+  mvpVotePlayerId?: string | null
 ): Promise<{ success: boolean; error?: string }> {
   const params: Record<string, unknown> = {
     p_token: token,
@@ -101,6 +112,7 @@ export async function submitTrainingFeedback(
   };
   // p_comment n'est passé que s'il est fourni (préserve l'appelant public sans commentaire).
   if (values.comment !== undefined) params.p_comment = values.comment;
+  if (mvpVotePlayerId) params.p_mvp_vote_player_id = mvpVotePlayerId;
   const { data, error } = await supabase.rpc('submit_training_feedback', params);
 
   if (error) {
@@ -275,4 +287,40 @@ export async function getTrainingFeedbackResponses(trainingId: string): Promise<
     submitted_at: row.submitted_at ?? null,
     comment: row.comment ?? null,
   }));
+}
+
+// ─── Classement des votes MVP d'un match (staff) ──────────────────────────────
+
+export interface MatchMvpRanking {
+  ranking: { player_id: string; player_name: string; votes: number }[];
+  totalVoters: number;
+  votedCount: number;
+  isComplete: boolean;
+  mvpPlayerIds: string[];
+}
+
+/**
+ * Classement des votes MVP pour un match, staff uniquement. `isComplete` reflète
+ * si tous les joueurs convoqués ont répondu au questionnaire (le MVP officiel,
+ * matches.mvp_player_ids, n'est calculé côté RPC qu'à ce moment-là).
+ */
+export async function getMatchMvpVotes(matchId: string): Promise<MatchMvpRanking> {
+  const { data, error } = await supabase.rpc('get_match_mvp_votes', { p_match_id: matchId });
+  if (error) throw error;
+  const r = data as {
+    ranking?: { player_id: string; player_name: string; votes: number }[];
+    total_voters?: number;
+    voted_count?: number;
+    is_complete?: boolean;
+    mvp_player_ids?: string[];
+    error?: string;
+  } | null;
+  if (!r || r.error) throw new Error(r?.error || 'Erreur');
+  return {
+    ranking: r.ranking ?? [],
+    totalVoters: r.total_voters ?? 0,
+    votedCount: r.voted_count ?? 0,
+    isComplete: !!r.is_complete,
+    mvpPlayerIds: r.mvp_player_ids ?? [],
+  };
 }

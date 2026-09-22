@@ -71,6 +71,7 @@ function PlayerCard({
   const goals = player.goals ?? 0;
   const assists = player.assists ?? 0;
   const matches = player.matches_played ?? 0;
+  const mvpCount = player.mvp_count ?? 0;
   const attendanceColor = attPct >= 80 ? t.positive : attPct >= 60 ? t.warning : attPct > 0 ? t.negative : t.textMuted;
   return (
     <div
@@ -93,17 +94,8 @@ function PlayerCard({
       <div style={{ height: 4, backgroundColor: pos.color, width: '100%' }} />
 
       <div style={{ padding: '12px 14px 14px' }}>
-        {/* Header row: number + position + status */}
+        {/* Header row: position + status */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-          <span style={{
-            fontSize: 11, fontWeight: 900, color: pos.color,
-            width: 28, height: 28, borderRadius: 6,
-            backgroundColor: pos.bg,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0,
-          }}>
-            {player.number != null ? player.number : '#'}
-          </span>
           <span style={{
             fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 3,
             backgroundColor: pos.bg, color: pos.color, letterSpacing: '0.3px',
@@ -135,6 +127,7 @@ function PlayerCard({
             { val: matches,  label: 'Matchs',   color: t.text },
             { val: goals,    label: 'Buts',      color: goals > 0 ? t.positive : t.textMuted },
             { val: assists,  label: 'Passes déc.', color: assists > 0 ? t.positive : t.textMuted },
+            { val: mvpCount, label: 'MVP',       color: mvpCount > 0 ? '#f59e0b' : t.textMuted },
             { val: `${attPct}%`, label: 'Présence', color: attendanceColor },
           ].map((s, i) => (
             <div key={i} style={{ flex: 1, textAlign: 'center', borderLeft: i > 0 ? `1px solid ${t.border}` : 'none' }}>
@@ -269,7 +262,7 @@ const MATCH_FILTERS: { label: string; value: MatchTypeFilter }[] = [
 ];
 
 // ─── Sort ─────────────────────────────────────────────────────────────────────
-type SortKey = 'name' | 'position' | 'seances' | 'matches' | 'goals' | 'assists';
+type SortKey = 'name' | 'position' | 'seances' | 'matches' | 'goals' | 'assists' | 'mvp_count';
 type SortDir = 'asc' | 'desc';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
@@ -285,6 +278,7 @@ interface Player {
   matches_played?: number;
   goals?: number;
   assists?: number;
+  mvp_count?: number;
   training_attendance?: number;
   attendance_percentage?: number;
   sequence_time_limit?: number;
@@ -437,6 +431,7 @@ export default function SquadPage() {
           matches_played: 0,
           goals: 0,
           assists: 0,
+          mvp_count: 0,
           training_attendance: 0,
           attendance_percentage: 0,
         };
@@ -484,6 +479,7 @@ export default function SquadPage() {
         case 'matches': va = a.matches_played ?? 0;      vb = b.matches_played ?? 0;      break;
         case 'goals':   va = a.goals ?? 0;               vb = b.goals ?? 0;               break;
         case 'assists': va = a.assists ?? 0;             vb = b.assists ?? 0;             break;
+        case 'mvp_count': va = a.mvp_count ?? 0;         vb = b.mvp_count ?? 0;           break;
         default:
           va = `${a.last_name} ${a.first_name}`;
           vb = `${b.last_name} ${b.first_name}`;
@@ -700,7 +696,7 @@ export default function SquadPage() {
         {/* Sort by (for card view) */}
         {viewMode === 'cards' && (
           <div style={{ display: 'flex', gap: 4 }}>
-            {([['name', 'Nom'], ['position', 'Poste'], ['goals', 'Buts'], ['assists', 'Passes déc.'], ['matches', 'Matchs'], ['seances', 'Séances']] as [SortKey, string][]).map(([key, label]) => (
+            {([['name', 'Nom'], ['position', 'Poste'], ['goals', 'Buts'], ['assists', 'Passes déc.'], ['matches', 'Matchs'], ['mvp_count', 'MVP'], ['seances', 'Séances']] as [SortKey, string][]).map(([key, label]) => (
               <button
                 key={key}
                 onClick={() => handleSort(key)}
@@ -830,7 +826,7 @@ export default function SquadPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ backgroundColor: t.rowOdd, borderBottom: `1px solid ${t.border}` }}>
-                  <th style={{ padding: '10px 12px 10px 20px', textAlign: 'center', width: 44, fontSize: 11, fontWeight: 700, color: t.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>N°</th>
+                  <th style={{ padding: 0, width: 3 }} />
                   <th style={{ padding: '10px 8px', width: 64, cursor: 'pointer', userSelect: 'none' }} onClick={() => handleSort('position')}>
                     <div style={{ display: 'flex', alignItems: 'center', fontSize: 11, fontWeight: 700, color: sortKey === 'position' ? t.accent : t.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
                       POS <SortIcon col="position" sortKey={sortKey} sortDir={sortDir} />
@@ -862,13 +858,18 @@ export default function SquadPage() {
                       PD <SortIcon col="assists" sortKey={sortKey} sortDir={sortDir} />
                     </div>
                   </th>
+                  <th style={{ padding: '10px 8px', width: 70, cursor: 'pointer', userSelect: 'none', textAlign: 'center' }} onClick={() => handleSort('mvp_count')}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: sortKey === 'mvp_count' ? t.accent : t.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                      MVP <SortIcon col="mvp_count" sortKey={sortKey} sortDir={sortDir} />
+                    </div>
+                  </th>
                   <th style={{ padding: '10px 20px 10px 8px', width: 72, fontSize: 11, fontWeight: 700, color: t.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: 'right' }}>ACTIONS</th>
                 </tr>
               </thead>
               <tbody>
                 {displayedPlayers.length === 0 ? (
                   <tr>
-                    <td colSpan={9} style={{ padding: '48px 20px', textAlign: 'center', color: t.textMuted, fontSize: 14 }}>
+                    <td colSpan={10} style={{ padding: '48px 20px', textAlign: 'center', color: t.textMuted, fontSize: 14 }}>
                       {players.length === 0 ? 'Aucun joueur dans cette équipe' : 'Aucun joueur ne correspond à la recherche'}
                     </td>
                   </tr>
@@ -884,9 +885,6 @@ export default function SquadPage() {
                     >
                       <td style={{ padding: 0, width: 0, position: 'relative' }}>
                         <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, backgroundColor: pos.color }} />
-                        <span style={{ display: 'block', paddingLeft: 23, paddingRight: 8, textAlign: 'center', fontSize: 13, fontWeight: 600, color: t.textMuted }}>
-                          {player.number != null ? player.number : '—'}
-                        </span>
                       </td>
                       <td style={{ padding: '10px 8px', textAlign: 'center' }}>
                         <span style={{ display: 'inline-block', padding: '2px 7px', borderRadius: 3, fontSize: 10, fontWeight: 800, letterSpacing: '0.3px', backgroundColor: pos.bg, color: pos.color }}>
@@ -913,6 +911,9 @@ export default function SquadPage() {
                       </td>
                       <td style={{ padding: '10px 8px', textAlign: 'center', fontSize: 14, fontWeight: 700, color: sortKey === 'assists' ? t.accent : (player.assists ?? 0) > 0 ? t.positive : t.textMuted }}>
                         {player.assists ?? 0}
+                      </td>
+                      <td style={{ padding: '10px 8px', textAlign: 'center', fontSize: 14, fontWeight: 700, color: sortKey === 'mvp_count' ? t.accent : (player.mvp_count ?? 0) > 0 ? '#f59e0b' : t.textMuted }}>
+                        {player.mvp_count ?? 0}
                       </td>
                       <td style={{ padding: '10px 20px 10px 8px', textAlign: 'right' }}>
                         {canEditActiveTeam && (

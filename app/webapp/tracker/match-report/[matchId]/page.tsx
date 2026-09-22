@@ -6,6 +6,8 @@ import { supabase } from '@/lib/supabaseClient'
 import { matchRatingsService } from '@/lib/services'
 import type { CoachEvaluation, MatchPlayerRating } from '@/types'
 import { CoachNoteCell } from './CoachNoteCell'
+import { MvpRankingPanel } from './MvpRankingPanel'
+import { MatchMomentumChart } from '../../components/MatchMomentumChart'
 import {
   PieChart,
   Pie,
@@ -330,13 +332,17 @@ export default function MatchReportPage() {
     .map(p => {
       const pe = events.filter(e => e.player_id === p.id)
       const mp = (match.players || []).find(x => x.id === p.id)
-      const plusMinus = goalEvents.reduce((acc, e) => {
+      // But pour / but contre : décomposition du +/- demandée par le coach,
+      // pas seulement le solde — savoir si un joueur encaisse beaucoup compte
+      // autant que savoir s'il est sur le terrain quand l'équipe marque.
+      let goalsFor = 0
+      let goalsAgainst = 0
+      goalEvents.forEach(e => {
         const onField = e.players_on_field ?? []
-        if (onField.includes(p.id)) {
-          return acc + (e.event_type === 'goal' ? 1 : -1)
-        }
-        return acc
-      }, 0)
+        if (!onField.includes(p.id)) return
+        if (e.event_type === 'goal') goalsFor++
+        else goalsAgainst++
+      })
       return {
         id: p.id,
         name: `${p.first_name} ${p.last_name}`,
@@ -349,7 +355,9 @@ export default function MatchReportPage() {
         ballLoss: count(pe, 'ball_loss'),
         yellowCards: count(pe, 'yellow_card'),
         redCards: count(pe, 'red_card'),
-        plusMinus,
+        goalsFor,
+        goalsAgainst,
+        plusMinus: goalsFor - goalsAgainst,
         rating: ratings[p.id]?.rating ?? null,
       }
     })
@@ -550,6 +558,20 @@ export default function MatchReportPage() {
           </div>
         )}
 
+        {/* ── Match momentum ── */}
+        {hasEvents && (
+          <div className="bg-gray-50 rounded-xl p-5 mb-6">
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">
+              Momentum du match
+            </h3>
+            <MatchMomentumChart
+              events={events}
+              teamName={teamName || 'Notre équipe'}
+              opponentName={match.opponent_team || 'Adversaire'}
+            />
+          </div>
+        )}
+
         {/* ── Goal timeline ── */}
         {goalTimeline.length > 0 && (
           <div className="bg-gray-50 rounded-xl p-5 mb-6">
@@ -614,7 +636,7 @@ export default function MatchReportPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200">
-                  {['#', 'Joueur', 'Min.', '+/-', 'Buts', 'Cadrés', 'Tirs', 'Récup.', 'Pertes', '🟨', '🟥', 'Note'].map(h => (
+                  {['#', 'Joueur', 'Min.', '+/-', 'B+', 'B-', 'Buts', 'Cadrés', 'Tirs', 'Récup.', 'Pertes', '🟨', '🟥', 'Note'].map(h => (
                     <th key={h} className={`pb-2 text-xs font-semibold text-gray-400 ${h === '#' || h === 'Joueur' ? 'text-left' : 'text-center'}`}>
                       {h}
                     </th>
@@ -632,6 +654,12 @@ export default function MatchReportPage() {
                     <td className="py-2 text-center font-bold tabular-nums"
                       style={{ color: p.plusMinus > 0 ? '#10B981' : p.plusMinus < 0 ? '#EF4444' : '#9CA3AF' }}>
                       {p.plusMinus > 0 ? `+${p.plusMinus}` : p.plusMinus === 0 ? '0' : p.plusMinus}
+                    </td>
+                    <td className="py-2 text-center tabular-nums" style={{ color: p.goalsFor > 0 ? '#10B981' : '#9CA3AF' }}>
+                      {p.goalsFor || '—'}
+                    </td>
+                    <td className="py-2 text-center tabular-nums" style={{ color: p.goalsAgainst > 0 ? '#EF4444' : '#9CA3AF' }}>
+                      {p.goalsAgainst || '—'}
                     </td>
                     <td className="py-2 text-center font-bold text-gray-900">{p.goals || '—'}</td>
                     <td className="py-2 text-center text-gray-600">{p.shotsOnTarget || '—'}</td>
@@ -695,6 +723,8 @@ export default function MatchReportPage() {
             </table>
           </div>
         )}
+
+        <MvpRankingPanel matchId={matchId} />
 
         {/* ── Footer ── */}
         <div className="mt-8 pt-4 border-t border-gray-100 flex items-center justify-between text-xs text-gray-300">

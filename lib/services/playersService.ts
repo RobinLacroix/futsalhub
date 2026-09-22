@@ -10,6 +10,7 @@ export interface PlayerBasicStats {
   assists: number;
   training_attendance: number;
   attendance_percentage: number;
+  mvp_count: number;
 }
 
 /**
@@ -19,7 +20,7 @@ export interface PlayerBasicStats {
  */
 function computePlayerBasicStats(
   playerId: string,
-  matchesData: Array<{ players: unknown }>,
+  matchesData: Array<{ players: unknown; mvp_player_ids?: string[] | null }>,
   trainingsData: Array<{ attendance: unknown }>
 ): PlayerBasicStats {
   const matchesPlayed = matchesData.filter(match => {
@@ -69,11 +70,14 @@ function computePlayerBasicStats(
     return s === 'present' || s === 'late' || s === 'absent' || s === 'injured';
   }).length;
 
+  const mvpCount = matchesData.filter(match => (match.mvp_player_ids ?? []).includes(playerId)).length;
+
   return {
     matches_played: matchesPlayed,
     goals,
     assists,
     training_attendance: trainingAttendance,
+    mvp_count: mvpCount,
     attendance_percentage: trainingConvoked > 0
       ? Math.round((trainingAttendance / trainingConvoked) * 100)
       : 0,
@@ -392,7 +396,7 @@ export const playersService = {
   ): Promise<Map<string, PlayerBasicStats>> {
     let matchesQuery = supabase
       .from('matches')
-      .select('players')
+      .select('players, mvp_player_ids')
       .eq('team_id', teamId);
     if (season) matchesQuery = matchesQuery.eq('season', season);
     const { data: matchesData, error: matchesError } = await matchesQuery;
@@ -433,11 +437,12 @@ export const playersService = {
     victories: number;
     draws: number;
     defeats: number;
+    mvp_count: number;
   }> {
     // Récupérer les matchs de l'équipe
     let matchesQuery = supabase
       .from('matches')
-      .select('id, competition, players, score_team, score_opponent')
+      .select('id, competition, players, score_team, score_opponent, mvp_player_ids')
       .eq('team_id', teamId);
     if (season) matchesQuery = matchesQuery.eq('season', season);
     const { data: matchesData, error: matchesError } = await matchesQuery;
@@ -602,6 +607,10 @@ export const playersService = {
     }
     const shot_efficiency = shots > 0 ? Math.round((goals / shots) * 100) : null;
 
+    const mvp_count = filteredMatches.filter(
+      match => ((match as any).mvp_player_ids as string[] | null ?? []).includes(playerId)
+    ).length;
+
     return {
       matches_played: matchesPlayed,
       goals,
@@ -612,7 +621,8 @@ export const playersService = {
       attendance_percentage,
       victories,
       draws,
-      defeats
+      defeats,
+      mvp_count
     };
   },
 
