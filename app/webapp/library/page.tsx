@@ -18,6 +18,7 @@ import {
   Pencil,
   Plus,
   Search,
+  SlidersHorizontal,
   Trash2,
   Users,
   X,
@@ -258,6 +259,47 @@ function BlocBadge({ bloc, short = false }: { bloc?: string | null; short?: bool
     >
       {short ? style.label : style.value}
     </span>
+  );
+}
+
+// ─── Filtres avancés — une ligne de chips à bascule pour une taxonomie ────────
+function FilterFacetRow({
+  label,
+  options,
+  selected,
+  onToggle,
+}: {
+  label: string;
+  options: readonly TaxoStyle[];
+  selected: string[];
+  onToggle: (value: string) => void;
+}) {
+  return (
+    <div>
+      <p style={{ color: T.textMuted }} className="text-[10px] font-semibold uppercase tracking-wide mb-1.5">
+        {label}
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((o) => {
+          const active = selected.includes(o.value);
+          return (
+            <button
+              key={o.value}
+              onClick={() => onToggle(o.value)}
+              style={{
+                backgroundColor: active ? o.bg : T.pageBg,
+                color: active ? o.color : T.textMuted,
+                border: `1px solid ${active ? o.color : T.border}`,
+                fontWeight: active ? 600 : 400,
+              }}
+              className="px-2.5 py-1 rounded-full text-xs transition-all hover:opacity-80"
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -1171,12 +1213,14 @@ function ProcedureCard({
   renderReady,
   onOpen,
   onSetFolder,
+  onDelete,
 }: {
   item: LibraryCard;
   folders: SchematicFolderRecord[];
   renderReady: boolean;
   onOpen: () => void;
   onSetFolder: (folderId: string | null) => void;
+  onDelete: () => void;
 }) {
   const p = item.procedure;
   const bits = p
@@ -1186,8 +1230,19 @@ function ProcedureCard({
   return (
     <div
       style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}` }}
-      className="rounded-xl overflow-hidden flex flex-col transition-transform hover:-translate-y-0.5"
+      className="relative rounded-xl overflow-hidden flex flex-col transition-transform hover:-translate-y-0.5"
     >
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onDelete(); }}
+        title="Supprimer"
+        aria-label={`Supprimer « ${item.title || 'sans titre'} »`}
+        style={{ backgroundColor: 'rgba(255,255,255,0.92)', color: '#dc2626', border: '1px solid #fca5a5' }}
+        className="absolute top-2 right-2 z-10 p-1.5 rounded-lg opacity-80 hover:opacity-100 transition-opacity"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+
       <button
         type="button"
         onClick={onOpen}
@@ -1572,6 +1627,12 @@ export default function LibraryPage() {
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
 
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [selectedFormats, setSelectedFormats] = useState<string[]>([]);
+  const [selectedPhases, setSelectedPhases] = useState<string[]>([]);
+  const [selectedIntensites, setSelectedIntensites] = useState<string[]>([]);
+  const [selectedPrincipes, setSelectedPrincipes] = useState<string[]>([]);
+
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [showDrawer, setShowDrawer] = useState(false);
   const [editingProcedure, setEditingProcedure] = useState<TrainingProcedure | null>(null);
@@ -1619,16 +1680,50 @@ export default function LibraryPage() {
   const filteredItems = useMemo(() => {
     const q = searchTerm.toLowerCase();
     return items.filter((item) => {
+      const p = item.procedure;
+      // Recherche plein contenu — pas juste le titre : objectifs, description,
+      // mécanismes inducteurs (règle + comportement induit), scoring,
+      // comportements attendus, variables +/-, principes, format/phase de jeu,
+      // rapport numérique. Demande explicite de Robin : le titre seul ratait
+      // trop de fiches pertinentes.
       const matchSearch =
         !q ||
         item.title.toLowerCase().includes(q) ||
-        (item.procedure?.objectives.toLowerCase().includes(q) ?? false) ||
-        (item.procedure?.principes || []).some((x) => x.toLowerCase().includes(q));
+        (p?.objectives.toLowerCase().includes(q) ?? false) ||
+        (p?.instructions?.toLowerCase().includes(q) ?? false) ||
+        (p?.principes || []).some((x) => x.toLowerCase().includes(q)) ||
+        (p?.scoring || []).some((x) => x.toLowerCase().includes(q)) ||
+        (p?.comportements || []).some((x) => x.toLowerCase().includes(q)) ||
+        (p?.variables_plus || []).some((x) => x.toLowerCase().includes(q)) ||
+        (p?.variables_moins || []).some((x) => x.toLowerCase().includes(q)) ||
+        (p?.mecanismes || []).some((m) => m.regle.toLowerCase().includes(q) || m.induit.toLowerCase().includes(q)) ||
+        (p?.type?.toLowerCase().includes(q) ?? false) ||
+        (p?.theme?.toLowerCase().includes(q) ?? false) ||
+        (p?.rapport_numerique?.toLowerCase().includes(q) ?? false) ||
+        (p?.question_debriefing?.toLowerCase().includes(q) ?? false);
       const matchBloc = selectedBlocs.length === 0 || selectedBlocs.includes(item.bloc ?? '');
       const matchFolder = activeFolder === 'all' ? true : activeFolder === null ? item.folder_id == null : item.folder_id === activeFolder;
-      return matchSearch && matchBloc && matchFolder;
+      const matchFormat = selectedFormats.length === 0 || (!!p && selectedFormats.includes(p.type));
+      const matchPhase = selectedPhases.length === 0 || (!!p && selectedPhases.includes(p.theme));
+      const matchIntensite = selectedIntensites.length === 0 || (!!p?.intensite && selectedIntensites.includes(p.intensite));
+      const matchPrincipes = selectedPrincipes.length === 0 || (p?.principes || []).some((x) => selectedPrincipes.includes(x));
+      return matchSearch && matchBloc && matchFolder && matchFormat && matchPhase && matchIntensite && matchPrincipes;
     });
-  }, [items, searchTerm, selectedBlocs, activeFolder]);
+  }, [items, searchTerm, selectedBlocs, activeFolder, selectedFormats, selectedPhases, selectedIntensites, selectedPrincipes]);
+
+  const availablePrincipes = useMemo(() => {
+    const set = new Set<string>();
+    items.forEach((i) => (i.procedure?.principes || []).forEach((x) => x && set.add(x)));
+    return Array.from(set).sort();
+  }, [items]);
+
+  const advancedFilterCount = selectedFormats.length + selectedPhases.length + selectedIntensites.length + selectedPrincipes.length;
+  const resetAdvancedFilters = () => {
+    setSelectedFormats([]);
+    setSelectedPhases([]);
+    setSelectedIntensites([]);
+    setSelectedPrincipes([]);
+  };
 
   const toggleBloc = (v: string) => setSelectedBlocs((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]));
 
@@ -1691,6 +1786,34 @@ export default function LibraryPage() {
     }
   };
 
+  /**
+   * Suppression directement depuis la carte de la grille — demande explicite
+   * de Robin, jusqu'ici il fallait ouvrir la fiche en détail pour supprimer.
+   * Même logique que handleDelete (archive un procédé, supprime un schéma
+   * orphelin), juste un point d'entrée de plus.
+   */
+  const handleDeleteCard = async (item: LibraryCard) => {
+    const label = item.title || 'sans titre';
+    if (item.kind === 'procedure' && item.procedure) {
+      if (!confirm(`Archiver le procédé « ${label} » ? Il disparaîtra de la bibliothèque. Le schéma dessiné, s'il y en a un, n'est pas supprimé.`)) return;
+      try {
+        await trainingProceduresService.archiveProcedure(item.procedure.id);
+        setItems((prev) => prev.filter((i) => i.key !== item.key));
+        if (selectedKey === item.key) setSelectedKey(null);
+      } catch {
+        alert('Impossible de supprimer ce procédé.');
+      }
+    } else if (item.schematic) {
+      if (!confirm(`Supprimer définitivement le schéma « ${label} » ? Cette action est irréversible.`)) return;
+      try {
+        await schematicsService.deleteSchematic(item.schematic.id);
+        setItems((prev) => prev.filter((i) => i.key !== item.key));
+      } catch {
+        alert('Impossible de supprimer ce schéma.');
+      }
+    }
+  };
+
   const handleSaved = () => {
     setShowDrawer(false);
     setEditingProcedure(null);
@@ -1729,6 +1852,26 @@ export default function LibraryPage() {
               className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
           </div>
+          <button
+            onClick={() => setShowAdvancedFilters((v) => !v)}
+            style={{
+              backgroundColor: advancedFilterCount > 0 ? '#EFF6FF' : T.cardBg,
+              color: advancedFilterCount > 0 ? T.accent : T.text,
+              border: `1px solid ${advancedFilterCount > 0 ? T.accent : T.border}`,
+            }}
+            className="relative inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg hover:opacity-80 transition-opacity shrink-0"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Filtres</span>
+            {advancedFilterCount > 0 && (
+              <span
+                style={{ backgroundColor: T.accent }}
+                className="text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center"
+              >
+                {advancedFilterCount}
+              </span>
+            )}
+          </button>
           <button
             onClick={() => window.open('/webapp/library/sessions', '_blank')}
             style={{ backgroundColor: T.cardBg, color: T.text, border: `1px solid ${T.border}` }}
@@ -1776,6 +1919,45 @@ export default function LibraryPage() {
             </button>
           )}
         </div>
+
+        {/* Filtres avancés — format / phase de jeu / intensité / principes, repliés par défaut */}
+        {showAdvancedFilters && (
+          <div style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}` }} className="rounded-lg p-3 space-y-2.5">
+            <FilterFacetRow label="Format" options={FORMATS} selected={selectedFormats} onToggle={(v) => setSelectedFormats((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]))} />
+            <FilterFacetRow label="Phase de jeu" options={PHASES_DE_JEU} selected={selectedPhases} onToggle={(v) => setSelectedPhases((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]))} />
+            <FilterFacetRow label="Intensité" options={INTENSITES} selected={selectedIntensites} onToggle={(v) => setSelectedIntensites((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]))} />
+            {availablePrincipes.length > 0 && (
+              <div>
+                <p style={{ color: T.textMuted }} className="text-[10px] font-semibold uppercase tracking-wide mb-1.5">Principes</p>
+                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                  {availablePrincipes.map((p) => {
+                    const active = selectedPrincipes.includes(p);
+                    return (
+                      <button
+                        key={p}
+                        onClick={() => setSelectedPrincipes((prev) => (prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]))}
+                        style={{
+                          backgroundColor: active ? '#EFF6FF' : T.pageBg,
+                          color: active ? T.accent : T.textMuted,
+                          border: `1px solid ${active ? T.accent : T.border}`,
+                          fontWeight: active ? 600 : 400,
+                        }}
+                        className="px-2.5 py-1 rounded-full text-xs transition-all hover:opacity-80"
+                      >
+                        {p}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {advancedFilterCount > 0 && (
+              <button onClick={resetAdvancedFilters} style={{ color: T.textMuted }} className="text-xs underline hover:opacity-70">
+                Réinitialiser les filtres avancés
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Dossiers */}
         <div className="flex flex-wrap gap-2 items-center">
@@ -1874,6 +2056,7 @@ export default function LibraryPage() {
                   else if (item.schematic) router.push(`/webapp/library/schematics?schematic=${item.schematic.id}`);
                 }}
                 onSetFolder={(folderId) => handleSetFolder(item, folderId)}
+                onDelete={() => handleDeleteCard(item)}
               />
             ))}
           </div>
