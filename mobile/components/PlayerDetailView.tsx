@@ -79,6 +79,7 @@ export type PlayerStats = {
   matches_played: number;
   goals: number;
   assists: number;
+  mvp_count: number;
   training_attendance: number;
   attendance_percentage: number;
   victories: number;
@@ -505,6 +506,7 @@ export function PlayerDetailView({
                 <KPIBlock p={p} label="Matchs" value={String(stats.matches_played)} />
                 <KPIBlock p={p} label="Buts" value={String(stats.goals)} color={p.accent} />
                 <KPIBlock p={p} label="Passes décisives" value={String(stats.assists)} color={p.accent} />
+                <KPIBlock p={p} label="MVP" value={String(stats.mvp_count)} color={p.warning} />
                 <KPIBlock
                   p={p}
                   label="Taux de victoire"

@@ -205,6 +205,10 @@ export const STAT_COLUMNS: StatColumn[] = [
   { key: 'ballLoss', label: 'Pertes', short: 'Perte', kind: 'count', tone: (c) => c.negative.default },
   { key: 'assists', label: 'Passes déc.', short: 'P.déc', kind: 'count', tone: (c) => c.chartSeries[5] ?? c.accent.default },
   { key: 'plusMinus', label: '+/-', short: '+/-', kind: 'plusminus', tone: (c) => c.text.secondary },
+  // Décomposition du +/- demandée par les coachs : le solde seul ne dit pas
+  // si un joueur encaisse beaucoup ou marque beaucoup.
+  { key: 'goalsFor', label: 'Buts pour', short: 'B+', kind: 'count', tone: (c) => c.positive.default },
+  { key: 'goalsAgainst', label: 'Buts contre', short: 'B-', kind: 'count', tone: (c) => c.negative.default },
   { key: 'totalTime', label: 'Temps de jeu', short: 'Tps', kind: 'time', tone: (c) => c.text.secondary },
 ];
 
@@ -263,6 +267,9 @@ export interface StatRow {
   assists: number;
   totalTime: number;
   plusMinus: number;
+  /** But pour / but contre, joueur sur le terrain — décomposition du +/- demandée par les coachs. */
+  goalsFor: number;
+  goalsAgainst: number;
   yellowCards: number;
   redCards: number;
   /** Écart de note live, `null` si gardien ou sous {@link RATING_MIN_EVENTS}. */

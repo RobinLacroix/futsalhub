@@ -56,6 +56,8 @@ import { toPayload } from '../../lib/painMap';
 
 type Onset = 'aigu' | 'chronique' | null;
 
+type Teammate = { id: string; name: string };
+
 type SessionInfo = {
   kind: 'training' | 'match';
   training_id?: string;
@@ -64,6 +66,8 @@ type SessionInfo = {
   training_date: string;
   theme: string | null;
   player_name: string | null;
+  /** Coéquipiers votables pour le MVP (hors soi-même), présent seulement si kind === 'match'. */
+  teammates?: Teammate[];
 };
 
 type FormValues = {
@@ -149,6 +153,7 @@ export default function PlayerQuestionnairesScreen() {
   const [sessionLoading, setSessionLoading] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [form, setForm] = useState<FormValues>(EMPTY_FORM);
+  const [mvpVote, setMvpVote] = useState<string | null>(null);
   const [comment, setComment] = useState('');
   const [pain, setPain] = useState<PainSelection>({});
   const [onset, setOnset] = useState<Onset>(null);
@@ -186,6 +191,7 @@ export default function PlayerQuestionnairesScreen() {
     setSessionLoading(true);
     setSubmitted(false);
     setForm(EMPTY_FORM);
+    setMvpVote(null);
     setComment('');
     setPain({});
     setOnset(null);
@@ -240,6 +246,7 @@ export default function PlayerQuestionnairesScreen() {
     if (!activeItem) return;
     const { auto_evaluation, rpe, physical_form, pleasure } = form;
     if (auto_evaluation == null || rpe == null || physical_form == null || pleasure == null) return;
+    if (sessionInfo?.kind === 'match' && !mvpVote) return;
 
     setSubmitting(true);
     try {
@@ -250,6 +257,7 @@ export default function PlayerQuestionnairesScreen() {
         p_physical_form: physical_form,
         p_pleasure: pleasure,
         p_comment: comment.trim() || null,
+        p_mvp_vote_player_id: mvpVote,
       });
       if (rpcError) throw rpcError;
       const result = data as { success: boolean; error?: string } | null;
@@ -274,10 +282,11 @@ export default function PlayerQuestionnairesScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [activeItem, form, comment, pain, onset]);
+  }, [activeItem, form, comment, pain, onset, sessionInfo, mvpVote]);
 
   const answered = Object.values(form).filter((v) => v !== null).length;
-  const allAnswered = answered === METRICS.length;
+  const needsMvpVote = sessionInfo?.kind === 'match';
+  const allAnswered = answered === METRICS.length && (!needsMvpVote || !!mvpVote);
 
   if (loading && items.length === 0) {
     return (
@@ -471,6 +480,50 @@ export default function PlayerQuestionnairesScreen() {
                   </View>
                 </Card>
 
+                {sessionInfo.kind === 'match' && (
+                  <Card variant="flat" padding="lg" style={s.block}>
+                    <View style={s.blockHead}>
+                      <Ionicons name="trophy-outline" size={16} color={c.text.secondary} />
+                      <Text variant="headline" style={s.flex}>
+                        Meilleur joueur du match
+                      </Text>
+                      <Badge label="Obligatoire" tone="warning" size="sm" />
+                    </View>
+                    <Text variant="caption" tone="secondary">
+                      Tu ne peux pas voter pour toi-même.
+                    </Text>
+                    <View style={s.mvpList}>
+                      {(sessionInfo.teammates ?? []).map((mate) => {
+                        const active = mvpVote === mate.id;
+                        return (
+                          <Pressable
+                            key={mate.id}
+                            onPress={() => setMvpVote(mate.id)}
+                            style={({ pressed }) => [s.mvpOption, active && s.mvpOptionOn, pressed && s.pressed]}
+                            accessibilityRole="radio"
+                            accessibilityState={{ selected: active, checked: active }}
+                            accessibilityLabel={mate.name}
+                          >
+                            <Ionicons
+                              name={active ? 'radio-button-on' : 'radio-button-off'}
+                              size={16}
+                              color={active ? c.accent.default : c.text.tertiary}
+                            />
+                            <Text variant="callout" weight={active ? '700' : '500'} tone={active ? 'accent' : 'primary'}>
+                              {mate.name}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                      {(sessionInfo.teammates ?? []).length === 0 && (
+                        <Text variant="caption" tone="tertiary">
+                          Aucun coéquipier à désigner pour ce match.
+                        </Text>
+                      )}
+                    </View>
+                  </Card>
+                )}
+
                 {METRICS.map((metric) => (
                   <ScaleSelector
                     key={metric.key}
@@ -516,7 +569,13 @@ export default function PlayerQuestionnairesScreen() {
                 </Card>
 
                 <Button
-                  label={allAnswered ? 'Envoyer le questionnaire' : `Encore ${METRICS.length - answered} question${METRICS.length - answered > 1 ? 's' : ''}`}
+                  label={
+                    allAnswered
+                      ? 'Envoyer le questionnaire'
+                      : needsMvpVote && !mvpVote
+                        ? 'Choisis le meilleur joueur du match'
+                        : `Encore ${METRICS.length - answered} question${METRICS.length - answered > 1 ? 's' : ''}`
+                  }
                   onPress={handleSubmit}
                   disabled={!allAnswered}
                   loading={submitting}
@@ -678,6 +737,20 @@ const useStyles = makeStyles((t) => ({
   block: { gap: t.space.md },
   blockHead: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm },
   commentInput: { minHeight: 88, textAlignVertical: 'top' },
+
+  mvpList: { gap: t.space.sm },
+  mvpOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: t.space.sm,
+    minHeight: HIT_SLOP_MIN,
+    paddingHorizontal: t.space.md,
+    borderRadius: t.radius.sm,
+    borderWidth: 1.5,
+    borderColor: t.colors.border.subtle,
+    backgroundColor: t.colors.bg.canvas,
+  },
+  mvpOptionOn: { borderColor: t.colors.accent.default, backgroundColor: t.colors.accent.subtle },
 
   onsetWrap: { gap: t.space.sm },
   onsetRow: { gap: t.space.sm },

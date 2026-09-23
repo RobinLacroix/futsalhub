@@ -59,6 +59,8 @@ import {
 } from './recorder';
 import type { GoalType } from '../lib/services/matchEvents';
 import type { MatchEventType, Player } from '../types';
+import { MomentumChart } from './charts/MomentumChart';
+import { currentAbsoluteMinute, lastEventAbsoluteMinute } from '../lib/matchMomentum';
 
 type Tab = 'terrain' | 'saisie' | 'bilan';
 
@@ -235,6 +237,21 @@ export default function PhoneMatchRecorder({
     ]);
   }, [r, router, onMatchFinished, setSuppressExitGuard]);
 
+  // Un tap accidentel sur « Enregistrer » finalisait immédiatement le score en
+  // cours — pas de rattrapage possible, contrairement à un but ou un carton
+  // (« Appui long pour annuler »). Même garde-fou que `handleQuit` juste
+  // en dessous.
+  const confirmEndMatch = useCallback(() => {
+    Alert.alert(
+      'Terminer le match ?',
+      'Le score et les statistiques actuels seront enregistrés tels quels. Vérifie que le match est bien terminé.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        { text: 'Terminer le match', style: 'destructive', onPress: handleSave },
+      ]
+    );
+  }, [handleSave]);
+
   const handleQuit = useCallback(() => {
     Alert.alert(
       'Quitter sans enregistrer',
@@ -302,7 +319,7 @@ export default function PhoneMatchRecorder({
           </Text>
 
           <Pressable
-            onPress={handleSave}
+            onPress={confirmEndMatch}
             disabled={r.saving}
             style={({ pressed }) => [s.savePill, r.saving && s.pressed, pressed && s.pressed]}
             accessibilityRole="button"
@@ -492,6 +509,26 @@ export default function PhoneMatchRecorder({
         {tab === 'bilan' && (
           <View style={s.block}>
             <Text variant="caption" tone="secondary" weight="700">
+              Momentum du match
+            </Text>
+            <Card variant="flat" padding="md">
+              <MomentumChart
+                events={r.momentumEvents}
+                upToMinute={Math.max(
+                  currentAbsoluteMinute(r.momentumEvents, r.half, r.seconds),
+                  lastEventAbsoluteMinute(r.momentumEvents)
+                )}
+                teamName="Nous"
+                opponentName={r.match?.opponent_team || 'Adversaire'}
+                usColor={c.positive.default}
+                opponentColor={c.negative.default}
+                gridColor={c.border.subtle}
+                textColor={c.text.tertiary}
+                live
+              />
+            </Card>
+
+            <Text variant="caption" tone="secondary" weight="700" style={s.blockLabel}>
               Notre équipe
             </Text>
             <View style={s.statGrid}>

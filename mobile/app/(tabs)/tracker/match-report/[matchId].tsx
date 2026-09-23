@@ -13,6 +13,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../../../lib/supabase';
 import { getMatchPlayerRatings, setMatchCoachEvaluation, getCoachNotes, setCoachNote } from '../../../../lib/services/matchRatings';
 import type { CoachEvaluation, MatchPlayerRating } from '../../../../types';
+import { MomentumChart } from '../../../../components/charts/MomentumChart';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -434,15 +435,17 @@ export default function MatchReportScreen() {
       const pe = events.filter(e => e.player_id === p.id);
       const mp = (match.players ?? []).find(x => x.id === p.id);
 
-      // +1 quand l'équipe marque avec le joueur sur le terrain
-      // -1 quand l'adversaire marque avec le joueur sur le terrain
-      const plusMinus = goalEvents.reduce((acc, e) => {
+      // But pour / but contre : décomposition du +/- demandée par le coach,
+      // pas seulement le solde — savoir si un joueur encaisse beaucoup compte
+      // autant que savoir s'il est sur le terrain quand l'équipe marque.
+      let goalsFor = 0;
+      let goalsAgainst = 0;
+      goalEvents.forEach(e => {
         const onField = e.players_on_field ?? [];
-        if (onField.includes(p.id)) {
-          return acc + (e.event_type === 'goal' ? 1 : -1);
-        }
-        return acc;
-      }, 0);
+        if (!onField.includes(p.id)) return;
+        if (e.event_type === 'goal') goalsFor++;
+        else goalsAgainst++;
+      });
 
       return {
         id: p.id,
@@ -456,7 +459,9 @@ export default function MatchReportScreen() {
         ballLoss: count(pe, 'ball_loss'),
         yellowCards: count(pe, 'yellow_card'),
         redCards: count(pe, 'red_card'),
-        plusMinus,
+        goalsFor,
+        goalsAgainst,
+        plusMinus: goalsFor - goalsAgainst,
         rating: ratings[p.id]?.rating ?? null,
       };
     })
@@ -547,6 +552,20 @@ export default function MatchReportScreen() {
           <View style={styles.divider} />
           <HorizontalBar label="Cadrés (adv.)" value={oppShotsCadres} max={maxShots} color="#EF4444" />
           <HorizontalBar label="Non cadrés (adv.)" value={oppShotsOff} max={maxShots} color="#FCA5A5" />
+        </View>
+      )}
+
+      {/* Momentum du match */}
+      {events.length > 0 && (
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Momentum du match</Text>
+          <MomentumChart
+            events={events}
+            teamName={teamName || 'Notre équipe'}
+            opponentName={match.opponent_team || 'Adversaire'}
+            gridColor={BORDER}
+            textColor={MUTED}
+          />
         </View>
       )}
 
@@ -649,9 +668,21 @@ export default function MatchReportScreen() {
                 <Text style={[styles.tableCell, styles.colStat, styles.muted]}>
                   {p.timePlayed > 0 ? `${Math.floor(p.timePlayed / 60)}'` : '—'}
                 </Text>
-                <Text style={[styles.tableCell, styles.colStat, styles.bold, pmColor ? { color: pmColor } : styles.muted]}>
-                  {pmLabel}
-                </Text>
+                {/* +/- avec but pour / but contre en petit dessous : demandé par le
+                    coach, le solde seul ne dit pas si un joueur encaisse
+                    beaucoup. Pas de colonne séparée : `colStat` fait 40pt,
+                    deux colonnes de plus n'auraient plus laissé de place pour
+                    le nom du joueur sur un petit écran. */}
+                <View style={[styles.colStat, styles.pmCell]}>
+                  <Text style={[styles.tableCell, styles.bold, pmColor ? { color: pmColor } : styles.muted]}>
+                    {pmLabel}
+                  </Text>
+                  <Text style={styles.pmBreakdown}>
+                    <Text style={{ color: '#10B981' }}>{p.goalsFor}</Text>
+                    <Text style={styles.muted}>–</Text>
+                    <Text style={{ color: '#EF4444' }}>{p.goalsAgainst}</Text>
+                  </Text>
+                </View>
                 <Text style={[styles.tableCell, styles.colStat, p.goals > 0 && styles.highlight]}>
                   {p.goals || '—'}
                 </Text>
@@ -816,6 +847,8 @@ const styles = StyleSheet.create({
   colNum: { width: 28, color: MUTED, fontVariant: ['tabular-nums'] },
   colName: { flex: 1, paddingRight: 4 },
   colStat: { width: 40, textAlign: 'center' },
+  pmCell: { alignItems: 'center' },
+  pmBreakdown: { fontSize: 9, fontVariant: ['tabular-nums'] },
 
   muted: { color: MUTED, fontSize: 12 },
   bold: { fontWeight: '800' } as object,

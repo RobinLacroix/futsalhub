@@ -61,6 +61,8 @@ import {
 } from './recorder';
 import type { GoalType } from '../lib/services/matchEvents';
 import type { MatchEventType } from '../types';
+import { MomentumChart } from './charts/MomentumChart';
+import { currentAbsoluteMinute, lastEventAbsoluteMinute } from '../lib/matchMomentum';
 
 type View2 = 'saisie' | 'bilan';
 
@@ -328,6 +330,21 @@ export default function TabletMatchRecorder({
     ]);
   }, [r, router, onMatchFinished, setSuppressExitGuard]);
 
+  // Un tap accidentel sur « Fin du match » enregistrait immédiatement le
+  // score en cours et quittait le recorder — pas de rattrapage possible côté
+  // UI, contrairement à un but ou un carton (qui passent par « Annuler
+  // dernière action »). Même garde-fou que `confirmNextHalf` juste au-dessus.
+  const confirmEndMatch = useCallback(() => {
+    Alert.alert(
+      'Terminer le match ?',
+      'Le score et les statistiques actuels seront enregistrés tels quels. Vérifie que le match est bien terminé.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        { text: 'Terminer le match', style: 'destructive', onPress: handleSave },
+      ]
+    );
+  }, [handleSave]);
+
   // ── Sélection du match ────────────────────────────────────────────────────
 
   if (r.step === 'select') {
@@ -396,7 +413,7 @@ export default function TabletMatchRecorder({
               onPress={() => setView('bilan')}
               active={view === 'bilan'}
             />
-            <HeaderButton icon="flag" label="Fin du match" onPress={handleSave} loading={r.saving} />
+            <HeaderButton icon="flag" label="Fin du match" onPress={confirmEndMatch} loading={r.saving} />
           </View>
         </View>
 
@@ -540,6 +557,26 @@ export default function TabletMatchRecorder({
         </ScrollView>
       ) : (
         <ScrollView style={s.flex} contentContainerStyle={s.body}>
+          <Card variant="flat" padding="md">
+            <Text variant="headline" style={s.tableTitle}>
+              Momentum du match
+            </Text>
+            <MomentumChart
+              events={r.momentumEvents}
+              upToMinute={Math.max(
+                currentAbsoluteMinute(r.momentumEvents, r.half, r.seconds),
+                lastEventAbsoluteMinute(r.momentumEvents)
+              )}
+              teamName="Nous"
+              opponentName={r.match?.opponent_team || 'Adversaire'}
+              usColor={c.positive.default}
+              opponentColor={c.negative.default}
+              gridColor={c.border.subtle}
+              textColor={c.text.tertiary}
+              live
+            />
+          </Card>
+
           <MatchStatsPanel
             teamStats={r.teamStats}
             opponentShotsTotal={r.opponentShotsTotal}

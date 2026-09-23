@@ -22,7 +22,7 @@ import type { Player } from '../../../types';
 
 // ─── Modèle de tri ────────────────────────────────────────────────────────────
 
-type SortKey = 'name' | 'position' | 'seances' | 'matches' | 'goals' | 'assists';
+type SortKey = 'name' | 'position' | 'seances' | 'matches' | 'goals' | 'assists' | 'mvp';
 type SortDir = 'asc' | 'desc';
 
 const FILTERS: readonly ChipOption<MatchTypeFilter>[] = [
@@ -33,21 +33,26 @@ const FILTERS: readonly ChipOption<MatchTypeFilter>[] = [
 ];
 
 /** Colonnes chiffrées du tableau. `label` reste court : la largeur est de 52 pt. */
-const STAT_COLUMNS: { key: Extract<SortKey, 'seances' | 'matches' | 'goals' | 'assists'>; label: string; full: string }[] = [
+const STAT_COLUMNS: { key: Extract<SortKey, 'seances' | 'matches' | 'goals' | 'assists' | 'mvp'>; label: string; full: string }[] = [
   { key: 'seances', label: 'SÉA', full: 'séances' },
   { key: 'matches', label: 'MAT', full: 'matchs' },
   { key: 'goals', label: 'BUT', full: 'buts' },
   { key: 'assists', label: 'PD', full: 'passes déc.' },
+  { key: 'mvp', label: 'MVP', full: 'MVP' },
 ];
 
-const COL_NUM = 38;
 const COL_POS = 54;
-const COL_STAT = 52;
+// Sur téléphone, 5 colonnes chiffrées grignotaient trop de place sur le nom
+// (raison d'être de la liste) : resserrées, mais pas au point de perdre en
+// lisibilité — deux chiffres doivent toujours tenir sans coupure.
+const COL_STAT_PHONE = 38;
+const COL_STAT_TABLET = 52;
 const ROW_HEIGHT = 56;
 
 export default function SquadScreen() {
   const router = useRouter();
   const isTablet = useIsTablet();
+  const colStat = isTablet ? COL_STAT_TABLET : COL_STAT_PHONE;
   const { theme } = useTheme();
   const c = theme.colors;
   const { activeTeamId, canEditActiveTeam } = useActiveTeam();
@@ -133,7 +138,7 @@ export default function SquadScreen() {
   };
 
   const sortedPlayers = useMemo(() => {
-    const empty: PlayerSquadStat = { seances: 0, matches: 0, goals: 0, assists: 0, unexcusedCount: 0 };
+    const empty: PlayerSquadStat = { seances: 0, matches: 0, goals: 0, assists: 0, mvp: 0, unexcusedCount: 0 };
     return [...players].sort((a, b) => {
       const sA = stats[a.id] ?? empty;
       const sB = stats[b.id] ?? empty;
@@ -330,14 +335,9 @@ export default function SquadScreen() {
           { backgroundColor: c.bg.surface, borderBottomColor: c.border.strong },
         ]}
       >
-        <View style={[styles.headCell, { width: COL_NUM }, styles.center]}>
-          <Text variant="tableHeader" tone="tertiary">
-            N°
-          </Text>
-        </View>
         {sortHeader('position', 'POS', 'poste', COL_POS, 'center')}
         {sortHeader('name', 'NOM', 'nom', 'flex', 'left')}
-        {STAT_COLUMNS.map((col) => sortHeader(col.key, col.label, col.full, COL_STAT, 'center'))}
+        {STAT_COLUMNS.map((col) => sortHeader(col.key, col.label, col.full, colStat, 'center'))}
       </View>
 
       {loading && players.length === 0 ? (
@@ -375,16 +375,15 @@ export default function SquadScreen() {
             />
           }
           renderItem={({ item, index }) => {
-            const s = stats[item.id] ?? { seances: 0, matches: 0, goals: 0, assists: 0, unexcusedCount: 0 };
+            const s = stats[item.id] ?? { seances: 0, matches: 0, goals: 0, assists: 0, mvp: 0, unexcusedCount: 0 };
             const pos = positionStyle(item.position, c);
             const hasFeedback = feedbackPlayerIds.has(item.id);
             const hasUnexcused = s.unexcusedCount > 0;
 
             const a11y = [
               `${item.first_name} ${item.last_name}`,
-              item.number != null ? `numéro ${item.number}` : undefined,
               pos.label,
-              `${s.seances} séances, ${s.matches} matchs, ${s.goals} buts, ${s.assists} passes déc.`,
+              `${s.seances} séances, ${s.matches} matchs, ${s.goals} buts, ${s.assists} passes déc., ${s.mvp} fois MVP`,
               hasFeedback ? 'nouveau retour à lire' : undefined,
               hasUnexcused ? `${s.unexcusedCount} absence ou retard non prévenu` : undefined,
             ]
@@ -443,12 +442,6 @@ export default function SquadScreen() {
                 >
                   <View style={[styles.posStripe, { backgroundColor: pos.color }]} />
 
-                  <View style={[styles.cell, { width: COL_NUM }, styles.center]}>
-                    <Text variant="tableCell" tone="secondary" numeric>
-                      {item.number ?? '—'}
-                    </Text>
-                  </View>
-
                   <View style={[styles.cell, { width: COL_POS }, styles.center]}>
                     <View
                       style={[
@@ -483,7 +476,7 @@ export default function SquadScreen() {
                     const value = s[col.key];
                     const isSorted = sortKey === col.key;
                     return (
-                      <View key={col.key} style={[styles.cell, { width: COL_STAT }, styles.center]}>
+                      <View key={col.key} style={[styles.cell, { width: colStat }, styles.center]}>
                         <Text
                           variant="tableCell"
                           tone={isSorted ? 'accent' : value > 0 ? 'primary' : 'tertiary'}

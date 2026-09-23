@@ -271,5 +271,8 @@ const useStyles = makeStyles((t) => ({
   },
 
   scrollInner: { paddingBottom: t.space.sm },
-  scrollWidth: { width: 620 },
+  // +80 pour les deux nouvelles colonnes B+/B- (2 x flex:1 en plus dans le
+  // même jeu de colonnes que la tablette) : sans ça, l'ajout se contente de
+  // resserrer toutes les colonnes existantes au lieu d'élargir le scroll.
+  scrollWidth: { width: 700 },
 }));

@@ -63,6 +63,7 @@ import {
 import { parseMatchPlayers } from '../../utils/matchUtils';
 import { computePlayingTime } from '../analytics/aggregate';
 import { haptics } from '../../lib/design/haptics';
+import type { MomentumEvent } from '../../lib/matchMomentum';
 import { DEFAULT_RATING_WEIGHTS } from '../../types';
 import type { Match, MatchEventType, Player, RatingWeights } from '../../types';
 import {
@@ -86,6 +87,19 @@ const labelOf = (e: MatchEventType) =>
   PLAYER_ACTIONS.find((a) => a.eventType === e)?.label ??
   OPPONENT_ACTIONS.find((a) => a.eventType === e)?.label ??
   'Action';
+
+/**
+ * Retire la dernière occurrence d'un type d'event — même sémantique que
+ * `deleteLastMatchEventByType` côté serveur, pour que le log local utilisé par
+ * le momentum (`momentumEvents`) reste aligné avec la base après une
+ * annulation.
+ */
+function removeLastByType(events: MomentumEvent[], eventType: string): MomentumEvent[] {
+  const idx = [...events].reverse().findIndex((e) => e.event_type === eventType);
+  if (idx === -1) return events;
+  const realIdx = events.length - 1 - idx;
+  return [...events.slice(0, realIdx), ...events.slice(realIdx + 1)];
+}
 
 export type GoalTypeTally = Record<string, number>;
 
@@ -140,6 +154,33 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
   const [seconds, setSeconds] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
 
+  /**
+   * Mi-temps/chrono sont restaurés par DEUX sources indépendantes au montage :
+   * la base (`events`, effet plus bas) et l'instantané local AsyncStorage
+   * (`loadRecorderState`, autre effet plus bas — son propre commentaire dit
+   * déjà "l'instantané local... peut aussi être périmé"). Les deux font un
+   * fetch async sans dépendre l'un de l'autre : celui qui répond en dernier
+   * écrase l'autre, sans notion d'ordre garanti (le réseau peut répondre avant
+   * ou après AsyncStorage selon les conditions). Un instantané local périmé
+   * (créé juste avant un passage en 2ème MT jamais réécrit ensuite) peut donc
+   * ramener l'affichage à "1ère MT" alors que la base — et donc les events
+   * réels, dont le momentum se sert — sait déjà qu'on est en 2ème MT.
+   *
+   * `applyHalfSecondsIfMoreAdvanced` applique le même principe que le
+   * `Math.max` déjà utilisé juste plus bas pour `totalTime` : ne jamais
+   * reculer une grandeur qui ne peut que croître pendant un match.
+   */
+  const halfSecondsProgressRef = useRef<{ half: 1 | 2; seconds: number }>({ half: 1, seconds: 0 });
+  const applyHalfSecondsIfMoreAdvanced = useCallback((candidate: { half: 1 | 2; seconds: number }) => {
+    const current = halfSecondsProgressRef.current;
+    const isMoreAdvanced =
+      candidate.half > current.half || (candidate.half === current.half && candidate.seconds >= current.seconds);
+    if (!isMoreAdvanced) return;
+    halfSecondsProgressRef.current = candidate;
+    setHalf(candidate.half);
+    setSeconds(candidate.seconds);
+  }, []);
+
   const [scoreUs, setScoreUs] = useState(0);
   const [scoreOpponent, setScoreOpponent] = useState(0);
   const [foulsUs, setFoulsUs] = useState(0);
@@ -167,6 +208,12 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
   const [timeoutOpponent, setTimeoutOpponent] = useState(false);
   const [outboxLength, setOutboxLength] = useState(0);
   const [history, setHistory] = useState<RecordedAction[]>([]);
+
+  // Log complet (pas juste les 12 dernières comme `history`) pour le momentum
+  // du match — voir `lib/matchMomentum.ts`. Réamorcé depuis la base à chaque
+  // chargement de match (cf. effet plus bas), complété en direct dans
+  // `recordEvent`, corrigé en symétrie dans `undoEvent`.
+  const [momentumEvents, setMomentumEvents] = useState<MomentumEvent[]>([]);
 
   // ── Dérivées ──────────────────────────────────────────────────────────────
 
@@ -246,6 +293,12 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
           assists: st?.stats.assists ?? 0,
           totalTime: st?.totalTime ?? 0,
           plusMinus: plusMinusByPlayer[p.id] ?? 0,
+          // `collGoalsFor`/`collGoalsAgainst` (COLLECTIVE_STAT) plutôt qu'un
+          // état séparé : déjà persisté dans `PlayerState.stats` et déjà
+          // reconstruit correctement à la reprise, contrairement à
+          // `plusMinusByPlayer` (cf. commentaire de COLLECTIVE_STAT).
+          goalsFor: st?.stats.collGoalsFor ?? 0,
+          goalsAgainst: st?.stats.collGoalsAgainst ?? 0,
           yellowCards: st?.yellowCards ?? 0,
           redCards: st?.redCards ?? 0,
           ratingDelta: ratingDeltaByPlayer[p.id] ?? null,
@@ -302,6 +355,11 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
 
   useEffect(() => {
     if (step !== 'record' || !matchId) return;
+    // Repartir d'une référence neutre à chaque match chargé : `selectMatch`
+    // ne démonte pas forcément ce hook en changeant de match, et une
+    // progression mi-temps/chrono du match précédent resterait sinon dans la
+    // ref et rejetterait à tort les valeurs (basses, légitimes) du nouveau.
+    halfSecondsProgressRef.current = { half: 1, seconds: 0 };
     let cancelled = false;
     (async () => {
       try {
@@ -354,12 +412,18 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
           states[p.id] = emptyPlayerState(p.id, limit, playedByPlayer.get(p.id) ?? 0);
         });
         setPlayerStates(states);
+        setMomentumEvents(
+          events.map((e) => ({
+            event_type: e.event_type,
+            match_time_seconds: e.match_time_seconds,
+            half: e.half,
+          }))
+        );
 
         if (cancelled || events.length === 0) return;
 
         const last = events[events.length - 1];
-        setHalf(last.half as 1 | 2);
-        setSeconds(last.match_time_seconds);
+        applyHalfSecondsIfMoreAdvanced({ half: last.half as 1 | 2, seconds: last.match_time_seconds });
         setScoreUs((prev) => Math.max(prev, events.filter((e) => e.event_type === 'goal').length));
         setScoreOpponent((prev) =>
           Math.max(prev, events.filter((e) => e.event_type === 'opponent_goal').length)
@@ -433,7 +497,7 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
     return () => {
       cancelled = true;
     };
-  }, [step, matchId, activeTeamId]);
+  }, [step, matchId, activeTeamId, applyHalfSecondsIfMoreAdvanced]);
 
   // Reprise après plantage : l'instantané local peut être plus récent que le
   // dernier `updateMatch` (crash pendant la saisie), mais peut aussi être
@@ -441,14 +505,16 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
   // à rien côté base, on ne peut pas trancher en général. Le temps de jeu
   // total, lui, ne peut que croître pendant un match : on garde donc le
   // maximum entre la valeur rechargée depuis la base et celle de l'instantané,
-  // pour ne jamais faire reculer `totalTime` avec un snapshot périmé.
+  // pour ne jamais faire reculer `totalTime` avec un snapshot périmé. Mi-temps
+  // et chrono passent par `applyHalfSecondsIfMoreAdvanced` pour la même raison
+  // (voir sa note plus haut) : cet effet et celui qui restaure depuis la base
+  // sont deux fetchs async indépendants, sans ordre de résolution garanti.
   useEffect(() => {
     if (step !== 'record' || !matchId) return;
     loadRecorderState(matchId)
       .then((saved) => {
         if (!saved) return;
-        setHalf(saved.half);
-        setSeconds(saved.seconds);
+        applyHalfSecondsIfMoreAdvanced({ half: saved.half, seconds: saved.seconds });
         setScoreUs(saved.scoreUs);
         setScoreOpponent(saved.scoreOpponent);
         setFoulsUs(saved.foulsUs);
@@ -468,7 +534,7 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
         });
       })
       .catch(() => {});
-  }, [step, matchId]);
+  }, [step, matchId, applyHalfSecondsIfMoreAdvanced]);
 
   // ── Chrono par horodatage ─────────────────────────────────────────────────
 
@@ -486,7 +552,15 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
     const delta = Math.floor((now - lastTickRef.current) / 1000);
     if (delta <= 0) return;
     lastTickRef.current += delta * 1000;
-    setSeconds((s) => s + delta);
+    setSeconds((s) => {
+      const next = s + delta;
+      // Le chrono qui tourne est lui aussi une source d'avancement : sans ce
+      // resync, une restauration lente qui résout après plusieurs ticks
+      // comparerait contre une ref restée à sa valeur de montage et pourrait
+      // faire reculer le chrono affiché.
+      halfSecondsProgressRef.current = { half: halfSecondsProgressRef.current.half, seconds: next };
+      return next;
+    });
     setPlayerStates((prev) => {
       const next = { ...prev };
       const onField = new Set(fieldRef.current);
@@ -775,6 +849,10 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
             ...h,
           ].slice(0, UNDO_DEPTH)
         );
+        setMomentumEvents((prev) => [
+          ...prev,
+          { event_type: eventType, match_time_seconds: seconds, half },
+        ]);
       } catch (e) {
         Alert.alert('Erreur', e instanceof Error ? e.message : "Impossible d'enregistrer l'action");
       }
@@ -835,6 +913,13 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
         setOpponentShotsTotal((n) => Math.max(0, n - 1));
       }
       if (eventType === 'opponent_shot') setOpponentShotsTotal((n) => Math.max(0, n - 1));
+
+      setMomentumEvents((prev) => {
+        let next = removeLastByType(prev, eventType);
+        const paired = PAIRED_EVENT[eventType];
+        if (paired) next = removeLastByType(next, paired);
+        return next;
+      });
 
       try {
         await deleteLastMatchEventByType(matchId, eventType, playerId);
@@ -909,6 +994,11 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
   const nextHalf = useCallback(() => {
     haptics.tapMedium();
     setIsRunning(false);
+    // Avancement live explicite : sert de nouvelle référence pour
+    // `applyHalfSecondsIfMoreAdvanced`, sinon une restauration qui résout
+    // après ce passage en 2ème MT pourrait comparer contre une ref restée à
+    // { half: 1, ... } et laisser passer un instantané périmé.
+    halfSecondsProgressRef.current = { half: 2, seconds: 0 };
     setHalf(2);
     setSeconds(0);
     // Le règlement remet les fautes cumulées à zéro, mais le total du match
@@ -998,6 +1088,7 @@ export function useMatchRecorder({ initialMatchId, onMatchFinished }: UseMatchRe
     goalsByType,
     concededByType,
     outboxLength,
+    momentumEvents,
     // chrono
     half,
     seconds,
