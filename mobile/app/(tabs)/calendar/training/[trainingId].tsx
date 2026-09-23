@@ -486,6 +486,15 @@ export default function TrainingDetailScreen() {
               onPress={shareConvocation}
             />
           ) : null}
+          {counts.available > 0 ? (
+            <Button
+              label="Mode Live"
+              icon="flash-outline"
+              variant="secondary"
+              block
+              onPress={() => router.push(`/(tabs)/calendar/training/squads/${trainingId}` as never)}
+            />
+          ) : null}
         </Card>
 
         {players.length > 0 && (
