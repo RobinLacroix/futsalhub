@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { View, Pressable, ScrollView, StyleSheet, type ViewStyle } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme, makeStyles } from '../../../../../contexts/ThemeContext';
 import { haptics } from '../../../../../lib/design/haptics';
@@ -8,8 +8,11 @@ import {
   startTrainingGame,
   endTrainingGame,
   getGamesForTraining,
+  getGameSquads,
+  getGameSquadsForGames,
   type TimerMode,
   type TrainingGame,
+  type TrainingGameSquad,
 } from '../../../../../lib/services/trainingGames';
 import { getProceduresByClub, type TrainingProcedureRecord } from '../../../../../lib/services/trainingProceduresService';
 import { enqueueTrainingGameScoreUpdate } from '../../../../../lib/offline/trainingGameOutbox';
@@ -48,19 +51,18 @@ export default function LiveGameScreen() {
   const [selectedProcedure, setSelectedProcedure] = useState<TrainingProcedureRecord | null>(null);
   const [procedurePickerOpen, setProcedurePickerOpen] = useState(false);
   const [pointsPerTap, setPointsPerTap] = useState(1);
-  /** Quels plateaux s'affrontent sur ce jeu — le coach choisit à chaque lancement, ce qui couvre round-robin, "roi du terrain" ou tout autre roulement sans coder une règle figée. */
-  const [homeSquadId, setHomeSquadId] = useState<string | null>(null);
-  const [awaySquadId, setAwaySquadId] = useState<string | null>(null);
+  /** Quelles équipes jouent ce jeu — 2 minimum, pas de maximum : certains jeux opposent 3 plateaux ou plus en même temps. */
+  const [selectedSquadIds, setSelectedSquadIds] = useState<string[]>([]);
 
   const [game, setGame] = useState<TrainingGame | null>(null);
-  const [scoreHome, setScoreHome] = useState(0);
-  const [scoreAway, setScoreAway] = useState(0);
+  const [currentGameSquads, setCurrentGameSquads] = useState<TrainingGameSquad[]>([]);
   const [ending, setEnding] = useState(false);
-  /** Jeux clos de la séance, tous plateaux confondus — alimente le bandeau de classement live (§ plus de 2 plateaux constitués). */
+  /** Jeux clos de la séance, tous plateaux confondus — alimente les bandeaux de classement live. */
   const [finishedGames, setFinishedGames] = useState<TrainingGame[]>([]);
+  const [finishedGameSquads, setFinishedGameSquads] = useState<TrainingGameSquad[]>([]);
 
-  const scoreRef = useRef({ scoreHome: 0, scoreAway: 0 });
-  scoreRef.current = { scoreHome, scoreAway };
+  const gameSquadsRef = useRef<TrainingGameSquad[]>([]);
+  gameSquadsRef.current = currentGameSquads;
 
   // ── Chargement : snapshot des plateaux, reprise d'un jeu non clos ─────────
 
@@ -74,11 +76,12 @@ export default function LiveGameScreen() {
       }
       setSnapshot(snap);
       if (snap.lastSeriesConfig) setSeriesConfig(snap.lastSeriesConfig);
-      setHomeSquadId(snap.squads[0]?.id ?? null);
-      setAwaySquadId(snap.squads[1]?.id ?? null);
+      setSelectedSquadIds(snap.squads.map((sq) => sq.id));
 
       const [allGames, clubId] = await Promise.all([getGamesForTraining(trainingId), getUserClubId()]);
-      setFinishedGames(allGames.filter((g) => g.ended_at));
+      const finished = allGames.filter((g) => g.ended_at);
+      setFinishedGames(finished);
+      setFinishedGameSquads(await getGameSquadsForGames(finished.map((g) => g.id)));
 
       if (clubId) {
         const procs = await getProceduresByClub(clubId);
@@ -87,12 +90,9 @@ export default function LiveGameScreen() {
         const open = allGames.find((g) => !g.ended_at) ?? null;
         if (open) {
           setGame(open);
-          setScoreHome(open.score_home);
-          setScoreAway(open.score_away);
+          setCurrentGameSquads(await getGameSquads(open.id));
           setTimerMode(open.timer_mode);
           setPointsPerTap(open.points_per_tap);
-          setHomeSquadId(open.home_squad_id);
-          setAwaySquadId(open.away_squad_id);
           setSelectedProcedure(open.procedure_id ? procs.find((p) => p.id === open.procedure_id) ?? null : null);
           setScreenState('playing');
         } else {
@@ -104,25 +104,20 @@ export default function LiveGameScreen() {
     })();
   }, [trainingId]);
 
-  // ── Choix des plateaux qui s'affrontent sur ce jeu ─────────────────────────
+  // ── Choix des équipes qui jouent ce jeu ────────────────────────────────────
 
-  const selectSquad = (side: 'home' | 'away', squadId: string) => {
+  const toggleSquadSelection = (squadId: string) => {
     haptics.select();
-    if (side === 'home') {
-      if (squadId === awaySquadId) setAwaySquadId(homeSquadId);
-      setHomeSquadId(squadId);
-    } else {
-      if (squadId === homeSquadId) setHomeSquadId(awaySquadId);
-      setAwaySquadId(squadId);
-    }
+    setSelectedSquadIds((prev) => (prev.includes(squadId) ? prev.filter((id) => id !== squadId) : [...prev, squadId]));
   };
 
   // ── Démarrage d'un jeu ─────────────────────────────────────────────────────
 
   const startGame = useCallback(async () => {
     if (!trainingId || !snapshot) return;
-    if (!homeSquadId || !awaySquadId || homeSquadId === awaySquadId) {
-      setError('Choisis deux plateaux différents pour ce jeu.');
+    const orderedSquadIds = snapshot.squads.map((sq) => sq.id).filter((id) => selectedSquadIds.includes(id));
+    if (orderedSquadIds.length < 2) {
+      setError('Choisis au moins deux équipes pour ce jeu.');
       return;
     }
     setStarting(true);
@@ -131,8 +126,7 @@ export default function LiveGameScreen() {
       const composition = Object.entries(snapshot.composition).map(([playerId, squadId]) => ({ playerId, squadId }));
       const newGame = await startTrainingGame({
         trainingId,
-        homeSquadId,
-        awaySquadId,
+        squadIds: orderedSquadIds,
         timerMode,
         seriesCount: timerMode === 'series' ? seriesConfig.seriesCount : undefined,
         seriesDurationSeconds: timerMode === 'series' ? seriesConfig.seriesDurationSeconds : undefined,
@@ -143,8 +137,14 @@ export default function LiveGameScreen() {
         composition,
       });
       setGame(newGame);
-      setScoreHome(0);
-      setScoreAway(0);
+      const freshGameSquads = orderedSquadIds.map((squadId, i) => ({
+        game_id: newGame.id,
+        squad_id: squadId,
+        club_id: newGame.club_id,
+        score: 0,
+        sort_order: i,
+      }));
+      setCurrentGameSquads(freshGameSquads);
       await writeLiveSessionSnapshot({
         ...snapshot,
         activeGameId: newGame.id,
@@ -153,8 +153,7 @@ export default function LiveGameScreen() {
         phaseStartedAtMs: Date.now(),
         phaseKind: 'serie',
         currentSeriesIndex: 0,
-        scoreHome: 0,
-        scoreAway: 0,
+        scores: Object.fromEntries(freshGameSquads.map((p) => [p.squad_id, 0])),
       });
       setScreenState('playing');
     } catch (e) {
@@ -162,7 +161,7 @@ export default function LiveGameScreen() {
     } finally {
       setStarting(false);
     }
-  }, [trainingId, snapshot, timerMode, seriesConfig, selectedProcedure, pointsPerTap, homeSquadId, awaySquadId]);
+  }, [trainingId, snapshot, timerMode, seriesConfig, selectedProcedure, pointsPerTap, selectedSquadIds]);
 
   // ── Chrono ───────────────────────────────────────────────────────────────
 
@@ -184,17 +183,23 @@ export default function LiveGameScreen() {
   useEffect(() => {
     if (screenState !== 'playing' || !snapshot) return;
     const interval = setInterval(() => {
-      void writeLiveSessionSnapshot({ ...snapshot, scoreHome: scoreRef.current.scoreHome, scoreAway: scoreRef.current.scoreAway });
+      void writeLiveSessionSnapshot({
+        ...snapshot,
+        scores: Object.fromEntries(gameSquadsRef.current.map((p) => [p.squad_id, p.score])),
+      });
     }, SNAPSHOT_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [screenState, snapshot]);
 
   // ── Score ───────────────────────────────────────────────────────────────
 
-  const applyScore = (nextHome: number, nextAway: number) => {
-    setScoreHome(nextHome);
-    setScoreAway(nextAway);
-    if (game) void enqueueTrainingGameScoreUpdate(game.id, nextHome, nextAway);
+  const applyScore = (squadId: string, delta: number) => {
+    setCurrentGameSquads((prev) => {
+      const next = prev.map((p) => (p.squad_id === squadId ? { ...p, score: Math.max(0, p.score + delta) } : p));
+      const updated = next.find((p) => p.squad_id === squadId);
+      if (game && updated) void enqueueTrainingGameScoreUpdate(game.id, squadId, updated.score);
+      return next;
+    });
   };
 
   // ── Fin de jeu ──────────────────────────────────────────────────────────
@@ -206,7 +211,9 @@ export default function LiveGameScreen() {
       const durationSeconds = Math.floor((Date.now() - new Date(game.started_at ?? Date.now()).getTime()) / 1000);
       await endTrainingGame(game.id, durationSeconds);
       const allGames = await getGamesForTraining(trainingId);
-      setFinishedGames(allGames.filter((g) => g.ended_at));
+      const finished = allGames.filter((g) => g.ended_at);
+      setFinishedGames(finished);
+      setFinishedGameSquads(await getGameSquadsForGames(finished.map((g) => g.id)));
       setScreenState('nextGame');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');
@@ -255,21 +262,17 @@ export default function LiveGameScreen() {
       <Screen contentContainerStyle={s.content}>
         {error ? <Text tone="negative">{error}</Text> : null}
 
-        {snapshot && snapshot.squads.length > 2 && (
+        {snapshot && (
           <Card variant="raised" padding="md" style={s.configCard}>
             <Text variant="headline">Qui joue ce jeu ?</Text>
-            <Text variant="caption" tone="tertiary">Domicile</Text>
             <View style={s.chipRow}>
               {snapshot.squads.map((sq) => (
-                <FilterChip key={sq.id} label={sq.label} active={sq.id === homeSquadId} onPress={() => selectSquad('home', sq.id)} />
+                <FilterChip key={sq.id} label={sq.label} active={selectedSquadIds.includes(sq.id)} onPress={() => toggleSquadSelection(sq.id)} />
               ))}
             </View>
-            <Text variant="caption" tone="tertiary">Extérieur</Text>
-            <View style={s.chipRow}>
-              {snapshot.squads.map((sq) => (
-                <FilterChip key={sq.id} label={sq.label} active={sq.id === awaySquadId} onPress={() => selectSquad('away', sq.id)} />
-              ))}
-            </View>
+            <Text variant="caption" tone="tertiary">
+              {selectedSquadIds.length} équipe{selectedSquadIds.length > 1 ? 's' : ''} sélectionnée{selectedSquadIds.length > 1 ? 's' : ''} — 2 minimum, pas de maximum si plusieurs jouent en même temps.
+            </Text>
           </Card>
         )}
 
@@ -358,13 +361,23 @@ export default function LiveGameScreen() {
   }
 
   if (screenState === 'nextGame') {
+    const rows = currentGameSquads
+      .slice()
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((p) => ({ ...p, label: snapshot?.squads.find((sq) => sq.id === p.squad_id)?.label ?? '—' }));
+
     return (
       <Screen contentContainerStyle={s.content}>
         <Card variant="raised" padding="md" style={s.configCard}>
           <Text variant="headline">Jeu terminé</Text>
-          <Text variant="title" numeric>{scoreHome} — {scoreAway}</Text>
+          {rows.map((r) => (
+            <View key={r.squad_id} style={s.nextGameRow}>
+              <Text variant="title">{r.label}</Text>
+              <Text variant="title" numeric weight="700">{r.score}</Text>
+            </View>
+          ))}
         </Card>
-        <Button label="Jeu suivant, mêmes équipes" icon="repeat" variant="primary" block onPress={playAgainSameSquads} />
+        <Button label="Jeu suivant" icon="repeat" variant="primary" block onPress={playAgainSameSquads} />
         <Button label="Rebrasser les plateaux" icon="shuffle-outline" variant="secondary" block onPress={goToSquads} />
         <Button label="Terminer la séance" icon="flag-outline" variant="ghost" block onPress={goToRecap} />
       </Screen>
@@ -372,12 +385,13 @@ export default function LiveGameScreen() {
   }
 
   // screenState === 'playing'
-  const homeSquad = snapshot?.squads.find((sq) => sq.id === game?.home_squad_id);
-  const awaySquad = snapshot?.squads.find((sq) => sq.id === game?.away_squad_id);
-  const homeLabel = homeSquad?.label ?? 'Équipe 1';
-  const awayLabel = awaySquad?.label ?? 'Équipe 2';
-  const homeColor = c.chartSeries[Number(homeSquad?.color_token ?? 0) % c.chartSeries.length];
-  const awayColor = c.chartSeries[Number(awaySquad?.color_token ?? 1) % c.chartSeries.length];
+  const participants = currentGameSquads
+    .slice()
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map((p) => {
+      const sq = snapshot?.squads.find((s2) => s2.id === p.squad_id);
+      return { ...p, label: sq?.label ?? '—', color: c.chartSeries[Number(sq?.color_token ?? 0) % c.chartSeries.length] };
+    });
   const tapValue = game?.points_per_tap ?? 1;
   const procedureGames = game?.procedure_id ? finishedGames.filter((g) => g.procedure_id === game.procedure_id) : [];
 
@@ -399,47 +413,94 @@ export default function LiveGameScreen() {
       </View>
 
       {snapshot && snapshot.squads.length > 2 && (
-        <StandingsBanner title="Séance" squads={snapshot.squads} games={finishedGames} />
+        <StandingsBanner title="Séance" squads={snapshot.squads} games={finishedGames} gameSquads={finishedGameSquads} />
       )}
       {snapshot && procedureGames.length > 0 && (
-        <StandingsBanner title={selectedProcedure?.title || 'Procédé'} squads={snapshot.squads} games={procedureGames} />
+        <StandingsBanner
+          title={selectedProcedure?.title || 'Procédé'}
+          squads={snapshot.squads}
+          games={procedureGames}
+          gameSquads={finishedGameSquads}
+        />
       )}
 
-      <View style={s.facesRow}>
-        <GameFace squadLabel={homeLabel} bg={homeColor} score={scoreHome} onScore={() => applyScore(scoreHome + tapValue, scoreAway)} onUndo={() => applyScore(Math.max(0, scoreHome - tapValue), scoreAway)} />
-        <GameFace squadLabel={awayLabel} bg={awayColor} score={scoreAway} onScore={() => applyScore(scoreHome, scoreAway + tapValue)} onUndo={() => applyScore(scoreHome, Math.max(0, scoreAway - tapValue))} />
-      </View>
+      <FacesGrid participants={participants} tapValue={tapValue} onScore={applyScore} />
+    </View>
+  );
+}
+
+/** Dispose les aplats de score : côte à côte pour 2, empilés plein largeur pour 3 (plus lisible qu'un tiers d'écran), grille à 2 colonnes au-delà. */
+function FacesGrid({
+  participants,
+  tapValue,
+  onScore,
+}: {
+  participants: { squad_id: string; label: string; color: string; score: number }[];
+  tapValue: number;
+  onScore: (squadId: string, delta: number) => void;
+}) {
+  const s = useStyles();
+  const n = participants.length;
+
+  const containerStyle = n <= 2 ? s.facesRow : n === 3 ? s.facesColumn : s.facesGrid;
+  const tileStyle: ViewStyle | undefined = n >= 4 ? s.gridTile : undefined;
+
+  return (
+    <View style={containerStyle}>
+      {participants.map((p) => (
+        <GameFace
+          key={p.squad_id}
+          squadLabel={p.label}
+          bg={p.color}
+          score={p.score}
+          style={tileStyle}
+          onScore={() => onScore(p.squad_id, tapValue)}
+          onUndo={() => onScore(p.squad_id, -tapValue)}
+        />
+      ))}
     </View>
   );
 }
 
 /**
  * Classement live d'un niveau (séance entière, ou un procédé donné) sur tous
- * les plateaux constitués, pas seulement les deux qui jouent. Ne compte que
- * les jeux clos ; le jeu en cours reste dans les deux grands aplats jusqu'à
+ * les plateaux constitués, pas seulement les équipes qui jouent ce jeu. Ne
+ * compte que les jeux clos ; le jeu en cours reste dans les aplats jusqu'à
  * "Terminer le jeu". Deux instances possibles côte à côte : séance (dès plus
  * de 2 plateaux) et procédé (dès qu'un 2e jeu du même procédé a été joué).
  */
-function StandingsBanner({ title, squads, games }: { title: string; squads: LiveSessionSnapshot['squads']; games: TrainingGame[] }) {
+function StandingsBanner({
+  title,
+  squads,
+  games,
+  gameSquads,
+}: {
+  title: string;
+  squads: LiveSessionSnapshot['squads'];
+  games: TrainingGame[];
+  gameSquads: TrainingGameSquad[];
+}) {
   const { theme } = useTheme();
   const c = theme.colors;
   const s = useStyles();
-  const standings = useMemo(() => computeSquadStandings(squads, games), [squads, games]);
+  const standings = useMemo(() => computeSquadStandings(squads, games, gameSquads), [squads, games, gameSquads]);
 
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[s.standingsBar, { backgroundColor: c.bg.sunken, borderBottomColor: c.border.subtle }]} contentContainerStyle={s.standingsContent}>
-      <Text variant="caption" tone="tertiary" weight="600" style={s.standingsTitle}>{title.toUpperCase()}</Text>
-      {standings.map((sq) => (
-        <View key={sq.squadId} style={s.standingChip}>
-          <View style={[s.standingDot, { backgroundColor: c.chartSeries[sq.colorIndex % c.chartSeries.length] }]} />
-          <Text variant="caption" weight="600" numberOfLines={1}>{sq.label}</Text>
-          <Text variant="caption" tone="secondary" numeric>{sq.wins}V {sq.draws}N {sq.losses}D</Text>
-          <Text variant="caption" tone={sq.diff > 0 ? 'positive' : sq.diff < 0 ? 'negative' : 'tertiary'} numeric weight="600">
-            {sq.diff > 0 ? '+' : ''}{sq.diff}
-          </Text>
-        </View>
-      ))}
-    </ScrollView>
+    <View style={[s.standingsBar, { backgroundColor: c.bg.sunken, borderBottomColor: c.border.subtle }]}>
+      <Text variant="callout" tone="tertiary" weight="700" style={s.standingsTitle}>{title.toUpperCase()}</Text>
+      <View style={s.standingsWrap}>
+        {standings.map((sq) => (
+          <View key={sq.squadId} style={s.standingChip}>
+            <View style={[s.standingDot, { backgroundColor: c.chartSeries[sq.colorIndex % c.chartSeries.length] }]} />
+            <Text variant="callout" weight="700" numberOfLines={1}>{sq.label}</Text>
+            <Text variant="callout" tone="secondary" numeric>{sq.wins}V {sq.draws}N {sq.losses}D</Text>
+            <Text variant="callout" tone={sq.diff > 0 ? 'positive' : sq.diff < 0 ? 'negative' : 'tertiary'} numeric weight="700">
+              {sq.diff > 0 ? '+' : ''}{sq.diff}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </View>
   );
 }
 
@@ -455,12 +516,14 @@ function GameFace({
   score,
   onScore,
   onUndo,
+  style,
 }: {
   squadLabel: string;
   bg: string;
   score: number;
   onScore: () => void;
   onUndo: () => void;
+  style?: ViewStyle;
 }) {
   const { theme } = useTheme();
 
@@ -472,7 +535,7 @@ function GameFace({
       }}
       accessibilityRole="button"
       accessibilityLabel={`+1 ${squadLabel}`}
-      style={{ flex: 1, backgroundColor: bg, alignItems: 'center', justifyContent: 'center' }}
+      style={[{ flex: 1, backgroundColor: bg, alignItems: 'center', justifyContent: 'center' }, style]}
     >
       <Text variant="title" tone="onFill" weight="700">{squadLabel}</Text>
       <Text variant="hero" tone="onFill" numeric weight="700">{score}</Text>
@@ -501,6 +564,7 @@ const useStyles = makeStyles((t) => ({
   seriesInputs: { flexDirection: 'row', gap: t.space.sm },
   seriesField: { flex: 1 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.xs },
+  nextGameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: t.space.xs },
   playingRoot: { flex: 1 },
   phaseBar: {
     flexDirection: 'row',
@@ -511,9 +575,12 @@ const useStyles = makeStyles((t) => ({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   facesRow: { flex: 1, flexDirection: 'row' },
-  standingsBar: { flexGrow: 0, borderBottomWidth: StyleSheet.hairlineWidth },
-  standingsContent: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, paddingHorizontal: t.space.lg, paddingVertical: t.space.sm },
-  standingsTitle: { marginRight: t.space.xs },
-  standingChip: { flexDirection: 'row', alignItems: 'center', gap: t.space.xs },
-  standingDot: { width: 8, height: 8, borderRadius: 4 },
+  facesColumn: { flex: 1, flexDirection: 'column' },
+  facesGrid: { flex: 1, flexDirection: 'row', flexWrap: 'wrap' },
+  gridTile: { width: '50%', minHeight: '50%' },
+  standingsBar: { borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: t.space.lg, paddingVertical: t.space.md, gap: t.space.sm },
+  standingsTitle: { letterSpacing: 0.5 },
+  standingsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.lg },
+  standingChip: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm },
+  standingDot: { width: 12, height: 12, borderRadius: 6 },
 }));

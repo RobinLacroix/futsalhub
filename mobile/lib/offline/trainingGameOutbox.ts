@@ -1,11 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { updateTrainingGameScore } from '../services/trainingGames';
+import { updateGameSquadScore } from '../services/trainingGames';
 import { isDeviceOffline, shouldTreatAsOfflineError } from './networkReachability';
 
-const STORAGE_KEY = '@futsalhub_training_game_outbox_v1';
+const STORAGE_KEY = '@futsalhub_training_game_outbox_v2';
 
-/** Une seule opération par jeu en file à la fois : la plus récente écrase la précédente (dernier score gagne), pas la peine de rejouer un historique de taps. */
-type OutboxMap = Record<string, { scoreHome: number; scoreAway: number }>;
+/** Une seule opération par (jeu, équipe) en file à la fois : le dernier score tapé gagne, pas la peine de rejouer un historique de taps. */
+type OutboxMap = Record<string, number>;
+
+function key(gameId: string, squadId: string): string {
+  return `${gameId}:${squadId}`;
+}
 
 async function readOutbox(): Promise<OutboxMap> {
   try {
@@ -26,15 +30,15 @@ async function writeOutbox(map: OutboxMap): Promise<void> {
 
 let flushing = false;
 
-/** Met à jour la file locale (remplace toute entrée en attente pour ce jeu) puis tente un flush en tâche de fond. */
-export async function enqueueTrainingGameScoreUpdate(gameId: string, scoreHome: number, scoreAway: number): Promise<void> {
+/** Met à jour la file locale (remplace toute entrée en attente pour cette équipe de ce jeu) puis tente un flush en tâche de fond. */
+export async function enqueueTrainingGameScoreUpdate(gameId: string, squadId: string, score: number): Promise<void> {
   const map = await readOutbox();
-  map[gameId] = { scoreHome, scoreAway };
+  map[key(gameId, squadId)] = score;
   await writeOutbox(map);
   void flushTrainingGameOutbox();
 }
 
-/** Rejoue la file — no-op si hors ligne ou déjà en cours. Un score par jeu, donc pas d'ordre à préserver entre jeux différents. */
+/** Rejoue la file — no-op si hors ligne ou déjà en cours. Un score par (jeu, équipe), donc pas d'ordre à préserver entre entrées. */
 export async function flushTrainingGameOutbox(): Promise<void> {
   if (flushing) return;
   if (await isDeviceOffline()) return;
@@ -42,19 +46,20 @@ export async function flushTrainingGameOutbox(): Promise<void> {
   try {
     const map = await readOutbox();
     const entries = Object.entries(map);
-    for (const [gameId, { scoreHome, scoreAway }] of entries) {
+    for (const [k, score] of entries) {
+      const [gameId, squadId] = k.split(':');
       try {
-        await updateTrainingGameScore(gameId, scoreHome, scoreAway);
+        await updateGameSquadScore(gameId, squadId, score);
         const current = await readOutbox();
-        if (current[gameId]?.scoreHome === scoreHome && current[gameId]?.scoreAway === scoreAway) {
-          delete current[gameId];
+        if (current[k] === score) {
+          delete current[k];
           await writeOutbox(current);
         }
       } catch (err) {
         if (shouldTreatAsOfflineError(err)) return; // réessaiera au prochain enqueue/flush
         // erreur non liée au réseau (ex: jeu supprimé) — on abandonne cette entrée pour ne pas bloquer les autres.
         const current = await readOutbox();
-        delete current[gameId];
+        delete current[k];
         await writeOutbox(current);
       }
     }

@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { TimerMode } from '../services/trainingGames';
 
-const KEY_PREFIX = '@futsalhub_live_session_v1_';
+const KEY_PREFIX = '@futsalhub_live_session_v2_';
 
 /**
  * État complet d'une session live en cours, un training à la fois. Sert deux
@@ -23,8 +23,8 @@ export interface LiveSessionSnapshot {
   phaseStartedAtMs: number | null;
   phaseKind: 'serie' | 'repos' | null;
   currentSeriesIndex: number | null;
-  scoreHome: number;
-  scoreAway: number;
+  /** squadId -> score courant du jeu en cours — une équipe par entrée, un jeu à N équipes n'est pas limité à domicile/extérieur. */
+  scores: Record<string, number>;
   updatedAtMs: number;
 }
 

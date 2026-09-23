@@ -5,8 +5,10 @@ import { useTheme, makeStyles } from '../../../../../contexts/ThemeContext';
 import {
   getGamesForTraining,
   getSquadsForTraining,
+  getGameSquadsForGames,
   type TrainingGame,
   type TrainingSquad,
+  type TrainingGameSquad,
 } from '../../../../../lib/services/trainingGames';
 import { computeSquadStandings, type SquadStanding } from '../../../../../lib/liveSession/standings';
 import { Screen, Card, Text, Button, EmptyState, SkeletonDetail } from '../../../../../components/ui';
@@ -20,6 +22,7 @@ export default function LiveRecapScreen() {
   const [error, setError] = useState<string | null>(null);
   const [games, setGames] = useState<TrainingGame[]>([]);
   const [squads, setSquads] = useState<TrainingSquad[]>([]);
+  const [gameSquads, setGameSquads] = useState<TrainingGameSquad[]>([]);
 
   useEffect(() => {
     if (!trainingId) return;
@@ -30,6 +33,7 @@ export default function LiveRecapScreen() {
         const [g, sq] = await Promise.all([getGamesForTraining(trainingId), getSquadsForTraining(trainingId)]);
         setGames(g);
         setSquads(sq);
+        setGameSquads(await getGameSquadsForGames(g.map((game) => game.id)));
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Erreur');
       } finally {
@@ -39,8 +43,18 @@ export default function LiveRecapScreen() {
   }, [trainingId]);
 
   const squadById = useMemo(() => new Map(squads.map((sq) => [sq.id, sq])), [squads]);
+  const gameSquadsByGame = useMemo(() => {
+    const map = new Map<string, TrainingGameSquad[]>();
+    for (const gs of gameSquads) {
+      const list = map.get(gs.game_id);
+      if (list) list.push(gs);
+      else map.set(gs.game_id, [gs]);
+    }
+    for (const list of map.values()) list.sort((a, b) => a.sort_order - b.sort_order);
+    return map;
+  }, [gameSquads]);
 
-  const standings = useMemo(() => computeSquadStandings(squads, games), [squads, games]);
+  const standings = useMemo(() => computeSquadStandings(squads, games, gameSquads), [squads, games, gameSquads]);
 
   const finishedGames = useMemo(() => games.filter((g) => g.ended_at), [games]);
 
@@ -55,8 +69,8 @@ export default function LiveRecapScreen() {
     }
     return Array.from(groups.values())
       .filter((group) => group.games.length > 1)
-      .map((group) => ({ title: group.title, standings: computeSquadStandings(squads, group.games) }));
-  }, [finishedGames, squads]);
+      .map((group) => ({ title: group.title, standings: computeSquadStandings(squads, group.games, gameSquads) }));
+  }, [finishedGames, squads, gameSquads]);
 
   if (loading) return <SkeletonDetail />;
 
@@ -93,15 +107,14 @@ export default function LiveRecapScreen() {
       <Card variant="raised" padding="md" style={s.section}>
         <Text variant="headline">Jeux joués</Text>
         {finishedGames.map((g) => {
-          const home = squadById.get(g.home_squad_id);
-          const away = squadById.get(g.away_squad_id);
+          const participants = gameSquadsByGame.get(g.id) ?? [];
           return (
             <View key={g.id} style={s.gameRow}>
               <Text variant="callout" style={s.gameLabel} numberOfLines={1}>
                 {g.label || `Jeu ${g.sequence}`}
               </Text>
               <Text variant="callout" numeric weight="600">
-                {home?.label ?? '—'} {g.score_home} — {g.score_away} {away?.label ?? '—'}
+                {participants.map((p) => `${squadById.get(p.squad_id)?.label ?? '—'} ${p.score}`).join(' — ')}
               </Text>
             </View>
           );

@@ -199,8 +199,7 @@ export default function LiveSquadsScreen() {
         phaseStartedAtMs: null,
         phaseKind: null,
         currentSeriesIndex: null,
-        scoreHome: 0,
-        scoreAway: 0,
+        scores: {},
         updatedAtMs: Date.now(),
       });
       router.push(`/(tabs)/calendar/training/live/${trainingId}` as never);
