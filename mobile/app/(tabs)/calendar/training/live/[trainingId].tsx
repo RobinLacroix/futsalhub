@@ -23,6 +23,7 @@ import {
 import { useLiveGameTimer, type SeriesConfig } from '../../../../../hooks/useLiveGameTimer';
 import { Screen, Card, Text, Button, Input, EmptyState, SkeletonDetail } from '../../../../../components/ui';
 import { ProcedurePickerSheet } from '../../../../../components/training/ProcedurePickerSheet';
+import { FilterChip } from '../../../../../components/tactics/FilterChip';
 
 type ScreenState = 'loading' | 'noSquads' | 'config' | 'playing' | 'nextGame';
 
@@ -47,6 +48,9 @@ export default function LiveGameScreen() {
   const [selectedProcedure, setSelectedProcedure] = useState<TrainingProcedureRecord | null>(null);
   const [procedurePickerOpen, setProcedurePickerOpen] = useState(false);
   const [pointsPerTap, setPointsPerTap] = useState(1);
+  /** Quels plateaux s'affrontent sur ce jeu — le coach choisit à chaque lancement, ce qui couvre round-robin, "roi du terrain" ou tout autre roulement sans coder une règle figée. */
+  const [homeSquadId, setHomeSquadId] = useState<string | null>(null);
+  const [awaySquadId, setAwaySquadId] = useState<string | null>(null);
 
   const [game, setGame] = useState<TrainingGame | null>(null);
   const [scoreHome, setScoreHome] = useState(0);
@@ -70,6 +74,8 @@ export default function LiveGameScreen() {
       }
       setSnapshot(snap);
       if (snap.lastSeriesConfig) setSeriesConfig(snap.lastSeriesConfig);
+      setHomeSquadId(snap.squads[0]?.id ?? null);
+      setAwaySquadId(snap.squads[1]?.id ?? null);
 
       const [allGames, clubId] = await Promise.all([getGamesForTraining(trainingId), getUserClubId()]);
       setFinishedGames(allGames.filter((g) => g.ended_at));
@@ -85,6 +91,8 @@ export default function LiveGameScreen() {
           setScoreAway(open.score_away);
           setTimerMode(open.timer_mode);
           setPointsPerTap(open.points_per_tap);
+          setHomeSquadId(open.home_squad_id);
+          setAwaySquadId(open.away_squad_id);
           setSelectedProcedure(open.procedure_id ? procs.find((p) => p.id === open.procedure_id) ?? null : null);
           setScreenState('playing');
         } else {
@@ -96,13 +104,25 @@ export default function LiveGameScreen() {
     })();
   }, [trainingId]);
 
+  // ── Choix des plateaux qui s'affrontent sur ce jeu ─────────────────────────
+
+  const selectSquad = (side: 'home' | 'away', squadId: string) => {
+    haptics.select();
+    if (side === 'home') {
+      if (squadId === awaySquadId) setAwaySquadId(homeSquadId);
+      setHomeSquadId(squadId);
+    } else {
+      if (squadId === homeSquadId) setHomeSquadId(awaySquadId);
+      setAwaySquadId(squadId);
+    }
+  };
+
   // ── Démarrage d'un jeu ─────────────────────────────────────────────────────
 
   const startGame = useCallback(async () => {
     if (!trainingId || !snapshot) return;
-    const squadIds = snapshot.squads.map((sq) => sq.id);
-    if (squadIds.length < 2) {
-      setError('Il faut au moins deux plateaux.');
+    if (!homeSquadId || !awaySquadId || homeSquadId === awaySquadId) {
+      setError('Choisis deux plateaux différents pour ce jeu.');
       return;
     }
     setStarting(true);
@@ -111,8 +131,8 @@ export default function LiveGameScreen() {
       const composition = Object.entries(snapshot.composition).map(([playerId, squadId]) => ({ playerId, squadId }));
       const newGame = await startTrainingGame({
         trainingId,
-        homeSquadId: squadIds[0],
-        awaySquadId: squadIds[1],
+        homeSquadId,
+        awaySquadId,
         timerMode,
         seriesCount: timerMode === 'series' ? seriesConfig.seriesCount : undefined,
         seriesDurationSeconds: timerMode === 'series' ? seriesConfig.seriesDurationSeconds : undefined,
@@ -142,7 +162,7 @@ export default function LiveGameScreen() {
     } finally {
       setStarting(false);
     }
-  }, [trainingId, snapshot, timerMode, seriesConfig, selectedProcedure, pointsPerTap]);
+  }, [trainingId, snapshot, timerMode, seriesConfig, selectedProcedure, pointsPerTap, homeSquadId, awaySquadId]);
 
   // ── Chrono ───────────────────────────────────────────────────────────────
 
@@ -234,6 +254,25 @@ export default function LiveGameScreen() {
     return (
       <Screen contentContainerStyle={s.content}>
         {error ? <Text tone="negative">{error}</Text> : null}
+
+        {snapshot && snapshot.squads.length > 2 && (
+          <Card variant="raised" padding="md" style={s.configCard}>
+            <Text variant="headline">Qui joue ce jeu ?</Text>
+            <Text variant="caption" tone="tertiary">Domicile</Text>
+            <View style={s.chipRow}>
+              {snapshot.squads.map((sq) => (
+                <FilterChip key={sq.id} label={sq.label} active={sq.id === homeSquadId} onPress={() => selectSquad('home', sq.id)} />
+              ))}
+            </View>
+            <Text variant="caption" tone="tertiary">Extérieur</Text>
+            <View style={s.chipRow}>
+              {snapshot.squads.map((sq) => (
+                <FilterChip key={sq.id} label={sq.label} active={sq.id === awaySquadId} onPress={() => selectSquad('away', sq.id)} />
+              ))}
+            </View>
+          </Card>
+        )}
+
         <Card variant="raised" padding="md" style={s.configCard}>
           <Text variant="headline">Procédé et score</Text>
           <Button
@@ -333,10 +372,12 @@ export default function LiveGameScreen() {
   }
 
   // screenState === 'playing'
-  const homeLabel = snapshot?.squads[0]?.label ?? 'Équipe 1';
-  const awayLabel = snapshot?.squads[1]?.label ?? 'Équipe 2';
-  const homeColor = c.chartSeries[Number(snapshot?.squads[0]?.color_token ?? 0) % c.chartSeries.length];
-  const awayColor = c.chartSeries[Number(snapshot?.squads[1]?.color_token ?? 1) % c.chartSeries.length];
+  const homeSquad = snapshot?.squads.find((sq) => sq.id === game?.home_squad_id);
+  const awaySquad = snapshot?.squads.find((sq) => sq.id === game?.away_squad_id);
+  const homeLabel = homeSquad?.label ?? 'Équipe 1';
+  const awayLabel = awaySquad?.label ?? 'Équipe 2';
+  const homeColor = c.chartSeries[Number(homeSquad?.color_token ?? 0) % c.chartSeries.length];
+  const awayColor = c.chartSeries[Number(awaySquad?.color_token ?? 1) % c.chartSeries.length];
   const tapValue = game?.points_per_tap ?? 1;
   const procedureGames = game?.procedure_id ? finishedGames.filter((g) => g.procedure_id === game.procedure_id) : [];
 
@@ -459,6 +500,7 @@ const useStyles = makeStyles((t) => ({
   modeBtn: { flex: 1 },
   seriesInputs: { flexDirection: 'row', gap: t.space.sm },
   seriesField: { flex: 1 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.xs },
   playingRoot: { flex: 1 },
   phaseBar: {
     flexDirection: 'row',
