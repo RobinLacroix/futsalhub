@@ -58,3 +58,9 @@ export async function getSchematicsByClub(clubId: string): Promise<SchematicWith
     return { ...rest, team_name: team?.name ?? null } as SchematicWithTeamName;
   });
 }
+
+/** Suppression définitive d'un schéma sans fiche liée (orphelin) — irréversible, contrairement à archiveProcedure. */
+export async function deleteSchematic(id: string): Promise<void> {
+  const { error } = await supabase.from('schematics').delete().eq('id', id);
+  if (error) throw error;
+}

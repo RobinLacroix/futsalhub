@@ -91,6 +91,15 @@ export async function updateProcedure(id: string, patch: ProcedureUpdateInput): 
   return data;
 }
 
+/** Archive une fiche (soft-delete) — disparaît de la bibliothèque, le schéma dessiné lié n'est pas touché. */
+export async function archiveProcedure(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('training_procedures')
+    .update({ archived_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) throw error;
+}
+
 /** Un procédé de la bibliothèque, avec son schéma s'il en a un. */
 export interface ProcedureLibraryItem extends TrainingProcedureRecord {
   schematic: SchematicRecord | null;
