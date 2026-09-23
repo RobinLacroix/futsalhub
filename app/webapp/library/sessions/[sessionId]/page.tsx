@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { Calendar, Link2, X } from 'lucide-react';
 import { useActiveTeam } from '../../../hooks/useActiveTeam';
 import {
   sessionsService,
@@ -10,12 +11,21 @@ import {
   type SessionMeta,
 } from '@/lib/services/sessionsService';
 import { trainingProceduresService, type TrainingProcedureRecord } from '@/lib/services/trainingProceduresService';
+import { trainingsService } from '@/lib/services/trainingsService';
+import { teamsService } from '@/lib/services/teamsService';
+import type { Training } from '@/types';
 import { buildDefaultBlocks, newBlock } from '../constants';
 import { SessionTimeline } from '../components/SessionTimeline';
 import { SessionHeaderForm } from '../components/SessionHeaderForm';
 import { SessionBlockCard } from '../components/SessionBlockCard';
 import { AddBlockMenu } from '../components/AddBlockMenu';
 import { ProcedurePickerDialog } from '../components/ProcedurePickerDialog';
+import { AttachTrainingDialog } from '../components/AttachTrainingDialog';
+
+function formatShortDate(d: string | Date): string {
+  const date = typeof d === 'string' ? new Date(d) : d;
+  return date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+}
 
 function emptyMeta(): SessionMeta {
   return { principe: '', dureeTotaleMin: 0 };
@@ -32,10 +42,20 @@ export default function SessionEditorPage() {
   const [meta, setMeta] = useState<SessionMeta>(emptyMeta());
   const [blocks, setBlocks] = useState<SessionBlock[]>([]);
   const [procedures, setProcedures] = useState<TrainingProcedureRecord[]>([]);
+  const [trainings, setTrainings] = useState<Training[]>([]);
+  const [teamNameById, setTeamNameById] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pickerForBlockId, setPickerForBlockId] = useState<string | null>(null);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
+
+  const loadTrainings = useCallback(async (clubId: string) => {
+    const teams = await teamsService.getTeamsByClub(clubId);
+    setTeamNameById(new Map(teams.map((t) => [t.id, t.name])));
+    setTrainings(await trainingsService.getTrainingsByTeamIds(teams.map((t) => t.id)));
+  }, []);
 
   useEffect(() => {
     const clubId = activeTeam?.club_id;
@@ -48,6 +68,7 @@ export default function SessionEditorPage() {
         const [procs, existing] = await Promise.all([
           trainingProceduresService.getProceduresByClub(clubId),
           isNew ? Promise.resolve(null) : sessionsService.getSessionById(params.sessionId),
+          loadTrainings(clubId),
         ]);
         if (cancelled) return;
         setProcedures(procs);
@@ -66,7 +87,30 @@ export default function SessionEditorPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [activeTeam?.club_id, isNew, params.sessionId]);
+  }, [activeTeam?.club_id, isNew, params.sessionId, loadTrainings]);
+
+  const attachedTrainings = useMemo(
+    () => (recordId ? trainings.filter((t) => t.session_id === recordId) : []),
+    [trainings, recordId]
+  );
+
+  const handleAttach = useCallback(async (trainingId: string) => {
+    try {
+      await trainingsService.setTrainingSession(trainingId, recordId);
+      if (activeTeam?.club_id) await loadTrainings(activeTeam.club_id);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Échec du rattachement.');
+    }
+  }, [recordId, activeTeam?.club_id, loadTrainings]);
+
+  const handleDetach = useCallback(async (trainingId: string) => {
+    try {
+      await trainingsService.setTrainingSession(trainingId, null);
+      if (activeTeam?.club_id) await loadTrainings(activeTeam.club_id);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Échec du détachement.');
+    }
+  }, [activeTeam?.club_id, loadTrainings]);
 
   const procedureById = useMemo(() => new Map(procedures.map((p) => [p.id, p])), [procedures]);
   const dureeTotaleMin = useMemo(() => blocks.reduce((sum, b) => sum + (b.duration || 0), 0), [blocks]);
@@ -111,13 +155,23 @@ export default function SessionEditorPage() {
         blocks,
       });
       setRecordId(saved.id);
-      router.push('/webapp/library/sessions');
+      setJustSaved(true);
+      // Reste sur l'éditeur (plus de redirection vers la liste) : une fois
+      // enregistrée, la séance peut être rattachée à un entraînement sans
+      // perdre le contexte — c'est précisément ce qui manquait à la création.
+      if (isNew) router.replace(`/webapp/library/sessions/${saved.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Échec de l’enregistrement de la séance');
     } finally {
       setSaving(false);
     }
-  }, [activeTeam?.club_id, name, meta, blocks, recordId, dureeTotaleMin, router]);
+  }, [activeTeam?.club_id, name, meta, blocks, recordId, dureeTotaleMin, isNew, router]);
+
+  useEffect(() => {
+    if (!justSaved) return;
+    const t = setTimeout(() => setJustSaved(false), 2500);
+    return () => clearTimeout(t);
+  }, [justSaved]);
 
   if (loading) {
     return (
@@ -145,6 +199,38 @@ export default function SessionEditorPage() {
         onMetaChange={(patch) => setMeta((m) => ({ ...m, ...patch }))}
       />
 
+      <div>
+        <label className="block text-xs font-medium text-gray-800 mb-1.5">Rattachement au calendrier</label>
+        {!recordId ? (
+          <p className="text-xs text-gray-500">Enregistre la séance une première fois pour pouvoir la rattacher à un entraînement.</p>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {attachedTrainings.map((t) => (
+              <span
+                key={t.id}
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-full pl-2 pr-1 py-0.5"
+              >
+                <Calendar className="h-3 w-3" />
+                {formatShortDate(t.date)} · {teamNameById.get(t.team_id || '') || '—'}
+                <button
+                  onClick={() => handleDetach(t.id)}
+                  aria-label="Détacher cet entraînement"
+                  className="p-0.5 rounded-full hover:bg-blue-100"
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </span>
+            ))}
+            <button
+              onClick={() => setAttachOpen(true)}
+              className="inline-flex items-center gap-1 text-[11px] font-medium text-gray-500 border border-dashed border-gray-300 rounded-full px-2 py-0.5 hover:border-gray-400 hover:text-gray-700"
+            >
+              <Link2 className="h-3 w-3" /> Rattacher à un entraînement
+            </button>
+          </div>
+        )}
+      </div>
+
       <SessionTimeline blocks={blocks} />
 
       <div className="space-y-2.5">
@@ -170,7 +256,7 @@ export default function SessionEditorPage() {
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-3">
         <div className="max-w-3xl mx-auto">
           <button onClick={handleSave} disabled={saving} className="fm-btn fm-btn-primary w-full justify-center">
-            {saving ? 'Enregistrement…' : 'Enregistrer'}
+            {saving ? 'Enregistrement…' : justSaved ? 'Enregistré ✓' : 'Enregistrer'}
           </button>
         </div>
       </div>
@@ -180,6 +266,14 @@ export default function SessionEditorPage() {
         procedures={procedures}
         onSelect={(procedureId) => { if (pickerBlock) patchBlock(pickerBlock.id, { procedureId }); }}
         onClose={() => setPickerForBlockId(null)}
+      />
+
+      <AttachTrainingDialog
+        open={attachOpen}
+        trainings={trainings}
+        teamNameById={teamNameById}
+        onSelect={handleAttach}
+        onClose={() => setAttachOpen(false)}
       />
     </div>
   );
