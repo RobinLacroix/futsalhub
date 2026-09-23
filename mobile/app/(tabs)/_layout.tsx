@@ -52,6 +52,7 @@ const HIDDEN_ROUTE_TITLES: Record<string, string> = {
   notifications: 'Notifications',
   'library/index': 'Bibliothèque',
   'sessions/index': 'Séances',
+  'calendar/training/squads/[trainingId]': 'Plateaux',
 };
 
 /**
@@ -76,6 +77,7 @@ const HIDDEN_ROUTES = [
   'feed/[postId]',
   'calendar/training/[trainingId]',
   'calendar/training/edit/[trainingId]',
+  'calendar/training/squads/[trainingId]',
   'calendar/matchDetail/[matchId]',
   'calendar/new',
   'calendar/new-match',
