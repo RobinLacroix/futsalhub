@@ -153,3 +153,28 @@ export async function sendQuestionnairesForTraining(trainingId: string): Promise
   if (r?.ok) return { ok: true, count: r.count };
   return { ok: false, error: (r?.error as string) || 'Erreur' };
 }
+
+/**
+ * Entraînements pour un ensemble d'équipes (club entier, via getTeamsByClubId)
+ * — utilisé par l'assembleur de séance pour retrouver à quel(s) entraînement(s)
+ * une séance est rattachée, toutes équipes confondues.
+ */
+export async function getTrainingsByTeamIds(teamIds: string[]): Promise<Training[]> {
+  if (teamIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from('trainings')
+    .select('*')
+    .in('team_id', teamIds)
+    .order('date', { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** Rattache (ou détache avec `null`) une séance de l'assembleur à un entraînement. */
+export async function setTrainingSession(trainingId: string, sessionId: string | null): Promise<void> {
+  const { error } = await supabase
+    .from('trainings')
+    .update({ session_id: sessionId })
+    .eq('id', trainingId);
+  if (error) throw error;
+}

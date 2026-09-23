@@ -130,6 +130,8 @@ export interface Training {
   session_duration?: number | null; // minutes, 45-150
   target_rpe_min?: number | null; // RPE cible, borne basse (1-10)
   target_rpe_max?: number | null; // RPE cible, borne haute (1-10)
+  /** Séance de l'assembleur rattachée à cet entraînement (training_sessions.id), ou aucune. */
+  session_id?: string | null;
 }
 
 export type GoalsByTypeRecord = Record<'offensive' | 'transition' | 'cpa' | 'superiority', number>;
