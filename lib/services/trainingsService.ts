@@ -258,7 +258,35 @@ export const trainingsService = {
     return (data ?? [])
       .map((r: { season: string | null }) => r.season)
       .filter((s): s is string => !!s);
-  }
+  },
+
+  /**
+   * Entraînements pour un ensemble d'équipes (club entier, via teamsService.getTeamsByClub)
+   * — utilisé par l'assembleur de séance pour retrouver à quel(s) entraînement(s) une
+   * séance de la bibliothèque club est rattachée (trainings.session_id), toutes équipes
+   * confondues, même pattern que getSeasonsForTeams.
+   */
+  async getTrainingsByTeamIds(teamIds: string[]): Promise<Training[]> {
+    if (teamIds.length === 0) return [];
+    const { data, error } = await supabase
+      .from('trainings')
+      .select('*')
+      .in('team_id', teamIds)
+      .order('date', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  /** Rattache (ou détache, sessionId = null) un entraînement à une séance de la bibliothèque. */
+  async setTrainingSession(trainingId: string, sessionId: string | null): Promise<void> {
+    const { error } = await supabase
+      .from('trainings')
+      .update({ session_id: sessionId })
+      .eq('id', trainingId);
+
+    if (error) throw error;
+  },
 };
 
 

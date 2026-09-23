@@ -298,6 +298,7 @@ export interface Training {
   session_duration?: number | null; // minutes, 45-150
   target_rpe_min?: number | null; // RPE cible, borne basse (1-10)
   target_rpe_max?: number | null; // RPE cible, borne haute (1-10)
+  session_id?: string | null; // séance de la bibliothèque assemblée pour cet entraînement (training_sessions.id)
   created_at?: string;
 }
 
