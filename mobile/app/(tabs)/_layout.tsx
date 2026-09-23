@@ -54,6 +54,7 @@ const HIDDEN_ROUTE_TITLES: Record<string, string> = {
   'sessions/index': 'Séances',
   'calendar/training/squads/[trainingId]': 'Plateaux',
   'calendar/training/live/[trainingId]': 'Séance live',
+  'calendar/training/recap/[trainingId]': 'Récap de séance',
 };
 
 /**
@@ -80,6 +81,7 @@ const HIDDEN_ROUTES = [
   'calendar/training/edit/[trainingId]',
   'calendar/training/squads/[trainingId]',
   'calendar/training/live/[trainingId]',
+  'calendar/training/recap/[trainingId]',
   'calendar/matchDetail/[matchId]',
   'calendar/new',
   'calendar/new-match',
