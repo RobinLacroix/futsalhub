@@ -89,6 +89,17 @@ export default function SessionEditorScreen() {
     const clubId = activeTeam?.club_id;
     if (!clubId) return;
     let cancelled = false;
+    // Expo Router réutilise l'instance de cet écran entre deux séances (contrairement au
+    // web où chaque navigation remonte le composant) : sans réinitialisation explicite ici,
+    // ouvrir "Nouvelle séance" juste après avoir consulté une séance existante laissait
+    // recordId/name/meta de l'ancienne séance en place — un Enregistrer aurait alors écrasé
+    // la mauvaise séance au lieu d'en créer une nouvelle.
+    if (isNew) {
+      setRecordId(null);
+      setName('');
+      setMeta(emptyMeta());
+      setBlocks(buildDefaultBlocks());
+    }
     (async () => {
       setLoading(true);
       try {
@@ -104,8 +115,6 @@ export default function SessionEditorScreen() {
           setName(existing.name);
           setMeta(existing.meta ?? emptyMeta());
           setBlocks(existing.blocks ?? []);
-        } else if (isNew) {
-          setBlocks(buildDefaultBlocks());
         }
       } catch (err) {
         Alert.alert('Erreur', err instanceof Error ? err.message : 'Chargement impossible');
@@ -328,7 +337,10 @@ export default function SessionEditorScreen() {
 const useStyles = makeStyles((t) => ({
   root: { flex: 1 },
   scroll: { flex: 1 },
-  scrollContent: { padding: t.space.lg, paddingBottom: t.space.xl, gap: t.space.lg },
+  // paddingBottom généreux : le footer est en position absolute (voir `footer` ci-dessous),
+  // donc rien ne réserve sa place dans le flux normal — sans cette marge, il couvrirait
+  // le bas du contenu (dernier bloc, bouton "Ajouter un bloc") une fois scrollé en bas.
+  scrollContent: { padding: t.space.lg, paddingBottom: 160, gap: t.space.lg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   metaRow: { flexDirection: 'row', gap: t.space.md },
   metaField: { flex: 1 },
@@ -344,6 +356,10 @@ const useStyles = makeStyles((t) => ({
   },
   blocksList: { gap: t.space.md, marginBottom: t.space.md },
   footer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     width: '100%',
     alignSelf: 'center',
     paddingHorizontal: t.space.lg,
