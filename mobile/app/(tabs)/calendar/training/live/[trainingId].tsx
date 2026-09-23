@@ -3,6 +3,7 @@ import { View, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme, makeStyles } from '../../../../../contexts/ThemeContext';
 import { haptics } from '../../../../../lib/design/haptics';
+import { getUserClubId } from '../../../../../lib/services/clubs';
 import {
   startTrainingGame,
   endTrainingGame,
@@ -10,6 +11,7 @@ import {
   type TimerMode,
   type TrainingGame,
 } from '../../../../../lib/services/trainingGames';
+import { getProceduresByClub, type TrainingProcedureRecord } from '../../../../../lib/services/trainingProceduresService';
 import { enqueueTrainingGameScoreUpdate } from '../../../../../lib/offline/trainingGameOutbox';
 import { computeSquadStandings } from '../../../../../lib/liveSession/standings';
 import {
@@ -20,6 +22,7 @@ import {
 } from '../../../../../lib/liveSession/liveSessionStorage';
 import { useLiveGameTimer, type SeriesConfig } from '../../../../../hooks/useLiveGameTimer';
 import { Screen, Card, Text, Button, Input, EmptyState, SkeletonDetail } from '../../../../../components/ui';
+import { ProcedurePickerSheet } from '../../../../../components/training/ProcedurePickerSheet';
 
 type ScreenState = 'loading' | 'noSquads' | 'config' | 'playing' | 'nextGame';
 
@@ -40,6 +43,10 @@ export default function LiveGameScreen() {
   const [timerMode, setTimerMode] = useState<TimerMode>('continu');
   const [seriesConfig, setSeriesConfig] = useState<SeriesConfig>(DEFAULT_SERIES);
   const [starting, setStarting] = useState(false);
+  const [procedures, setProcedures] = useState<TrainingProcedureRecord[]>([]);
+  const [selectedProcedure, setSelectedProcedure] = useState<TrainingProcedureRecord | null>(null);
+  const [procedurePickerOpen, setProcedurePickerOpen] = useState(false);
+  const [pointsPerTap, setPointsPerTap] = useState(1);
 
   const [game, setGame] = useState<TrainingGame | null>(null);
   const [scoreHome, setScoreHome] = useState(0);
@@ -64,16 +71,25 @@ export default function LiveGameScreen() {
       setSnapshot(snap);
       if (snap.lastSeriesConfig) setSeriesConfig(snap.lastSeriesConfig);
 
-      const allGames = await getGamesForTraining(trainingId);
+      const [allGames, clubId] = await Promise.all([getGamesForTraining(trainingId), getUserClubId()]);
       setFinishedGames(allGames.filter((g) => g.ended_at));
 
-      const open = allGames.find((g) => !g.ended_at) ?? null;
-      if (open) {
-        setGame(open);
-        setScoreHome(open.score_home);
-        setScoreAway(open.score_away);
-        setTimerMode(open.timer_mode);
-        setScreenState('playing');
+      if (clubId) {
+        const procs = await getProceduresByClub(clubId);
+        setProcedures(procs);
+
+        const open = allGames.find((g) => !g.ended_at) ?? null;
+        if (open) {
+          setGame(open);
+          setScoreHome(open.score_home);
+          setScoreAway(open.score_away);
+          setTimerMode(open.timer_mode);
+          setPointsPerTap(open.points_per_tap);
+          setSelectedProcedure(open.procedure_id ? procs.find((p) => p.id === open.procedure_id) ?? null : null);
+          setScreenState('playing');
+        } else {
+          setScreenState('config');
+        }
       } else {
         setScreenState('config');
       }
@@ -101,6 +117,9 @@ export default function LiveGameScreen() {
         seriesCount: timerMode === 'series' ? seriesConfig.seriesCount : undefined,
         seriesDurationSeconds: timerMode === 'series' ? seriesConfig.seriesDurationSeconds : undefined,
         restDurationSeconds: timerMode === 'series' ? seriesConfig.restDurationSeconds : undefined,
+        procedureId: selectedProcedure?.id ?? null,
+        label: selectedProcedure?.title ?? null,
+        pointsPerTap,
         composition,
       });
       setGame(newGame);
@@ -123,7 +142,7 @@ export default function LiveGameScreen() {
     } finally {
       setStarting(false);
     }
-  }, [trainingId, snapshot, timerMode, seriesConfig]);
+  }, [trainingId, snapshot, timerMode, seriesConfig, selectedProcedure, pointsPerTap]);
 
   // ── Chrono ───────────────────────────────────────────────────────────────
 
@@ -216,6 +235,30 @@ export default function LiveGameScreen() {
       <Screen contentContainerStyle={s.content}>
         {error ? <Text tone="negative">{error}</Text> : null}
         <Card variant="raised" padding="md" style={s.configCard}>
+          <Text variant="headline">Procédé et score</Text>
+          <Button
+            label={selectedProcedure ? selectedProcedure.title || 'Sans titre' : 'Choisir un procédé (optionnel)'}
+            icon="document-text-outline"
+            variant="secondary"
+            block
+            onPress={() => setProcedurePickerOpen(true)}
+          />
+          {selectedProcedure && selectedProcedure.scoring.length > 0 && (
+            <Text variant="caption" tone="tertiary">
+              Rappel du procédé : {selectedProcedure.scoring.join(' · ')}
+            </Text>
+          )}
+          <Input
+            label="Valeur du point (par tap)"
+            numeric
+            keyboardType="number-pad"
+            value={String(pointsPerTap)}
+            onChangeText={(v) => setPointsPerTap(Math.max(1, parseInt(v, 10) || 1))}
+            containerStyle={s.seriesField}
+          />
+        </Card>
+
+        <Card variant="raised" padding="md" style={s.configCard}>
           <Text variant="headline">Type de chrono</Text>
           <View style={s.modeRow}>
             <Button
@@ -264,6 +307,13 @@ export default function LiveGameScreen() {
 
         <Button label="Démarrer le jeu" icon="play" variant="primary" block loading={starting} onPress={startGame} />
         <Button label="Rebrasser les plateaux" variant="ghost" onPress={goToSquads} />
+
+        <ProcedurePickerSheet
+          visible={procedurePickerOpen}
+          onClose={() => setProcedurePickerOpen(false)}
+          procedures={procedures}
+          onSelect={(procedureId) => setSelectedProcedure(procedures.find((p) => p.id === procedureId) ?? null)}
+        />
       </Screen>
     );
   }
@@ -287,6 +337,8 @@ export default function LiveGameScreen() {
   const awayLabel = snapshot?.squads[1]?.label ?? 'Équipe 2';
   const homeColor = c.chartSeries[Number(snapshot?.squads[0]?.color_token ?? 0) % c.chartSeries.length];
   const awayColor = c.chartSeries[Number(snapshot?.squads[1]?.color_token ?? 1) % c.chartSeries.length];
+  const tapValue = game?.points_per_tap ?? 1;
+  const procedureGames = game?.procedure_id ? finishedGames.filter((g) => g.procedure_id === game.procedure_id) : [];
 
   return (
     <View style={s.playingRoot}>
@@ -306,24 +358,28 @@ export default function LiveGameScreen() {
       </View>
 
       {snapshot && snapshot.squads.length > 2 && (
-        <StandingsBanner squads={snapshot.squads} games={finishedGames} />
+        <StandingsBanner title="Séance" squads={snapshot.squads} games={finishedGames} />
+      )}
+      {snapshot && procedureGames.length > 0 && (
+        <StandingsBanner title={selectedProcedure?.title || 'Procédé'} squads={snapshot.squads} games={procedureGames} />
       )}
 
       <View style={s.facesRow}>
-        <GameFace squadLabel={homeLabel} bg={homeColor} score={scoreHome} onScore={() => applyScore(scoreHome + 1, scoreAway)} onUndo={() => applyScore(Math.max(0, scoreHome - 1), scoreAway)} />
-        <GameFace squadLabel={awayLabel} bg={awayColor} score={scoreAway} onScore={() => applyScore(scoreHome, scoreAway + 1)} onUndo={() => applyScore(scoreHome, Math.max(0, scoreAway - 1))} />
+        <GameFace squadLabel={homeLabel} bg={homeColor} score={scoreHome} onScore={() => applyScore(scoreHome + tapValue, scoreAway)} onUndo={() => applyScore(Math.max(0, scoreHome - tapValue), scoreAway)} />
+        <GameFace squadLabel={awayLabel} bg={awayColor} score={scoreAway} onScore={() => applyScore(scoreHome, scoreAway + tapValue)} onUndo={() => applyScore(scoreHome, Math.max(0, scoreAway - tapValue))} />
       </View>
     </View>
   );
 }
 
 /**
- * Classement live de tous les plateaux constitués, pas seulement les deux qui
- * jouent — visible dès qu'il y a plus de 2 plateaux (avec 2, les deux aplats
- * suffisent). Ne compte que les jeux clos ; le jeu en cours reste dans les
- * deux grands aplats jusqu'à "Terminer le jeu".
+ * Classement live d'un niveau (séance entière, ou un procédé donné) sur tous
+ * les plateaux constitués, pas seulement les deux qui jouent. Ne compte que
+ * les jeux clos ; le jeu en cours reste dans les deux grands aplats jusqu'à
+ * "Terminer le jeu". Deux instances possibles côte à côte : séance (dès plus
+ * de 2 plateaux) et procédé (dès qu'un 2e jeu du même procédé a été joué).
  */
-function StandingsBanner({ squads, games }: { squads: LiveSessionSnapshot['squads']; games: TrainingGame[] }) {
+function StandingsBanner({ title, squads, games }: { title: string; squads: LiveSessionSnapshot['squads']; games: TrainingGame[] }) {
   const { theme } = useTheme();
   const c = theme.colors;
   const s = useStyles();
@@ -331,6 +387,7 @@ function StandingsBanner({ squads, games }: { squads: LiveSessionSnapshot['squad
 
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[s.standingsBar, { backgroundColor: c.bg.sunken, borderBottomColor: c.border.subtle }]} contentContainerStyle={s.standingsContent}>
+      <Text variant="caption" tone="tertiary" weight="600" style={s.standingsTitle}>{title.toUpperCase()}</Text>
       {standings.map((sq) => (
         <View key={sq.squadId} style={s.standingChip}>
           <View style={[s.standingDot, { backgroundColor: c.chartSeries[sq.colorIndex % c.chartSeries.length] }]} />
@@ -413,7 +470,8 @@ const useStyles = makeStyles((t) => ({
   },
   facesRow: { flex: 1, flexDirection: 'row' },
   standingsBar: { flexGrow: 0, borderBottomWidth: StyleSheet.hairlineWidth },
-  standingsContent: { flexDirection: 'row', gap: t.space.md, paddingHorizontal: t.space.lg, paddingVertical: t.space.sm },
+  standingsContent: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, paddingHorizontal: t.space.lg, paddingVertical: t.space.sm },
+  standingsTitle: { marginRight: t.space.xs },
   standingChip: { flexDirection: 'row', alignItems: 'center', gap: t.space.xs },
   standingDot: { width: 8, height: 8, borderRadius: 4 },
 }));

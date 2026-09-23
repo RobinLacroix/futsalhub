@@ -25,6 +25,8 @@ export interface TrainingGame {
   away_squad_id: string;
   score_home: number;
   score_away: number;
+  /** Valeur ajoutée au score à chaque tap — 1 par défaut, fixe pour toute la durée du jeu. */
+  points_per_tap: number;
   timer_mode: TimerMode;
   series_count: number | null;
   series_duration_seconds: number | null;
@@ -136,6 +138,8 @@ export interface StartGameInput {
   procedureId?: string | null;
   label?: string | null;
   scoreUnitLabel?: string | null;
+  /** Valeur ajoutée au score à chaque tap — défaut 1 côté base si omis. */
+  pointsPerTap?: number;
   /** joueur → plateau, au moment du lancement — figé pour ce jeu (voir migration §1). */
   composition: { playerId: string; squadId: string }[];
 }
@@ -155,6 +159,7 @@ export async function startTrainingGame(input: StartGameInput): Promise<Training
       score_unit_label: input.scoreUnitLabel ?? null,
       home_squad_id: input.homeSquadId,
       away_squad_id: input.awaySquadId,
+      points_per_tap: input.pointsPerTap ?? 1,
       timer_mode: input.timerMode,
       series_count: input.timerMode === 'series' ? input.seriesCount : null,
       series_duration_seconds: input.timerMode === 'series' ? input.seriesDurationSeconds : null,
