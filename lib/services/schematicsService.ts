@@ -12,11 +12,17 @@ export interface SchematicData {
 export interface SchematicRecord {
   id: string;
   team_id: string;
+  club_id: string;
   name: string;
   data: SchematicData;
   folder_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Schéma + nom de l'équipe qui l'a créé — pour l'affichage/le filtre "créé par" (cf getSchematicsByClub). */
+export interface SchematicWithTeamName extends SchematicRecord {
+  team_name: string | null;
 }
 
 export const schematicsService = {
@@ -117,9 +123,7 @@ export const schematicsService = {
   /**
    * Récupère les schémas d'UNE équipe précise (filtré, contrairement à
    * getSchematicsByTeam ci-dessus qui ignore volontairement team_id pour
-   * d'autres usages). Utilisé par la bibliothèque embarquée de l'éditeur
-   * (Phase 0 + ajout bibliothèque/dossiers), scopée strictement à l'équipe
-   * active.
+   * d'autres usages).
    */
   async getSchematicsByTeamId(teamId: string): Promise<SchematicRecord[]> {
     const { data, error } = await supabase
@@ -130,6 +134,27 @@ export const schematicsService = {
 
     if (error) throw error;
     return data || [];
+  },
+
+  /**
+   * Bibliothèque club-wide : tous les schémas du club, quelle que soit
+   * l'équipe qui les a créés (cf migration 20260922100000_schematics_club_wide,
+   * demande de Robin — un schéma appartient au club, team_id reste une
+   * étiquette "créée par" affichable/filtrable, plus une portée d'accès).
+   * Utilisé par la bibliothèque embarquée de l'éditeur (#libOverlay).
+   */
+  async getSchematicsByClub(clubId: string): Promise<SchematicWithTeamName[]> {
+    const { data, error } = await supabase
+      .from('schematics')
+      .select('*, team:teams(name)')
+      .eq('club_id', clubId)
+      .order('updated_at', { ascending: false });
+
+    if (error) throw error;
+    return (data || []).map((row: any) => {
+      const { team, ...rest } = row;
+      return { ...rest, team_name: team?.name ?? null } as SchematicWithTeamName;
+    });
   },
 
   /**

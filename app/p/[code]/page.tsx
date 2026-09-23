@@ -268,7 +268,7 @@ export default async function PublicProcedurePage({
                 marginBottom: '0.5rem',
               }}
             >
-              Consignes &amp; Règles
+              Description
             </h2>
             <p style={{ color: '#1A2332', fontSize: '0.9375rem', lineHeight: 1.65, whiteSpace: 'pre-line' }}>
               {procedure.instructions}

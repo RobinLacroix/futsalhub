@@ -25,13 +25,27 @@
   // etape 3). teamId/embeddedDrillId arrivent avec le message INIT.
   var embedded = window.parent !== window;
   var embeddedTeamId = null, embeddedDrillId = null;
-  // Bibliotheque embarquee (schematics + schematic_folders reels de l'equipe
-  // active, cf message LIBRARY dans applyEmbeddedContext) — remplace DrillStore
-  // comme source pour le panneau bibliotheque quand embedded. Les mutations
-  // (creer/renommer/supprimer un dossier, ranger/dupliquer/supprimer un
-  // schema) passent par LIBRARY_ACTION vers le parent, seul a parler a
-  // Supabase ; le parent repond LIBRARY_UPDATE avec l'etat a jour.
-  var embeddedLibrary = { folders: [], schematics: [] };
+  // Bibliotheque embarquee (procedes reels du club + schematic_folders, cf
+  // message LIBRARY dans applyEmbeddedContext) — remplace DrillStore comme
+  // source pour le panneau bibliotheque quand embedded. Depuis le recadrage
+  // 2026-09-22 : une seule bibliotheque, alimentee par training_procedures
+  // (chaque item porte son schema joint sous .schematic, ou null) — plus de
+  // liste de schemas bruts separee. Les mutations (creer/renommer/supprimer
+  // un dossier, ranger/dupliquer/supprimer un procede) passent par
+  // LIBRARY_ACTION vers le parent, seul a parler a Supabase ; le parent
+  // repond LIBRARY_UPDATE avec l'etat a jour.
+  var embeddedLibrary = { folders: [], procedures: [] };
+  // Fiche procede liee a ce schema (training_procedures.schematic_id), ou
+  // null si aucune (cf migration 20260922120000 + constat de Robin : les
+  // champs pedagogiques du panneau "Seance & donnees" ecrivaient dans
+  // schematics.data.meta/.rules, deconnectes de training_procedures). Quand
+  // non-null, les champs pedagogiques (titre/objectif/effectif/duree/
+  // intensite/phase cible/scoring/comportements/mecanismes/variables)
+  // lisent/ecrivent cette fiche au lieu de drill.meta/drill.rules.
+  // category/subcategory/theme du schema restent sur drill.meta : un schema
+  // sans fiche liee (croquis tactique pur) doit rester filtrable dans la
+  // bibliotheque de schemas.
+  var embeddedProcedure = null;
   // Selection multiple : [{kind:'entity'|'zone'|'line'|'text'|'pulse', ref}]. Active
   // des qu'on utilise Maj+clic ou une zone de selection ; independante des variables
   // selEntity/selZone/... qui restent la source de verite pour la selection simple
@@ -2552,7 +2566,30 @@
   }
 
   // ---- lists ----
-  function listArray(key) { if (key === "varPlus") return drill.rules.variablesPlus; if (key === "varMinus") return drill.rules.variablesMinus; return drill.rules[key]; }
+  // Cible des listes (scoring/comportements/variables) : la fiche procede
+  // liee quand il y en a une (embedded), sinon drill.rules comme avant.
+  function proceduresRulesKey(key) {
+    if (key === "varPlus") return "variables_plus";
+    if (key === "varMinus") return "variables_moins";
+    return key; // scoring, comportements
+  }
+  function listArray(key) {
+    if (embedded && embeddedProcedure) {
+      var pk = proceduresRulesKey(key);
+      if (!Array.isArray(embeddedProcedure[pk])) embeddedProcedure[pk] = [];
+      return embeddedProcedure[pk];
+    }
+    if (key === "varPlus") return drill.rules.variablesPlus;
+    if (key === "varMinus") return drill.rules.variablesMinus;
+    return drill.rules[key];
+  }
+  function mecanismesArray() {
+    if (embedded && embeddedProcedure) {
+      if (!Array.isArray(embeddedProcedure.mecanismes)) embeddedProcedure.mecanismes = [];
+      return embeddedProcedure.mecanismes;
+    }
+    return drill.rules.mecanismes;
+  }
   function renderList(key, containerId) {
     var arr = listArray(key), c = document.getElementById(containerId); c.innerHTML = "";
     arr.forEach(function (v, i) {
@@ -2565,7 +2602,7 @@
     });
   }
   function renderMeca() {
-    var arr = drill.rules.mecanismes, c = document.getElementById("mecanismesList"); c.innerHTML = "";
+    var arr = mecanismesArray(), c = document.getElementById("mecanismesList"); c.innerHTML = "";
     arr.forEach(function (m, i) {
       var row = document.createElement("div"); row.className = "meca-row";
       var r = document.createElement("input"); r.placeholder = "règle"; r.value = m.regle;
@@ -2585,7 +2622,7 @@
       var d = document.createElement("div"); d.className = "lever";
       var ph = l.phase || "offensive";
       d.innerHTML = '<span class="tag ' + ph + '">' + ph + " · " + l.categorie + '</span><div class="meca">' + l.mecanisme + '</div><div class="induit">→ ' + l.induit + "</div>";
-      d.addEventListener("click", function () { drill.rules.mecanismes.push({ regle: l.mecanisme, induit: l.induit }); renderMeca(); syncJSON(); flash("Levier ajouté aux mécanismes", true); });
+      d.addEventListener("click", function () { mecanismesArray().push({ regle: l.mecanisme, induit: l.induit }); renderMeca(); syncJSON(); flash("Levier ajouté aux mécanismes", true); });
       c.appendChild(d);
     });
   }
@@ -2611,32 +2648,160 @@
   // pertinents pour un procede d'entrainement, pas pour un CPA (combinaison sur coup de pied arrete).
   function applyCategoryVisibility() {
     var hideDesignFields = drill.meta.category === "cpa" || drill.meta.category === "animation";
-    ["fieldPhaseCible", "fieldObjectif", "fieldNbJoueurs", "fieldDuree", "fieldIntensite", "fieldFormeJouee", "listsBlock", "leversPanelWrap"].forEach(function (id) {
+    [
+      "fieldBloc", "fieldFormat", "fieldPhaseDeJeu", "fieldIntensite", "fieldPrincipes",
+      "fieldRapportNumerique", "fieldDescription", "fieldObjectif",
+      "fieldNbJoueurs", "fieldDuree", "listsBlock", "leversPanelWrap"
+    ].forEach(function (id) {
       var el = document.getElementById(id); if (el) el.classList.toggle("hidden", hideDesignFields);
     });
   }
+  // Un seul formulaire (recadrage 2026-09-22) : ce panneau édite toujours un
+  // brouillon de fiche (embeddedProcedure), jamais null en embarqué — les
+  // mêmes champs que "+ Nouveau procédé" côté /webapp/library, tout le temps
+  // visibles. Rien n'est persisté tant que le schéma n'a pas d'id (la fiche a
+  // besoin de schematic_id) : le brouillon vit en mémoire, envoyé au parent
+  // juste après chaque sauvegarde réussie du schéma (cf handler SAVED).
+  function makeEmptyProcedureDraft() {
+    return {
+      id: null, title: "", bloc: null, type: "Exercice", theme: "Offensif", intensite: null,
+      principes: [], rapport_numerique: null, objectives: "", instructions: "",
+      min_players: null, duration_minutes: null,
+      scoring: [], comportements: [], mecanismes: [], variables_plus: [], variables_moins: [],
+      schematic_id: null
+    };
+  }
+  // Fiche pré-migration (2026-09-22) : la "regle avec mecanisme inducteur"
+  // vivait en texte libre dans `instructions`, ce panneau n'a jamais eu de
+  // champ pour l'afficher. On la reprend dans le tableau structure des qu'un
+  // procede arrive ici sans mecanismes, pour que le contenu reste visible et
+  // editable — meme comportement que côté /webapp/library (page.tsx,
+  // ProcedureDrawer), qui fait le meme rattrapage a l'edition.
+  function seedMecanismesFromInstructions(proc) {
+    if (!proc) return proc;
+    if (Array.isArray(proc.mecanismes) && proc.mecanismes.length > 0) return proc;
+    if (proc.instructions && proc.instructions.trim()) {
+      proc.mecanismes = [{ regle: proc.instructions.trim(), induit: "" }];
+    }
+    return proc;
+  }
+  var TAXO_BLOC = ["Échauffement", "Problématisation", "Situation isolée", "Analytique", "Jeu orienté", "Match libre"];
+  var TAXO_FORMAT = ["Echauffement", "Exercice", "Situation", "Jeu", "Rondo/Toro"];
+  var TAXO_PHASE = ["Offensif", "Transition", "Defensif", "CPA", "Powerplay"];
+  var TAXO_INTENSITE = ["Légère", "Modérée", "Haute"];
+
+  function renderChipGroup(containerId, values, current, onChange) {
+    var box = document.getElementById(containerId);
+    if (!box) return;
+    box.innerHTML = "";
+    values.forEach(function (v) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "lib-chip" + (v === current ? " active" : "");
+      b.textContent = v;
+      b.addEventListener("click", function () { onChange(v); renderProcedureChips(); syncJSON(); });
+      box.appendChild(b);
+    });
+  }
+  function renderProcedureChips() {
+    if (!embeddedProcedure) return;
+    renderChipGroup("mBlocChips", TAXO_BLOC, embeddedProcedure.bloc, function (v) { embeddedProcedure.bloc = v; });
+    renderChipGroup("mFormatChips", TAXO_FORMAT, embeddedProcedure.type, function (v) { embeddedProcedure.type = v; });
+    renderChipGroup("mPhaseDeJeuChips", TAXO_PHASE, embeddedProcedure.theme, function (v) { embeddedProcedure.theme = v; });
+    renderChipGroup("mIntensiteChips", TAXO_INTENSITE, embeddedProcedure.intensite, function (v) {
+      embeddedProcedure.intensite = embeddedProcedure.intensite === v ? null : v;
+    });
+  }
+  function renderPrincipesTags() {
+    var box = document.getElementById("mPrincipesTags");
+    if (!box || !embeddedProcedure) return;
+    box.innerHTML = "";
+    (embeddedProcedure.principes || []).forEach(function (p, i) {
+      var chip = document.createElement("span"); chip.className = "lib-chip active";
+      var label = document.createElement("span"); label.textContent = p;
+      var del = document.createElement("button"); del.type = "button"; del.textContent = "✕";
+      del.style.marginLeft = "4px";
+      del.addEventListener("click", function () { embeddedProcedure.principes.splice(i, 1); renderPrincipesTags(); syncJSON(); });
+      chip.appendChild(label); chip.appendChild(del);
+      box.appendChild(chip);
+    });
+  }
+
   function bindMeta() {
     document.getElementById("mCategory").addEventListener("change", function (e) { drill.meta.category = e.target.value; refreshSubcategoryOptions(false); applyCategoryVisibility(); syncJSON(); });
     document.getElementById("mSubcategory").addEventListener("change", function (e) { drill.meta.subcategory = e.target.value; syncJSON(); });
-    map("mTitle", "title"); map("mTheme", "theme"); map("mPhaseCible", "phaseCible"); map("mObjectif", "objectif");
-    numMap("mNbJoueurs", "nbJoueurs"); numMap("mDuree", "dureeMin");
-    document.getElementById("mIntensite").addEventListener("change", function (e) { drill.meta.intensite = e.target.value; syncJSON(); });
-    document.getElementById("mFormeJouee").addEventListener("change", function (e) { drill.meta.formeJouee = e.target.value === "true"; syncJSON(); });
-    function map(id, key) { document.getElementById(id).addEventListener("input", function (e) { drill.meta[key] = e.target.value; syncJSON(); }); }
-    function numMap(id, key) { document.getElementById(id).addEventListener("input", function (e) { drill.meta[key] = parseInt(e.target.value, 10) || 0; syncJSON(); }); }
+
+    document.getElementById("mTitle").addEventListener("input", function (e) {
+      if (embeddedProcedure) embeddedProcedure.title = e.target.value;
+      drill.meta.title = e.target.value; // garde schematics.name synchro (cf SAVE, page.tsx)
+      syncJSON();
+    });
+    document.getElementById("mDescription").addEventListener("input", function (e) {
+      if (embeddedProcedure) embeddedProcedure.instructions = e.target.value;
+      syncJSON();
+    });
+    document.getElementById("mObjectif").addEventListener("input", function (e) {
+      if (embeddedProcedure) embeddedProcedure.objectives = e.target.value;
+      syncJSON();
+    });
+    document.getElementById("mNbJoueurs").addEventListener("input", function (e) {
+      if (embeddedProcedure) embeddedProcedure.min_players = parseInt(e.target.value, 10) || null;
+      syncJSON();
+    });
+    document.getElementById("mDuree").addEventListener("input", function (e) {
+      if (embeddedProcedure) embeddedProcedure.duration_minutes = parseInt(e.target.value, 10) || null;
+      syncJSON();
+    });
+    document.getElementById("mRapportNumerique").addEventListener("input", function (e) {
+      if (embeddedProcedure) embeddedProcedure.rapport_numerique = e.target.value || null;
+      syncJSON();
+    });
+    var principeInput = document.getElementById("mPrincipeInput");
+    principeInput.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter" && e.key !== ",") return;
+      e.preventDefault();
+      var v = principeInput.value.trim();
+      if (v && embeddedProcedure && embeddedProcedure.principes.indexOf(v) === -1) { embeddedProcedure.principes.push(v); renderPrincipesTags(); syncJSON(); }
+      principeInput.value = "";
+    });
+  }
+  // Poste la fiche courante (creation ou mise a jour) au parent — jamais
+  // avant que le schema lui-meme soit enregistre (schematic_id requis pour
+  // lier, cf schematics/page.tsx). Appele automatiquement apres chaque
+  // sauvegarde reussie du schema (handler SAVED) — pas de bouton separe.
+  function sendProcedureSave(extraPatch) {
+    if (!embedded || !embeddedDrillId || !embeddedProcedure) return;
+    var patch = Object.assign({}, embeddedProcedure, extraPatch || {});
+    delete patch.id;
+    window.parent.postMessage(
+      { type: "PROCEDURE_SAVE", procedureId: embeddedProcedure.id, patch: patch },
+      window.location.origin
+    );
+  }
+  function updateProcedureLinkUI() {
+    var status = document.getElementById("procedureLinkStatus");
+    if (!status) return;
+    if (!embedded) { status.textContent = ""; return; }
+    status.textContent = embeddedProcedure && embeddedProcedure.id
+      ? "Fiche liée ✓"
+      : "Remplis les champs puis enregistre le schéma (bouton « Enregistrer ») pour créer la fiche.";
   }
   function fillMeta() {
     document.getElementById("mCategory").value = drill.meta.category || "entrainement";
     refreshSubcategoryOptions(true);
     applyCategoryVisibility();
-    document.getElementById("mTitle").value = drill.meta.title || "";
-    document.getElementById("mTheme").value = drill.meta.theme || "";
-    document.getElementById("mPhaseCible").value = drill.meta.phaseCible || "";
-    document.getElementById("mObjectif").value = drill.meta.objectif || "";
-    document.getElementById("mNbJoueurs").value = drill.meta.nbJoueurs || 0;
-    document.getElementById("mDuree").value = drill.meta.dureeMin || 0;
-    document.getElementById("mIntensite").value = drill.meta.intensite || "elevee";
-    document.getElementById("mFormeJouee").value = String(drill.meta.formeJouee !== false);
+    if (embedded && !embeddedProcedure) embeddedProcedure = makeEmptyProcedureDraft();
+    var p = embeddedProcedure || makeEmptyProcedureDraft();
+    document.getElementById("mTitle").value = p.title || drill.meta.title || "";
+    document.getElementById("mDescription").value = p.instructions || "";
+    document.getElementById("mObjectif").value = p.objectives || "";
+    document.getElementById("mNbJoueurs").value = p.min_players || "";
+    document.getElementById("mDuree").value = p.duration_minutes || "";
+    document.getElementById("mRapportNumerique").value = p.rapport_numerique || "";
+    renderProcedureChips();
+    renderPrincipesTags();
+    refreshAllLists();
+    updateProcedureLinkUI();
     document.getElementById("pitchLen").value = drill.pitch.length;
     document.getElementById("pitchWid").value = drill.pitch.width;
     document.getElementById("pitchMark").value = drill.pitch.markings;
@@ -2733,9 +2898,11 @@
   }
   function validate() {
     var errs = [];
+    // objectif vit desormais sur la fiche liee (embeddedProcedure.objectives),
+    // plus sur drill.meta (champ retire du formulaire, cf recadrage 2026-09-22).
+    var obj = (embedded && embeddedProcedure) ? embeddedProcedure.objectives : drill.meta.objectif;
     if (!drill.meta.title) errs.push("titre manquant");
-    if (!drill.meta.theme) errs.push("thème manquant");
-    if (!drill.meta.objectif) errs.push("objectif manquant");
+    if (!obj) errs.push("objectif manquant");
     if (ents().length === 0) errs.push("aucun élément sur le terrain");
     return errs;
   }
@@ -2778,21 +2945,37 @@
   // de rendu (R.renderStatic) plutot qu'une liste de titres, recherche plein
   // texte et filtre par categorie. L'editeur reste intact derriere l'overlay.
   // libFolder : null = tous, "" = sans dossier, sinon l'id d'un dossier.
-  var libQuery = "", libCat = "", libFolder = null;
+  // libTeam : "" = toutes les equipes, sinon un nom d'equipe exact (cf
+  // renderTeamFilters) — bibliotheque club-wide, filtre "cree par".
+  var libQuery = "", libCat = "", libTeam = "", libFolder = null;
 
   // ---- acces bibliotheque unifie : DrillStore (standalone) ou
   // embeddedLibrary (embarque, donnees reelles Supabase) ----
+  // Bibliotheque unifiee (recadrage 2026-09-22 avec Robin) : chaque carte est
+  // soit un PROCEDE (training_procedures, avec son schema en vignette s'il en
+  // a un), soit un SCHEMA sans fiche liee — les deux cas existent, cf
+  // getFullLibraryByClub cote parent. "category" porte le bloc pedagogique
+  // (Echauffement/Problematisation/Situation isolee/Analytique/Jeu oriente/
+  // Match libre) pour une carte procede ; un schema sans fiche n'a pas de
+  // bloc, affiche "Sans fiche". Categorie du schema lui-meme
+  // (entrainement/cpa/animation) reste un reglage du schema, sans rapport
+  // avec ce filtre de bibliotheque (cf mCategory/applyCategoryVisibility).
   function libListDrills() {
     if (embedded) {
-      return embeddedLibrary.schematics.map(function (rec) {
-        var m = (rec.data && rec.data.meta) || {};
+      return embeddedLibrary.procedures.map(function (card) {
+        var sch = card.schematic, proc = card.procedure;
         return {
-          id: rec.id, updatedAt: rec.updated_at ? +new Date(rec.updated_at) : 0,
-          title: m.title || rec.name || "", theme: m.theme || "",
-          category: m.category || "entrainement", subcategory: m.subcategory || "",
-          dureeMin: m.dureeMin || 0, nbJoueurs: m.nbJoueurs || 0,
-          keyframes: (rec.data && rec.data.keyframes && rec.data.keyframes.length) || 0,
-          folderId: rec.folder_id || null
+          id: card.key, kind: card.kind,
+          realId: proc ? proc.id : (sch ? sch.id : null),
+          schematicId: sch ? sch.id : null,
+          updatedAt: card.updated_at ? +new Date(card.updated_at) : 0,
+          title: card.title || "", theme: card.theme || "",
+          category: card.kind === "schematic" ? "Sans fiche" : (card.bloc || "Jeu orienté"), subcategory: "",
+          dureeMin: (proc && proc.duration_minutes) || 0, nbJoueurs: (proc && proc.min_players) || 0,
+          keyframes: (sch && sch.data && sch.data.keyframes && sch.data.keyframes.length) || 0,
+          folderId: card.folder_id || null,
+          teamName: "",
+          hasSchematic: !!sch
         };
       }).sort(function (a, b) { return b.updatedAt - a.updatedAt; });
     }
@@ -2805,8 +2988,12 @@
   function libGetDrillRecord(id) {
     if (embedded) {
       var rec = null;
-      embeddedLibrary.schematics.some(function (r) { if (r.id === id) { rec = r; return true; } return false; });
-      return rec ? { id: rec.id, drill: rec.data, folderId: rec.folder_id } : null;
+      embeddedLibrary.procedures.some(function (r) { if (r.key === id) { rec = r; return true; } return false; });
+      if (!rec) return null;
+      return {
+        id: rec.key, drill: rec.schematic ? rec.schematic.data : null, folderId: rec.folder_id,
+        kind: rec.kind, procedure: rec.procedure, schematicId: rec.schematic ? rec.schematic.id : null
+      };
     }
     return (window.DrillStore && DrillStore.getDrill(id)) || null;
   }
@@ -2858,19 +3045,55 @@
     refreshLibrary();
     flash("Copie enregistrée dans la bibliothèque ✓", true);
   }
+  // Ouvrir un procede : s'il a un schema, le charge dans le canevas comme
+  // avant. S'il n'en a pas (fiche sans dessin, cf "les deux cas existent"),
+  // demarre un terrain vierge deja lie a cette fiche — enregistrer le
+  // prochain dessin cree le schema ET le lie automatiquement (cf handler
+  // SAVED, recherche "embeddedProcedure && !embeddedProcedure.schematic_id").
   function loadFromLibrary(id) {
     if (!id) return;
-    var rec = libGetDrillRecord(id);
-    if (!rec || !rec.drill) { flash("Procédé introuvable", false); return; }
-    applyDrill(rec.drill); currentDrillId = id; refreshLibrary();
+    if (embedded) {
+      var rec = libGetDrillRecord(id);
+      if (!rec) { flash("Introuvable", false); return; }
+      // .schematic est une jointure (cf getFullLibraryByClub), pas une
+      // colonne : jamais copiee dans le brouillon envoye au parent
+      // (sendProcedureSave). Une carte "schema sans fiche" (kind schematic)
+      // n'a pas de rec.procedure : on demarre un brouillon vierge, deja
+      // pre-lie a ce schema (schematic_id) puisqu'il existe deja.
+      if (rec.procedure) {
+        embeddedProcedure = Object.assign({}, rec.procedure);
+        delete embeddedProcedure.schematic;
+        seedMecanismesFromInstructions(embeddedProcedure);
+      } else {
+        embeddedProcedure = makeEmptyProcedureDraft();
+        embeddedProcedure.title = "";
+        embeddedProcedure.schematic_id = rec.schematicId;
+      }
+      if (rec.drill) {
+        applyDrill(rec.drill);
+        embeddedDrillId = rec.schematicId;
+      } else {
+        resetCanvas();
+        drill.meta.title = embeddedProcedure.title || "";
+        embeddedDrillId = null;
+      }
+      currentDrillId = embeddedDrillId;
+      fillMeta();
+      refreshLibrary();
+      flash(rec.drill ? "Chargé depuis la bibliothèque ✓" : "Fiche chargée — dessine puis enregistre pour créer le schéma", true);
+      return;
+    }
+    var rec2 = libGetDrillRecord(id);
+    if (!rec2 || !rec2.drill) { flash("Procédé introuvable", false); return; }
+    applyDrill(rec2.drill); currentDrillId = id; refreshLibrary();
     flash("Chargé depuis la bibliothèque ✓", true);
   }
-  function deleteFromLibrary(id, title) {
+  function deleteFromLibrary(id, title, kind) {
     if (!id) return;
-    if (!window.confirm("Supprimer définitivement « " + (title || "ce procédé") + " » de la bibliothèque ?")) return;
+    if (!window.confirm("Supprimer définitivement « " + (title || "ce procédé") + " » de la bibliothèque ?\nLe schéma dessiné, s'il y en a un, n'est pas supprimé.")) return;
     if (embedded) {
-      libAction("deleteSchematic", { id: id });
-      if (currentDrillId === id) currentDrillId = null;
+      libAction("deleteProcedure", { id: id, kind: kind });
+      if (currentDrillId === id || (embeddedProcedure && embeddedProcedure.id === id)) { currentDrillId = null; embeddedProcedure = null; }
       return;
     }
     if (!window.DrillStore) return;
@@ -2878,9 +3101,9 @@
     if (currentDrillId === id) currentDrillId = null;
     renderFolderList(); refreshLibrary(); flash("Supprimé de la bibliothèque", true);
   }
-  function duplicateInLibrary(id) {
+  function duplicateInLibrary(id, kind) {
     if (!id) return;
-    if (embedded) { libAction("duplicateSchematic", { id: id }); return; }
+    if (embedded) { libAction("duplicateProcedure", { id: id, kind: kind }); return; }
     if (!window.DrillStore) return;
     var rec = DrillStore.getDrill(id);
     if (!rec || !rec.drill) return;
@@ -2896,7 +3119,7 @@
   function exportFromLibrary(id) {
     if (!id) return;
     var rec = libGetDrillRecord(id);
-    if (!rec || !rec.drill) return;
+    if (!rec || !rec.drill) { flash("Ce procédé n'a pas de schéma à exporter", false); return; }
     var blob = new Blob([JSON.stringify(rec.drill, null, 2)], { type: "application/json" });
     var a = document.createElement("a"); a.href = URL.createObjectURL(blob);
     a.download = ((rec.drill.meta && rec.drill.meta.title) || "procede").toLowerCase().replace(/[^a-z0-9]+/g, "-") + ".json";
@@ -2918,14 +3141,17 @@
       return svg;
     } catch (e) { return null; }
   }
+  // "category" porte le bloc pedagogique du procede (deja une chaine prete a
+  // afficher, cf BLOCS cote React cote webapp — meme liste, a garder sync).
   function libCatLabel(cat) {
-    return cat === "cpa" ? "CPA" : cat === "animation" ? "Animation" : "Entraînement";
+    return cat || "Jeu orienté";
   }
   function libMatches(it) {
     if (libCat && (it.category || "entrainement") !== libCat) return false;
+    if (libTeam && (it.teamName || "") !== libTeam) return false;
     if (libFolder !== null && (it.folderId || "") !== libFolder) return false;
     if (!libQuery) return true;
-    var hay = ((it.title || "") + " " + (it.theme || "") + " " + (it.subcategory || "")).toLowerCase();
+    var hay = ((it.title || "") + " " + (it.theme || "") + " " + (it.subcategory || "") + " " + (it.teamName || "")).toLowerCase();
     return hay.indexOf(libQuery) >= 0;
   }
   // Barre laterale : "Tous", "Sans dossier", puis les dossiers du coach avec
@@ -2972,6 +3198,31 @@
     folders.forEach(function (f) {
       row(f.id, f.name, all.filter(function (d) { return d.folderId === f.id; }).length, f.id);
     });
+    renderTeamFilters();
+  }
+  // Filtre "créée par" — bibliothèque club-wide (cf migration
+  // 20260922100000_schematics_club_wide) : les noms d'équipe ne sont pas une
+  // liste fixe comme les catégories, donc les chips sont reconstruites à
+  // chaque rafraîchissement à partir des données réellement présentes.
+  function renderTeamFilters() {
+    var box = document.getElementById("libTeamFilters");
+    if (!box) return;
+    var all = libListDrills();
+    var names = [];
+    all.forEach(function (d) { if (d.teamName && names.indexOf(d.teamName) === -1) names.push(d.teamName); });
+    names.sort();
+    if (names.length < 2) { box.innerHTML = ""; box.style.display = "none"; return; }
+    box.style.display = "";
+    if (names.indexOf(libTeam) === -1) libTeam = "";
+    box.innerHTML = "";
+    function chip(value, label) {
+      var b = document.createElement("button");
+      b.type = "button"; b.className = "lib-chip" + (libTeam === value ? " active" : "");
+      b.setAttribute("data-team", value); b.textContent = label;
+      box.appendChild(b);
+    }
+    chip("", "Toutes les équipes");
+    names.forEach(function (n) { chip(n, n); });
   }
   function renderLibraryGrid() {
     var grid = document.getElementById("libGrid");
@@ -2986,7 +3237,7 @@
     var neuf = document.createElement("button");
     neuf.type = "button"; neuf.className = "lib-new";
     neuf.innerHTML = '<span style="font-size:22px;line-height:1">+</span><span>Nouveau procédé</span>';
-    neuf.addEventListener("click", function () { closeLibrary(); resetCanvas(); });
+    neuf.addEventListener("click", function () { closeLibrary(); embeddedDrillId = null; embeddedProcedure = null; resetCanvas(); fillMeta(); });
     grid.appendChild(neuf);
 
     if (!all.length) {
@@ -3005,14 +3256,14 @@
     items.forEach(function (it) {
       var rec = libGetDrillRecord(it.id);
       var card = document.createElement("div");
-      card.className = "lib-card" + (it.id === currentDrillId ? " current" : "");
+      card.className = "lib-card" + (it.schematicId && it.schematicId === currentDrillId ? " current" : "");
 
       var thumb = document.createElement("button");
       thumb.type = "button"; thumb.className = "lib-thumb";
       thumb.title = "Ouvrir « " + (it.title || "sans titre") + " »";
       var svg = rec ? libThumbSvg(rec) : null;
       if (svg) thumb.appendChild(svg);
-      else thumb.innerHTML = '<span class="lib-thumb-na">aperçu indisponible</span>';
+      else thumb.innerHTML = '<span class="lib-thumb-na">' + (it.hasSchematic ? "aperçu indisponible" : "pas de schéma — clique pour dessiner") + '</span>';
       thumb.addEventListener("click", function () { loadFromLibrary(it.id); closeLibrary(); });
       card.appendChild(thumb);
 
@@ -3027,9 +3278,16 @@
       bits.push(it.keyframes + " étape" + (it.keyframes > 1 ? "s" : ""));
       var s = document.createElement("div"); s.className = "lib-sub"; s.textContent = bits.join(" · ");
       meta.appendChild(s);
+      var badgeRow = document.createElement("div"); badgeRow.className = "lib-badge-row";
       var b = document.createElement("span"); b.className = "lib-badge";
       b.textContent = libCatLabel(it.category) + (it.subcategory ? " · " + it.subcategory : "");
-      meta.appendChild(b);
+      badgeRow.appendChild(b);
+      if (it.teamName) {
+        var tb = document.createElement("span"); tb.className = "lib-badge lib-badge-team";
+        tb.textContent = it.teamName;
+        badgeRow.appendChild(tb);
+      }
+      meta.appendChild(badgeRow);
       // Ranger un procede : un select plutot qu'un glisser-deposer, parce qu'il
       // marche aussi au doigt et qu'il dit ou est la carte sans avoir a la
       // survoler.
@@ -3043,7 +3301,7 @@
       });
       fsel.value = it.folderId || "";
       fsel.addEventListener("change", function () {
-        if (embedded) { libAction("setFolder", { schematicId: it.id, folderId: fsel.value || null }); return; }
+        if (embedded) { libAction("setFolder", { id: it.realId, kind: it.kind, folderId: fsel.value || null }); return; }
         if (window.DrillStore) { DrillStore.setDrillFolder(it.id, fsel.value || null); renderFolderList(); renderLibraryGrid(); }
       });
       meta.appendChild(fsel);
@@ -3053,11 +3311,11 @@
       var open = document.createElement("button"); open.type = "button"; open.className = "open"; open.textContent = "Ouvrir";
       open.addEventListener("click", function () { loadFromLibrary(it.id); closeLibrary(); });
       var dup = document.createElement("button"); dup.type = "button"; dup.textContent = "Dupliquer"; dup.title = "Créer une copie dans la bibliothèque";
-      dup.addEventListener("click", function () { duplicateInLibrary(it.id); });
+      dup.addEventListener("click", function () { duplicateInLibrary(it.realId, it.kind); });
       var exp = document.createElement("button"); exp.type = "button"; exp.textContent = "JSON"; exp.title = "Exporter en JSON";
       exp.addEventListener("click", function () { exportFromLibrary(it.id); });
       var del = document.createElement("button"); del.type = "button"; del.className = "danger"; del.textContent = "×"; del.title = "Supprimer de la bibliothèque";
-      del.addEventListener("click", function () { deleteFromLibrary(it.id, it.title); });
+      del.addEventListener("click", function () { deleteFromLibrary(it.realId, it.title, it.kind); });
       acts.appendChild(open); acts.appendChild(dup); acts.appendChild(exp); acts.appendChild(del);
       card.appendChild(acts);
 
@@ -4760,7 +5018,7 @@
   wireFlyoutToggle("exportSettingsToggle", "exportSettingsFlyout");
   document.addEventListener("click", closeFlyouts);
   document.querySelectorAll("[data-addlist]").forEach(function (b) { b.addEventListener("click", function () { var k = b.getAttribute("data-addlist"); listArray(k).push(""); renderList(k, k === "varPlus" ? "varPlusList" : k === "varMinus" ? "varMinusList" : k + "List"); syncJSON(); }); });
-  document.querySelector("[data-addmeca]").addEventListener("click", function () { drill.rules.mecanismes.push({ regle: "", induit: "" }); renderMeca(); syncJSON(); });
+  document.querySelector("[data-addmeca]").addEventListener("click", function () { mecanismesArray().push({ regle: "", induit: "" }); renderMeca(); syncJSON(); });
   document.getElementById("leverFilters").addEventListener("click", function (e) {
     if (e.target.tagName !== "BUTTON") return;
     this.querySelectorAll("button").forEach(function (b) { b.classList.remove("on"); });
@@ -4994,6 +5252,12 @@
     Array.prototype.forEach.call(this.querySelectorAll(".lib-chip"), function (b) { b.classList.toggle("active", b === btn); });
     renderLibraryGrid();
   });
+  document.getElementById("libTeamFilters").addEventListener("click", function (e) {
+    var btn = e.target.closest(".lib-chip"); if (!btn) return;
+    libTeam = btn.getAttribute("data-team") || "";
+    Array.prototype.forEach.call(this.querySelectorAll(".lib-chip"), function (b) { b.classList.toggle("active", b === btn); });
+    renderLibraryGrid();
+  });
 
   seedTeamsFromPreset(); wireTeamsPanel(); fillTeamsPanel();
   bindMeta(); ensureAnnotations(); ensureTimeline(); ensureOverlays(); fillMeta(); refreshAllLists(); renderLevers("all"); renderVariants(); renderSteps(); render(); syncJSON();
@@ -5015,7 +5279,7 @@
   // dossiers, 2026-09). Verification d'origine stricte : meme origine que la
   // page (outil servi en statique par Next.js sous /tools/tactics/, meme
   // domaine que la webapp).
-  //   -> INIT           { teamId, drillId, drill|null, roster, teamColors, library:{folders,schematics} }
+  //   -> INIT           { teamId, drillId, drill|null, procedure|null, roster, teamColors, library:{folders,schematics} }
   //   -> CONTEXT_UPDATE { teamId, roster, teamColors, library }  (equipe active
   //                        corrigee apres coup cote parent, cf useActiveTeam qui
   //                        se resout en deux temps — jamais de drill ici, ne
@@ -5024,15 +5288,22 @@
   //   -> SAVE_ERROR     { message }
   //   -> LIBRARY_UPDATE { folders, schematics }  (reponse a une LIBRARY_ACTION,
   //                        ou rafraichissement pousse par le parent)
+  //   -> PROCEDURE_SAVED       { procedure }  (fiche liee creee/mise a jour)
+  //   -> PROCEDURE_SAVE_ERROR  { message }
   //   <- SAVE           { drillId|null, drill }  (null = nouvelle entree)
   //   <- CLOSE          {}
   //   <- LIBRARY_ACTION { action, payload }  (createFolder/renameFolder/
   //                        deleteFolder/setFolder/deleteSchematic/duplicateSchematic)
+  //   <- PROCEDURE_SAVE { procedureId|null, patch }  (panneau "Seance &
+  //                        donnees" : la fiche liee (training_procedures.
+  //                        schematic_id) devient la reference pour les champs
+  //                        pedagogiques, ajout 2026-09 — cf sendProcedureSave().
+  //                        Necessite embeddedDrillId (schema deja enregistre).
   function applyEmbeddedContext(msg) {
     embeddedTeamId = msg.teamId || null;
     if (msg.teamColors && !drill.teams) drill.teams = JSON.parse(JSON.stringify(msg.teamColors));
     if (Array.isArray(msg.roster)) { roster = msg.roster; renderRoster(); }
-    if (msg.library) { embeddedLibrary = { folders: msg.library.folders || [], schematics: msg.library.schematics || [] }; }
+    if (msg.library) { embeddedLibrary = { folders: msg.library.folders || [], procedures: msg.library.procedures || [] }; }
     fillTeamsPanel();
     refreshLibrary();
   }
@@ -5043,8 +5314,10 @@
       var msg = ev.data;
       if (msg.type === "INIT") {
         embeddedDrillId = msg.drillId || null;
+        embeddedProcedure = seedMecanismesFromInstructions(msg.procedure || null);
         if (msg.drill) { applyDrill(msg.drill); currentDrillId = embeddedDrillId; }
         applyEmbeddedContext(msg);
+        fillMeta();
         render(); syncJSON();
       } else if (msg.type === "CONTEXT_UPDATE") {
         applyEmbeddedContext(msg);
@@ -5053,12 +5326,22 @@
         embeddedDrillId = msg.drillId || embeddedDrillId;
         currentDrillId = embeddedDrillId;
         refreshLibrary();
+        // Un seul formulaire (recadrage 2026-09-22) : chaque sauvegarde du
+        // schema enregistre aussi la fiche liee (creation la premiere fois,
+        // mise a jour ensuite) — pas de bouton separe, cf sendProcedureSave.
+        if (embeddedProcedure) sendProcedureSave({ schematic_id: embeddedDrillId });
         flash("Enregistré ✓", true);
       } else if (msg.type === "SAVE_ERROR") {
         flash("Échec de l'enregistrement" + (msg.message ? " : " + msg.message : ""), false);
       } else if (msg.type === "LIBRARY_UPDATE") {
-        embeddedLibrary = { folders: msg.folders || [], schematics: msg.schematics || [] };
+        embeddedLibrary = { folders: msg.folders || [], procedures: msg.procedures || [] };
         refreshLibrary();
+      } else if (msg.type === "PROCEDURE_SAVED") {
+        embeddedProcedure = msg.procedure || null;
+        fillMeta();
+        flash("Fiche procédé enregistrée ✓", true);
+      } else if (msg.type === "PROCEDURE_SAVE_ERROR") {
+        flash("Échec de la fiche procédé" + (msg.message ? " : " + msg.message : ""), false);
       }
     });
     document.body.classList.add("embedded");

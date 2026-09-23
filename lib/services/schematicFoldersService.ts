@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient';
 export interface SchematicFolderRecord {
   id: string;
   team_id: string;
+  club_id: string;
   name: string;
   created_at: string;
   updated_at: string;
@@ -14,6 +15,18 @@ export const schematicFoldersService = {
       .from('schematic_folders')
       .select('*')
       .eq('team_id', teamId)
+      .order('name', { ascending: true });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  /** Dossiers du club entier — même bascule club-wide que les schémas (cf schematicsService.getSchematicsByClub). */
+  async getFoldersByClub(clubId: string): Promise<SchematicFolderRecord[]> {
+    const { data, error } = await supabase
+      .from('schematic_folders')
+      .select('*')
+      .eq('club_id', clubId)
       .order('name', { ascending: true });
 
     if (error) throw error;

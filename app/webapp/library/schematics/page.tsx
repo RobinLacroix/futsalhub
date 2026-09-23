@@ -9,17 +9,28 @@
 // Ce composant est le SEUL point de contact avec Supabase pour cet éditeur :
 // l'iframe ne voit jamais de session ni de clé. Protocole postMessage
 // (même origine, /tools/tactics/ est servi par cette même app Next.js) :
-//   -> INIT           { teamId, drillId, drill|null, roster, teamColors, library }
+//   -> INIT           { teamId, drillId, drill|null, procedure|null, roster, teamColors, library }
 //   -> CONTEXT_UPDATE { teamId, roster, teamColors, library }
 //   -> SAVED          { drillId }
 //   -> SAVE_ERROR     { message }
-//   -> LIBRARY_UPDATE { folders, schematics }
+//   -> LIBRARY_UPDATE { folders, procedures }
+//   -> PROCEDURE_SAVED       { procedure }   (fiche liée créée/mise à jour)
+//   -> PROCEDURE_SAVE_ERROR  { message }
 //   <- READY          {}
 //   <- SAVE           { drillId: string|null, drill: unknown }
 //   <- CLOSE          {}
-//   <- LIBRARY_ACTION { action, payload }  (bibliothèque/dossiers, ajout
-//                        2026-09 après la Phase 2 — cf editor.js pour le
-//                        détail des 6 actions)
+//   <- LIBRARY_ACTION { action, payload }  (bibliothèque/dossiers — actions :
+//                        createFolder/renameFolder/deleteFolder/setFolder
+//                        (payload.procedureId)/deleteProcedure/
+//                        duplicateProcedure ; procedures depuis le recadrage
+//                        2026-09-22, avant : schémas bruts)
+//   <- PROCEDURE_SAVE { procedureId: string|null, patch }  (panneau "Séance &
+//                        données", ajout 2026-09 : la fiche liée au schéma
+//                        (training_procedures.schematic_id) devient la
+//                        référence unique — le panneau n'écrit plus dans
+//                        schematics.data.meta/.rules pour ces champs-là. Le
+//                        schéma doit déjà être enregistré (drillId non nul) :
+//                        pas de fiche sans schéma à lier.
 //
 // Deux courses distinctes a respecter (les deux reproduites et corrigees en
 // session — ne pas "simplifier" sans revalider les deux) :
@@ -46,6 +57,7 @@ import { useActiveTeam } from '../../hooks/useActiveTeam';
 import { schematicsService } from '@/lib/services/schematicsService';
 import { schematicFoldersService } from '@/lib/services/schematicFoldersService';
 import { playersService } from '@/lib/services/playersService';
+import { trainingProceduresService, type ProcedureUpsertInput } from '@/lib/services/trainingProceduresService';
 
 const TACTICS_TOOL_SRC = '/tools/tactics/index.html';
 
@@ -59,6 +71,10 @@ function SchematicsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const schematicId = searchParams.get('schematic');
+  // Ouvre l'éditeur sur une fiche SANS schéma, pour en dessiner un et le lier
+  // (cf carte "Dessiner un schéma" de la bibliothèque quand hasSchematic est
+  // faux) — ignoré si `schematic` est aussi présent (un schéma déjà là prime).
+  const procedureIdParam = searchParams.get('procedure');
   const { activeTeam } = useActiveTeam();
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -66,19 +82,38 @@ function SchematicsPageContent() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const iframeReadyRef = useRef(false); // true dès que READY est reçu
   const initSentRef = useRef(false);    // true dès que l'INIT complet (avec drill) est parti
+  // Miroir synchrone de schematicId : sur le tout premier enregistrement d'un
+  // schéma neuf, le handler SAVE ci-dessous connaît l'id immédiatement (reçu
+  // de saveSchematic), mais router.replace() qui met `schematicId` (état,
+  // dérivé de l'URL) à jour ne re-render qu'après coup. Or l'éditeur poste
+  // PROCEDURE_SAVE quasi aussitôt après SAVED (cf sendProcedureSave côté
+  // editor.js) : le handler PROCEDURE_SAVE, qui capture `schematicId` par
+  // closure, le voyait donc encore à null et abandonnait en silence — la
+  // fiche du procédé n'était jamais créée au tout premier enregistrement
+  // (cf conversation 2026-09-22, "je veux que ce soit directement un procédé
+  // de la librairie avec fiche"). La ref est mise à jour de façon synchrone
+  // dans le handler SAVE, avant même l'appel à router.replace.
+  const schematicIdRef = useRef<string | null>(schematicId);
+  useEffect(() => {
+    schematicIdRef.current = schematicId;
+  }, [schematicId]);
 
   const sendToIframe = useCallback((message: unknown) => {
     iframeRef.current?.contentWindow?.postMessage(message, window.location.origin);
   }, []);
 
-  // Bibliothèque (dossiers + schémas) de l'équipe active — alimente le
-  // panneau "Bibliothèque" de l'éditeur embarqué (cf editor.js embeddedLibrary).
-  const fetchLibrary = useCallback(async (teamId: string) => {
-    const [folders, schematics] = await Promise.all([
-      schematicFoldersService.getFoldersByTeam(teamId),
-      schematicsService.getSchematicsByTeamId(teamId),
+  // Bibliothèque (dossiers + cartes) de TOUT LE CLUB — alimente le panneau
+  // "Bibliothèque" de l'éditeur embarqué (cf editor.js embeddedLibrary).
+  // Recadrage 2026-09-22 : une seule bibliothèque, même donnée que
+  // /webapp/library — procédés (avec schéma joint) UNION schémas sans fiche
+  // liée (cf getFullLibraryByClub). Sans l'union, un schéma jamais rattaché
+  // à une fiche disparaissait purement et simplement du panneau.
+  const fetchLibrary = useCallback(async (clubId: string) => {
+    const [folders, procedures] = await Promise.all([
+      schematicFoldersService.getFoldersByClub(clubId),
+      trainingProceduresService.getFullLibraryByClub(clubId),
     ]);
-    return { folders, schematics };
+    return { folders, procedures };
   }, []);
 
   // Effectif + couleurs de l'équipe active -> format attendu par l'outil.
@@ -96,7 +131,7 @@ function SchematicsPageContent() {
     // ses propres valeurs par défaut pour le reste (cf teamDefault() dans
     // editor.js). Gap connu, documenté dans la spec §3.5/§4.
     const teamColors = team.color ? { home: { fill: team.color } } : null;
-    const library = await fetchLibrary(team.id);
+    const library = await fetchLibrary(team.club_id);
     return { teamId: team.id, roster, teamColors, library };
   }, [fetchLibrary]);
 
@@ -110,15 +145,22 @@ function SchematicsPageContent() {
       const context = await buildContext(activeTeam);
       if (!initSentRef.current) {
         let drill: unknown = null;
+        let procedure = null;
         if (schematicId) {
-          const record = await schematicsService.getSchematicById(schematicId);
+          const [record, proc] = await Promise.all([
+            schematicsService.getSchematicById(schematicId),
+            trainingProceduresService.getProcedureBySchematicId(schematicId),
+          ]);
           // record.data est type SchematicData (ancien format circuits/sequences)
           // dans ce service, mais porte en réalité le format drill dès qu'un
           // schéma a été enregistré par le nouvel éditeur — le service ne
           // valide pas la forme du jsonb, il la fait juste transiter.
           drill = record?.data ?? null;
+          procedure = proc;
+        } else if (procedureIdParam) {
+          procedure = await trainingProceduresService.getProcedureById(procedureIdParam);
         }
-        sendToIframe({ type: 'INIT', ...context, drillId: schematicId, drill });
+        sendToIframe({ type: 'INIT', ...context, drillId: schematicId, drill, procedure });
         initSentRef.current = true;
         setStatus('ready');
       } else {
@@ -131,7 +173,7 @@ function SchematicsPageContent() {
         setErrorMessage("Impossible de charger le schéma ou l'effectif.");
       }
     }
-  }, [activeTeam, schematicId, buildContext, sendToIframe]);
+  }, [activeTeam, schematicId, procedureIdParam, buildContext, sendToIframe]);
 
   useEffect(() => {
     function handleMessage(ev: MessageEvent) {
@@ -157,6 +199,9 @@ function SchematicsPageContent() {
           // toucher schematicsService pour rester chirurgical).
           data: msg.drill as never,
         }).then((record) => {
+          // Synchrone, avant tout : PROCEDURE_SAVE peut arriver avant que
+          // router.replace() ci-dessous n'ait fait re-rendre `schematicId`.
+          schematicIdRef.current = record.id;
           sendToIframe({ type: 'SAVED', drillId: record.id });
           // Un premier enregistrement (id absent de l'URL) fixe l'URL sur le
           // nouvel id, pour qu'un rechargement de page rouvre ce schéma.
@@ -179,19 +224,48 @@ function SchematicsPageContent() {
           } else if (action === 'deleteFolder') {
             await schematicFoldersService.deleteFolder(String(payload.id));
           } else if (action === 'setFolder') {
-            await schematicsService.setSchematicFolder(String(payload.schematicId), (payload.folderId as string | null) || null);
-          } else if (action === 'deleteSchematic') {
-            await schematicsService.deleteSchematic(String(payload.id));
-          } else if (action === 'duplicateSchematic') {
-            await schematicsService.duplicateSchematic(String(payload.id));
+            // kind distingue une carte procédé (training_procedures.folder_id)
+            // d'un schéma sans fiche liée (schematics.folder_id) — les deux
+            // cas existent dans la bibliothèque unifiée (cf getFullLibraryByClub).
+            const folderId = (payload.folderId as string | null) || null;
+            if (payload.kind === 'schematic') await schematicsService.setSchematicFolder(String(payload.id), folderId);
+            else await trainingProceduresService.setProcedureFolder(String(payload.id), folderId);
+          } else if (action === 'deleteProcedure') {
+            if (payload.kind === 'schematic') await schematicsService.deleteSchematic(String(payload.id));
+            else await trainingProceduresService.archiveProcedure(String(payload.id));
+          } else if (action === 'duplicateProcedure') {
+            if (payload.kind === 'schematic') await schematicsService.duplicateSchematic(String(payload.id));
+            else await trainingProceduresService.duplicateProcedure(String(payload.id));
           }
         };
         run()
           .catch((err) => console.error('schematics: échec LIBRARY_ACTION ' + action, err))
           .finally(() => {
-            fetchLibrary(activeTeam.id)
-              .then(({ folders, schematics }) => sendToIframe({ type: 'LIBRARY_UPDATE', folders, schematics }))
+            fetchLibrary(activeTeam.club_id)
+              .then(({ folders, procedures }) => sendToIframe({ type: 'LIBRARY_UPDATE', folders, procedures }))
               .catch((err) => console.error('schematics: échec de rafraîchissement de la bibliothèque', err));
+          });
+      } else if (msg.type === 'PROCEDURE_SAVE') {
+        const savedSchematicId = schematicIdRef.current;
+        if (!activeTeam || !savedSchematicId) return;
+        const procedureId = (msg as { procedureId?: string | null }).procedureId || undefined;
+        const patch = ((msg as { patch?: Partial<ProcedureUpsertInput> }).patch || {}) as Partial<ProcedureUpsertInput>;
+        trainingProceduresService
+          .createOrUpdateProcedure({
+            ...patch,
+            id: procedureId,
+            schematic_id: savedSchematicId,
+            club_id: activeTeam.club_id,
+            title: patch.title || 'Sans titre',
+            objectives: patch.objectives || '',
+            instructions: patch.instructions || '',
+            type: patch.type || 'Exercice',
+            theme: patch.theme || 'Offensif',
+          })
+          .then((procedure) => sendToIframe({ type: 'PROCEDURE_SAVED', procedure }))
+          .catch((err) => {
+            console.error('schematics: échec de sauvegarde de la fiche procédé', err);
+            sendToIframe({ type: 'PROCEDURE_SAVE_ERROR', message: err instanceof Error ? err.message : 'Erreur inconnue' });
           });
       }
     }
