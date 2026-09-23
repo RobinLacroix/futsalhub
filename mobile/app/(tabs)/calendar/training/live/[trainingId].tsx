@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Pressable, StyleSheet } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme, makeStyles } from '../../../../../contexts/ThemeContext';
 import { haptics } from '../../../../../lib/design/haptics';
 import {
   startTrainingGame,
   endTrainingGame,
-  getOpenGameForTraining,
+  getGamesForTraining,
   type TimerMode,
   type TrainingGame,
 } from '../../../../../lib/services/trainingGames';
 import { enqueueTrainingGameScoreUpdate } from '../../../../../lib/offline/trainingGameOutbox';
+import { computeSquadStandings } from '../../../../../lib/liveSession/standings';
 import {
   readLiveSessionSnapshot,
   writeLiveSessionSnapshot,
@@ -44,6 +45,8 @@ export default function LiveGameScreen() {
   const [scoreHome, setScoreHome] = useState(0);
   const [scoreAway, setScoreAway] = useState(0);
   const [ending, setEnding] = useState(false);
+  /** Jeux clos de la séance, tous plateaux confondus — alimente le bandeau de classement live (§ plus de 2 plateaux constitués). */
+  const [finishedGames, setFinishedGames] = useState<TrainingGame[]>([]);
 
   const scoreRef = useRef({ scoreHome: 0, scoreAway: 0 });
   scoreRef.current = { scoreHome, scoreAway };
@@ -61,7 +64,10 @@ export default function LiveGameScreen() {
       setSnapshot(snap);
       if (snap.lastSeriesConfig) setSeriesConfig(snap.lastSeriesConfig);
 
-      const open = await getOpenGameForTraining(trainingId);
+      const allGames = await getGamesForTraining(trainingId);
+      setFinishedGames(allGames.filter((g) => g.ended_at));
+
+      const open = allGames.find((g) => !g.ended_at) ?? null;
       if (open) {
         setGame(open);
         setScoreHome(open.score_home);
@@ -155,18 +161,20 @@ export default function LiveGameScreen() {
   // ── Fin de jeu ──────────────────────────────────────────────────────────
 
   const finishGame = useCallback(async () => {
-    if (!game) return;
+    if (!game || !trainingId) return;
     setEnding(true);
     try {
       const durationSeconds = Math.floor((Date.now() - new Date(game.started_at ?? Date.now()).getTime()) / 1000);
       await endTrainingGame(game.id, durationSeconds);
+      const allGames = await getGamesForTraining(trainingId);
+      setFinishedGames(allGames.filter((g) => g.ended_at));
       setScreenState('nextGame');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');
     } finally {
       setEnding(false);
     }
-  }, [game]);
+  }, [game, trainingId]);
 
   useEffect(() => {
     if (timer.isFinished && screenState === 'playing') {
@@ -297,11 +305,43 @@ export default function LiveGameScreen() {
         </Pressable>
       </View>
 
+      {snapshot && snapshot.squads.length > 2 && (
+        <StandingsBanner squads={snapshot.squads} games={finishedGames} />
+      )}
+
       <View style={s.facesRow}>
         <GameFace squadLabel={homeLabel} bg={homeColor} score={scoreHome} onScore={() => applyScore(scoreHome + 1, scoreAway)} onUndo={() => applyScore(Math.max(0, scoreHome - 1), scoreAway)} />
         <GameFace squadLabel={awayLabel} bg={awayColor} score={scoreAway} onScore={() => applyScore(scoreHome, scoreAway + 1)} onUndo={() => applyScore(scoreHome, Math.max(0, scoreAway - 1))} />
       </View>
     </View>
+  );
+}
+
+/**
+ * Classement live de tous les plateaux constitués, pas seulement les deux qui
+ * jouent — visible dès qu'il y a plus de 2 plateaux (avec 2, les deux aplats
+ * suffisent). Ne compte que les jeux clos ; le jeu en cours reste dans les
+ * deux grands aplats jusqu'à "Terminer le jeu".
+ */
+function StandingsBanner({ squads, games }: { squads: LiveSessionSnapshot['squads']; games: TrainingGame[] }) {
+  const { theme } = useTheme();
+  const c = theme.colors;
+  const s = useStyles();
+  const standings = useMemo(() => computeSquadStandings(squads, games), [squads, games]);
+
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[s.standingsBar, { backgroundColor: c.bg.sunken, borderBottomColor: c.border.subtle }]} contentContainerStyle={s.standingsContent}>
+      {standings.map((sq) => (
+        <View key={sq.squadId} style={s.standingChip}>
+          <View style={[s.standingDot, { backgroundColor: c.chartSeries[sq.colorIndex % c.chartSeries.length] }]} />
+          <Text variant="caption" weight="600" numberOfLines={1}>{sq.label}</Text>
+          <Text variant="caption" tone="secondary" numeric>{sq.wins}V {sq.draws}N {sq.losses}D</Text>
+          <Text variant="caption" tone={sq.diff > 0 ? 'positive' : sq.diff < 0 ? 'negative' : 'tertiary'} numeric weight="600">
+            {sq.diff > 0 ? '+' : ''}{sq.diff}
+          </Text>
+        </View>
+      ))}
+    </ScrollView>
   );
 }
 
@@ -372,4 +412,8 @@ const useStyles = makeStyles((t) => ({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   facesRow: { flex: 1, flexDirection: 'row' },
+  standingsBar: { flexGrow: 0, borderBottomWidth: StyleSheet.hairlineWidth },
+  standingsContent: { flexDirection: 'row', gap: t.space.md, paddingHorizontal: t.space.lg, paddingVertical: t.space.sm },
+  standingChip: { flexDirection: 'row', alignItems: 'center', gap: t.space.xs },
+  standingDot: { width: 8, height: 8, borderRadius: 4 },
 }));
