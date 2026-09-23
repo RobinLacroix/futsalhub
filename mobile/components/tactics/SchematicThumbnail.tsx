@@ -32,20 +32,24 @@ export function SchematicThumbnail({ drill, size }: { drill: Drill; size?: numbe
       {width > 0 && kf && (
         <Svg width={width} height={width * (g.H / g.W)} viewBox={`0 0 ${g.W} ${g.H}`}>
           <PitchBackground pitch={drill.pitch} g={g} />
-          {(drill.zones ?? []).map((z) => (
-            <ZoneShape key={z.id} zone={z} g={g} />
+          {/* Clé composée id+index : certains schémas portent des doublons d'id
+              (ex. deux zones "z2", cf schémas historiques créés côté web avant
+              une correction de l'éditeur) — avec key={z.id} seul, React avertit
+              et peut silencieusement en faire disparaître un des deux. */}
+          {(drill.zones ?? []).map((z, i) => (
+            <ZoneShape key={`${z.id}-${i}`} zone={z} g={g} />
           ))}
-          {kf.lines.map((ln) => (
-            <FreeLine key={ln.id} line={ln} g={g} />
+          {kf.lines.map((ln, i) => (
+            <FreeLine key={`${ln.id}-${i}`} line={ln} g={g} />
           ))}
-          {kf.texts.map((tx) => (
-            <FreeTextMarker key={tx.id} item={tx} g={g} />
+          {kf.texts.map((tx, i) => (
+            <FreeTextMarker key={`${tx.id}-${i}`} item={tx} g={g} />
           ))}
-          {kf.pulses.map((pu) => (
-            <PulseMarker key={pu.id} item={pu} g={g} />
+          {kf.pulses.map((pu, i) => (
+            <PulseMarker key={`${pu.id}-${i}`} item={pu} g={g} />
           ))}
-          {kf.entities.map((entity) => (
-            <EntityToken key={entity.id} entity={entity} drill={drill} g={g} />
+          {kf.entities.map((entity, i) => (
+            <EntityToken key={`${entity.id}-${i}`} entity={entity} drill={drill} g={g} />
           ))}
         </Svg>
       )}

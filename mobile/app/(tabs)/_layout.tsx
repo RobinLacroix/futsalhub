@@ -93,6 +93,8 @@ const HIDDEN_ROUTES = [
   'notifications',
   'library/index',
   'library/[schematicId]',
+  'library/folder/[folderId]',
+  'library/procedure/[procedureId]',
   'sessions/index',
   'sessions/[sessionId]',
 ] as const;

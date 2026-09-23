@@ -164,6 +164,42 @@ export async function getMatchFeedbackResponses(matchId: string): Promise<Traini
   }));
 }
 
+// ─── Classement des votes MVP d'un match (staff) ──────────────────────────────
+
+export interface MatchMvpRanking {
+  ranking: { player_id: string; player_name: string; votes: number }[];
+  totalVoters: number;
+  votedCount: number;
+  isComplete: boolean;
+  mvpPlayerIds: string[];
+}
+
+/**
+ * Classement des votes MVP pour un match, staff uniquement. `isComplete` reflète
+ * si tous les joueurs convoqués ont répondu au questionnaire (le MVP officiel,
+ * matches.mvp_player_ids, n'est calculé côté RPC qu'à ce moment-là).
+ */
+export async function getMatchMvpVotes(matchId: string): Promise<MatchMvpRanking> {
+  const { data, error } = await supabase.rpc('get_match_mvp_votes', { p_match_id: matchId });
+  if (error) throw error;
+  const r = data as {
+    ranking?: { player_id: string; player_name: string; votes: number }[];
+    total_voters?: number;
+    voted_count?: number;
+    is_complete?: boolean;
+    mvp_player_ids?: string[];
+    error?: string;
+  } | null;
+  if (!r || r.error) throw new Error(r?.error || 'Erreur');
+  return {
+    ranking: r.ranking ?? [],
+    totalVoters: r.total_voters ?? 0,
+    votedCount: r.voted_count ?? 0,
+    isComplete: !!r.is_complete,
+    mvpPlayerIds: r.mvp_player_ids ?? [],
+  };
+}
+
 /**
  * Historique des feedbacks du joueur connecté.
  * Utilise un RPC SECURITY DEFINER car la RLS de training_player_feedback

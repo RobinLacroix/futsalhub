@@ -9,11 +9,14 @@
 
 import { useEffect, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../../contexts/ThemeContext';
 import {
   getTrainingFeedbackResponses,
   getMatchFeedbackResponses,
+  getMatchMvpVotes,
   type TrainingFeedbackResponse,
+  type MatchMvpRanking,
 } from '../../lib/services/feedback';
 import { Sheet, Text, Card, Badge, EmptyState } from '../ui';
 
@@ -38,6 +41,7 @@ export function TrainingFeedbackResponsesSheet({ visible, onClose, trainingId, m
   const [loading, setLoading] = useState(false);
   const [responses, setResponses] = useState<TrainingFeedbackResponse[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [mvpRanking, setMvpRanking] = useState<MatchMvpRanking | null>(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -48,6 +52,14 @@ export function TrainingFeedbackResponsesSheet({ visible, onClose, trainingId, m
       .then(setResponses)
       .catch((e) => setError(e instanceof Error ? e.message : 'Erreur'))
       .finally(() => setLoading(false));
+
+    if (matchId) {
+      getMatchMvpVotes(matchId)
+        .then(setMvpRanking)
+        .catch(() => setMvpRanking(null));
+    } else {
+      setMvpRanking(null);
+    }
   }, [visible, trainingId, matchId]);
 
   return (
@@ -70,6 +82,35 @@ export function TrainingFeedbackResponsesSheet({ visible, onClose, trainingId, m
             description="Les joueurs n'ont pas encore rempli le questionnaire."
             compact
           />
+        )}
+        {!loading && mvpRanking && mvpRanking.ranking.length > 0 && (
+          <Card variant="flat" padding="md" style={{ gap: theme.space.sm }}>
+            <View style={styles.header}>
+              <Ionicons name="trophy-outline" size={16} color={c.text.secondary} />
+              <Text variant="headline" style={styles.flex}>
+                Classement MVP
+              </Text>
+            </View>
+            <Text variant="caption" tone="secondary">
+              {mvpRanking.isComplete
+                ? `Vote terminé — ${mvpRanking.votedCount}/${mvpRanking.totalVoters} réponses.`
+                : `Vote en cours — ${mvpRanking.votedCount}/${mvpRanking.totalVoters} réponses.`}
+            </Text>
+            {mvpRanking.ranking.map((row) => {
+              const isTop = mvpRanking.isComplete && mvpRanking.mvpPlayerIds.includes(row.player_id);
+              return (
+                <View key={row.player_id} style={styles.mvpRow}>
+                  {isTop && <Ionicons name="trophy" size={14} color={c.warning.default} />}
+                  <Text variant="body" weight="600" style={styles.flex} numberOfLines={1}>
+                    {row.player_name}
+                  </Text>
+                  <Text variant="body" numeric tone="secondary">
+                    {row.votes} vx
+                  </Text>
+                </View>
+              );
+            })}
+          </Card>
         )}
         {!loading &&
           !error &&
@@ -111,4 +152,5 @@ const styles = StyleSheet.create({
   scoresRow: { flexDirection: 'row', justifyContent: 'space-between' },
   scoreItem: { alignItems: 'center', flex: 1 },
   comment: { fontStyle: 'italic' },
+  mvpRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
 });

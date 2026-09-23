@@ -133,11 +133,42 @@ export interface DrillTeamStyle {
   shape?: string;
 }
 
+/**
+ * Timeline "clips" par entité — même format que R.buildEntityTimeline (web,
+ * render-core.js), persisté sur `variants[i].timeline` par l'éditeur dès
+ * qu'un procédé y est ouvert (cf commentaire cleanDrill/editor.js : "un clip
+ * désynchronisé (mode avancé) ne tombe pas forcément sur une frontière
+ * d'étape"). Fondation du lecteur d'animation mobile (lib/tactics/timeline.ts) —
+ * lu tel quel s'il est présent, reconstruit depuis `keyframes` sinon (schémas
+ * plus anciens, jamais rouverts côté éditeur depuis l'ajout de ce champ).
+ */
+export interface DrillTimelineClip {
+  startMs: number;
+  durationMs: number;
+  toX: number;
+  toY: number;
+  to: DrillEntity;
+  curve?: boolean;
+  ctrls?: Array<{ x: number; y: number }>;
+}
+
+export interface DrillEntityTimelineRecord {
+  spawn: DrillEntity;
+  clips: DrillTimelineClip[];
+}
+
+export interface DrillTimeline {
+  totalMs: number;
+  entities: Record<string, DrillEntityTimelineRecord>;
+}
+
 export interface DrillVariant {
   id: string;
   name: string;
   /** Type large : seule keyframes[0] de la variante active est éditée ici, le reste (timeline avancée, etc.) est opaque. */
   keyframes: unknown;
+  /** Présent dès que l'éditeur web a ouvert cette variante depuis l'ajout du mode avancé — absent sur les schémas plus anciens (cf lib/tactics/timeline.ts, qui le reconstruit alors depuis `keyframes`). */
+  timeline?: DrillTimeline;
 }
 
 export interface Drill {

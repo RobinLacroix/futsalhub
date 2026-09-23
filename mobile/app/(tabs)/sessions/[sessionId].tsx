@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, makeStyles } from '../../../contexts/ThemeContext';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
 import { useIsTablet, LAYOUT } from '../../../hooks/useIsTablet';
-import { Screen, Text, Button, IconButton, Card, Section, Input, ChipGroup, type ChipOption } from '../../../components/ui';
+import { Screen, Text, Button, IconButton, Card, Section, Input, ChipGroup, HeaderBackButton, BackLink, type ChipOption } from '../../../components/ui';
 import { ProcedurePickerSheet } from '../../../components/training/ProcedurePickerSheet';
 import {
   getSessionById,
@@ -61,8 +61,11 @@ export default function SessionEditorScreen() {
   const [pickerForBlock, setPickerForBlock] = useState<string | null>(null);
 
   useEffect(() => {
-    navigation.setOptions({ title: 'Assembleur de séance' });
-  }, [navigation]);
+    navigation.setOptions({
+      title: 'Assembleur de séance',
+      headerLeft: () => <HeaderBackButton onPress={() => router.back()} />,
+    });
+  }, [navigation, router]);
 
   useEffect(() => {
     const clubId = activeTeam?.club_id;
@@ -148,6 +151,7 @@ export default function SessionEditorScreen() {
   if (loading) {
     return (
       <Screen scroll={false}>
+        {isTablet && <BackLink onPress={() => router.back()} />}
         <View style={s.center}>
           <ActivityIndicator color={theme.colors.accent.default} />
         </View>
@@ -160,6 +164,7 @@ export default function SessionEditorScreen() {
   return (
     <View style={[s.root, { backgroundColor: theme.colors.bg.canvas }]}>
       <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
+        {isTablet && <BackLink onPress={() => router.back()} />}
         <Input label="Nom de la séance" value={name} onChangeText={setName} placeholder="Ex : Semaine 3 — sortie de pression" />
 
         <Section title="Détails">

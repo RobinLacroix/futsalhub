@@ -254,10 +254,11 @@ export async function getPlayerStats(
   victories: number;
   draws: number;
   defeats: number;
+  mvp_count: number;
 }> {
   let matchesQ = supabase
     .from('matches')
-    .select('id, competition, players, score_team, score_opponent')
+    .select('id, competition, players, score_team, score_opponent, mvp_player_ids')
     .eq('team_id', teamId);
   if (season) matchesQ = matchesQ.eq('season', season);
   const { data: matchesData, error: matchesError } = await matchesQ;
@@ -380,6 +381,10 @@ export async function getPlayerStats(
     }, 0);
   }
 
+  const mvp_count = matches.filter((m) =>
+    ((m as any).mvp_player_ids as string[] | null ?? []).includes(playerId)
+  ).length;
+
   return {
     matches_played: matchesPlayed,
     goals,
@@ -389,6 +394,7 @@ export async function getPlayerStats(
     victories,
     draws,
     defeats,
+    mvp_count,
   };
 }
 
@@ -396,6 +402,7 @@ export interface PlayerSquadStat {
   matches: number;
   goals: number;
   assists: number;
+  mvp: number;
   seances: number; // séances présent ou en retard
   unexcusedCount: number; // absences/retards non prévenus, sur la saison
 }
@@ -411,7 +418,7 @@ export async function getSquadBulkStats(
 ): Promise<Record<string, PlayerSquadStat>> {
   let matchesQ = supabase
     .from('matches')
-    .select('competition, players, score_team, score_opponent')
+    .select('competition, players, score_team, score_opponent, mvp_player_ids')
     .eq('team_id', teamId);
   if (season) matchesQ = matchesQ.eq('season', season);
   let trainingsQ = supabase
@@ -436,7 +443,7 @@ export async function getSquadBulkStats(
   const stats: Record<string, PlayerSquadStat> = {};
 
   const ensurePlayer = (id: string) => {
-    if (!stats[id]) stats[id] = { matches: 0, goals: 0, assists: 0, seances: 0, unexcusedCount: 0 };
+    if (!stats[id]) stats[id] = { matches: 0, goals: 0, assists: 0, mvp: 0, seances: 0, unexcusedCount: 0 };
   };
 
   for (const m of matches) {
@@ -451,6 +458,9 @@ export async function getSquadBulkStats(
         stats[p.id].matches += 1;
         stats[p.id].goals += p.goals ?? 0;
         stats[p.id].assists += p.assists ?? 0;
+        if (((m as any).mvp_player_ids as string[] | null ?? []).includes(p.id)) {
+          stats[p.id].mvp += 1;
+        }
       }
     } catch {
       // JSONB malformé — ignorer ce match

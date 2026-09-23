@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react';
 import { View, ActivityIndicator, Alert } from 'react-native';
-import { useLocalSearchParams, useNavigation } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useTheme, makeStyles } from '../../../contexts/ThemeContext';
-import { Screen, Text } from '../../../components/ui';
-import { SchematicThumbnail } from '../../../components/tactics/SchematicThumbnail';
+import { useIsTablet } from '../../../hooks/useIsTablet';
+import { Screen, Text, HeaderBackButton, BackLink } from '../../../components/ui';
+import { DrillPlayer } from '../../../components/tactics/DrillPlayer';
 import { getSchematicById, type SchematicRecord } from '../../../lib/services/schematicsService';
 
 /** Aperçu plein écran d'un schéma — lecture seule, même limite que la bibliothèque (cf index.tsx). */
 export default function SchematicDetailScreen() {
   const { schematicId } = useLocalSearchParams<{ schematicId: string }>();
   const navigation = useNavigation();
+  const router = useRouter();
   const { theme } = useTheme();
+  const isTablet = useIsTablet();
   const s = useStyles();
 
   const [record, setRecord] = useState<SchematicRecord | null>(null);
@@ -32,12 +35,16 @@ export default function SchematicDetailScreen() {
   }, [schematicId]);
 
   useEffect(() => {
-    navigation.setOptions({ title: record?.name || 'Schéma' });
-  }, [navigation, record]);
+    navigation.setOptions({
+      title: record?.name || 'Schéma',
+      headerLeft: () => <HeaderBackButton onPress={() => router.back()} />,
+    });
+  }, [navigation, record, router]);
 
   if (loading || !record) {
     return (
       <Screen scroll={false}>
+        {isTablet && <BackLink onPress={() => router.back()} />}
         <View style={s.center}>
           <ActivityIndicator color={theme.colors.accent.default} />
         </View>
@@ -47,7 +54,8 @@ export default function SchematicDetailScreen() {
 
   return (
     <Screen>
-      <SchematicThumbnail drill={record.data} />
+      {isTablet && <BackLink onPress={() => router.back()} />}
+      <DrillPlayer drill={record.data} />
       <Text variant="title" style={s.title}>
         {record.name || 'Sans titre'}
       </Text>

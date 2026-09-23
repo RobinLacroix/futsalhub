@@ -23,6 +23,8 @@ export type { ButtonProps, ButtonVariant, ButtonSize } from './Button';
 export { IconButton } from './IconButton';
 export type { IconButtonProps, IconButtonVariant, IconButtonSize } from './IconButton';
 
+export { HeaderBackButton, BackLink } from './HeaderBackButton';
+
 export { Stat } from './Stat';
 export type { StatProps, StatSize } from './Stat';
 
