@@ -70,7 +70,8 @@
             "backgroundColor": "#0E1116"
           }
         }
-      ]
+      ],
+      "expo-audio"
     ],
     "extra": {
       "router": {},
