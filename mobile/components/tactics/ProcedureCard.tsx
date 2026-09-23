@@ -1,4 +1,5 @@
-import { View, StyleSheet } from 'react-native';
+import { View, Pressable, StyleSheet } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme, makeStyles } from '../../contexts/ThemeContext';
 import { Card, Text, Badge } from '../ui';
 import { SchematicThumbnail } from './SchematicThumbnail';
@@ -10,8 +11,19 @@ import type { LibraryCard } from '../../lib/services/trainingProceduresService';
  * .lib-card côté web (app/webapp/library/page.tsx) : vignette + titre + Bloc/
  * Phase de jeu si c'est un procédé avec fiche, badge "Sans fiche" sinon (cf
  * LibraryCard, qui unifie les deux cas — recadrage 2026-09-22).
+ *
+ * `onDelete` optionnelle : la bibliothèque (2026-09-23) l'utilise, un futur
+ * appelant en lecture seule (ex. un picker) peut s'en passer.
  */
-export function ProcedureCard({ card, onPress }: { card: LibraryCard; onPress: () => void }) {
+export function ProcedureCard({
+  card,
+  onPress,
+  onDelete,
+}: {
+  card: LibraryCard;
+  onPress: () => void;
+  onDelete?: () => void;
+}) {
   const { theme } = useTheme();
   const c = theme.colors;
   const s = useStyles();
@@ -34,6 +46,20 @@ export function ProcedureCard({ card, onPress }: { card: LibraryCard; onPress: (
               Pas de schéma
             </Text>
           </View>
+        )}
+        {onDelete && (
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Supprimer"
+            hitSlop={8}
+            style={[s.deleteBtn, { backgroundColor: c.bg.elevated, borderColor: c.border.subtle }]}
+          >
+            <Ionicons name="trash-outline" size={14} color={c.negative.default} />
+          </Pressable>
         )}
       </View>
       <View style={s.meta}>
@@ -64,6 +90,17 @@ const useStyles = makeStyles((t) => ({
   card: { width: '47%', overflow: 'hidden' },
   thumb: { borderBottomWidth: StyleSheet.hairlineWidth },
   noThumb: { width: '100%', aspectRatio: 1.8, alignItems: 'center', justifyContent: 'center' },
+  deleteBtn: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 28,
+    height: 28,
+    borderRadius: t.radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   meta: { padding: t.space.md, gap: 3 },
   badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.xs, marginTop: 2 },
 }));
