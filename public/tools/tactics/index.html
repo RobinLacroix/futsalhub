@@ -101,7 +101,7 @@
   /* Le terrain absorbe la hauteur restante ; preserveAspectRatio s'occupe du
      letterboxing, donc il reste centre quel que soit le format de la fenetre. */
   .canvas-card>svg#pitch{flex:1;min-height:0;height:100%}
-  .canvas-card>.seqbar,.canvas-card>.playbar,.canvas-card>.tl-wrap,.canvas-card>.canvas-toolbar{flex:none}
+  .canvas-card>.seqbar,.canvas-card>.playbar,.canvas-card>.canvas-toolbar{flex:none}
   /* Panneau d'inspection : flotte au-dessus du terrain (coin haut-gauche) au lieu
      de reserver une colonne fixe en permanence — le terrain recupere toute la
      largeur disponible ; le panneau n'apparait que quand un element est
@@ -115,7 +115,7 @@
   .inspector-drag-handle:hover{color:var(--text)}
   .inspector-drag-handle svg{width:14px;height:14px;flex:none}
   .inspector-drag-handle.dragging{cursor:grabbing;color:var(--accent)}
-  .toolrail{flex:none;width:64px;display:flex;flex-direction:column;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:10px 8px;order:2}
+  .toolrail{flex:none;width:64px;display:flex;flex-direction:column;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:10px 8px;order:3}
   .toolrail>.rail-btn,.tool-item>.rail-btn{width:44px;height:44px;padding:0;display:flex;align-items:center;justify-content:center}
   .toolrail .rail-btn svg{width:22px;height:22px;overflow:visible}
   .rail-sep{height:1px;background:var(--line);margin:2px 0}
@@ -191,8 +191,15 @@
      d'objet, repliables, avec des clips positionnes/dimensionnes au prorata de
      leur startMs/durationMs sur la largeur disponible. Glisser le corps d'un
      clip decale son debut ; sa poignee droite change sa duree (Milestone 5). */
-  .tl-wrap{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;margin-top:10px}
-  .tl-toprow{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+  .tl-wrap{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px}
+  /* Panneau lateral plutot qu'empile sous le terrain (qui lui laissait de
+     moins en moins de hauteur a mesure que les pistes/groupes s'ajoutaient) :
+     largeur fixe, hauteur pleine (stretch de .workspace), et seule la liste
+     des pistes (#advTracks) defile — l'entete/la regle restent visibles en
+     repere pendant le scroll. Demande Robin 2026-09-25. */
+  #advTimeline{order:2;flex:none;width:360px;max-width:38vw;height:100%;min-height:0;margin-top:0;display:flex;flex-direction:column}
+  #advTimeline #advTracks{flex:1;min-height:0;overflow-y:auto}
+  .tl-toprow{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;flex:none}
   .tl-ruler{position:relative;height:18px;margin-left:150px;border-bottom:1px solid var(--line-strong);font-size:10px;color:var(--muted);font-family:var(--font-mono);cursor:pointer}
   .tl-ruler span{position:absolute;top:0}
   .tl-guide{position:absolute;top:0;bottom:0;width:1px;border-left:1px dashed var(--line-strong)}
@@ -486,6 +493,12 @@
        — suit le viewBox reel, terrain configure ou vue demi-terrain compris)
        plutot que depuis une hauteur de conteneur qui n'existe plus ici. */
     .canvas-card>svg#pitch{flex:none;height:auto}
+    /* Sous 900px la page entiere defile deja (body:height:auto plus haut) :
+       le panneau lateral n'a plus de raison d'etre une colonne etroite a
+       hauteur fixe, il redevient un bloc pleine largeur a hauteur naturelle,
+       stacke entre le rail d'outils et le bloc enregistrer/export. */
+    #advTimeline{order:2;width:100%;max-width:none;height:auto;margin-top:10px}
+    #advTimeline #advTracks{flex:none;overflow-y:visible}
     /* Regroupement des barres d'outils (§2.4) : .sec-group vaut display:contents
        en permanence hors de ce media query (cf regle de base plus bas — aucun
        effet desktop, les boutons qu'il enveloppe restent des enfants flex
@@ -888,31 +901,34 @@
         <button id="advToggle" title="Mode avancé : timeline libre, chaque déplacement indépendant (bêta — entités uniquement pour l'instant)">Mode avancé</button>
       </div>
       </div>
-      <div class="tl-wrap hidden" id="advTimeline">
-        <div class="tl-toprow">
-          <span class="seqlabel">Timeline avancée</span>
-          <details class="help-pop up"><summary title="Aide de la timeline" aria-label="Aide de la timeline">?</summary><div class="help-body"><div class="hint">Glisse un clip pour le décaler, sa poignée droite pour sa durée — ou clique une piste vide pour créer un déplacement. Clique un clip pour en régler les valeurs précises, Maj+clic pour en sélectionner plusieurs et les décaler ou les aligner ensemble.</div></div></details>
-          <button id="advToggleBack" class="icon-btn" title="Revenir au mode simple" aria-label="Revenir au mode simple" style="margin-left:auto"><svg viewBox="0 0 20 20"><path d="M5 3.5 L15.5 12 L11 12.8 L13.5 17.5 L11.3 18.6 L8.8 13.9 L5.8 16.8 Z" fill="currentColor" /></svg></button>
-        </div>
-        <div class="tl-clip-inspector hidden" id="advClipInspector">
-          <span class="seqlabel" id="advClipInspectorLabel">Clip</span>
-          <label class="tl-num">Début (temps) <input type="number" id="advClipStart" min="0" step="0.1" style="width:60px" /> s</label>
-          <label class="tl-num">Durée <input type="number" id="advClipDur" min="0.15" step="0.1" style="width:60px" /> s</label>
-          <span class="io-sep" aria-hidden="true"></span>
-          <label class="tl-num" title="Position au debut du clip — c'est l'arrivee du clip precedent (ou le point de depart initial si c'est le premier) : la modifier ici deplace aussi ce clip precedent">Départ X <input type="number" id="advClipFromX" step="0.1" style="width:64px" /> m</label>
-          <label class="tl-num">Y <input type="number" id="advClipFromY" step="0.1" style="width:64px" /> m</label>
-          <label class="tl-num">Arrivée X <input type="number" id="advClipX" step="0.1" style="width:64px" /> m</label>
-          <label class="tl-num">Y <input type="number" id="advClipY" step="0.1" style="width:64px" /> m</label>
-          <button id="advClipDelete" class="icon-btn danger" title="Supprimer ce clip" aria-label="Supprimer ce clip"><svg viewBox="0 0 20 20"><line x1="5" y1="5" x2="15" y2="15" stroke="currentColor" stroke-width="2" /><line x1="15" y1="5" x2="5" y2="15" stroke="currentColor" stroke-width="2" /></svg></button>
-        </div>
-        <div class="tl-clip-inspector hidden" id="advClipMultiBar">
-          <span class="seqlabel" id="advClipMultiLabel">Clips sélectionnés</span>
-          <button id="advClipAlign" title="Aligner le début de tous les clips sélectionnés sur le plus précoce">Aligner les débuts</button>
-          <button id="advClipMultiDelete" class="icon-btn danger" title="Supprimer les clips sélectionnés" aria-label="Supprimer les clips sélectionnés"><svg viewBox="0 0 20 20"><line x1="5" y1="5" x2="15" y2="15" stroke="currentColor" stroke-width="2" /><line x1="15" y1="5" x2="5" y2="15" stroke="currentColor" stroke-width="2" /></svg></button>
-        </div>
-        <div class="tl-ruler" id="advRuler"></div>
-        <div id="advTracks"></div>
+    </div>
+    <!-- Panneau lateral (pas empile sous le terrain) : menu scrollable en
+         hauteur, pour laisser au terrain toute la hauteur disponible en mode
+         avance (demande Robin 2026-09-25, cf .tl-wrap#advTimeline en CSS). -->
+    <div class="tl-wrap hidden" id="advTimeline">
+      <div class="tl-toprow">
+        <span class="seqlabel">Timeline avancée</span>
+        <details class="help-pop up"><summary title="Aide de la timeline" aria-label="Aide de la timeline">?</summary><div class="help-body"><div class="hint">Glisse un clip pour le décaler, sa poignée droite pour sa durée — ou clique une piste vide pour créer un déplacement. Clique un clip pour en régler les valeurs précises, Maj+clic pour en sélectionner plusieurs et les décaler ou les aligner ensemble.</div></div></details>
+        <button id="advToggleBack" class="icon-btn" title="Revenir au mode simple" aria-label="Revenir au mode simple" style="margin-left:auto"><svg viewBox="0 0 20 20"><path d="M5 3.5 L15.5 12 L11 12.8 L13.5 17.5 L11.3 18.6 L8.8 13.9 L5.8 16.8 Z" fill="currentColor" /></svg></button>
       </div>
+      <div class="tl-clip-inspector hidden" id="advClipInspector">
+        <span class="seqlabel" id="advClipInspectorLabel">Clip</span>
+        <label class="tl-num">Début (temps) <input type="number" id="advClipStart" min="0" step="0.1" style="width:60px" /> s</label>
+        <label class="tl-num">Durée <input type="number" id="advClipDur" min="0.15" step="0.1" style="width:60px" /> s</label>
+        <span class="io-sep" aria-hidden="true"></span>
+        <label class="tl-num" title="Position au debut du clip — c'est l'arrivee du clip precedent (ou le point de depart initial si c'est le premier) : la modifier ici deplace aussi ce clip precedent">Départ X <input type="number" id="advClipFromX" step="0.1" style="width:64px" /> m</label>
+        <label class="tl-num">Y <input type="number" id="advClipFromY" step="0.1" style="width:64px" /> m</label>
+        <label class="tl-num">Arrivée X <input type="number" id="advClipX" step="0.1" style="width:64px" /> m</label>
+        <label class="tl-num">Y <input type="number" id="advClipY" step="0.1" style="width:64px" /> m</label>
+        <button id="advClipDelete" class="icon-btn danger" title="Supprimer ce clip" aria-label="Supprimer ce clip"><svg viewBox="0 0 20 20"><line x1="5" y1="5" x2="15" y2="15" stroke="currentColor" stroke-width="2" /><line x1="15" y1="5" x2="5" y2="15" stroke="currentColor" stroke-width="2" /></svg></button>
+      </div>
+      <div class="tl-clip-inspector hidden" id="advClipMultiBar">
+        <span class="seqlabel" id="advClipMultiLabel">Clips sélectionnés</span>
+        <button id="advClipAlign" title="Aligner le début de tous les clips sélectionnés sur le plus précoce">Aligner les débuts</button>
+        <button id="advClipMultiDelete" class="icon-btn danger" title="Supprimer les clips sélectionnés" aria-label="Supprimer les clips sélectionnés"><svg viewBox="0 0 20 20"><line x1="5" y1="5" x2="15" y2="15" stroke="currentColor" stroke-width="2" /><line x1="15" y1="5" x2="5" y2="15" stroke="currentColor" stroke-width="2" /></svg></button>
+      </div>
+      <div class="tl-ruler" id="advRuler"></div>
+      <div id="advTracks"></div>
     </div>
 
     <div class="toolrail" id="toolrail">

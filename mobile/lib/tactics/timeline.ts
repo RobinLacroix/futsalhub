@@ -1,6 +1,7 @@
 import type {
   Drill,
   DrillEntity,
+  DrillEntityTimelineRecord,
   DrillKeyframe,
   DrillLine,
   DrillPulse,
@@ -164,6 +165,135 @@ export function entityStateAtMs(tl: DrillTimeline, id: string, t: number): Drill
   return state;
 }
 
+/** Flèche de déplacement (joueur/appui/ballon) — port de l'objet retourné par computeArrowsAtMs (web, render-core.js). */
+export interface DrillArrow {
+  type: 'run' | 'pass' | 'dribble';
+  from: Pt;
+  to: Pt;
+  ctrls?: Array<{ x: number; y: number }>;
+  pts?: Pt[] | null;
+  width?: number;
+  aerial?: boolean;
+}
+
+const ARROW_MOVED = 0.3;
+
+/** Clip actif d'une entité à l'instant t — port de activeClipIndexAt (web, render-core.js). Borne haute EXCLUSIVE (cf commentaire web) : au ms partagé entre un clip qui se termine et le suivant qui démarre, on bascule immédiatement sur le nouveau plutôt que de laisser la flèche du précédent une image de plus. */
+function activeClipIndexAt(rec: DrillEntityTimelineRecord, t: number, totalMs: number): number {
+  for (let i = 0; i < rec.clips.length; i++) {
+    const c = rec.clips[i];
+    if (t >= c.startMs && t < c.startMs + c.durationMs) return i;
+  }
+  const n = rec.clips.length;
+  if (n && t >= totalMs) return n - 1;
+  return -1;
+}
+
+/** État "de départ" du clip ci — port de clipFromState (web). */
+function clipFromState(rec: DrillEntityTimelineRecord, ci: number): DrillEntity {
+  return ci > 0 ? rec.clips[ci - 1].to : rec.spawn;
+}
+
+/** Port de curvePointsForClip (web) : même spline Catmull-Rom que sampleEntityAt, échantillonnée sur toute la longueur du clip pour tracer la flèche. */
+function curvePointsForClip(rec: DrillEntityTimelineRecord, ci: number, steps: number): Pt[] {
+  const clips = rec.clips, c = clips[ci], from = clipFromState(rec, ci);
+  const p0 = ci >= 2 ? { x: clips[ci - 2].toX, y: clips[ci - 2].toY } : { x: rec.spawn.x, y: rec.spawn.y };
+  const p3 = ci + 1 < clips.length ? { x: clips[ci + 1].toX, y: clips[ci + 1].toY } : { x: c.toX, y: c.toY };
+  const pts: Pt[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const u = i / steps;
+    pts.push({ x: catmullRom1D(p0.x, from.x, c.toX, p3.x, u), y: catmullRom1D(p0.y, from.y, c.toY, p3.y, u) });
+  }
+  return pts;
+}
+
+/**
+ * Flèches visibles à l'instant absolu t (ms) — port de computeArrowsAtMs
+ * (web, render-core.js) : chaque entité n'a une flèche que pendant la
+ * fenêtre [startMs, startMs+durationMs) de son propre clip actif, exactement
+ * synchronisée avec sampleEntityAt qui déplace son jeton (contrairement à
+ * l'ancien calcul par étape entière, qui aurait affiché la flèche avant que
+ * le jeton ne bouge réellement en mode avancé désynchronisé).
+ */
+export function computeArrowsAtMs(tl: DrillTimeline, t: number): DrillArrow[] {
+  const out: DrillArrow[] = [];
+  const ids = Object.keys(tl.entities);
+  const states: Record<string, DrillEntity | null> = {};
+  ids.forEach((id) => { states[id] = entityStateAtMs(tl, id, t); });
+
+  const carriers: Record<string, string> = {};
+  ids.forEach((id) => {
+    const st = states[id];
+    if (st && st.type === 'ball' && st.attachedTo) carriers[st.attachedTo as string] = id;
+  });
+
+  const ballHandled: Record<string, true> = {};
+  ids.forEach((id) => {
+    const st = states[id];
+    if (!st || (st.type !== 'player' && st.type !== 'support')) return;
+    const rec = tl.entities[id];
+    const ci = activeClipIndexAt(rec, t, tl.totalMs);
+    if (ci < 0) return;
+    const clip = rec.clips[ci], from = clipFromState(rec, ci);
+    const d = Math.hypot(clip.toX - from.x, clip.toY - from.y);
+    if (d < ARROW_MOVED) return;
+    const arrowWidth = typeof st.arrowWidth === 'number' ? st.arrowWidth : undefined;
+
+    const ballId = carriers[id];
+    const brec = ballId ? tl.entities[ballId] : null;
+    const bci = brec ? activeClipIndexAt(brec, t, tl.totalMs) : -1;
+    if (brec && bci >= 0) {
+      const bclip = brec.clips[bci], bfrom = clipFromState(brec, bci);
+      const bd = Math.hypot(bclip.toX - bfrom.x, bclip.toY - bfrom.y);
+      const together = Math.hypot((bclip.toX - bfrom.x) - (clip.toX - from.x), (bclip.toY - bfrom.y) - (clip.toY - from.y)) < 0.7;
+      if (bd >= ARROW_MOVED && together) {
+        out.push({
+          type: 'dribble',
+          from: { x: from.x, y: from.y },
+          to: { x: clip.toX, y: clip.toY },
+          ctrls: clip.ctrls,
+          width: arrowWidth,
+          pts: clip.curve ? curvePointsForClip(rec, ci, 16) : null,
+        });
+        ballHandled[ballId as string] = true;
+        return;
+      }
+    }
+    out.push({
+      type: 'run',
+      from: { x: from.x, y: from.y },
+      to: { x: clip.toX, y: clip.toY },
+      ctrls: clip.ctrls,
+      width: arrowWidth,
+      pts: clip.curve ? curvePointsForClip(rec, ci, 16) : null,
+    });
+  });
+
+  ids.forEach((id) => {
+    if (ballHandled[id]) return;
+    const st = states[id];
+    if (!st || st.type !== 'ball') return;
+    const rec = tl.entities[id];
+    const ci = activeClipIndexAt(rec, t, tl.totalMs);
+    if (ci < 0) return;
+    const clip = rec.clips[ci], from = clipFromState(rec, ci);
+    const d = Math.hypot(clip.toX - from.x, clip.toY - from.y);
+    if (d < ARROW_MOVED) return;
+    const arrowWidth = typeof st.arrowWidth === 'number' ? st.arrowWidth : undefined;
+    out.push({
+      type: 'pass',
+      from: { x: from.x, y: from.y },
+      to: { x: clip.toX, y: clip.toY },
+      ctrls: clip.ctrls,
+      width: arrowWidth,
+      pts: clip.curve ? curvePointsForClip(rec, ci, 16) : null,
+      aerial: !!st.aerial,
+    });
+  });
+
+  return out;
+}
+
 interface VisibilityWindow {
   visibleFrom?: number | null;
   visibleTo?: number | null;
@@ -207,6 +337,7 @@ export function buildOverlayGlobal<T extends { id: string }>(
 
 export interface DrillFrame {
   entities: DrillEntity[];
+  arrows: DrillArrow[];
   lines: DrillLine[];
   texts: DrillText[];
   pulses: DrillPulse[];
@@ -239,6 +370,7 @@ export function frameAt(drill: Drill, tl: DrillTimeline, overlays: DrillOverlays
 
   return {
     entities,
+    arrows: computeArrowsAtMs(tl, t),
     lines: overlays.lines.filter((ln) => visibleAt(ln, t)),
     texts: overlays.texts.filter((tx) => visibleAt(tx, t)),
     pulses: overlays.pulses.filter((pu) => visibleAt(pu, t)),

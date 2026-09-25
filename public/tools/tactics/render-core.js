@@ -151,6 +151,105 @@ window.DrillRender = (function () {
     return out;
   }
 
+  // Clip actif d'une entite a l'instant t, sur la timeline canonique (tl) —
+  // pendant de computeArrows mais precis a la milliseconde plutot que par
+  // etape entiere : necessaire pour que la fleche d'un mouvement desynchronise
+  // (mode avance) apparaisse EXACTEMENT quand il demarre, pas seulement quand
+  // toute l'etape qui le contient commence (cf renderAnimated ci-dessous).
+  // Borne HAUTE exclusive : au ms partage entre un clip qui se termine et le
+  // suivant qui demarre (deplacements consecutifs), on bascule immediatement
+  // sur le nouveau plutot que de laisser trainer l'ancien une image de plus —
+  // c'est precisement l'inverse qui causait le decalage signale par Robin
+  // (la fleche du nouveau mouvement n'apparaissait qu'a l'image suivante).
+  // Exception : sur l'image de fin de la SEQUENCE COMPLETE (t >= totalMs), on
+  // garde le dernier clip actif au lieu de rendre -1, pour que la derniere
+  // fleche ne disparaisse pas pile sur l'image figee finale.
+  function activeClipIndexAt(rec, t, totalMs) {
+    for (var i = 0; i < rec.clips.length; i++) {
+      var c = rec.clips[i];
+      if (t >= c.startMs && t < c.startMs + c.durationMs) return i;
+    }
+    var n = rec.clips.length;
+    if (n && t >= totalMs) return n - 1;
+    return -1;
+  }
+  // Etat "de depart" du clip ci d'une entite — meme definition que
+  // fromStateOf cote editeur (arrivee du clip precedent, ou spawn pour le
+  // premier), necessaire ici puisque render-core n'a pas acces a la closure
+  // de l'editeur.
+  function clipFromState(rec, ci) { return ci > 0 ? rec.clips[ci - 1].to : rec.spawn; }
+  // Meme spline Catmull-Rom que curvePoints, mais a partir des voisins de la
+  // CHAINE DE CLIPS (comme sampleEntityAt) plutot que des keyframes — la
+  // fleche suit alors exactement la trajectoire echantillonnee pour la
+  // position du jeton, y compris en mode avance ou clip et etape ne
+  // coincident plus.
+  function curvePointsForClip(rec, ci, steps) {
+    var clips = rec.clips, c = clips[ci], from = clipFromState(rec, ci);
+    var p0 = (ci >= 2) ? { x: clips[ci - 2].toX, y: clips[ci - 2].toY } : { x: rec.spawn.x, y: rec.spawn.y };
+    var p3 = (ci + 1 < clips.length) ? { x: clips[ci + 1].toX, y: clips[ci + 1].toY } : { x: c.toX, y: c.toY };
+    var pts = [];
+    for (var i = 0; i <= steps; i++) {
+      var u = i / steps;
+      pts.push({ x: catmullRom1D(p0.x, from.x, c.toX, p3.x, u), y: catmullRom1D(p0.y, from.y, c.toY, p3.y, u) });
+    }
+    return pts;
+  }
+  // Fleches visibles a l'instant absolu t (ms), a partir de la timeline
+  // canonique — remplace computeArrows(drill, seg) dans renderAnimated : ce
+  // dernier derive les fleches des positions aux FRONTIERES d'etape, donc les
+  // affiche pendant toute la duree de l'etape meme quand le clip d'une entite
+  // (mode avance, desynchronise) ne demarre qu'en cours d'etape — la fleche
+  // apparaissait alors avant que le jeton ne bouge reellement, et restait
+  // affichee apres son arrivee jusqu'a la fin de l'etape. Ici chaque entite
+  // n'a une fleche que pendant la fenetre [startMs, startMs+durationMs) de
+  // son propre clip actif, exactement synchronisee avec sampleEntityAt qui
+  // deplace son jeton.
+  function computeArrowsAtMs(drill, tl, t) {
+    var out = [], ids = Object.keys(tl.entities), MOVED = 0.3;
+    var states = {};
+    ids.forEach(function (id) { states[id] = entityStateAtMs(tl, id, t); });
+    var carriers = {};
+    ids.forEach(function (id) {
+      var st = states[id];
+      if (st && st.type === "ball" && st.attachedTo) carriers[st.attachedTo] = id;
+    });
+    var ballHandled = {};
+    ids.forEach(function (id) {
+      var st = states[id];
+      if (!st || (st.type !== "player" && st.type !== "support")) return;
+      var rec = tl.entities[id], ci = activeClipIndexAt(rec, t, tl.totalMs);
+      if (ci < 0) return;
+      var clip = rec.clips[ci], from = clipFromState(rec, ci);
+      var d = Math.hypot(clip.toX - from.x, clip.toY - from.y);
+      if (d < MOVED) return;
+      var ballId = carriers[id], brec = ballId ? tl.entities[ballId] : null;
+      var bci = brec ? activeClipIndexAt(brec, t, tl.totalMs) : -1;
+      if (brec && bci >= 0) {
+        var bclip = brec.clips[bci], bfrom = clipFromState(brec, bci);
+        var bd = Math.hypot(bclip.toX - bfrom.x, bclip.toY - bfrom.y);
+        var together = Math.hypot((bclip.toX - bfrom.x) - (clip.toX - from.x), (bclip.toY - bfrom.y) - (clip.toY - from.y)) < 0.7;
+        if (bd >= MOVED && together) {
+          out.push({ type: "dribble", from: { x: from.x, y: from.y }, to: { x: clip.toX, y: clip.toY }, actorId: id, srcId: id, ctrls: clip.ctrls, width: st.arrowWidth, pts: clip.curve ? curvePointsForClip(rec, ci, 16) : null });
+          ballHandled[ballId] = true;
+          return;
+        }
+      }
+      out.push({ type: "run", from: { x: from.x, y: from.y }, to: { x: clip.toX, y: clip.toY }, actorId: id, srcId: id, ctrls: clip.ctrls, width: st.arrowWidth, pts: clip.curve ? curvePointsForClip(rec, ci, 16) : null });
+    });
+    ids.forEach(function (id) {
+      if (ballHandled[id]) return;
+      var st = states[id];
+      if (!st || st.type !== "ball") return;
+      var rec = tl.entities[id], ci = activeClipIndexAt(rec, t, tl.totalMs);
+      if (ci < 0) return;
+      var clip = rec.clips[ci], from = clipFromState(rec, ci);
+      var d = Math.hypot(clip.toX - from.x, clip.toY - from.y);
+      if (d < MOVED) return;
+      out.push({ type: "pass", from: { x: from.x, y: from.y }, to: { x: clip.toX, y: clip.toY }, srcId: id, ctrls: clip.ctrls, width: st.arrowWidth, pts: clip.curve ? curvePointsForClip(rec, ci, 16) : null, aerial: !!st.aerial });
+    });
+    return out;
+  }
+
   // Symbole du but (cadre schématique) à l'endroit réel des buts, indépendant de
   // l'entité "But" que le coach peut placer et déplacer librement à la main.
   // But futsal vu de dessus, aux dimensions reglementaires (3 m d'ouverture,
@@ -982,11 +1081,16 @@ window.DrillRender = (function () {
     var elapsedMs = 0;
     for (var k = 0; k < seg; k++) elapsedMs += drill.keyframes[k].durationMs || 1500;
     elapsedMs += f * (drill.keyframes[seg].durationMs || 1500);
+    // drill.timeline (canonique) prefere a une reconstruction fraiche — lu ici
+    // deja (avant, seule la resolution de position plus bas s'en servait) pour
+    // que les fleches (computeArrowsAtMs) soient calculees sur les memes clips
+    // per-entite que la position des jetons, avec la meme precision a la ms.
+    var tl = drill.timeline || buildEntityTimeline(drill);
     var tasks = [];
     (drill.zones || []).filter(function (z) { return visibleAt(z, elapsedMs); }).forEach(function (z, i) {
       tasks.push({ z: zOf(drill, "zone", z.id, i), run: function () { drawZone(svg, drill, g, z, {}); } });
     });
-    computeArrows(drill, seg).forEach(function (a, i) {
+    computeArrowsAtMs(drill, tl, elapsedMs).forEach(function (a, i) {
       tasks.push({ z: Z_BASE.arrow + i, run: function () { drawAnnotation(svg, g, a, i); } });
     });
     var linesG2 = drill.lines || buildOverlayGlobal(drill, "lines");
@@ -999,14 +1103,10 @@ window.DrillRender = (function () {
     });
     var pulsePhase = (elapsedMs % PULSE_PERIOD_MS) / PULSE_PERIOD_MS;
     var A = drill.keyframes[seg].entities, B = drill.keyframes[seg + 1] ? drill.keyframes[seg + 1].entities : A;
-    // Position resolue par le moteur de timeline (clips par entite, instant
-    // absolu elapsedMs) — remplace l'ancienne resolution inline hold/curve/
-    // ctrls/lineaire par segment. Parite verifiee (cf SPEC_TIMELINE_AVANCEE).
-    // drill.timeline (canonique, Milestone 3) est prefere a une reconstruction
-    // fraiche : plus rapide, et seule source garantie a jour pendant un
-    // glisser (keyframes[].entities est resynchronise depuis elle plus haut,
-    // pas l'inverse).
-    var tl = drill.timeline || buildEntityTimeline(drill);
+    // Position resolue par le meme moteur de timeline (tl, clips par entite,
+    // instant absolu elapsedMs, cf plus haut) — remplace l'ancienne resolution
+    // inline hold/curve/ctrls/lineaire par segment. Parite verifiee (cf
+    // SPEC_TIMELINE_AVANCEE).
     var carriedA = carrierMap(A);
     A.forEach(function (ea, ei) {
       var eb = findById(B, ea.id) || ea;

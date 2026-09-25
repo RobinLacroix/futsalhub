@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme, makeStyles } from '../../../contexts/ThemeContext';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
+import { useResponsiveColumns } from '../../../hooks/useResponsiveColumns';
 import { Screen, Text, EmptyState } from '../../../components/ui';
 import { ProcedureCard } from '../../../components/tactics/ProcedureCard';
 import { FilterChip } from '../../../components/tactics/FilterChip';
@@ -42,6 +43,11 @@ export default function LibraryScreen() {
   const c = theme.colors;
   const s = useStyles();
   const { activeTeam } = useActiveTeam();
+  // Colonnes calculées sur la largeur réelle (pas un `47%` figé à 2
+  // colonnes) : la bibliothèque doit occuper toute la largeur dispo sur iPad
+  // (Screen fullWidth) avec des cartes qui restent lisibles plutôt que
+  // s'étirer — demande explicite de Robin (2026-09-23).
+  const { onLayout: onGridLayout, cardWidth } = useResponsiveColumns(170, theme.space.md, 2);
 
   const [folders, setFolders] = useState<SchematicFolderRecord[]>([]);
   const [cards, setCards] = useState<LibraryCard[]>([]);
@@ -86,8 +92,13 @@ export default function LibraryScreen() {
       const matchPrincipes =
         selectedPrincipes.length === 0 ||
         (card.procedure?.principes || []).some((x) => selectedPrincipes.includes(x));
+      // CPA masqué par défaut (demande Robin 2026-09-25, miroir webapp) :
+      // uniquement des procédés d'entraînement tant qu'on ne cherche pas
+      // spécifiquement du CPA (chip "Phase de jeu" ou recherche texte).
+      const cpaRequested = selectedPhases.includes('CPA') || q.includes('cpa');
+      const matchCPA = card.procedure?.theme !== 'CPA' || cpaRequested;
 
-      if (!matchBloc || !matchFormat || !matchPhase || !matchIntensite || !matchPrincipes) return false;
+      if (!matchBloc || !matchFormat || !matchPhase || !matchIntensite || !matchPrincipes || !matchCPA) return false;
       if (q.length === 0) return true;
 
       const p = card.procedure;
@@ -204,7 +215,7 @@ export default function LibraryScreen() {
   }
 
   return (
-    <Screen onRefresh={load} refreshing={loading}>
+    <Screen onRefresh={load} refreshing={loading} fullWidth>
       <View style={[s.searchBar, { backgroundColor: c.bg.surface, borderColor: c.border.subtle }]}>
         <Ionicons name="search-outline" size={16} color={c.text.tertiary} />
         <TextInput
@@ -294,9 +305,9 @@ export default function LibraryScreen() {
         flatResults.length === 0 ? (
           <EmptyState icon="search-outline" title="Aucun résultat" description="Essaie un autre titre ou une autre phase de jeu." />
         ) : (
-          <View style={s.grid}>
+          <View style={s.grid} onLayout={onGridLayout}>
             {flatResults.map((card) => (
-              <ProcedureCard key={card.key} card={card} onPress={() => openCard(card)} onDelete={() => handleDeleteCard(card)} />
+              <ProcedureCard key={card.key} card={card} width={cardWidth} onPress={() => openCard(card)} onDelete={() => handleDeleteCard(card)} />
             ))}
           </View>
         )
@@ -343,9 +354,9 @@ export default function LibraryScreen() {
               compact
             />
           ) : (
-            <View style={s.grid}>
+            <View style={s.grid} onLayout={onGridLayout}>
               {rootCards.map((card) => (
-                <ProcedureCard key={card.key} card={card} onPress={() => openCard(card)} onDelete={() => handleDeleteCard(card)} />
+                <ProcedureCard key={card.key} card={card} width={cardWidth} onPress={() => openCard(card)} onDelete={() => handleDeleteCard(card)} />
               ))}
             </View>
           )}

@@ -10,6 +10,7 @@ import { buildOverlays, buildEntityTimeline, frameAt, resolveVariant, stepBounda
 import { PitchBackground } from './PitchBackground';
 import { EntityToken } from './EntityToken';
 import { ZoneShape } from './ZoneShape';
+import { MovementArrow } from './MovementArrow';
 import { FreeLine } from './FreeLine';
 import { FreeTextMarker } from './FreeTextMarker';
 import { PulseMarker } from './PulseMarker';
@@ -131,6 +132,12 @@ export function DrillPlayer({ drill }: { drill: Drill }) {
                 d'id existent sur certains schémas historiques. */}
             {frame.zones.map((z, i) => (
               <ZoneShape key={`${z.id}-${i}`} zone={z} g={g} />
+            ))}
+            {/* Ordre calqué sur Z_BASE côté web (zone < arrow < line < text < entity) :
+                la flèche d'un déplacement en cours doit rester sous le jeton qu'elle
+                explique, pas par-dessus. */}
+            {frame.arrows.map((a, i) => (
+              <MovementArrow key={`arrow-${i}`} arrow={a} index={i} g={g} />
             ))}
             {frame.lines.map((ln, i) => (
               <FreeLine key={`${ln.id}-${i}`} line={ln} g={g} />

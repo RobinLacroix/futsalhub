@@ -1707,7 +1707,12 @@ export default function LibraryPage() {
       const matchPhase = selectedPhases.length === 0 || (!!p && selectedPhases.includes(p.theme));
       const matchIntensite = selectedIntensites.length === 0 || (!!p?.intensite && selectedIntensites.includes(p.intensite));
       const matchPrincipes = selectedPrincipes.length === 0 || (p?.principes || []).some((x) => selectedPrincipes.includes(x));
-      return matchSearch && matchBloc && matchFolder && matchFormat && matchPhase && matchIntensite && matchPrincipes;
+      // CPA masqué par défaut (demande Robin 2026-09-25) : uniquement des
+      // procédés d'entraînement tant qu'on ne cherche pas spécifiquement du
+      // CPA (chip "Phase de jeu" ou recherche texte).
+      const cpaRequested = selectedPhases.includes('CPA') || q.includes('cpa');
+      const matchCPA = p?.theme !== 'CPA' || cpaRequested;
+      return matchSearch && matchBloc && matchFolder && matchFormat && matchPhase && matchIntensite && matchPrincipes && matchCPA;
     });
   }, [items, searchTerm, selectedBlocs, activeFolder, selectedFormats, selectedPhases, selectedIntensites, selectedPrincipes]);
 
