@@ -862,6 +862,10 @@ window.DrillRender = (function () {
 
   function annoColor(type) { return (type === "pass" || type === "shot") ? "#ffe14d" : "#ffffff"; }
   function annoDash(type) { return type === "run" ? "7 5" : type === "dribble" ? "2 4" : "0"; }
+  // Opacite des fleches de mouvement (demande Robin 2026-09-26) — DIM garde le
+  // meme ratio qu'avant (moitie moins visible) pour les fleches de contexte
+  // du mode avance (cf renderAdvancedPitchEntities, editor.js).
+  var ARROW_OPACITY = 0.7, ARROW_OPACITY_DIM = 0.35;
 
   function drawAnnotation(svg, g, a, i, opts) {
     opts = opts || {};
@@ -894,9 +898,13 @@ window.DrillRender = (function () {
     }
     var shape = el("path", { d: pathD(0, 0), fill: "none", stroke: color, "stroke-width": sw, "stroke-dasharray": dash, "marker-end": "url(#" + mid + ")" });
     shape.style.pointerEvents = "none";
-    if (opts.dim) shape.setAttribute("opacity", "0.5");
+    // Fleches moins opaques par defaut (demande Robin 2026-09-26, ex-pleine
+    // opacite) : moins criardes sur un schema charge. Les fleches de contexte
+    // (opts.dim, mode avance) gardent le meme ratio qu'avant (moitie moins
+    // visibles que les fleches normales).
+    shape.setAttribute("opacity", opts.dim ? ARROW_OPACITY_DIM : ARROW_OPACITY);
     svg.appendChild(shape);
-    if (a.label) svg.appendChild(textNode((x1 + x2) / 2, (y1 + y2) / 2 - 6, a.label, 11, color, { bold: true, opacity: opts.dim ? 0.5 : 1 }));
+    if (a.label) svg.appendChild(textNode((x1 + x2) / 2, (y1 + y2) / 2 - 6, a.label, 11, color, { bold: true, opacity: opts.dim ? ARROW_OPACITY_DIM : ARROW_OPACITY }));
   }
 
   // Traits libres (droits ou courbés) que le coach dessine à la main : annotations

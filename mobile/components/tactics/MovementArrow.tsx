@@ -10,6 +10,10 @@ function annoDash(type: DrillArrow['type']): string | undefined {
   return type === 'run' ? '7 5' : type === 'dribble' ? '2 4' : undefined;
 }
 
+// Opacité des flèches de mouvement (demande Robin 2026-09-26, miroir du web
+// — cf ARROW_OPACITY dans render-core.js) : moins criardes sur un schéma chargé.
+const ARROW_OPACITY = 0.7;
+
 /**
  * Port de drawAnnotation() (render-core.js, web) : flèche de déplacement
  * (course/passe/conduite), dérivée du mouvement d'une entité — jamais posée
@@ -62,9 +66,9 @@ export function MovementArrow({ arrow, index, g }: { arrow: DrillArrow; index: n
         )
       )}
       {wayPts ? (
-        <Polyline points={pointsAttr} fill="none" stroke={color} strokeWidth={sw} strokeDasharray={dash} markerEnd={`url(#${markerId})`} />
+        <Polyline points={pointsAttr} fill="none" stroke={color} strokeWidth={sw} strokeDasharray={dash} markerEnd={`url(#${markerId})`} opacity={ARROW_OPACITY} />
       ) : (
-        <Path d={`M${x1},${y1} L${x2},${y2}`} fill="none" stroke={color} strokeWidth={sw} strokeDasharray={dash} markerEnd={`url(#${markerId})`} />
+        <Path d={`M${x1},${y1} L${x2},${y2}`} fill="none" stroke={color} strokeWidth={sw} strokeDasharray={dash} markerEnd={`url(#${markerId})`} opacity={ARROW_OPACITY} />
       )}
     </>
   );
