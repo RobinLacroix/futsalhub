@@ -191,6 +191,18 @@
   // supprimee soit "ressuscitee" par un commit qui la trouverait encore dans
   // entsCache.arr.
   function commitEnts() {
+    // Le mode avance mute drill.timeline directement (clip.to, rec.spawn...),
+    // jamais via ents()/entsCache — cf commentaires sur onAdvClipEntityDown/
+    // onAdvHoldEntityDown. Mais entsCache peut rester "chaud" (kfIdx===curKf)
+    // en arrivant en mode avance si quoi que ce soit a appele ents() juste
+    // avant (ex. un clic qui remonte jusqu'a un gestionnaire document generique)
+    // SANS jamais se re-invalider ensuite puisque curKf ne bouge plus non plus —
+    // sans ce garde-fou, ce commit rejouait alors a CHAQUE render() un instantane
+    // fige (capture la derniere fois que ents() a tourne) par-dessus toute
+    // edition directe du mode avance, qui semblait alors "ne pas se sauvegarder"
+    // (bug constate 2026-09-26 : glisser un jeton en mode avance revenait
+    // aussitot a sa position, meme celui du clip selectionne).
+    if (advancedMode) return;
     if (entsCache.kfIdx !== curKf) return; // rien materialise pour cette frontiere : rien a ecrire
     var tl = drill.timeline, N = drill.keyframes.length;
     entsCache.arr.forEach(function (e) { if (tl.entities[e.id]) R.commitEntityStateAt(tl, e.id, curKf, N, e); });
@@ -3999,42 +4011,99 @@
     }
     return null;
   }
+  // Ancre "hors mouvement" d'une entite a l'instant t : le point qu'elle tient
+  // fixe la (avant son premier clip, entre deux clips desynchronises, ou
+  // apres le dernier). Meme parcours qu'entityStateAtMs (render-core.js),
+  // mais renvoie aussi le clip dont c'est l'arrivee (clip: null si c'est
+  // rec.spawn, rien avant le premier clip) pour tenir a jour son miroir
+  // toX/toY en ecriture, et nextIdx (index du PREMIER clip suivant, non
+  // encore atteint) pour advForwardHoldChain — cf onAdvHoldEntityDown.
+  function holdRefAt(rec, t) {
+    var obj = rec.spawn, clip = null, nextIdx = 0;
+    for (var i = 0; i < rec.clips.length; i++) {
+      var c = rec.clips[i];
+      if (c.startMs + c.durationMs > t) break;
+      obj = c.to; clip = c; nextIdx = i + 1;
+    }
+    return { obj: obj, clip: clip, nextIdx: nextIdx };
+  }
+  // Une entite EN COURS DE MOUVEMENT a l'instant t : son clip actif existe ET
+  // represente un vrai deplacement (depart != arrivee) — chaque segment recoit
+  // un clip meme sans deplacement (cf buildEntityTimeline, render-core.js),
+  // donc activeClipAt seul ne suffit pas a distinguer "en train de bouger" de
+  // "immobile, mais son segment couvre quand meme cet instant". Sert a decider
+  // si l'entite doit rester verrouillee (contexte, cf renderAdvancedPitchEntities)
+  // ou si elle est librement deplacable (holdRefAt).
+  function isMovingAt(rec, t) {
+    var active = activeClipAt(rec, t);
+    if (!active) return false;
+    var from = fromStateOf(rec, active.ci);
+    return from.x !== active.clip.to.x || from.y !== active.clip.to.y;
+  }
+  // Chaine de "tenue" en mode avance, a partir du premier clip suivant
+  // l'ancre (ref.nextIdx) : les clips qui tiennent encore EXACTEMENT (ox,oy)
+  // sans mouvement volontaire doivent suivre le meme glisser, jusqu'au
+  // premier qui represente un vrai deplacement — pendant clip-par-clip de
+  // forwardHoldChain (mode simple, indexe par etape), necessaire ici car
+  // chaque segment recoit un clip meme sans deplacement : sans cette
+  // propagation, glisser un point tenu sur plusieurs etapes ne deplacerait
+  // que le tout premier segment, et l'entite "sauterait" en arriere a
+  // l'ancienne position des que son clip suivant (lui aussi immobile)
+  // reprend la main.
+  function advForwardHoldChain(rec, fromCi, ox, oy) {
+    var list = [];
+    for (var i = fromCi; i < rec.clips.length; i++) {
+      var c = rec.clips[i];
+      if (c.to.x !== ox || c.to.y !== oy) break;
+      list.push(c);
+    }
+    return list;
+  }
   // Rendu du terrain en mode avance (clip selectionne) : chaque entite est
   // affichee a sa position interpolee au meme instant (advEditTimeMs), pour
-  // que le coach voie le dispositif complet a ce moment-la — mais SEULE
-  // l'entite du clip edite est glissable ; les autres ne sont que du contexte
-  // (pas d'ecriture accidentelle sur une entite dont ce n'est pas le clip).
-  // Chaque entite EN MOUVEMENT a cet instant recoit sa propre fleche pointillee
-  // (pas seulement celle du clip selectionne, cf bug signale par Robin —
-  // les autres semblaient statiques alors qu'elles bougeaient aussi) ; celle
-  // du clip edite reste a pleine opacite avec ses poignees, les autres sont
-  // attenuees (contexte, non editables directement).
+  // que le coach voie le dispositif complet a ce moment-la. Trois cas par
+  // entite : (1) celle du clip edite (selClip) — glissable via clip.to, avec
+  // poignees de courbure ; (2) une entite EN MOUVEMENT a cet instant (mais
+  // pas celle editee) — contexte non editable directement (fleche pointillee
+  // attenuee, il faut selectionner SON clip pour la modifier, sans quoi
+  // glisser un jeton mi-course n'aurait pas de sens geometrique clair) ;
+  // (3) une entite qui NE BOUGE PAS a cet instant (avant son premier clip,
+  // entre deux clips desynchronises, ou apres le dernier) — librement
+  // deplacable/selectionnable exactement comme en mode simple, MEME SI un
+  // clip est selectionne ailleurs sur la timeline pour une autre entite
+  // (retour de Robin 2026-09-26 : le mode avance verrouillait par erreur
+  // toute entite des qu'un clip etait selectionne quelque part, empechant par
+  // exemple de replacer un point de depart pendant qu'on regle un mouvement).
   function renderAdvancedPitchEntities(g) {
-    // Rien selectionne mais un curseur pose (cf advPitchViewActive) : simple
-    // aperçu en lecture seule de l'instant choisi, sans entite "editee" —
-    // chacune recoit sa propre fleche si elle est en mouvement, comme les
-    // autres, mais aucune n'a de poignee de glisser/courbure tant qu'on ne
-    // selectionne pas explicitement un de ses clips.
     var tl = drill.timeline, t = advEditTimeMs(), editId = selClip ? selClip.id : null;
     // Etats resolus d'abord, dessin ensuite : la marque du porteur se deduit de
     // l'ensemble des entites a cet instant, pas de l'entite courante seule.
+    // `style` (en plus de `e`, la copie utilisee pour le rendu) est l'objet
+    // canonique retourne par entityStateAtMs — identique par reference a
+    // holdRefAt(...).obj quand l'entite ne bouge pas la, ce qui sert plus bas
+    // a savoir si CET objet precis est actuellement selEntity (cf `selected`).
     var advStates = Object.keys(tl.entities).map(function (id) {
       var pos = R.sampleEntityAt(tl, id, t), style = R.entityStateAtMs(tl, id, t);
       if (!pos || !style) return null;
-      return { id: id, e: Object.assign({}, style, { x: pos.x, y: pos.y }) };
+      return { id: id, style: style, e: Object.assign({}, style, { x: pos.x, y: pos.y }) };
     }).filter(Boolean);
     var advCarried = R.carrierMap(advStates.map(function (s) { return s.e; }));
     advStates.forEach(function (st) {
-      var id = st.id, e = st.e;
-      var isEditing = id === editId;
-      R.drawEntity(rt, drill, g, e, { selected: isEditing, carrier: !!advCarried[id], onDown: isEditing ? onAdvClipEntityDown : null });
-      if (isEditing) return;
-      var rec = tl.entities[id], active = activeClipAt(rec, t);
-      if (!active) return;
-      var from = fromStateOf(rec, active.ci);
-      if (from.x !== active.clip.to.x || from.y !== active.clip.to.y) {
-        R.drawAnnotation(rt, g, { type: "run", from: { x: from.x, y: from.y }, to: { x: active.clip.to.x, y: active.clip.to.y }, ctrls: active.clip.ctrls, width: 2 }, 0, { dim: true });
+      var id = st.id, e = st.e, isEditing = id === editId;
+      var rec = tl.entities[id], moving = !isEditing && isMovingAt(rec, t);
+      var onDown = null, selected = isEditing;
+      if (isEditing) {
+        onDown = onAdvClipEntityDown;
+      } else if (!moving) {
+        var ref = holdRefAt(rec, t);
+        onDown = function (ev) { onAdvHoldEntityDown(ev, rec, ref); };
+        selected = selEntity === st.style;
       }
+      R.drawEntity(rt, drill, g, e, { selected: selected, carrier: !!advCarried[id], onDown: onDown });
+      if (isEditing) return;
+      if (!moving) return;
+      var active = activeClipAt(rec, t), from = fromStateOf(rec, active.ci);
+      R.drawAnnotation(rt, g, { type: "run", from: { x: from.x, y: from.y }, to: { x: active.clip.to.x, y: active.clip.to.y }, ctrls: active.clip.ctrls, width: 2 }, 0, { dim: true });
     });
     if (!selClip) return;
     var clip = selClip.rec.clips[selClip.ci], from = fromStateOf(selClip.rec, selClip.ci);
@@ -4110,6 +4179,43 @@
       clip.to.x = clamp(round1(ox + (m.x - start.x)), 0, drill.pitch.length);
       clip.to.y = clamp(round1(oy + (m.y - start.y)), 0, drill.pitch.width);
       clip.toX = clip.to.x; clip.toY = clip.to.y;
+      render();
+    }
+    function up() {
+      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
+      if (!moved) { undoStack.pop(); updateHistoryBtns(); return; }
+      renderAdvancedTimeline(); syncJSON();
+    }
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
+  }
+  // Glisser une entite qui ne bouge PAS a l'instant courant (ref vient de
+  // holdRefAt) : deplacement libre comme en mode simple, sans passer par la
+  // selection d'un clip — pendant de onAdvClipEntityDown pour le cas "hors
+  // mouvement" (cf renderAdvancedPitchEntities). Ecrit directement dans
+  // l'ancre canonique (rec.spawn ou clip.to precedent, meme mecanisme de
+  // mutation en place que clip.to plus haut), tient a jour son miroir toX/toY
+  // quand c'est un clip.to, ET propage vers les clips suivants qui tenaient
+  // encore la meme position (advForwardHoldChain, pendant de forwardHoldChain
+  // en mode simple) — sans ca l'entite "sauterait" en arriere a l'ancienne
+  // position des que son prochain segment (lui aussi immobile) reprend la
+  // main, puisque chaque segment a son propre clip meme sans deplacement.
+  function onAdvHoldEntityDown(ev, rec, ref) {
+    if (ev.button === 2 || pendingTool) return;
+    ev.preventDefault(); ev.stopPropagation();
+    var obj = ref.obj;
+    selectEntity(obj);
+    var start = clientToMeters(ev), ox = obj.x, oy = obj.y;
+    var chain = advForwardHoldChain(rec, ref.nextIdx, ox, oy);
+    pushHistory();
+    var moved = false;
+    function move(mv) {
+      moved = true;
+      var m = clientToMeters(mv);
+      var nx = clamp(round1(ox + (m.x - start.x)), 0, drill.pitch.length);
+      var ny = clamp(round1(oy + (m.y - start.y)), 0, drill.pitch.width);
+      obj.x = nx; obj.y = ny;
+      if (ref.clip) { ref.clip.toX = nx; ref.clip.toY = ny; }
+      chain.forEach(function (c) { c.to.x = nx; c.to.y = ny; c.toX = nx; c.toY = ny; });
       render();
     }
     function up() {

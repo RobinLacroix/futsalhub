@@ -200,7 +200,7 @@
   #advTimeline{order:2;flex:none;width:360px;max-width:38vw;height:100%;min-height:0;margin-top:0;display:flex;flex-direction:column}
   #advTimeline #advTracks{flex:1;min-height:0;overflow-y:auto}
   .tl-toprow{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;flex:none}
-  .tl-ruler{position:relative;height:18px;margin-left:150px;border-bottom:1px solid var(--line-strong);font-size:10px;color:var(--muted);font-family:var(--font-mono);cursor:pointer}
+  .tl-ruler{position:relative;height:18px;margin-left:106px;border-bottom:1px solid var(--line-strong);font-size:10px;color:var(--muted);font-family:var(--font-mono);cursor:pointer}
   .tl-ruler span{position:absolute;top:0}
   .tl-guide{position:absolute;top:0;bottom:0;width:1px;border-left:1px dashed var(--line-strong)}
   .tl-cursor{position:absolute;top:0;bottom:0;width:0;border-left:2px solid var(--accent);pointer-events:none;z-index:4}
@@ -209,10 +209,14 @@
   .tl-grouphead:hover{border-color:var(--accent)}
   .tl-grouphead .car{color:var(--muted);margin-right:6px;font-size:9px;flex:none}
   .tl-grouphead .cnt{color:var(--muted);margin-left:4px}
-  .tl-mini{flex:1;height:12px;margin-left:130px;position:relative;background:var(--bg);border-radius:3px;overflow:hidden}
+  .tl-mini{flex:1;height:12px;margin-left:106px;position:relative;background:var(--bg);border-radius:3px;overflow:hidden}
   .tl-mini .blob{position:absolute;top:2px;height:8px;border-radius:2px;opacity:.85}
   .tl-track{display:flex;align-items:center;height:30px;position:relative;border-top:1px solid var(--line);padding-left:14px}
-  .tl-label{width:136px;flex:none;font-size:11px;color:var(--text);padding-right:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* Colonne d'etiquette reduite (92px, etait 136px) : la timeline avancee est
+     desormais un panneau lateral etroit (cf #advTimeline plus haut), 136px y
+     laissait trop peu de place a la piste elle-meme — retour de Robin
+     2026-09-26. L'ellipsis existant absorbe les noms plus longs. */
+  .tl-label{width:92px;flex:none;font-size:11px;color:var(--text);padding-right:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .tl-lane{flex:1;position:relative;height:100%}
   .tl-clip{position:absolute;top:5px;height:20px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;color:var(--accent-ink);box-shadow:0 1px 3px rgba(0,0,0,.4);white-space:nowrap;overflow:hidden;padding:0 4px;cursor:grab;touch-action:none}
   .tl-clip:active{cursor:grabbing}
