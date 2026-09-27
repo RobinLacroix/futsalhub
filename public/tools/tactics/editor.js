@@ -1609,7 +1609,47 @@
     r5.appendChild(op); r5.appendChild(opv);
     r5.style.display = (z.fill || "solid") === "none" ? "none" : "";
     pop.appendChild(s2);
+    var sApp = buildAppearsSection(z, "zone");
+    if (sApp) pop.appendChild(sApp);
     return pop;
+  }
+  // Bloc "Apparaît" partage : fenetre d'etapes de presence en mode simple,
+  // pour tout objet portant visibleFrom/visibleTo (trait, zone, texte, pulse).
+  // Meme logique que celle initialement ecrite pour buildLineEditPop, extraite
+  // pour eviter de la dupliquer a l'identique dans chaque panneau.
+  function buildAppearsSection(obj, kind) {
+    if (advancedMode || drill.keyframes.length <= 1) return null;
+    var s = epSection("Apparaît");
+    var bm = boundaryMs(), N = drill.keyframes.length;
+    var range = lineVisibleStepRange(obj, bm, N);
+    function stepLabel(i) { return drill.keyframes[i].label || ("Étape " + (i + 1)); }
+    function fillSteps(sel, selected) {
+      for (var i = 0; i < N; i++) {
+        var o = document.createElement("option");
+        o.value = String(i); o.textContent = stepLabel(i);
+        if (i === selected) o.selected = true;
+        sel.appendChild(o);
+      }
+    }
+    var fromSel = document.createElement("select");
+    var toSel = document.createElement("select");
+    fillSteps(fromSel, range.from);
+    fillSteps(toSel, range.to);
+    fromSel.addEventListener("change", function () {
+      pushHistory();
+      var f = parseInt(fromSel.value, 10), t = Math.max(f, parseInt(toSel.value, 10));
+      setLineVisibleStepRange(obj, bm, N, f, t);
+      render(); syncJSON(); openEditPop(obj, lastPopXY.x, lastPopXY.y, kind);
+    });
+    toSel.addEventListener("change", function () {
+      pushHistory();
+      var t = parseInt(toSel.value, 10), f = Math.min(t, parseInt(fromSel.value, 10));
+      setLineVisibleStepRange(obj, bm, N, f, t);
+      render(); syncJSON(); openEditPop(obj, lastPopXY.x, lastPopXY.y, kind);
+    });
+    epRow(s, "De l'étape").appendChild(fromSel);
+    epRow(s, "à l'étape").appendChild(toSel);
+    return s;
   }
   function buildLineEditPop(ln) {
     var pop = epEl("div", "edit-pop");
@@ -1628,39 +1668,8 @@
     // Choix des etapes d'apparition : uniquement utile a partir de 2 etapes,
     // et seulement en mode simple (le mode avance a deja sa propre edition
     // fine, au ms pres, via les poignees de la timeline avancee).
-    if (!advancedMode && drill.keyframes.length > 1) {
-      var s2 = epSection("Apparaît");
-      var bm = boundaryMs(), N = drill.keyframes.length;
-      var range = lineVisibleStepRange(ln, bm, N);
-      function stepLabel(i) { return drill.keyframes[i].label || ("Étape " + (i + 1)); }
-      function fillSteps(sel, selected) {
-        for (var i = 0; i < N; i++) {
-          var o = document.createElement("option");
-          o.value = String(i); o.textContent = stepLabel(i);
-          if (i === selected) o.selected = true;
-          sel.appendChild(o);
-        }
-      }
-      var fromSel = document.createElement("select");
-      var toSel = document.createElement("select");
-      fillSteps(fromSel, range.from);
-      fillSteps(toSel, range.to);
-      fromSel.addEventListener("change", function () {
-        pushHistory();
-        var f = parseInt(fromSel.value, 10), t = Math.max(f, parseInt(toSel.value, 10));
-        setLineVisibleStepRange(ln, bm, N, f, t);
-        render(); syncJSON(); openEditPop(ln, lastPopXY.x, lastPopXY.y, "line");
-      });
-      toSel.addEventListener("change", function () {
-        pushHistory();
-        var t = parseInt(toSel.value, 10), f = Math.min(t, parseInt(fromSel.value, 10));
-        setLineVisibleStepRange(ln, bm, N, f, t);
-        render(); syncJSON(); openEditPop(ln, lastPopXY.x, lastPopXY.y, "line");
-      });
-      epRow(s2, "De l'étape").appendChild(fromSel);
-      epRow(s2, "à l'étape").appendChild(toSel);
-      pop.appendChild(s2);
-    }
+    var s2 = buildAppearsSection(ln, "line");
+    if (s2) pop.appendChild(s2);
     var hint = epEl("div", "ep-sect");
     hint.appendChild(epEl("div", null, "Glisse les carrés pour les extrémités, le rond pour courber."));
     hint.style.color = "var(--muted)"; hint.style.fontSize = "11px";
@@ -1697,6 +1706,8 @@
     });
     ar.appendChild(seg);
     pop.appendChild(s2);
+    var sApp = buildAppearsSection(tx, "text");
+    if (sApp) pop.appendChild(sApp);
     return pop;
   }
   function buildPulseEditPop(pu) {
@@ -1706,6 +1717,8 @@
     epColor(s, "Couleur", pu.color || "#ff3b30", function (v) { pu.color = v; });
     epRange(s, "Taille", 0.6, 2.5, 0.1, pu.size || 1, function (v) { return v.toFixed(1) + "×"; }, function (v) { pu.size = v; });
     pop.appendChild(s);
+    var sApp = buildAppearsSection(pu, "pulse");
+    if (sApp) pop.appendChild(sApp);
     var hint = epEl("div", "ep-sect");
     hint.appendChild(epEl("div", null, "Clignote en continu, en édition comme à l'export."));
     hint.style.color = "var(--muted)"; hint.style.fontSize = "11px";
@@ -3577,10 +3590,25 @@
       inp.size = Math.max(4, inp.value.length);
       inp.title = "Double-clic pour renommer";
       inp.readOnly = true;
+      // Un clic droit sur un <input> lui donne le focus par defaut (comportement
+      // navigateur, avant meme que l'evenement "contextmenu" ne parte) — ca
+      // declenchait aussitot le blur (donc renameVariant + renderVariants, qui
+      // recree tous les chips) AVANT l'ouverture du menu, qui operait alors sur
+      // un <input> deja detache du DOM : "Renommer" ne faisait rien en apparence.
+      inp.addEventListener("mousedown", function (ev) { if (ev.button === 2) ev.preventDefault(); });
       inp.addEventListener("dblclick", function (ev) { ev.stopPropagation(); inp.readOnly = false; inp.focus(); inp.select(); });
       inp.addEventListener("click", function (ev) { if (inp.readOnly) { ev.stopPropagation(); switchVariant(i); } });
       inp.addEventListener("blur", function () { inp.readOnly = true; renameVariant(i, inp.value); });
       inp.addEventListener("keydown", function (ev) { if (ev.key === "Enter") inp.blur(); if (ev.key === "Escape") { inp.value = v.name || ("Variante " + (i + 1)); inp.blur(); } });
+      chip.addEventListener("contextmenu", function (ev) {
+        ev.preventDefault(); ev.stopPropagation();
+        var items = [
+          { label: "Renommer", onClick: function () { inp.readOnly = false; inp.focus(); inp.select(); } },
+          { label: "Dupliquer", onClick: function () { duplicateVariant(i); } },
+        ];
+        if (drill.variants.length > 1) items.push({ label: "Supprimer", onClick: function () { deleteVariant(i); } });
+        showContextMenu(ev.clientX, ev.clientY, items);
+      });
       chip.appendChild(inp);
       if (drill.variants.length > 1) {
         var del = document.createElement("button");
@@ -3610,6 +3638,20 @@
     var copy = { id: "var-" + (vid++), name: "Variante " + (drill.variants.length + 1), keyframes: JSON.parse(JSON.stringify(src.keyframes)) };
     drill.variants.push(copy);
     drill.activeVariantIndex = drill.variants.length - 1;
+    drill.keyframes = copy.keyframes;
+    ensureTimeline(); ensureOverlays(); invalidateEntsCache();
+    curKf = 0;
+    selEntity = null; selZone = null; selAnno = null; selLine = null; selText = null; selPulse = null; multiSel = []; hideInspectors();
+    document.getElementById("scrub").value = 0;
+    renderVariants(); renderSteps(); render(); syncJSON();
+    flash("Variante dupliquée — modifie-la à partir d'où elle doit diverger", true);
+  }
+  function duplicateVariant(idx) {
+    stopPlay(); commitEnts(); pushHistory();
+    var src = drill.variants[idx];
+    var copy = { id: "var-" + (vid++), name: src.name + " (copie)", keyframes: JSON.parse(JSON.stringify(src.keyframes)) };
+    drill.variants.splice(idx + 1, 0, copy);
+    drill.activeVariantIndex = idx + 1;
     drill.keyframes = copy.keyframes;
     ensureTimeline(); ensureOverlays(); invalidateEntsCache();
     curKf = 0;

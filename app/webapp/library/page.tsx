@@ -15,9 +15,13 @@ import {
   Link2,
   Link2Off,
   Loader2,
+  Pause,
   Pencil,
+  Play,
   Plus,
   Search,
+  SkipBack,
+  SkipForward,
   SlidersHorizontal,
   Trash2,
   Users,
@@ -42,8 +46,206 @@ declare global {
   interface Window {
     DrillRender?: {
       renderStatic: (svg: SVGSVGElement, drill: unknown, kfIndex: number) => { W: number; H: number };
+      renderAnimated: (svg: SVGSVGElement, drill: unknown, p: number) => { W: number; H: number };
     };
   }
+}
+
+type DrillVariant = { id: string; name: string; keyframes: DrillKeyframe[] };
+type DrillKeyframe = { label?: string; durationMs?: number; [key: string]: unknown };
+type DrillLike = { keyframes?: DrillKeyframe[]; variants?: DrillVariant[]; activeVariantIndex?: number; [key: string]: unknown };
+
+const SPEEDS = [1, 1.5, 2] as const;
+
+/**
+ * Étapes actives d'un Drill : celles de la variante sélectionnée si le schéma
+ * en a plusieurs (cf drill.variants côté éditeur, public/tools/tactics/
+ * editor.js:ensureVariants), sinon drill.keyframes directement (schémas sans
+ * variante ou anciens exports).
+ */
+function activeKeyframesOf(drill: DrillLike, variantIndex: number): DrillKeyframe[] {
+  const variants = drill.variants;
+  if (variants && variants.length > 0) {
+    return (variants[variantIndex] ?? variants[0]).keyframes;
+  }
+  return drill.keyframes ?? [];
+}
+
+/**
+ * Aperçu animé d'un schéma — même moteur que l'éditeur (render-core.js,
+ * fonctions renderAnimated/renderStatic), même minuterie que son bouton
+ * "Lecture" (cf play()/pAt() dans editor.js), pour un rendu et un rythme
+ * identiques à ce que Robin voit en éditant. Contrôles calqués sur DrillPlayer
+ * côté mobile (mobile/components/tactics/DrillPlayer.tsx) : chips de variante,
+ * étape précédente/suivante, lecture/pause, vitesse — pour la même raison
+ * (lecture seule, pas d'édition ici).
+ */
+function SchematicAnimatedPlayer({ drill, ready }: { drill: unknown; ready: boolean }) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [failed, setFailed] = useState(false);
+  const d = drill as DrillLike | null;
+  const variants = d?.variants ?? [];
+  const [variantIndex, setVariantIndex] = useState(d?.activeVariantIndex ?? 0);
+  const keyframes = useMemo(() => (d ? activeKeyframesOf(d, variantIndex) : []), [d, variantIndex]);
+  const N = keyframes.length;
+  const canPlay = N > 1;
+
+  const [step, setStep] = useState(0); // étape courante quand la lecture est arrêtée
+  const [playing, setPlaying] = useState(false);
+  const [speedIndex, setSpeedIndex] = useState(0);
+  const rafRef = useRef<number | null>(null);
+
+  // Changer de variante repart de zéro : durées et nombre d'étapes diffèrent.
+  useEffect(() => { setStep(0); setPlaying(false); }, [variantIndex]);
+
+  const renderAt = useCallback((p: number) => {
+    if (!ready || !svgRef.current || !d || !window.DrillRender) return;
+    try {
+      const copy = JSON.parse(JSON.stringify(d)) as DrillLike;
+      copy.keyframes = JSON.parse(JSON.stringify(keyframes));
+      const svg = svgRef.current;
+      svg.innerHTML = '';
+      const g = window.DrillRender.renderAnimated(svg, copy, p);
+      svg.setAttribute('viewBox', `0 0 ${g.W} ${g.H}`);
+      setFailed(false);
+    } catch {
+      setFailed(true);
+    }
+  }, [ready, d, keyframes]);
+
+  useEffect(() => { renderAt(step); }, [renderAt, step]);
+
+  useEffect(() => {
+    if (!playing || N < 2) return undefined;
+    const speed = SPEEDS[speedIndex];
+    let total = 0;
+    for (let i = 0; i < N - 1; i++) total += (keyframes[i].durationMs || 1500) / speed;
+    let t0: number | null = null;
+    function pAt(elapsed: number) {
+      let acc = 0;
+      for (let j = 0; j < N - 1; j++) {
+        const dur = (keyframes[j].durationMs || 1500) / speed;
+        if (elapsed < acc + dur) return j + (elapsed - acc) / dur;
+        acc += dur;
+      }
+      return N - 1;
+    }
+    function frame(ts: number) {
+      if (t0 == null) t0 = ts;
+      const elapsed = ts - t0!;
+      const p = pAt(elapsed);
+      renderAt(p);
+      if (elapsed < total) {
+        rafRef.current = requestAnimationFrame(frame);
+      } else {
+        setPlaying(false);
+        setStep(N - 1);
+      }
+    }
+    rafRef.current = requestAnimationFrame(frame);
+    return () => { if (rafRef.current != null) cancelAnimationFrame(rafRef.current); };
+  }, [playing, speedIndex, keyframes, N, renderAt]);
+
+  const togglePlay = useCallback(() => {
+    if (!canPlay) return;
+    if (step >= N - 1) setStep(0);
+    setPlaying((p) => !p);
+  }, [canPlay, step, N]);
+
+  const stepTo = useCallback((idx: number) => {
+    setPlaying(false);
+    setStep(Math.max(0, Math.min(N - 1, idx)));
+  }, [N]);
+
+  if (!d) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-center px-3" style={{ color: T.textMuted }}>
+        <span className="text-xs">Pas de schéma</span>
+      </div>
+    );
+  }
+  if (failed) {
+    return (
+      <div className="w-full h-full flex items-center justify-center" style={{ color: T.textMuted }}>
+        <span className="text-xs">Aperçu indisponible</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {variants.length > 1 && (
+        <div className="flex flex-wrap gap-1.5">
+          {variants.map((v, i) => (
+            <button
+              key={v.id || i}
+              type="button"
+              onClick={() => setVariantIndex(i)}
+              style={
+                i === variantIndex
+                  ? { backgroundColor: T.accent, color: '#fff', border: `1px solid ${T.accent}` }
+                  : { backgroundColor: T.pageBg, color: T.textMuted, border: `1px solid ${T.border}` }
+              }
+              className="px-2.5 py-1 rounded-full text-xs font-medium"
+            >
+              {v.name || `Variante ${i + 1}`}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div style={{ backgroundColor: T.pageBg, border: `1px solid ${T.border}` }} className="rounded-lg overflow-hidden">
+        <div style={{ aspectRatio: '16/9' }}>
+          <svg ref={svgRef} className="w-full h-full" preserveAspectRatio="xMidYMid meet" />
+        </div>
+      </div>
+
+      {canPlay && (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => stepTo(step - 1)}
+            disabled={step === 0}
+            style={{ color: step === 0 ? T.border : T.text }}
+            className="p-1.5 disabled:cursor-not-allowed"
+            aria-label="Étape précédente"
+          >
+            <SkipBack className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={togglePlay}
+            style={{ backgroundColor: T.accent, color: '#fff' }}
+            className="w-8 h-8 rounded-full flex items-center justify-center"
+            aria-label={playing ? 'Pause' : 'Lecture'}
+          >
+            {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" />}
+          </button>
+          <button
+            type="button"
+            onClick={() => stepTo(step + 1)}
+            disabled={step >= N - 1}
+            style={{ color: step >= N - 1 ? T.border : T.text }}
+            className="p-1.5 disabled:cursor-not-allowed"
+            aria-label="Étape suivante"
+          >
+            <SkipForward className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setSpeedIndex((i) => (i + 1) % SPEEDS.length)}
+            style={{ color: T.textMuted, border: `1px solid ${T.border}` }}
+            className="ml-auto px-2 py-1 rounded-md text-xs font-semibold"
+          >
+            {SPEEDS[speedIndex]}×
+          </button>
+          <span className="text-xs" style={{ color: T.textMuted }}>
+            Étape {step + 1}/{N}
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -1431,11 +1633,7 @@ function ProcedureDetailModal({
             </h3>
             {procedure.schematic ? (
               <>
-                <div style={{ backgroundColor: T.pageBg, border: `1px solid ${T.border}` }} className="rounded-lg overflow-hidden" >
-                  <div style={{ aspectRatio: '16/9' }}>
-                    <SchematicThumb drill={procedure.schematic.data} ready={renderReady} />
-                  </div>
-                </div>
+                <SchematicAnimatedPlayer drill={procedure.schematic.data} ready={renderReady} />
                 <button
                   onClick={() => router.push(`/webapp/library/schematics?schematic=${procedure.schematic!.id}`)}
                   style={{ color: T.accent, borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' }}
@@ -1610,6 +1808,59 @@ function ProcedureDetailModal({
   );
 }
 
+// ─── Preview Modal (schéma sans fiche) ─────────────────────────────────────────
+/**
+ * Aperçu léger d'un schéma "sans fiche" (pas de procédure pédagogique liée) —
+ * avant, ouvrir une telle carte sautait direct dans l'éditeur complet, sans
+ * jamais montrer le mouvement. Ici juste l'animation + un accès à l'éditeur
+ * pour qui veut vraiment modifier.
+ */
+function SchematicPreviewModal({
+  schematic,
+  onClose,
+  renderReady,
+}: {
+  schematic: SchematicRecord;
+  onClose: () => void;
+  renderReady: boolean;
+}) {
+  const router = useRouter();
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div
+          style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}` }}
+          className="w-full max-w-xl rounded-xl shadow-2xl overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ borderBottom: `1px solid ${T.border}` }} className="px-5 py-4 flex items-center justify-between gap-3">
+            <h2 style={{ color: T.text }} className="text-base font-semibold truncate">
+              {schematic.name || '(sans titre)'}
+            </h2>
+            <button type="button" onClick={onClose} style={{ color: T.textMuted }} className="hover:opacity-70 shrink-0">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="p-5">
+            <SchematicAnimatedPlayer drill={schematic.data} ready={renderReady} />
+            <button
+              type="button"
+              onClick={() => router.push(`/webapp/library/schematics?schematic=${schematic.id}`)}
+              style={{ color: T.accent, borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' }}
+              className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium border rounded-lg px-3 py-1.5 hover:opacity-80 transition-opacity"
+            >
+              <Layout className="h-3.5 w-3.5" />
+              Ouvrir dans l'éditeur
+              <ExternalLink className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function LibraryPage() {
   const router = useRouter();
@@ -1634,6 +1885,7 @@ export default function LibraryPage() {
   const [selectedPrincipes, setSelectedPrincipes] = useState<string[]>([]);
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [previewSchematic, setPreviewSchematic] = useState<SchematicRecord | null>(null);
   const [showDrawer, setShowDrawer] = useState(false);
   const [editingProcedure, setEditingProcedure] = useState<TrainingProcedure | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -1661,8 +1913,10 @@ export default function LibraryPage() {
     load();
   }, [load]);
 
-  // Le détail ne s'ouvre que pour un procédé (contenu pédagogique à montrer) —
-  // une carte "Sans fiche" ouvre directement l'éditeur, cf ProcedureCard onOpen.
+  // Le détail complet (fiche pédagogique) ne s'ouvre que pour un procédé —
+  // une carte "Sans fiche" ouvre un aperçu animé léger (previewSchematic),
+  // avec un accès direct à l'éditeur depuis ce même aperçu (cf ProcedureCard
+  // onOpen et SchematicPreviewModal).
   const selectedCard = useMemo(() => items.find((i) => i.key === selectedKey) ?? null, [items, selectedKey]);
   const selectedProcedure = selectedCard?.procedure ?? null;
 
@@ -2058,7 +2312,7 @@ export default function LibraryPage() {
                 renderReady={renderReady}
                 onOpen={() => {
                   if (item.kind === 'procedure') setSelectedKey(item.key);
-                  else if (item.schematic) router.push(`/webapp/library/schematics?schematic=${item.schematic.id}`);
+                  else if (item.schematic) setPreviewSchematic(item.schematic);
                 }}
                 onSetFolder={(folderId) => handleSetFolder(item, folderId)}
                 onDelete={() => handleDeleteCard(item)}
@@ -2077,6 +2331,14 @@ export default function LibraryPage() {
           isDeleting={isDeleting}
           onDrawSchematic={() => router.push(`/webapp/library/schematics?procedure=${selectedProcedure.id}`)}
           usageCount={procedureUsageCount}
+          renderReady={renderReady}
+        />
+      )}
+
+      {previewSchematic && (
+        <SchematicPreviewModal
+          schematic={previewSchematic}
+          onClose={() => setPreviewSchematic(null)}
           renderReady={renderReady}
         />
       )}
