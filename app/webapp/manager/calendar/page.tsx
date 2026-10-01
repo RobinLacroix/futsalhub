@@ -503,6 +503,12 @@ export default function CalendarPage() {
   };
 
   const trainingPlayersFormData = watchTraining('players');
+  // Motif saisi par le joueur quand il se déclare absent lui-même (set_my_training_attendance).
+  // Lecture seule ici : le coach ne le saisit jamais, il ne fait que le consulter.
+  const trainingAttendanceReasons = useMemo(
+    () => ((editingEvent as any)?.attendance_reason || {}) as Record<string, string>,
+    [editingEvent]
+  );
   const trainingAttendanceCounts = useMemo(() => {
     const form = (trainingPlayersFormData || {}) as Record<string, { id: string; status: PlayerStatus }>;
     const statuses = Object.values(form).map((p) => p?.status);
@@ -2856,9 +2862,19 @@ export default function CalendarPage() {
                           key={player.id}
                           className="flex flex-col sm:flex-row sm:items-center gap-2 p-2 hover:bg-gray-50"
                         >
-                          <span className="text-sm text-gray-900 flex-1">
-                            {player.first_name} {player.last_name}
-                          </span>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-sm text-gray-900">
+                              {player.first_name} {player.last_name}
+                            </span>
+                            {formPlayers[player.id]?.status === 'absent' && trainingAttendanceReasons[player.id] && (
+                              <p
+                                className="text-xs text-red-600 mt-0.5 truncate"
+                                title={trainingAttendanceReasons[player.id]}
+                              >
+                                Motif : {trainingAttendanceReasons[player.id]}
+                              </p>
+                            )}
+                          </div>
                           {isInForm ? (
                             <div className="flex flex-wrap items-center gap-3 sm:gap-4 sm:justify-end">
                               <Controller
@@ -2934,7 +2950,17 @@ export default function CalendarPage() {
                           key={playerId}
                           className="flex flex-col sm:flex-row sm:items-center gap-2 p-2 hover:bg-gray-50"
                         >
-                          <span className="text-sm text-gray-900 flex-1">{getPlayerDisplayName(playerId)}</span>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-sm text-gray-900">{getPlayerDisplayName(playerId)}</span>
+                            {(trainingPlayersFormData as Record<string, { status: PlayerStatus }> | undefined)?.[playerId]?.status === 'absent' && trainingAttendanceReasons[playerId] && (
+                              <p
+                                className="text-xs text-red-600 mt-0.5 truncate"
+                                title={trainingAttendanceReasons[playerId]}
+                              >
+                                Motif : {trainingAttendanceReasons[playerId]}
+                              </p>
+                            )}
+                          </div>
                           <div className="flex flex-wrap items-center gap-3 sm:gap-4 sm:justify-end">
                             <Controller
                               name={`players.${playerId}.status`}

@@ -71,6 +71,7 @@ export default function TrainingDetailScreen() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [attendance, setAttendance] = useState<Record<string, PlayerStatus>>({});
   const [attendanceExcused, setAttendanceExcused] = useState<Record<string, boolean>>({});
+  const [attendanceReason, setAttendanceReason] = useState<Record<string, string>>({});
   const [convoked, setConvoked] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -102,6 +103,7 @@ export default function TrainingDetailScreen() {
       setPlayers(pl);
       setAttendance(t.attendance ?? {});
       setAttendanceExcused(t.attendance_excused ?? {});
+      setAttendanceReason(t.attendance_reason ?? {});
       // Séance historique sans liste de convoqués : tout le groupe est réputé convoqué.
       const saved = t.convoked_players?.map((x) => x.id) ?? [];
       setConvoked(
@@ -468,6 +470,15 @@ export default function TrainingDetailScreen() {
             onPress={() => router.push(`/(tabs)/calendar/training/edit/${trainingId}` as never)}
             style={styles.editBtn}
           />
+          {training.session_id ? (
+            <Button
+              label="Voir le contenu de la séance"
+              icon="albums-outline"
+              variant="secondary"
+              block
+              onPress={() => router.push(`/(tabs)/sessions/${training.session_id}` as never)}
+            />
+          ) : null}
           <Button
             label="Tests physiques"
             icon="stopwatch-outline"
@@ -492,7 +503,7 @@ export default function TrainingDetailScreen() {
               icon="flash-outline"
               variant="secondary"
               block
-              onPress={() => router.push(`/(tabs)/calendar/training/squads/${trainingId}` as never)}
+              onPress={() => router.push(`/(tabs)/calendar/training/live/${trainingId}` as never)}
             />
           ) : null}
         </Card>
@@ -636,6 +647,11 @@ export default function TrainingDetailScreen() {
                           onExcusedChange={(v) => setAttendanceExcused((prev) => ({ ...prev, [p.id]: v }))}
                         />
                       )}
+                      {isConv && attendance[p.id] === 'absent' && attendanceReason[p.id] && (
+                        <Text variant="caption" tone="tertiary">
+                          Motif : {attendanceReason[p.id]}
+                        </Text>
+                      )}
                     </Card>
                   );
                 })
@@ -698,6 +714,11 @@ export default function TrainingDetailScreen() {
                     excused={!!attendanceExcused[playerId]}
                     onExcusedChange={(v) => setAttendanceExcused((prev) => ({ ...prev, [playerId]: v }))}
                   />
+                  {attendance[playerId] === 'absent' && attendanceReason[playerId] && (
+                    <Text variant="caption" tone="tertiary">
+                      Motif : {attendanceReason[playerId]}
+                    </Text>
+                  )}
                 </Card>
               );
             })

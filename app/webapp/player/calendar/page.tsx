@@ -118,10 +118,10 @@ export default function PlayerCalendarPage() {
 
   const handleRefresh = () => { setRefreshing(true); load(true); };
 
-  const handleSetAttendance = async (trainingId: string, status: AttendanceStatus) => {
+  const handleSetAttendance = async (trainingId: string, status: AttendanceStatus, reason?: string) => {
     setUpdatingId(trainingId);
     setError(null);
-    const result = await setMyTrainingAttendance(trainingId, status);
+    const result = await setMyTrainingAttendance(trainingId, status, reason);
     setUpdatingId(null);
     if (result.ok) {
       setTrainings(prev => prev.map(c => c.training_id === trainingId ? { ...c, my_status: status } : c));
@@ -131,6 +131,8 @@ export default function PlayerCalendarPage() {
       setError(status === 'absent'
         ? `Trop tard pour se déclarer absent : ferme ${formatNotice(minutes)} avant la séance.`
         : `Trop tard pour répondre : ferme ${formatNotice(minutes)} avant la séance.`);
+    } else if (result.error === 'reason_required') {
+      setError('Indique un motif pour te déclarer absent.');
     } else {
       setError(result.error ?? 'Erreur');
     }
@@ -265,11 +267,13 @@ function MatchCard({ m }: { m: MyUpcomingMatchRow }) {
 function TrainingCard({ c, isUpdating, onSetAttendance }: {
   c: MyConvolutionRow;
   isUpdating: boolean;
-  onSetAttendance: (id: string, s: AttendanceStatus) => void;
+  onSetAttendance: (id: string, s: AttendanceStatus, reason?: string) => void;
 }) {
   const { theme } = useTheme();
   const T = paletteFrom(theme.colors);
   const ATTENDANCE = attendanceOptions(T);
+  const [absenceOpen, setAbsenceOpen] = useState(false);
+  const [reason, setReason] = useState('');
   const date   = c.training_date ? parseISO(c.training_date) : new Date();
   const status = (c.my_status as AttendanceStatus) || null;
   const other  = !!c.is_other_team;
@@ -328,7 +332,15 @@ function TrainingCard({ c, isUpdating, onSetAttendance }: {
                 return (
                   <button
                     key={btn.status}
-                    onClick={() => onSetAttendance(c.training_id, btn.status)}
+                    onClick={() => {
+                      if (btn.status === 'absent') {
+                        setReason('');
+                        setAbsenceOpen(true);
+                        return;
+                      }
+                      setAbsenceOpen(false);
+                      onSetAttendance(c.training_id, btn.status);
+                    }}
                     disabled={disabled}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 6,
@@ -354,6 +366,53 @@ function TrainingCard({ c, isUpdating, onSetAttendance }: {
               <p style={{ fontSize: 11, color: T.textFaint, margin: '6px 0 0' }}>
                 Se déclarer absent ferme {formatNotice(c.absence_notice_minutes)} avant la séance.
               </p>
+            )}
+            {absenceOpen && (
+              <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: T.redBg, border: `1px solid ${T.red}33` }}>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: T.red, marginBottom: 6 }}>
+                  Motif de l&apos;absence (obligatoire)
+                </label>
+                <textarea
+                  value={reason}
+                  onChange={e => setReason(e.target.value)}
+                  placeholder="Ex : blessure, contrainte pro, indisponibilité personnelle..."
+                  rows={2}
+                  maxLength={300}
+                  autoFocus
+                  style={{
+                    width: '100%', resize: 'vertical', borderRadius: 6,
+                    border: `1px solid ${T.border}`, padding: '6px 8px',
+                    fontSize: 12, fontFamily: 'inherit', color: T.text, background: T.cardBg,
+                  }}
+                />
+                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                  <button
+                    onClick={() => {
+                      const trimmed = reason.trim();
+                      if (!trimmed) return;
+                      setAbsenceOpen(false);
+                      onSetAttendance(c.training_id, 'absent', trimmed);
+                    }}
+                    disabled={!reason.trim() || isUpdating}
+                    style={{
+                      padding: '6px 12px', borderRadius: 6, border: 'none',
+                      background: reason.trim() ? T.red : T.textFaint, color: '#fff',
+                      fontSize: 12, fontWeight: 700, cursor: reason.trim() ? 'pointer' : 'default',
+                    }}
+                  >
+                    Confirmer l&apos;absence
+                  </button>
+                  <button
+                    onClick={() => setAbsenceOpen(false)}
+                    style={{
+                      padding: '6px 12px', borderRadius: 6, border: `1px solid ${T.border}`,
+                      background: 'transparent', color: T.textMuted, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    }}
+                  >
+                    Annuler
+                  </button>
+                </div>
+              </div>
             )}
           </>
         )}

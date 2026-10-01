@@ -29,7 +29,7 @@ import { useRouter } from 'expo-router';
 import { View, FlatList, RefreshControl, Pressable } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme, makeStyles } from '../../contexts/ThemeContext';
-import { Text, EmptyState, Button } from '../../components/ui';
+import { Text, EmptyState, Button, Sheet, Input } from '../../components/ui';
 import { SkeletonList } from '../../components/ui/Skeleton';
 import { AttendancePicker } from '../../components/training/AttendancePicker';
 import { PlayerEventCard } from '../../components/player/PlayerEventCard';
@@ -78,6 +78,8 @@ export default function PlayerConvocationsScreen() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [emptyHint, setEmptyHint] = useState<'no_player' | 'no_team' | 'no_upcoming' | null>(null);
+  const [absenceDraftId, setAbsenceDraftId] = useState<string | null>(null);
+  const [absenceReason, setAbsenceReason] = useState('');
 
   const items = useMemo(
     () =>
@@ -123,10 +125,10 @@ export default function PlayerConvocationsScreen() {
     load();
   }, [load]);
 
-  const handleSetAttendance = useCallback(async (trainingId: string, status: PlayerStatus) => {
+  const handleSetAttendance = useCallback(async (trainingId: string, status: PlayerStatus, reason?: string) => {
     setUpdatingId(trainingId);
     setError(null);
-    const result = await setMyTrainingAttendance(trainingId, status);
+    const result = await setMyTrainingAttendance(trainingId, status, reason);
     setUpdatingId(null);
     if (result.ok) {
       setConvocations((prev) =>
@@ -142,10 +144,26 @@ export default function PlayerConvocationsScreen() {
           ? `Trop tard pour se déclarer absent : ferme ${formatNotice(minutes)} avant la séance.`
           : `Trop tard pour répondre : ferme ${formatNotice(minutes)} avant la séance.`
       );
+    } else if (result.error === 'reason_required') {
+      setError('Indique un motif pour te déclarer absent.');
     } else {
       setError(result.error ?? 'Erreur');
     }
   }, [convocations]);
+
+  /** Se déclarer absent exige un motif : on ouvre la feuille au lieu d'appeler direct. */
+  const requestAbsence = useCallback((trainingId: string) => {
+    setAbsenceReason('');
+    setAbsenceDraftId(trainingId);
+  }, []);
+
+  const confirmAbsence = useCallback(() => {
+    const trimmed = absenceReason.trim();
+    if (!trimmed || !absenceDraftId) return;
+    const trainingId = absenceDraftId;
+    setAbsenceDraftId(null);
+    handleSetAttendance(trainingId, 'absent', trimmed);
+  }, [absenceReason, absenceDraftId, handleSetAttendance]);
 
   /**
    * Le questionnaire se remplit DANS l'application, onglet « Questionnaires ».
@@ -245,12 +263,38 @@ export default function PlayerConvocationsScreen() {
               c={item.data}
               updating={updatingId === item.data.training_id}
               onSetAttendance={handleSetAttendance}
+              onRequestAbsence={requestAbsence}
               onOpenQuestionnaire={openQuestionnaire}
             />
           )
         }
         ItemSeparatorComponent={() => <View style={s.separator} />}
       />
+
+      <Sheet
+        visible={!!absenceDraftId}
+        onClose={() => setAbsenceDraftId(null)}
+        title="Motif de l'absence"
+        subtitle="Obligatoire pour te déclarer absent."
+      >
+        <Input
+          label="Motif"
+          value={absenceReason}
+          onChangeText={setAbsenceReason}
+          placeholder="Ex : blessure, contrainte pro, indisponibilité personnelle..."
+          multiline
+          numberOfLines={3}
+          maxLength={300}
+          autoFocus
+          inputStyle={{ minHeight: 88, textAlignVertical: 'top', paddingTop: theme.space.sm }}
+        />
+        <Button
+          label="Confirmer l'absence"
+          onPress={confirmAbsence}
+          disabled={!absenceReason.trim()}
+          block
+        />
+      </Sheet>
     </View>
   );
 }
@@ -259,11 +303,13 @@ function TrainingItem({
   c,
   updating,
   onSetAttendance,
+  onRequestAbsence,
   onOpenQuestionnaire,
 }: {
   c: MyConvolutionRow;
   updating: boolean;
   onSetAttendance: (id: string, s: PlayerStatus) => void;
+  onRequestAbsence: (trainingId: string) => void;
   onOpenQuestionnaire: (token: string) => void;
 }) {
   const s = useStyles();
@@ -313,7 +359,9 @@ function TrainingItem({
         <>
           <AttendancePicker
             value={(c.my_status as PlayerStatus) ?? null}
-            onChange={(status) => onSetAttendance(c.training_id, status)}
+            onChange={(status) =>
+              status === 'absent' ? onRequestAbsence(c.training_id) : onSetAttendance(c.training_id, status)
+            }
             playerName="Ma présence"
             loading={updating}
             fullLabels

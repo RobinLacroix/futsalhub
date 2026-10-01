@@ -123,6 +123,8 @@ export interface Training {
   attendance?: Record<string, PlayerStatus>;
   /** Pertinent seulement quand attendance[playerId] est 'absent' ou 'late'. Absence de clé = non prévenu. */
   attendance_excused?: Record<string, boolean>;
+  /** Motif saisi par le joueur quand il se déclare absent lui-même. Absence de clé = pas de motif (marqué par le coach, ou statut non-absent). */
+  attendance_reason?: Record<string, string>;
   /** Joueurs convoqués pour cette séance (ceux qui voient la séance dans leur calendrier). */
   convoked_players?: { id: string }[];
   team_id?: string;

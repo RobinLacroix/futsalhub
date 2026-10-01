@@ -75,13 +75,19 @@ export async function getMyCalendarEvents(): Promise<{
   };
 }
 
+/**
+ * `reason` est obligatoire côté RPC pour le statut 'absent' (le joueur doit motiver son
+ * absence ; une absence notée par le coach passe par un autre chemin, sans cette contrainte).
+ */
 export async function setMyTrainingAttendance(
   trainingId: string,
-  status: 'present' | 'absent' | 'late' | 'injured'
+  status: 'present' | 'absent' | 'late' | 'injured',
+  reason?: string
 ): Promise<{ ok: boolean; error?: string }> {
   const { data, error } = await supabase.rpc('set_my_training_attendance', {
     p_training_id: trainingId,
     p_status: status,
+    p_reason: reason ?? null,
   });
   if (error) return { ok: false, error: error.message };
   const result = data as { ok?: boolean; error?: string } | null;
