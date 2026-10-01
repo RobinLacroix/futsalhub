@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import Script from 'next/script';
 import { Calendar, Link2, X } from 'lucide-react';
 import { useActiveTeam } from '../../../hooks/useActiveTeam';
 import {
@@ -21,6 +22,7 @@ import { SessionBlockCard } from '../components/SessionBlockCard';
 import { AddBlockMenu } from '../components/AddBlockMenu';
 import { ProcedurePickerDialog } from '../components/ProcedurePickerDialog';
 import { AttachTrainingDialog } from '../components/AttachTrainingDialog';
+import { ProcedureDetailsDialog } from '../components/ProcedureDetailsDialog';
 
 function formatShortDate(d: string | Date): string {
   const date = typeof d === 'string' ? new Date(d) : d;
@@ -50,6 +52,8 @@ export default function SessionEditorPage() {
   const [pickerForBlockId, setPickerForBlockId] = useState<string | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
+  const [detailsProcedure, setDetailsProcedure] = useState<TrainingProcedureRecord | null>(null);
+  const [renderReady, setRenderReady] = useState(false);
 
   const loadTrainings = useCallback(async (clubId: string) => {
     const teams = await teamsService.getTeamsByClub(clubId);
@@ -247,6 +251,7 @@ export default function SessionEditorPage() {
             onMoveDown={() => moveBlock(block.id, 1)}
             onPickProcedure={() => setPickerForBlockId(block.id)}
             onViewSchematic={(schematicId) => window.open(`/webapp/library/schematics?schematic=${schematicId}`, '_blank')}
+            onViewDetails={(procedure) => setDetailsProcedure(procedure)}
           />
         ))}
       </div>
@@ -275,6 +280,16 @@ export default function SessionEditorPage() {
         onSelect={handleAttach}
         onClose={() => setAttachOpen(false)}
       />
+
+      {detailsProcedure && (
+        <ProcedureDetailsDialog
+          procedure={detailsProcedure}
+          onClose={() => setDetailsProcedure(null)}
+          renderReady={renderReady}
+        />
+      )}
+
+      <Script src="/tools/tactics/render-core.js" strategy="afterInteractive" onReady={() => setRenderReady(true)} />
     </div>
   );
 }

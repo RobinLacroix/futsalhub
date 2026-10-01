@@ -160,6 +160,8 @@ export interface StartGameInput {
   seriesDurationSeconds?: number;
   restDurationSeconds?: number;
   procedureId?: string | null;
+  /** Regroupe les séquences d'un même procédé (voir lib/liveSession/levels.ts). */
+  partIndex?: number | null;
   label?: string | null;
   scoreUnitLabel?: string | null;
   /** Valeur ajoutée au score à chaque tap — défaut 1 côté base si omis. */
@@ -181,6 +183,7 @@ export async function startTrainingGame(input: StartGameInput): Promise<Training
       training_id: input.trainingId,
       sequence: nextSequence,
       procedure_id: input.procedureId ?? null,
+      part_index: input.partIndex ?? null,
       label: input.label ?? null,
       score_unit_label: input.scoreUnitLabel ?? null,
       points_per_tap: input.pointsPerTap ?? 1,

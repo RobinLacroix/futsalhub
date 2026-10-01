@@ -52,8 +52,8 @@ const HIDDEN_ROUTE_TITLES: Record<string, string> = {
   notifications: 'Notifications',
   'library/index': 'Bibliothèque',
   'sessions/index': 'Séances',
-  'calendar/training/squads/[trainingId]': 'Plateaux',
-  'calendar/training/live/[trainingId]': 'Séance live',
+  'calendar/training/squads/[trainingId]': 'Équipes',
+  'calendar/training/live/[trainingId]': 'Mode live',
   'calendar/training/recap/[trainingId]': 'Récap de séance',
 };
 
@@ -129,6 +129,13 @@ function TabsLayoutContent() {
 
   const content = (
     <Tabs
+      // Sans ça, le routeur retombe sur son défaut ('firstRoute') : le bouton
+      // retour d'un écran caché (ex. library/procedure/[procedureId], ouvert
+      // par router.push depuis l'onglet Bibliothèque) ramène alors toujours à
+      // Accueil (premier onglet) au lieu de l'écran précédemment affiché —
+      // signalé par Robin sur la fiche procédé. 'history' fait remonter
+      // router.back() à l'onglet réellement visité avant, ici Bibliothèque.
+      backBehavior="history"
       screenOptions={{
         headerShown: !isTablet,
         headerStyle: { backgroundColor: c.bg.canvas },

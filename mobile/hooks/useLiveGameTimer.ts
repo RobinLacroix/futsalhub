@@ -38,8 +38,21 @@ export function useLiveGameTimer(params: {
   initialPhaseKind?: TimerPhaseKind;
   initialSeriesIndex?: number;
   onPhaseChange?: (phaseStartedAtMs: number, phaseKind: TimerPhaseKind, seriesIndex: number) => void;
+  /** Gèle le décompte. Les pauses sont retranchées de l'horloge (horloge virtuelle) et jamais persistées : elles ne valent que pour le montage courant. */
+  paused?: boolean;
 }): LiveGameTimerState {
-  const { mode, seriesConfig, gameStartedAtMs, onPhaseChange } = params;
+  const { mode, seriesConfig, gameStartedAtMs, onPhaseChange, paused = false } = params;
+
+  const pausedAtRef = useRef<number | null>(paused ? Date.now() : null);
+  const totalPausedRef = useRef(0);
+  useEffect(() => {
+    if (paused && pausedAtRef.current === null) pausedAtRef.current = Date.now();
+    if (!paused && pausedAtRef.current !== null) {
+      totalPausedRef.current += Date.now() - pausedAtRef.current;
+      pausedAtRef.current = null;
+    }
+  }, [paused]);
+  const now = () => (pausedAtRef.current ?? Date.now()) - totalPausedRef.current;
 
   const phaseStartedAtMsRef = useRef(params.initialPhaseStartedAtMs ?? gameStartedAtMs);
   const phaseKindRef = useRef<TimerPhaseKind>(params.initialPhaseKind ?? 'serie');
@@ -47,7 +60,7 @@ export function useLiveGameTimer(params: {
 
   const computeState = useCallback((): LiveGameTimerState => {
     if (mode === 'continu') {
-      const elapsedSeconds = Math.floor((Date.now() - gameStartedAtMs) / 1000);
+      const elapsedSeconds = Math.floor((now() - gameStartedAtMs) / 1000);
       return { mode, elapsedSeconds, currentSeriesIndex: null, phaseKind: null, phaseRemainingSeconds: null, isFinished: false };
     }
 
@@ -58,7 +71,7 @@ export function useLiveGameTimer(params: {
     const phaseDurationFor = (kind: TimerPhaseKind) =>
       kind === 'serie' ? seriesConfig.seriesDurationSeconds : seriesConfig.restDurationSeconds;
 
-    let phaseElapsed = Math.floor((Date.now() - phaseStartedAtMsRef.current) / 1000);
+    let phaseElapsed = Math.floor((now() - phaseStartedAtMsRef.current) / 1000);
     let remaining = phaseDurationFor(phaseKindRef.current) - phaseElapsed;
 
     // Avale toutes les bascules manquées (app restée en arrière-plan plusieurs
@@ -75,7 +88,7 @@ export function useLiveGameTimer(params: {
         phaseKindRef.current = 'serie';
         seriesIndexRef.current += 1;
       }
-      phaseStartedAtMsRef.current = Date.now() - overshoot * 1000;
+      phaseStartedAtMsRef.current = now() - overshoot * 1000;
       onPhaseChange?.(phaseStartedAtMsRef.current, phaseKindRef.current, seriesIndexRef.current);
       void playPhaseTransitionSound();
 
@@ -106,7 +119,7 @@ export function useLiveGameTimer(params: {
       clearInterval(interval);
       sub.remove();
     };
-  }, [computeState]);
+  }, [computeState, paused]);
 
   return state;
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronUp, ChevronDown, X, FileText, Eye } from 'lucide-react';
+import { ChevronUp, ChevronDown, X, FileText, Eye, Info } from 'lucide-react';
 import type { SessionBlock } from '@/lib/services/sessionsService';
 import type { TrainingProcedureRecord } from '@/lib/services/trainingProceduresService';
 import { blockMeta } from '../constants';
@@ -17,6 +17,7 @@ export interface SessionBlockCardProps {
   onMoveDown: () => void;
   onPickProcedure: () => void;
   onViewSchematic?: (schematicId: string) => void;
+  onViewDetails?: (procedure: TrainingProcedureRecord) => void;
 }
 
 /**
@@ -25,7 +26,7 @@ export interface SessionBlockCardProps {
  * scan rapide de toute la séance plutôt que des champs toujours ouverts.
  */
 export function SessionBlockCard({
-  block, index, total, procedure, onPatch, onRemove, onMoveUp, onMoveDown, onPickProcedure, onViewSchematic,
+  block, index, total, procedure, onPatch, onRemove, onMoveUp, onMoveDown, onPickProcedure, onViewSchematic, onViewDetails,
 }: SessionBlockCardProps) {
   const [showIntention, setShowIntention] = useState(!!block.intentionPedagogique);
   const meta = blockMeta(block.type);
@@ -95,6 +96,17 @@ export function SessionBlockCard({
             <span className="text-xs text-gray-800 truncate">
               {procedure ? (procedure.title || 'Sans titre') : 'Choisir un procédé (optionnel)'}
             </span>
+            {procedure && onViewDetails && (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => { e.stopPropagation(); onViewDetails(procedure); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); onViewDetails(procedure); } }}
+                className={`inline-flex items-center gap-1 text-[11px] text-blue-600 hover:underline shrink-0 ${procedure?.schematic_id ? '' : 'ml-auto'}`}
+              >
+                <Info className="h-3 w-3" /> Détails
+              </span>
+            )}
             {procedure?.schematic_id && onViewSchematic && (
               <span
                 role="button"

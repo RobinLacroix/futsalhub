@@ -50,7 +50,10 @@ function buildBreakdown(
   filteredMatchIds: Set<string>,
 ): MatchBreakdown[] {
   return matches
-    .filter(m => filteredMatchIds.has(m.id) && m.score_team != null && m.score_opponent != null)
+    // score_team/score_opponent valent 0 par défaut (colonnes NOT NULL) sur un
+    // match pas encore joué : seule la date de coup d'envoi distingue un
+    // résultat réel d'un match à venir.
+    .filter(m => filteredMatchIds.has(m.id) && new Date(m.date as string).getTime() <= Date.now())
     .sort((a, b) => (a.date as string).localeCompare(b.date as string))
     .map(m => {
       const scoredByType:   Record<GoalType, number> = { offensive: 0, transition: 0, cpa: 0, superiority: 0 };

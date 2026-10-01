@@ -81,7 +81,18 @@ function SchematicsPageContent() {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const iframeReadyRef = useRef(false); // true dès que READY est reçu
-  const initSentRef = useRef(false);    // true dès que l'INIT complet (avec drill) est parti
+  // Clé (schematic:<id> / procedure:<id> / '') du dernier INIT complet (avec
+  // drill) envoyé — plus un simple booléen "déjà envoyé une fois" (bug
+  // 2026-09-27 : rester sur cette page et ouvrir un AUTRE schéma via un lien
+  // client-side, ex. ProcedureDetailModal "Ouvrir dans l'éditeur", changeait
+  // schematicId dans l'URL mais gardait ce composant monté — le booléen
+  // bloquait alors tout nouvel INIT, et l'iframe restait figée sur le premier
+  // schéma ouvert). Comparer une clé permet de ne renvoyer l'INIT que quand
+  // schematicId/procedureIdParam changent vraiment, tout en laissant le SAVE
+  // handler ci-dessous la mettre à jour en même temps que schematicIdRef pour
+  // ne pas redéclencher un INIT (donc un applyDrill qui remet à zéro la
+  // sélection/l'historique) juste après le tout premier enregistrement.
+  const initedKeyRef = useRef<string | null>(null);
   // Miroir synchrone de schematicId : sur le tout premier enregistrement d'un
   // schéma neuf, le handler SAVE ci-dessous connaît l'id immédiatement (reçu
   // de saveSchematic), mais router.replace() qui met `schematicId` (état,
@@ -141,9 +152,10 @@ function SchematicsPageContent() {
   // suivants n'envoient qu'un CONTEXT_UPDATE.
   const trySendContext = useCallback(async () => {
     if (!iframeReadyRef.current || !activeTeam) return;
+    const key = schematicId ? `schematic:${schematicId}` : procedureIdParam ? `procedure:${procedureIdParam}` : '';
     try {
       const context = await buildContext(activeTeam);
-      if (!initSentRef.current) {
+      if (initedKeyRef.current !== key) {
         let drill: unknown = null;
         let procedure = null;
         if (schematicId) {
@@ -161,14 +173,14 @@ function SchematicsPageContent() {
           procedure = await trainingProceduresService.getProcedureById(procedureIdParam);
         }
         sendToIframe({ type: 'INIT', ...context, drillId: schematicId, drill, procedure });
-        initSentRef.current = true;
+        initedKeyRef.current = key;
         setStatus('ready');
       } else {
         sendToIframe({ type: 'CONTEXT_UPDATE', ...context });
       }
     } catch (err) {
       console.error('schematics: échec de préparation du contexte', err);
-      if (!initSentRef.current) {
+      if (initedKeyRef.current !== key) {
         setStatus('error');
         setErrorMessage("Impossible de charger le schéma ou l'effectif.");
       }
@@ -204,8 +216,15 @@ function SchematicsPageContent() {
           schematicIdRef.current = record.id;
           sendToIframe({ type: 'SAVED', drillId: record.id });
           // Un premier enregistrement (id absent de l'URL) fixe l'URL sur le
-          // nouvel id, pour qu'un rechargement de page rouvre ce schéma.
-          if (!schematicId) router.replace(`/webapp/library/schematics?schematic=${record.id}`);
+          // nouvel id, pour qu'un rechargement de page rouvre ce schéma. Sans
+          // marquer initedKeyRef ici, le futur re-render avec schematicId=
+          // record.id verrait une clé "jamais initée" et renverrait un INIT
+          // complet — écrasant l'édition en cours dans l'iframe par un
+          // applyDrill() de la même donnée tout juste relue en base.
+          if (!schematicId) {
+            initedKeyRef.current = `schematic:${record.id}`;
+            router.replace(`/webapp/library/schematics?schematic=${record.id}`);
+          }
         }).catch((err) => {
           console.error('schematics: échec de sauvegarde', err);
           sendToIframe({ type: 'SAVE_ERROR', message: err instanceof Error ? err.message : 'Erreur inconnue' });

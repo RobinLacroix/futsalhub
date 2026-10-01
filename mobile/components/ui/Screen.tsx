@@ -26,6 +26,15 @@ export interface ScreenProps {
   bleed?: boolean;
   /** Respecte l'encoche en haut. À désactiver quand un header natif est présent. */
   edgeTop?: boolean;
+  /**
+   * Ignore `LAYOUT.MAX_CONTENT_WIDTH` sur tablette : le contenu occupe toute
+   * la largeur disponible au lieu d'être plafonné à 900dp puis centré. Pour
+   * les écrans dont le contenu s'adapte lui-même à la largeur (grille de
+   * cartes à colonnes variables, cf useResponsiveColumns) — la plupart des
+   * écrans (formulaires, fiches texte) restent plus lisibles avec le
+   * plafond par défaut.
+   */
+  fullWidth?: boolean;
   style?: ViewStyle;
   contentContainerStyle?: ViewStyle;
 }
@@ -37,6 +46,7 @@ export function Screen({
   refreshing = false,
   bleed = false,
   edgeTop = false,
+  fullWidth = false,
   style,
   contentContainerStyle,
 }: ScreenProps) {
@@ -49,7 +59,7 @@ export function Screen({
     paddingTop: edgeTop ? insets.top : 0,
     paddingBottom: theme.space.huge,
     width: '100%',
-    maxWidth: isTablet ? LAYOUT.MAX_CONTENT_WIDTH : undefined,
+    maxWidth: isTablet && !fullWidth ? LAYOUT.MAX_CONTENT_WIDTH : undefined,
     alignSelf: 'center',
   };
 

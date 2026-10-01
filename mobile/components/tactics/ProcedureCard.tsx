@@ -19,10 +19,13 @@ export function ProcedureCard({
   card,
   onPress,
   onDelete,
+  width,
 }: {
   card: LibraryCard;
   onPress: () => void;
   onDelete?: () => void;
+  /** Largeur explicite (dp), calculée par la grille appelante (cf useResponsiveColumns). Par défaut, 2 colonnes fixes. */
+  width?: number;
 }) {
   const { theme } = useTheme();
   const c = theme.colors;
@@ -36,7 +39,13 @@ export function ProcedureCard({
   ].filter(Boolean);
 
   return (
-    <Card variant="raised" padding="none" style={s.card} onPress={onPress} accessibilityLabel={card.title || 'Sans titre'}>
+    <Card
+      variant="raised"
+      padding="none"
+      style={[s.card, width != null && { width }]}
+      onPress={onPress}
+      accessibilityLabel={card.title || 'Sans titre'}
+    >
       <View style={[s.thumb, { backgroundColor: c.bg.sunken, borderBottomColor: c.border.subtle }]}>
         {sch ? (
           <SchematicThumbnail drill={sch.data} />

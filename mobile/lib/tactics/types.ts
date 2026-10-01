@@ -20,6 +20,8 @@ export interface DrillPitch {
   lineColor?: string;
   goalAreaColor?: string;
   goalAreaOpacity?: number;
+  /** Repères figés (couloirs/zones), cf drawPitchPattern() côté web. */
+  pattern?: 'none' | 'corridors3' | 'zones3' | 'zones4' | 'grid' | string;
   view?: 'full' | 'half-left' | 'half-right';
   /** Champs non gérés tranche 1 (image de fond, logo, motif de surface…). */
   [key: string]: unknown;

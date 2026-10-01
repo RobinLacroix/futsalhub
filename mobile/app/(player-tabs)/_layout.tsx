@@ -40,6 +40,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { PlayerSettingsButton } from '../../components/PlayerSettingsButton';
+import { TeamAnalyticsButton } from '../../components/TeamAnalyticsButton';
 
 export default function PlayerTabsLayout() {
   usePushNotifications();
@@ -89,6 +90,7 @@ export default function PlayerTabsLayout() {
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? 'person' : 'person-outline'} size={size} color={color} />
           ),
+          headerRight: () => <TeamAnalyticsButton />,
         }}
       />
       <Tabs.Screen

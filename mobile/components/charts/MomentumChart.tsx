@@ -31,6 +31,10 @@ export interface MomentumChartProps {
   events: MomentumEvent[];
   /** Minute jusqu'à laquelle calculer/afficher. Omis = match entier (post-match). */
   upToMinute?: number;
+  /** Nombre max de points par mi-temps. Omis = un point par minute entière. Voir `buildMomentumSeries`. */
+  maxPointsPerHalf?: number;
+  /** false = pas de décroissance causale, un pic isolé par event. Voir `buildMomentumSeries`. */
+  decay?: boolean;
   teamName?: string;
   opponentName?: string;
   usColor?: string;
@@ -46,6 +50,8 @@ export interface MomentumChartProps {
 export function MomentumChart({
   events,
   upToMinute,
+  maxPointsPerHalf,
+  decay,
   teamName = 'Nous',
   opponentName = 'Adversaire',
   usColor = '#10B981',
@@ -57,8 +63,7 @@ export function MomentumChart({
 }: MomentumChartProps) {
   const [width, setWidth] = useState(0);
 
-  const { points, dominantSpans, halfDurations } = buildMomentumSeries(events, upToMinute);
-  const half2Started = events.some((e) => e.half === 2);
+  const { points, dominantSpans, half2StartIndex } = buildMomentumSeries(events, upToMinute, { maxPointsPerHalf, decay });
 
   if (points.length === 0 || points.every((p) => p.value === 0)) {
     return (
@@ -70,7 +75,10 @@ export function MomentumChart({
 
   const half = height / 2;
   const barW = width > 0 ? width / points.length : 0;
-  const halfTimeX = (halfDurations.h1 / points.length) * width;
+  // Repère par index, pas par minute : le seul repère qui reste juste que les
+  // points soient espacés d'une minute (historique) ou d'une fraction de
+  // mi-temps (`maxPointsPerHalf`).
+  const halfTimeX = half2StartIndex != null ? half2StartIndex * barW : null;
   const topSpans = dominantSpans.slice(0, 2);
 
   return (
@@ -113,7 +121,7 @@ export function MomentumChart({
             absolue placée avant ses frères peint dessous en React Native
             comme sur le web, et se retrouvait invisible pile sous la barre de
             la minute qui l'intéresse. */}
-        {width > 0 && half2Started && (
+        {width > 0 && halfTimeX != null && (
           <>
             <View
               pointerEvents="none"

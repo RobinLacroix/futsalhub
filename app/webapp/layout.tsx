@@ -116,6 +116,7 @@ function Sidebar({
       items: [
         { name: 'Calendrier', href: '/webapp/player/calendar', icon: Calendar },
         { name: 'Ma fiche', href: '/webapp/player/profile', icon: UserCircle },
+        { name: 'Analyse équipe', href: '/webapp/player/analytics', icon: BarChart3 },
         { name: 'Questionnaires', href: '/webapp/player/questionnaires', icon: MessageSquare },
         { name: 'Contenu partagé', href: '/webapp/player/shared', icon: Share2 },
       ],

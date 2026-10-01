@@ -75,11 +75,50 @@ export function buildEntityTimeline(keyframes: DrillKeyframe[]): DrillTimeline {
   return { totalMs: startMsAt[N - 1] || 0, entities };
 }
 
+/**
+ * `variant.timeline` peut devenir orphelin de `variant.keyframes` : côté web,
+ * `ensureTimeline()` (editor.js) ne reconstruit la timeline stockée que si
+ * elle est ABSENTE, jamais si elle est désynchronisée d'un nombre d'étapes
+ * différent — un schéma d'abord animé sur plusieurs étapes puis réduit à une
+ * seule (ex. "Variante 1" gardée comme simple dispositif de départ) peut donc
+ * sauvegarder une `timeline` qui décrit encore l'ancien mouvement. Le lecteur
+ * mobile (DrillPlayer) faisait alors confiance à cette timeline stockée : le
+ * terrain affichait la position ET les flèches de l'ancienne animation, figé
+ * sur son tout premier instant, sans aucun contrôle de lecture (repéré via
+ * simulateur iOS 2026-09-30, schéma réel "Jeu 4v4 course couloir"). Comparer
+ * la durée totale que les keyframes ACTUELS impliquent à celle portée par la
+ * timeline stockée détecte cette désync ; en cas d'écart, la timeline stockée
+ * est ignorée au profit d'une reconstruction fraîche depuis les keyframes.
+ */
+function isTimelineConsistent(timeline: DrillTimeline | undefined, keyframes: DrillKeyframe[]): timeline is DrillTimeline {
+  if (!timeline) return false;
+  // Comparer `timeline.totalMs` à la somme naïve des `durationMs` par étape
+  // (tentative précédente, 2026-09-27) casse tout schéma légitimement édité
+  // en "mode avancé" : editor.js (recomputeTotalMs/ensureKeyframeCapacity,
+  // §"timeline du mode avance") étire volontairement `totalMs` au-delà de
+  // cette somme quand un clip est glissé au-delà de la frontière simple —
+  // c'est le fonctionnement normal d'une timeline désynchronisée, pas un
+  // signe de péremption. Les deux cas (désync légitime vs timeline périmée
+  // après suppression d'étapes) produisent le même écart de ce côté-là, donc
+  // la comparaison ne peut pas les distinguer — elle a cassé toute la
+  // bibliothèque, pas seulement les schémas réduits à une étape (repéré par
+  // Robin 2026-09-28, schémas jamais retouchés depuis avant le correctif).
+  // Le vrai bug (2026-09-27) ne concernait que le cas où il ne reste plus
+  // qu'UNE étape : aucun segment de mouvement n'est alors possible, donc
+  // toute timeline stockée à ce stade est forcément un résidu d'un état
+  // antérieur à plusieurs étapes — c'est le seul cas qu'on peut détecter
+  // sans faux positif.
+  return keyframes.length > 1;
+}
+
 /** La variante à jouer — celle demandée (sélecteur de variantes du lecteur), sinon la variante active du schéma, sinon les keyframes racine (schéma sans variante, format le plus ancien). */
 export function resolveVariant(drill: Drill, variantIndex?: number): { name: string; keyframes: DrillKeyframe[]; timeline?: DrillTimeline } {
   const idx = variantIndex ?? drill.activeVariantIndex ?? 0;
   const variant = drill.variants?.[idx] as (DrillVariant & { keyframes: DrillKeyframe[] }) | undefined;
-  if (variant) return { name: variant.name, keyframes: variant.keyframes, timeline: variant.timeline };
+  if (variant) {
+    const timeline = isTimelineConsistent(variant.timeline, variant.keyframes) ? variant.timeline : undefined;
+    return { name: variant.name, keyframes: variant.keyframes, timeline };
+  }
   return { name: 'Variante 1', keyframes: drill.keyframes ?? [] };
 }
 
@@ -127,6 +166,24 @@ function quadChainPointAt(from: Pt, ctrls: Pt[] | undefined, to: Pt, f: number):
   const segF = f * n;
   const si = Math.max(0, Math.min(n - 1, Math.floor(segF)));
   return quadSegPoint(segs[si], segF - si);
+}
+
+/**
+ * Points échantillonnés le long de la VRAIE chaîne de béziers quadratiques
+ * (from → ctrls → to), `stepsPerSeg` points par segment — port de
+ * quadChainPath (web, render-core.js l.59-65). Contrairement à
+ * quadChainPointAt (une seule position, pour l'interpolation d'un jeton),
+ * celle-ci renvoie tout le tracé : c'est ce que MovementArrow/FreeLine
+ * utilisent pour dessiner la flèche en courbe plutôt qu'en ligne brisée
+ * passant par les points de contrôle.
+ */
+export function quadChainPath(from: Pt, ctrls: Pt[] | undefined, to: Pt, stepsPerSeg: number): Pt[] {
+  const segs = quadChainSegments(from, ctrls, to);
+  const out: Pt[] = [segs[0].p0];
+  segs.forEach((seg) => {
+    for (let s = 1; s <= stepsPerSeg; s++) out.push(quadSegPoint(seg, s / stepsPerSeg));
+  });
+  return out;
 }
 
 /** Position d'une entité à l'instant absolu t (ms) — port exact de sampleEntityAt (web). */
@@ -357,6 +414,42 @@ export function buildOverlays(keyframes: DrillKeyframe[]): DrillOverlays {
     texts: buildOverlayGlobal<DrillText>(keyframes, 'texts'),
     pulses: buildOverlayGlobal<DrillPulse>(keyframes, 'pulses'),
   };
+}
+
+/**
+ * Tous les instants (ms) où le contenu non continu du schéma change réellement
+ * — bornes de clip (une flèche apparaît/disparaît avec son clip, cf
+ * computeArrowsAtMs) et fenêtres de visibilité des survols — triés, dédupliqués.
+ * DrillPlayer (mobile) s'en sert pour ne déclencher un re-rendu JS qu'à ces
+ * instants précis pendant la lecture, plutôt qu'en continu : les jetons sont
+ * pilotés nativement (AnimatedEntityToken) et tolèrent une fréquence de
+ * mise à jour élevée, mais les flèches/traits/textes/pulses restent rendus
+ * par React à chaque commit — sur ce projet (ancienne architecture RN), un
+ * flux continu de commits, même clairsemé (30-100ms), a empêché le pont natif
+ * de jamais peindre au-delà du tout premier état pendant toute la lecture
+ * (constaté par Robin : "seule la première flèche apparaît"). Ne committer
+ * QUE quand quelque chose change vraiment laisse le thread JS réellement
+ * inactif entre deux bornes, ce qui donne au pont une vraie fenêtre pour
+ * peindre — même mécanisme de fond que le passage des jetons au natif.
+ */
+export function collectBoundaryMs(tl: DrillTimeline, overlays: DrillOverlays, totalMs: number): number[] {
+  const set = new Set<number>([0, totalMs]);
+  Object.values(tl.entities).forEach((rec) => {
+    rec.clips.forEach((c) => {
+      set.add(c.startMs);
+      set.add(c.startMs + c.durationMs);
+    });
+  });
+  const addWindow = (o: VisibilityWindow) => {
+    if (o.visibleFrom != null) set.add(o.visibleFrom);
+    if (o.visibleTo != null) set.add(o.visibleTo);
+  };
+  overlays.lines.forEach(addWindow);
+  overlays.texts.forEach(addWindow);
+  overlays.pulses.forEach(addWindow);
+  return Array.from(set)
+    .filter((ms) => ms >= 0 && ms <= totalMs)
+    .sort((a, b) => a - b);
 }
 
 /** État complet du schéma à l'instant t (ms) — entités interpolées + overlays/zones filtrés par fenêtre de présence. */

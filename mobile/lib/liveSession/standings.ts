@@ -3,7 +3,7 @@ import type { TrainingGame, TrainingGameSquad } from '../services/trainingGames'
 export interface SquadStanding {
   squadId: string;
   label: string;
-  colorIndex: number;
+  colorToken: string;
   wins: number;
   draws: number;
   losses: number;
@@ -35,7 +35,7 @@ export interface SquadLike {
 export function computeSquadStandings(squads: SquadLike[], games: TrainingGame[], gameSquads: TrainingGameSquad[]): SquadStanding[] {
   const map = new Map<string, SquadStanding>();
   for (const sq of squads) {
-    map.set(sq.id, { squadId: sq.id, label: sq.label, colorIndex: Number(sq.color_token) || 0, wins: 0, draws: 0, losses: 0, diff: 0, points: 0 });
+    map.set(sq.id, { squadId: sq.id, label: sq.label, colorToken: sq.color_token, wins: 0, draws: 0, losses: 0, diff: 0, points: 0 });
   }
 
   const finishedGameIds = new Set(games.filter((g) => g.ended_at).map((g) => g.id));

@@ -3,6 +3,7 @@ import { View, ActivityIndicator, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTheme, makeStyles } from '../../../contexts/ThemeContext';
 import { useActiveTeam } from '../../../contexts/ActiveTeamContext';
+import { useResponsiveColumns } from '../../../hooks/useResponsiveColumns';
 import { Screen, Text, Button, EmptyState, Input } from '../../../components/ui';
 import { FilterChip } from '../../../components/tactics/FilterChip';
 import { SessionCard } from '../../../components/tactics/SessionCard';
@@ -31,6 +32,11 @@ export default function SessionsScreen() {
   const { theme } = useTheme();
   const s = useStyles();
   const { activeTeam } = useActiveTeam();
+  // Cible une carte de ~420dp (titre + timeline + puces de rattachement
+  // restent lisibles à cette largeur) plutôt qu'une pleine largeur qui
+  // s'étire sur iPad — même logique que la bibliothèque de procédés
+  // (cf useResponsiveColumns), demande explicite de Robin (2026-09-23).
+  const { onLayout: onGridLayout, cardWidth } = useResponsiveColumns(420, theme.space.md, 1);
 
   const [sessions, setSessions] = useState<TrainingSessionRecord[]>([]);
   const [trainings, setTrainings] = useState<Training[]>([]);
@@ -119,7 +125,7 @@ export default function SessionsScreen() {
   }
 
   return (
-    <Screen onRefresh={load} refreshing={loading}>
+    <Screen onRefresh={load} refreshing={loading} fullWidth>
       <Button label="Nouvelle séance" icon="add" onPress={() => router.push('/(tabs)/sessions/new' as never)} block style={s.newBtn} />
 
       <Input label="Rechercher" value={search} onChangeText={setSearch} placeholder="Nom, principe, moyen, thème…" containerStyle={s.searchField} />
@@ -141,11 +147,12 @@ export default function SessionsScreen() {
           }
         />
       ) : (
-        <View style={s.list}>
+        <View style={s.grid} onLayout={onGridLayout}>
           {visibleSessions.map((session) => (
             <SessionCard
               key={session.id}
               session={session}
+              width={cardWidth}
               attachedTrainings={trainingsBySessionId.get(session.id) || []}
               teamNameById={teamNameById}
               onOpen={() => router.push(`/(tabs)/sessions/${session.id}` as never)}
@@ -163,5 +170,5 @@ const useStyles = makeStyles((t) => ({
   newBtn: { marginBottom: t.space.lg },
   searchField: { marginBottom: t.space.md },
   filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.sm, marginBottom: t.space.lg },
-  list: { gap: t.space.md },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.md },
 }));

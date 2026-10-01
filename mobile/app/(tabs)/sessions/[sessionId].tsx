@@ -295,6 +295,7 @@ export default function SessionEditorScreen() {
                 onMoveDown={() => moveBlock(block.id, 1)}
                 onPickProcedure={() => setPickerForBlock(block.id)}
                 onViewSchematic={(schematicId) => router.push(`/(tabs)/library/${schematicId}` as never)}
+                onViewDetails={(procedure) => router.push(`/(tabs)/library/procedure/${procedure.id}` as never)}
               />
             ))}
           </View>

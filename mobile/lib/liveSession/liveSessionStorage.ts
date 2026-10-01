@@ -25,6 +25,12 @@ export interface LiveSessionSnapshot {
   currentSeriesIndex: number | null;
   /** squadId -> score courant du jeu en cours — une équipe par entrée, un jeu à N équipes n'est pas limité à domicile/extérieur. */
   scores: Record<string, number>;
+  /** Plateaux qui jouent la prochaine séquence — absent = tous. */
+  playingSquadIds?: string[];
+  /** Chrono global du procédé en cours, avec pause : temps accumulé + instant de reprise (null = en pause). Ignoré s'il concerne un autre procédé. */
+  /** Séquences closes dont les scores ont été remis à zéro : exclues des bilans V/N/D (un 0-0 remis à zéro n'est pas un match nul). */
+  resetGameIds?: string[];
+  procedureClock?: { key: string; accumulatedMs: number; runningSinceMs: number | null };
   updatedAtMs: number;
 }
 

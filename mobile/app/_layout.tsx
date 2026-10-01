@@ -141,6 +141,7 @@ function ThemedRoot() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="(player-tabs)" />
         <Stack.Screen name="player-settings" options={{ title: 'Réglages' }} />
+        <Stack.Screen name="player-team-analytics" options={{ title: 'Analyse équipe' }} />
         <Stack.Screen name="join-staff-code" options={{ title: 'Rejoindre le staff' }} />
         {/* Vérification visuelle du design system. Non listée en navigation. */}
         <Stack.Screen name="design-gallery" options={{ title: 'Design system' }} />

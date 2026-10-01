@@ -15,19 +15,17 @@ import {
   Link2,
   Link2Off,
   Loader2,
-  Pause,
   Pencil,
-  Play,
   Plus,
   Search,
-  SkipBack,
-  SkipForward,
   SlidersHorizontal,
   Trash2,
   Users,
   X,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
+import { SchematicAnimatedPlayer } from './components/SchematicAnimatedPlayer';
+import { BLOCS, FORMATS, PHASES_DE_JEU, INTENSITES, TaxoBadge, BlocBadge, type TaxoStyle } from './components/taxonomy';
 import { useActiveTeam } from '../hooks/useActiveTeam';
 import { schematicsService, type SchematicRecord } from '@/lib/services/schematicsService';
 import { schematicFoldersService, type SchematicFolderRecord } from '@/lib/services/schematicFoldersService';
@@ -41,212 +39,6 @@ import {
   type ProcedureLibraryItem,
   type LibraryCard,
 } from '@/lib/services/trainingProceduresService';
-
-declare global {
-  interface Window {
-    DrillRender?: {
-      renderStatic: (svg: SVGSVGElement, drill: unknown, kfIndex: number) => { W: number; H: number };
-      renderAnimated: (svg: SVGSVGElement, drill: unknown, p: number) => { W: number; H: number };
-    };
-  }
-}
-
-type DrillVariant = { id: string; name: string; keyframes: DrillKeyframe[] };
-type DrillKeyframe = { label?: string; durationMs?: number; [key: string]: unknown };
-type DrillLike = { keyframes?: DrillKeyframe[]; variants?: DrillVariant[]; activeVariantIndex?: number; [key: string]: unknown };
-
-const SPEEDS = [1, 1.5, 2] as const;
-
-/**
- * Étapes actives d'un Drill : celles de la variante sélectionnée si le schéma
- * en a plusieurs (cf drill.variants côté éditeur, public/tools/tactics/
- * editor.js:ensureVariants), sinon drill.keyframes directement (schémas sans
- * variante ou anciens exports).
- */
-function activeKeyframesOf(drill: DrillLike, variantIndex: number): DrillKeyframe[] {
-  const variants = drill.variants;
-  if (variants && variants.length > 0) {
-    return (variants[variantIndex] ?? variants[0]).keyframes;
-  }
-  return drill.keyframes ?? [];
-}
-
-/**
- * Aperçu animé d'un schéma — même moteur que l'éditeur (render-core.js,
- * fonctions renderAnimated/renderStatic), même minuterie que son bouton
- * "Lecture" (cf play()/pAt() dans editor.js), pour un rendu et un rythme
- * identiques à ce que Robin voit en éditant. Contrôles calqués sur DrillPlayer
- * côté mobile (mobile/components/tactics/DrillPlayer.tsx) : chips de variante,
- * étape précédente/suivante, lecture/pause, vitesse — pour la même raison
- * (lecture seule, pas d'édition ici).
- */
-function SchematicAnimatedPlayer({ drill, ready }: { drill: unknown; ready: boolean }) {
-  const svgRef = useRef<SVGSVGElement>(null);
-  const [failed, setFailed] = useState(false);
-  const d = drill as DrillLike | null;
-  const variants = d?.variants ?? [];
-  const [variantIndex, setVariantIndex] = useState(d?.activeVariantIndex ?? 0);
-  const keyframes = useMemo(() => (d ? activeKeyframesOf(d, variantIndex) : []), [d, variantIndex]);
-  const N = keyframes.length;
-  const canPlay = N > 1;
-
-  const [step, setStep] = useState(0); // étape courante quand la lecture est arrêtée
-  const [playing, setPlaying] = useState(false);
-  const [speedIndex, setSpeedIndex] = useState(0);
-  const rafRef = useRef<number | null>(null);
-
-  // Changer de variante repart de zéro : durées et nombre d'étapes diffèrent.
-  useEffect(() => { setStep(0); setPlaying(false); }, [variantIndex]);
-
-  const renderAt = useCallback((p: number) => {
-    if (!ready || !svgRef.current || !d || !window.DrillRender) return;
-    try {
-      const copy = JSON.parse(JSON.stringify(d)) as DrillLike;
-      copy.keyframes = JSON.parse(JSON.stringify(keyframes));
-      const svg = svgRef.current;
-      svg.innerHTML = '';
-      const g = window.DrillRender.renderAnimated(svg, copy, p);
-      svg.setAttribute('viewBox', `0 0 ${g.W} ${g.H}`);
-      setFailed(false);
-    } catch {
-      setFailed(true);
-    }
-  }, [ready, d, keyframes]);
-
-  useEffect(() => { renderAt(step); }, [renderAt, step]);
-
-  useEffect(() => {
-    if (!playing || N < 2) return undefined;
-    const speed = SPEEDS[speedIndex];
-    let total = 0;
-    for (let i = 0; i < N - 1; i++) total += (keyframes[i].durationMs || 1500) / speed;
-    let t0: number | null = null;
-    function pAt(elapsed: number) {
-      let acc = 0;
-      for (let j = 0; j < N - 1; j++) {
-        const dur = (keyframes[j].durationMs || 1500) / speed;
-        if (elapsed < acc + dur) return j + (elapsed - acc) / dur;
-        acc += dur;
-      }
-      return N - 1;
-    }
-    function frame(ts: number) {
-      if (t0 == null) t0 = ts;
-      const elapsed = ts - t0!;
-      const p = pAt(elapsed);
-      renderAt(p);
-      if (elapsed < total) {
-        rafRef.current = requestAnimationFrame(frame);
-      } else {
-        setPlaying(false);
-        setStep(N - 1);
-      }
-    }
-    rafRef.current = requestAnimationFrame(frame);
-    return () => { if (rafRef.current != null) cancelAnimationFrame(rafRef.current); };
-  }, [playing, speedIndex, keyframes, N, renderAt]);
-
-  const togglePlay = useCallback(() => {
-    if (!canPlay) return;
-    if (step >= N - 1) setStep(0);
-    setPlaying((p) => !p);
-  }, [canPlay, step, N]);
-
-  const stepTo = useCallback((idx: number) => {
-    setPlaying(false);
-    setStep(Math.max(0, Math.min(N - 1, idx)));
-  }, [N]);
-
-  if (!d) {
-    return (
-      <div className="w-full h-full flex items-center justify-center text-center px-3" style={{ color: T.textMuted }}>
-        <span className="text-xs">Pas de schéma</span>
-      </div>
-    );
-  }
-  if (failed) {
-    return (
-      <div className="w-full h-full flex items-center justify-center" style={{ color: T.textMuted }}>
-        <span className="text-xs">Aperçu indisponible</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-2">
-      {variants.length > 1 && (
-        <div className="flex flex-wrap gap-1.5">
-          {variants.map((v, i) => (
-            <button
-              key={v.id || i}
-              type="button"
-              onClick={() => setVariantIndex(i)}
-              style={
-                i === variantIndex
-                  ? { backgroundColor: T.accent, color: '#fff', border: `1px solid ${T.accent}` }
-                  : { backgroundColor: T.pageBg, color: T.textMuted, border: `1px solid ${T.border}` }
-              }
-              className="px-2.5 py-1 rounded-full text-xs font-medium"
-            >
-              {v.name || `Variante ${i + 1}`}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div style={{ backgroundColor: T.pageBg, border: `1px solid ${T.border}` }} className="rounded-lg overflow-hidden">
-        <div style={{ aspectRatio: '16/9' }}>
-          <svg ref={svgRef} className="w-full h-full" preserveAspectRatio="xMidYMid meet" />
-        </div>
-      </div>
-
-      {canPlay && (
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => stepTo(step - 1)}
-            disabled={step === 0}
-            style={{ color: step === 0 ? T.border : T.text }}
-            className="p-1.5 disabled:cursor-not-allowed"
-            aria-label="Étape précédente"
-          >
-            <SkipBack className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={togglePlay}
-            style={{ backgroundColor: T.accent, color: '#fff' }}
-            className="w-8 h-8 rounded-full flex items-center justify-center"
-            aria-label={playing ? 'Pause' : 'Lecture'}
-          >
-            {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" />}
-          </button>
-          <button
-            type="button"
-            onClick={() => stepTo(step + 1)}
-            disabled={step >= N - 1}
-            style={{ color: step >= N - 1 ? T.border : T.text }}
-            className="p-1.5 disabled:cursor-not-allowed"
-            aria-label="Étape suivante"
-          >
-            <SkipForward className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setSpeedIndex((i) => (i + 1) % SPEEDS.length)}
-            style={{ color: T.textMuted, border: `1px solid ${T.border}` }}
-            className="ml-auto px-2 py-1 rounded-md text-xs font-semibold"
-          >
-            {SPEEDS[speedIndex]}×
-          </button>
-          <span className="text-xs" style={{ color: T.textMuted }}>
-            Étape {step + 1}/{N}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
 
 /**
  * Vignette de schéma — même moteur de rendu que l'éditeur (render-core.js,
@@ -300,58 +92,6 @@ const T = {
   accent: '#3B82F6',
   accentAmber: '#FFB020',
 };
-
-// ─── Taxonomie pédagogique ────────────────────────────────────────────────────
-const BLOCS = [
-  { value: 'Échauffement',      color: '#ea580c', bg: '#FFF7ED', label: 'Éch.'  },
-  { value: 'Problématisation',  color: '#2563eb', bg: '#EFF6FF', label: 'Prob.' },
-  { value: 'Situation isolée',  color: '#16a34a', bg: '#F0FDF4', label: 'Sit.'  },
-  { value: 'Analytique',        color: '#6b7280', bg: '#F9FAFB', label: 'Anal.' },
-  { value: 'Jeu orienté',       color: '#7c3aed', bg: '#F5F3FF', label: 'Jeu'   },
-  { value: 'Match libre',       color: '#d97706', bg: '#FFFBEB', label: 'Match' },
-] as const;
-
-type BlocValue = (typeof BLOCS)[number]['value'];
-
-// Format (ex-"type" legacy) : forme de l'exercice, axe distinct du bloc
-// (place dans la séance) — décidé avec Robin le 2026-09-22, cf conversation.
-// Colonne DB toujours `type`, enum `training_type` + "Rondo/Toro" (migration
-// 20260922110000).
-const FORMATS = [
-  { value: 'Echauffement', color: '#d97706', bg: '#FFFBEB', label: 'Éch.' },
-  { value: 'Exercice',     color: '#64748b', bg: '#F8FAFC', label: 'Exo'  },
-  { value: 'Situation',    color: '#059669', bg: '#ECFDF5', label: 'Sit.' },
-  { value: 'Jeu',          color: '#7c3aed', bg: '#F5F3FF', label: 'Jeu'  },
-  { value: 'Rondo/Toro',   color: '#0891b2', bg: '#ECFEFF', label: 'Rondo' },
-] as const;
-
-// Phase de jeu (ex-"theme" legacy) : moment de jeu, remplace l'ancienne
-// "phase" d'apprentissage (1/2/Mix, sortie des formulaires). Colonne DB
-// toujours `theme`, enum `training_theme` + "Powerplay".
-const PHASES_DE_JEU = [
-  { value: 'Offensif',  color: '#dc2626', bg: '#FEF2F2', label: 'Off.'  },
-  { value: 'Transition', color: '#d97706', bg: '#FFFBEB', label: 'Trans.' },
-  { value: 'Defensif',  color: '#2563eb', bg: '#EFF6FF', label: 'Déf.'  },
-  { value: 'CPA',        color: '#7c3aed', bg: '#F5F3FF', label: 'CPA'   },
-  { value: 'Powerplay',  color: '#db2777', bg: '#FDF2F8', label: 'PP'    },
-] as const;
-
-const INTENSITES = [
-  { value: 'Légère',  color: '#059669', bg: '#ECFDF5', label: 'Légère'  },
-  { value: 'Modérée', color: '#d97706', bg: '#FFFBEB', label: 'Modérée' },
-  { value: 'Haute',   color: '#dc2626', bg: '#FEF2F2', label: 'Haute'   },
-] as const;
-
-interface TaxoStyle { value: string; color: string; bg: string; label: string }
-function getTaxoStyle(list: readonly TaxoStyle[], value?: string | null): TaxoStyle {
-  const found = list.find((b) => b.value === value);
-  if (found) return found;
-  return { value: value || '—', color: T.textMuted, bg: '#F1F2F5', label: value || '—' };
-}
-function getBlocStyle(bloc?: string | null): BlocStyle {
-  return getTaxoStyle(BLOCS as unknown as TaxoStyle[], bloc);
-}
-type BlocStyle = TaxoStyle;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type TrainingTheme = 'Offensif' | 'Defensif' | 'Transition' | 'CPA' | 'Powerplay';
@@ -437,32 +177,6 @@ const DEFAULT_FORM: ProcedureForm = {
   image_url: '',
   schematic_id: '',
 };
-
-// ─── BlocBadge / TaxoBadge ─────────────────────────────────────────────────────
-function TaxoBadge({ list, value, short = false }: { list: readonly TaxoStyle[]; value?: string | null; short?: boolean }) {
-  if (!value) return null;
-  const style = getTaxoStyle(list, value);
-  return (
-    <span
-      style={{ backgroundColor: style.bg, color: style.color, border: `1px solid ${style.color}22` }}
-      className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap"
-    >
-      {short ? style.label : style.value}
-    </span>
-  );
-}
-function BlocBadge({ bloc, short = false }: { bloc?: string | null; short?: boolean }) {
-  if (!bloc) return null;
-  const style = getBlocStyle(bloc);
-  return (
-    <span
-      style={{ backgroundColor: style.bg, color: style.color, border: `1px solid ${style.color}22` }}
-      className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap"
-    >
-      {short ? style.label : style.value}
-    </span>
-  );
-}
 
 // ─── Filtres avancés — une ligne de chips à bascule pour une taxonomie ────────
 function FilterFacetRow({

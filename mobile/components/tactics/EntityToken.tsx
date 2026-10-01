@@ -124,7 +124,15 @@ function Equipment({ entity, g, scale }: { entity: DrillEntity; g: PitchGeo; sca
   return rotation ? <G rotation={rotation} origin="0,0">{inner}</G> : <>{inner}</>;
 }
 
-export function EntityToken({
+/**
+ * Contenu d'un jeton, relatif à l'origine (0,0) — sans le `<G x y>` qui le
+ * positionne sur le terrain. Extrait pour être réutilisé tel quel par
+ * AnimatedEntityToken (DrillPlayer en lecture), qui positionne ce même
+ * contenu via une `Animated.View` (RN core, `useNativeDriver`) plutôt que
+ * par re-rendu React du SVG à chaque frame — cf commentaire dans
+ * DrillPlayer.tsx.
+ */
+export function EntityTokenShape({
   entity,
   drill,
   g,
@@ -135,33 +143,30 @@ export function EntityToken({
   g: PitchGeo;
   selected?: boolean;
 }) {
-  const x = g.px(entity.x);
-  const y = g.py(entity.y);
-
   if (entity.type === 'ball') {
     return (
-      <G x={x} y={y}>
+      <>
         {selected && <Circle cx={0} cy={0} r={15} fill="none" stroke={SEL_COLOR} strokeWidth={2} />}
         <Circle cx={0} cy={0} r={6} fill={BALL_COLOR} stroke="#111" strokeWidth={1.5} />
-      </G>
+      </>
     );
   }
 
   if (entity.type === 'cone') {
     return (
-      <G x={x} y={y}>
+      <>
         {selected && <Circle cx={0} cy={0} r={15} fill="none" stroke={SEL_COLOR} strokeWidth={2} />}
         <Polygon points="0,-7 -6,6 6,6" fill={entity.color || '#ff8c1a'} stroke="#111" strokeWidth={1} />
-      </G>
+      </>
     );
   }
 
   if (EQUIP[entity.type]) {
     return (
-      <G x={x} y={y}>
+      <>
         {selected && <Circle cx={0} cy={0} r={15} fill="none" stroke={SEL_COLOR} strokeWidth={2} />}
         <Equipment entity={entity} g={g} scale={entity.size || 1} />
-      </G>
+      </>
     );
   }
 
@@ -171,7 +176,7 @@ export function EntityToken({
     const dep = 1 * g.sc;
     const rot = entity.facing || 0;
     return (
-      <G x={x} y={y} rotation={rot} origin="0,0">
+      <G rotation={rot} origin="0,0">
         <Rect x={-dep} y={-halfW} width={dep} height={2 * halfW} fill="rgba(255,255,255,0.10)" />
         <Line x1={-dep} y1={-halfW} x2={0} y2={-halfW} stroke="#eafff0" strokeWidth={1.3} />
         <Line x1={-dep} y1={halfW} x2={0} y2={halfW} stroke="#eafff0" strokeWidth={1.3} />
@@ -190,7 +195,7 @@ export function EntityToken({
   const fs = r * 0.9;
 
   return (
-    <G x={x} y={y}>
+    <>
       {selected && <Circle cx={0} cy={0} r={15 * ts.size} fill="none" stroke={SEL_COLOR} strokeWidth={2} />}
       {pts ? (
         <Polygon points={pts} fill={ts.fill} stroke={ts.stroke} strokeWidth={2} />
@@ -204,6 +209,26 @@ export function EntityToken({
           {entity.label}
         </SvgText>
       ) : null}
+    </>
+  );
+}
+
+export function EntityToken({
+  entity,
+  drill,
+  g,
+  selected,
+}: {
+  entity: DrillEntity;
+  drill: Pick<Drill, 'teams'>;
+  g: PitchGeo;
+  selected?: boolean;
+}) {
+  const x = g.px(entity.x);
+  const y = g.py(entity.y);
+  return (
+    <G x={x} y={y}>
+      <EntityTokenShape entity={entity} drill={drill} g={g} selected={selected} />
     </G>
   );
 }

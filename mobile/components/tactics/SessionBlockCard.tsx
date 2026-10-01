@@ -17,11 +17,12 @@ export interface SessionBlockCardProps {
   onMoveDown: () => void;
   onPickProcedure: () => void;
   onViewSchematic?: (schematicId: string) => void;
+  onViewDetails?: (procedure: TrainingProcedureRecord) => void;
 }
 
 /** Carte compacte : type + durée + réordonnancement sur une ligne, aperçu du procédé, intention pédagogique repliée. */
 export function SessionBlockCard({
-  block, index, total, procedure, onPatch, onRemove, onMoveUp, onMoveDown, onPickProcedure, onViewSchematic,
+  block, index, total, procedure, onPatch, onRemove, onMoveUp, onMoveDown, onPickProcedure, onViewSchematic, onViewDetails,
 }: SessionBlockCardProps) {
   const s = useStyles();
   const [showIntention, setShowIntention] = useState(!!block.intentionPedagogique);
@@ -58,14 +59,27 @@ export function SessionBlockCard({
         block
       />
 
-      {procedure?.schematic_id && onViewSchematic ? (
-        <Button
-          label="Voir le schéma"
-          icon="albums-outline"
-          variant="ghost"
-          size="sm"
-          onPress={() => onViewSchematic(procedure.schematic_id as string)}
-        />
+      {procedure && (onViewDetails || onViewSchematic) ? (
+        <View style={s.orderActions}>
+          {onViewDetails ? (
+            <Button
+              label="Détails"
+              icon="information-circle-outline"
+              variant="ghost"
+              size="sm"
+              onPress={() => onViewDetails(procedure)}
+            />
+          ) : null}
+          {procedure.schematic_id && onViewSchematic ? (
+            <Button
+              label="Voir le schéma"
+              icon="albums-outline"
+              variant="ghost"
+              size="sm"
+              onPress={() => onViewSchematic(procedure.schematic_id as string)}
+            />
+          ) : null}
+        </View>
       ) : null}
 
       {showIntention ? (

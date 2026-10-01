@@ -252,8 +252,8 @@ function generateComboInsightCards(
   return out;
 }
 
-const LOCATION_FILTERS = ['all', 'Domicile', 'Extérieur'] as const;
-const COMPETITION_FILTERS = ['all', 'Championnat', 'Coupe', 'Amical'] as const;
+export const LOCATION_FILTERS = ['all', 'Domicile', 'Extérieur'] as const;
+export const COMPETITION_FILTERS = ['all', 'Championnat', 'Coupe', 'Amical'] as const;
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -294,7 +294,10 @@ export function AnalyticsView() {
   );
 
   const homeAway = useMemo(() => {
-    const withScore = filteredMatches.filter(m => m.score_team != null && m.score_opponent != null);
+    // score_team/score_opponent valent 0 par défaut (colonnes NOT NULL) sur un
+    // match pas encore joué : ce filtre ne les excluait jamais. Seule la date
+    // de coup d'envoi distingue un résultat réel d'un match à venir.
+    const withScore = filteredMatches.filter(m => new Date(m.date as string).getTime() <= Date.now());
     const home = withScore.filter(m => (m.location ?? '').toLowerCase().includes('dom'));
     const away = withScore.filter(m => !(m.location ?? '').toLowerCase().includes('dom'));
     const wr = (arr: typeof withScore) =>
@@ -304,7 +307,10 @@ export function AnalyticsView() {
 
   const teamStats = useMemo(() => {
     const played = filteredMatches.length;
-    const withScore = filteredMatches.filter(m => m.score_team != null && m.score_opponent != null);
+    // score_team/score_opponent valent 0 par défaut (colonnes NOT NULL) sur un
+    // match pas encore joué : ce filtre ne les excluait jamais. Seule la date
+    // de coup d'envoi distingue un résultat réel d'un match à venir.
+    const withScore = filteredMatches.filter(m => new Date(m.date as string).getTime() <= Date.now());
     const wins = withScore.filter(m => (m.score_team as number) > (m.score_opponent as number)).length;
     const draws = withScore.filter(m => (m.score_team as number) === (m.score_opponent as number)).length;
     const losses = withScore.length - wins - draws;
@@ -739,7 +745,7 @@ export function AnalyticsView() {
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
-function SectionHeader({ label, tone = 'accent' }: { label: string; tone?: 'accent' | 'warning' }) {
+export function SectionHeader({ label, tone = 'accent' }: { label: string; tone?: 'accent' | 'warning' }) {
   const { theme } = useTheme();
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: theme.space.sm, paddingLeft: theme.space.lg, paddingTop: theme.space.lg, paddingBottom: theme.space.md }}>
@@ -749,7 +755,7 @@ function SectionHeader({ label, tone = 'accent' }: { label: string; tone?: 'acce
   );
 }
 
-function RecordPill({ value, label, color, labelColor }: { value: number; label: string; color: string; labelColor: string }) {
+export function RecordPill({ value, label, color, labelColor }: { value: number; label: string; color: string; labelColor: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
       <Text variant="display" color={color} numeric>{value}</Text>
@@ -758,7 +764,7 @@ function RecordPill({ value, label, color, labelColor }: { value: number; label:
   );
 }
 
-function FilterRow({ label, options, active, onSelect, allLabel }: {
+export function FilterRow({ label, options, active, onSelect, allLabel }: {
   label: string; options: string[]; active: string; onSelect: (v: string) => void; allLabel: string;
 }) {
   const { theme } = useTheme();

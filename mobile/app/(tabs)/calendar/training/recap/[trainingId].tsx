@@ -10,6 +10,8 @@ import {
   type TrainingSquad,
   type TrainingGameSquad,
 } from '../../../../../lib/services/trainingGames';
+import { readLiveSessionSnapshot } from '../../../../../lib/liveSession/liveSessionStorage';
+import { squadColor } from '../../../../../lib/liveSession/bibColors';
 import { computeSquadStandings, type SquadStanding } from '../../../../../lib/liveSession/standings';
 import { Screen, Card, Text, Button, EmptyState, SkeletonDetail } from '../../../../../components/ui';
 
@@ -31,7 +33,8 @@ export default function LiveRecapScreen() {
       setError(null);
       try {
         const [g, sq] = await Promise.all([getGamesForTraining(trainingId), getSquadsForTraining(trainingId)]);
-        setGames(g);
+        const reset = new Set((await readLiveSessionSnapshot(trainingId))?.resetGameIds ?? []);
+        setGames(g.filter((game) => !reset.has(game.id)));
         setSquads(sq);
         setGameSquads(await getGameSquadsForGames(g.map((game) => game.id)));
       } catch (e) {
@@ -135,7 +138,7 @@ function StandingsRows({ standings }: { standings: SquadStanding[] }) {
     <>
       {standings.map((sq) => (
         <View key={sq.squadId} style={s.cumulRow}>
-          <View style={[s.dot, { backgroundColor: c.chartSeries[sq.colorIndex % c.chartSeries.length] }]} />
+          <View style={[s.dot, { backgroundColor: squadColor(sq.colorToken, c.chartSeries) }]} />
           <Text variant="callout" style={s.cumulLabel}>{sq.label}</Text>
           <Text variant="caption" tone="secondary">{sq.wins}V {sq.draws}N {sq.losses}D</Text>
           <Text variant="callout" weight="700" numeric tone={sq.diff > 0 ? 'positive' : sq.diff < 0 ? 'negative' : 'secondary'}>

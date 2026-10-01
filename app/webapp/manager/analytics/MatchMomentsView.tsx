@@ -1,50 +1,41 @@
 /**
- * MatchMomentsView — répartition des événements par quart de match.
+ * MatchMomentsView — momentum du match sur la sélection, décliné par
+ * catégorie d'événement (global / buts / tirs cadrés / tirs totaux).
+ * Réutilise tel quel le moteur et le rendu du momentum du bilan post-match
+ * (`app/webapp/tracker/components/MatchMomentumChart.tsx`, lui-même sur
+ * `lib/matchMomentum.ts`) : même calcul à décroissance causale, même
+ * histogramme divergent — avec deux adaptations propres à cette vue agrégée
+ * sur plusieurs matchs (voir `BuildMomentumOptions` dans `lib/matchMomentum.ts`) :
+ *
+ * 1. `maxPointsPerHalf` fixe le nombre de barres par mi-temps quel que soit le
+ *    nombre/la durée des matchs sélectionnés, pour rester lisible en agrégat
+ *    (contrairement au bilan d'UN match, qui garde une barre par minute).
+ * 2. La déclinaison « Buts » désactive la décroissance (`decay: false`) : un
+ *    but est un événement rare et net, une traînée qui s'étale sur plusieurs
+ *    minutes autour n'apporterait rien, juste un pic isolé à l'instant T.
+ *
  * Miroir de mobile/components/MatchMomentsView.tsx.
  */
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Text, Card, EmptyState } from './ui';
-import { LineChart, SeriesToggle, type LineSeries } from './LineChart';
-import { Filter, BarChart3, EyeOff } from 'lucide-react';
+import { MatchMomentumChart } from '../../tracker/components/MatchMomentumChart';
+import type { MomentumEvent } from '@/lib/matchMomentum';
+import { Filter } from 'lucide-react';
 import type { Match, MatchEvent } from '@/types';
 
-const DEFAULT_HALF_DURATION_SEC = 20 * 60;
-const QUARTERS_PER_HALF = 4;
-const QUARTERS = [0, 1, 2, 3, 4, 5, 6, 7] as const;
+const MAX_POINTS_PER_HALF = 15;
 
-type SeriesKey = string;
+type MetricKey = 'global' | 'goal' | 'shot_on_target' | 'total_shots';
 
-const EVENT_SERIES: { key: SeriesKey; label: string; seriesIndex: number; opponent: boolean }[] = [
-  { key: 'goal', label: 'Buts', seriesIndex: 0, opponent: false },
-  { key: 'total_shots', label: 'Tirs', seriesIndex: 2, opponent: false },
-  { key: 'shot_on_target', label: 'Tirs cadrés', seriesIndex: 1, opponent: false },
-  { key: 'shot', label: 'Tirs non cadrés', seriesIndex: 5, opponent: false },
-  { key: 'opponent_goal', label: 'Buts adverses', seriesIndex: 3, opponent: true },
-  { key: 'opponent_total_shots', label: 'Tirs adverses', seriesIndex: 4, opponent: true },
-  { key: 'opponent_shot_on_target', label: 'Tirs cadrés adv.', seriesIndex: 4, opponent: true },
-  { key: 'opponent_shot', label: 'Tirs non cadrés adv.', seriesIndex: 5, opponent: true },
+const METRICS: { key: MetricKey; label: string; eventTypes: string[] | null; decay: boolean }[] = [
+  { key: 'global', label: 'Global', eventTypes: null, decay: true },
+  { key: 'goal', label: 'Buts', eventTypes: ['goal', 'opponent_goal'], decay: false },
+  { key: 'shot_on_target', label: 'Tirs cadrés', eventTypes: ['shot_on_target', 'opponent_shot_on_target'], decay: true },
+  { key: 'total_shots', label: 'Tirs totaux', eventTypes: ['shot', 'shot_on_target', 'opponent_shot', 'opponent_shot_on_target'], decay: true },
 ];
-
-function halfDurations(events: MatchEvent[]): { h1: number; h2: number } {
-  const max = (half: number) => {
-    const list = events.filter((e) => e.half === half);
-    return list.length > 0 ? Math.max(...list.map((e) => e.match_time_seconds)) : 0;
-  };
-  const m1 = max(1);
-  const m2 = max(2);
-  return { h1: m1 > 0 ? m1 : DEFAULT_HALF_DURATION_SEC, h2: m2 > 0 ? m2 : DEFAULT_HALF_DURATION_SEC };
-}
-
-function quarterOf(ev: MatchEvent, d: { h1: number; h2: number }): number {
-  const duration = ev.half === 1 ? d.h1 : d.h2;
-  const q = Math.max(0, Math.min(Math.floor((ev.match_time_seconds / duration) * QUARTERS_PER_HALF), QUARTERS_PER_HALF - 1));
-  return ev.half === 1 ? q : QUARTERS_PER_HALF + q;
-}
-
-const quarterLabel = (q: number) => `MT${Math.floor(q / QUARTERS_PER_HALF) + 1} Q${(q % QUARTERS_PER_HALF) + 1}`;
 
 export type MatchMomentsViewProps = {
   matches: Match[];
@@ -56,104 +47,68 @@ export function MatchMomentsView({ eventsByMatch, filteredMatchIds }: MatchMomen
   const { theme } = useTheme();
   const c = theme.colors;
 
-  const [visible, setVisible] = useState<Set<SeriesKey>>(
-    () => new Set(EVENT_SERIES.filter((e) => !e.opponent).map((e) => e.key))
-  );
+  const [metric, setMetric] = useState<MetricKey>('global');
+  const active = METRICS.find((m) => m.key === metric) ?? METRICS[0];
 
-  const toggle = useCallback((key: SeriesKey) => {
-    setVisible((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
-
-  const { byQuarter, totalEvents } = useMemo(() => {
-    const acc: Record<number, Record<string, number>> = {};
-    QUARTERS.forEach((q) => { acc[q] = {}; });
-
-    let total = 0;
+  const momentumEvents: MomentumEvent[] = useMemo(() => {
+    const out: MomentumEvent[] = [];
     Object.entries(eventsByMatch).forEach(([matchId, events]) => {
       if (!filteredMatchIds.has(matchId)) return;
-      const d = halfDurations(events);
       events.forEach((ev) => {
-        const q = quarterOf(ev, d);
-        if (q >= 0 && q < 8) {
-          acc[q][ev.event_type] = (acc[q][ev.event_type] ?? 0) + 1;
-          total++;
+        if (active.eventTypes === null || active.eventTypes.includes(ev.event_type)) {
+          out.push({ event_type: ev.event_type, match_time_seconds: ev.match_time_seconds, half: ev.half });
         }
       });
     });
-
-    QUARTERS.forEach((q) => {
-      acc[q].total_shots = (acc[q].shot ?? 0) + (acc[q].shot_on_target ?? 0);
-      acc[q].opponent_total_shots = (acc[q].opponent_shot ?? 0) + (acc[q].opponent_shot_on_target ?? 0);
-    });
-
-    return { byQuarter: acc, totalEvents: total };
-  }, [eventsByMatch, filteredMatchIds]);
-
-  const series: LineSeries[] = useMemo(
-    () =>
-      EVENT_SERIES.filter((e) => visible.has(e.key)).map((e) => ({
-        key: e.key,
-        label: e.label,
-        color: c.chartSeries[e.seriesIndex] ?? c.accent.default,
-        data: QUARTERS.map((q) => byQuarter[q][e.key] ?? 0),
-      })),
-    [byQuarter, visible, c]
-  );
-
-  const a11y = useMemo(
-    () => series.map((s) => `${s.label} : ${s.data.map((v, i) => `${quarterLabel(i)} ${v}`).join(', ')}`).join('. '),
-    [series]
-  );
+    return out;
+  }, [eventsByMatch, filteredMatchIds, active]);
 
   if (filteredMatchIds.size === 0) {
     return <EmptyState icon={Filter} title="Aucun match sélectionné" description="Aucun match ne correspond aux filtres en cours." compact />;
   }
 
-  if (totalEvents === 0) {
-    return <EmptyState icon={BarChart3} title="Aucun événement" description="Les matchs sélectionnés n'ont pas d'événement enregistré." compact />;
-  }
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: theme.space.lg, paddingBottom: 24 }}>
       <Text variant="callout" tone="secondary">
-        Répartition des événements par quart de match : quatre quarts par mi-temps, huit au total.
+        Momentum sur la sélection : qui domine, minute par minute, pour la catégorie choisie.
       </Text>
 
-      <Card variant="flat" padding="sm">
-        {series.length > 0 ? (
-          <LineChart labels={QUARTERS.map(quarterLabel)} series={series} height={180} fromZero smooth={false} accessibilityLabel={`Événements par quart. ${a11y}`} />
-        ) : (
-          <EmptyState icon={EyeOff} title="Aucune courbe affichée" description="Activez au moins un type d'événement ci-dessous." compact />
-        )}
-      </Card>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <Text variant="callout" tone="secondary" weight={600}>Afficher ou masquer</Text>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {EVENT_SERIES.map((e) => {
-            const hasData = QUARTERS.some((q) => (byQuarter[q][e.key] ?? 0) > 0);
-            return (
-              <SeriesToggle
-                key={e.key}
-                label={e.label}
-                color={c.chartSeries[e.seriesIndex] ?? c.accent.default}
-                active={visible.has(e.key)}
-                disabled={!hasData}
-                onPress={() => toggle(e.key)}
-              />
-            );
-          })}
-        </div>
+      <div role="tablist" style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: 3, borderRadius: theme.radius.md, backgroundColor: c.bg.sunken }}>
+        {METRICS.map((m) => {
+          const isActive = metric === m.key;
+          return (
+            <button
+              key={m.key}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => setMetric(m.key)}
+              style={{
+                flex: '1 1 47%',
+                minHeight: 36,
+                borderRadius: theme.radius.sm,
+                border: `1px solid ${isActive ? c.border.subtle : 'transparent'}`,
+                backgroundColor: isActive ? c.bg.surface : 'transparent',
+                cursor: 'pointer',
+              }}
+            >
+              <Text variant="caption" weight={600} tone={isActive ? 'accent' : 'secondary'}>{m.label}</Text>
+            </button>
+          );
+        })}
       </div>
 
-      <Card variant="flat" padding="sm" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-        <Text variant="callout" tone="secondary" style={{ flex: 1 } as React.CSSProperties}>Total sur la sélection</Text>
-        <Text variant="headline" numeric>{totalEvents}</Text>
+      <Card variant="flat" padding="sm">
+        <MatchMomentumChart
+          events={momentumEvents}
+          maxPointsPerHalf={MAX_POINTS_PER_HALF}
+          decay={active.decay}
+          height={180}
+          usColor={c.chartSeries[0] ?? c.accent.default}
+          opponentColor={c.chartSeries[3] ?? c.negative.default}
+          gridColor={c.chartGrid}
+          textColor={c.text.tertiary}
+        />
       </Card>
     </div>
   );

@@ -28,6 +28,10 @@ interface MatchMomentumChartProps {
   events: MomentumEvent[]
   /** Minute jusqu'à laquelle calculer/afficher. Omis = match entier (post-match). */
   upToMinute?: number
+  /** Nombre max de points par mi-temps. Omis = un point par minute entière. Voir `buildMomentumSeries`. */
+  maxPointsPerHalf?: number
+  /** false = pas de décroissance causale, un pic isolé par event. Voir `buildMomentumSeries`. */
+  decay?: boolean
   teamName?: string
   opponentName?: string
   usColor?: string
@@ -42,6 +46,8 @@ interface MatchMomentumChartProps {
 export function MatchMomentumChart({
   events,
   upToMinute,
+  maxPointsPerHalf,
+  decay,
   teamName = 'Nous',
   opponentName = 'Adversaire',
   usColor = '#10B981',
@@ -51,8 +57,7 @@ export function MatchMomentumChart({
   height = 150,
   live = false,
 }: MatchMomentumChartProps) {
-  const { points, dominantSpans, halfDurations } = buildMomentumSeries(events, upToMinute)
-  const half2Started = events.some(e => e.half === 2)
+  const { points, dominantSpans, half2StartIndex } = buildMomentumSeries(events, upToMinute, { maxPointsPerHalf, decay })
 
   if (points.length === 0 || points.every(p => p.value === 0)) {
     return (
@@ -76,7 +81,7 @@ export function MatchMomentumChart({
             axisLine={false}
             tickLine={false}
             interval={tickStep - 1}
-            tickFormatter={(m: number) => `${m}'`}
+            tickFormatter={(m: number) => `${Math.round(m)}'`}
           />
           <ReferenceLine y={0} stroke={gridColor} />
           <Tooltip
@@ -84,7 +89,7 @@ export function MatchMomentumChart({
               `${Math.round(Math.abs(value) * 100)}%`,
               value >= 0 ? teamName : opponentName,
             ]}
-            labelFormatter={(m: number) => `${m}e minute`}
+            labelFormatter={(m: number) => `${Math.round(m)}e minute`}
             contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.15)', fontSize: 12 }}
           />
           <Bar dataKey="momentum" radius={[2, 2, 2, 2]} isAnimationActive={!live}>
@@ -95,9 +100,9 @@ export function MatchMomentumChart({
           {/* Après le Bar, pas avant : Recharts peint dans l'ordre du JSX, une
               ReferenceLine placée avant le Bar se retrouve sous des barres
               opaques et devient invisible pile à la minute qui l'intéresse. */}
-          {half2Started && (
+          {half2StartIndex != null && (
             <ReferenceLine
-              x={Math.round(halfDurations.h1)}
+              x={data[half2StartIndex]?.minute}
               stroke={textColor}
               strokeWidth={1.5}
               strokeDasharray="4 3"

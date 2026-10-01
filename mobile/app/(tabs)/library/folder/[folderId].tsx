@@ -4,6 +4,7 @@ import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useTheme, makeStyles } from '../../../../contexts/ThemeContext';
 import { useActiveTeam } from '../../../../contexts/ActiveTeamContext';
 import { useIsTablet } from '../../../../hooks/useIsTablet';
+import { useResponsiveColumns } from '../../../../hooks/useResponsiveColumns';
 import { Screen, Text, EmptyState, HeaderBackButton, BackLink } from '../../../../components/ui';
 import { ProcedureCard } from '../../../../components/tactics/ProcedureCard';
 import { FilterChip } from '../../../../components/tactics/FilterChip';
@@ -20,6 +21,7 @@ export default function LibraryFolderScreen() {
   const isTablet = useIsTablet();
   const s = useStyles();
   const { activeTeam } = useActiveTeam();
+  const { onLayout: onGridLayout, cardWidth } = useResponsiveColumns(170, theme.space.md, 2);
 
   const [folder, setFolder] = useState<SchematicFolderRecord | null>(null);
   const [cards, setCards] = useState<LibraryCard[]>([]);
@@ -77,7 +79,7 @@ export default function LibraryFolderScreen() {
   }
 
   return (
-    <Screen onRefresh={load} refreshing={loading}>
+    <Screen onRefresh={load} refreshing={loading} fullWidth>
       {isTablet && (
         <>
           <BackLink onPress={() => router.back()} />
@@ -96,9 +98,9 @@ export default function LibraryFolderScreen() {
       {visible.length === 0 ? (
         <EmptyState icon="albums-outline" title="Aucun procédé" description="Ce dossier ne contient rien pour ce filtre." />
       ) : (
-        <View style={s.grid}>
+        <View style={s.grid} onLayout={onGridLayout}>
           {visible.map((card) => (
-            <ProcedureCard key={card.key} card={card} onPress={() => openCard(card)} />
+            <ProcedureCard key={card.key} card={card} width={cardWidth} onPress={() => openCard(card)} />
           ))}
         </View>
       )}

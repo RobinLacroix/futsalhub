@@ -12,6 +12,8 @@ export interface SessionCardProps {
   teamNameById: Map<string, string>;
   onOpen: () => void;
   onDelete: () => void;
+  /** Largeur explicite (dp), calculée par la grille appelante (cf useResponsiveColumns). Par défaut, pleine largeur. */
+  width?: number;
 }
 
 function formatShortDate(d: string): string {
@@ -19,13 +21,19 @@ function formatShortDate(d: string): string {
 }
 
 /** Carte de la liste des séances — timeline miniature + statut de rattachement. */
-export function SessionCard({ session, attachedTrainings, teamNameById, onOpen, onDelete }: SessionCardProps) {
+export function SessionCard({ session, attachedTrainings, teamNameById, onOpen, onDelete, width }: SessionCardProps) {
   const { theme } = useTheme();
   const c = theme.colors;
   const s = useStyles();
 
   return (
-    <Card variant="raised" padding="md" onPress={onOpen} accessibilityLabel={session.name || 'Sans titre'} style={s.card}>
+    <Card
+      variant="raised"
+      padding="md"
+      onPress={onOpen}
+      accessibilityLabel={session.name || 'Sans titre'}
+      style={[s.card, width != null && { width }]}
+    >
       <View style={s.headerRow}>
         <View style={s.headerText}>
           <Text variant="headline" numberOfLines={1}>{session.name || 'Sans titre'}</Text>

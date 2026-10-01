@@ -70,6 +70,30 @@ export interface MomentumSeries {
   dominantSpans: DominantSpan[];
   /** Durée réelle (temps coulé) de chaque mi-temps, en minutes — pour placer le repère de mi-temps côté graphique. */
   halfDurations: HalfDurationsMinutes;
+  /** Index (dans `points`) du premier point de la 2ème mi-temps. Absent tant qu'elle n'a pas commencé. À utiliser pour positionner le repère de mi-temps plutôt que de recalculer depuis `halfDurations` : c'est le seul repère qui reste juste quel que soit l'échantillonnage (`maxPointsPerHalf` ou non). */
+  half2StartIndex?: number;
+}
+
+export interface BuildMomentumOptions {
+  /**
+   * Nombre max de points par mi-temps, répartis uniformément sur sa durée
+   * réelle (temps coulé) plutôt qu'un point par minute entière. Sert à garder
+   * un nombre de barres lisible quel que soit le nombre de matchs agrégés
+   * (ex. `components/MatchMomentsView.tsx`, qui somme les events de plusieurs
+   * matchs de durées différentes). Omis = comportement historique, un point
+   * par minute entière (bilan post-match, récap live).
+   */
+  maxPointsPerHalf?: number;
+  /**
+   * false : chaque point ne reflète que les events tombant dans sa propre
+   * tranche de temps, sans décroissance ni influence des points voisins — un
+   * but isolé produit UN pic isolé, pas une traînée qui s'étale sur plusieurs
+   * points. Pertinent pour une déclinaison qui isole un seul type d'event rare
+   * (ex. buts seuls) où la traînée de décroissance n'apporte rien et brouille
+   * la lecture. Par défaut true (comportement historique : décroissance
+   * causale, cf. note de tête de fichier).
+   */
+  decay?: boolean;
 }
 
 export interface DominantSpan {
@@ -192,30 +216,73 @@ function isOpponentEvent(eventType: string): boolean {
 export function buildMomentumSeries(
   events: MomentumEvent[],
   upToMinute?: number,
+  options?: BuildMomentumOptions,
 ): MomentumSeries {
   const halfDurations = halfDurationsMinutes(events);
   const totalMinutes = halfDurations.h1 + halfDurations.h2;
   const lastMinute = Math.max(0, Math.ceil(upToMinute ?? totalMinutes));
+  const decay = options?.decay ?? true;
+  const half2Started = events.some(e => e.half === 2);
 
   const timedEvents = events
     .map(e => ({ minute: eventMinute(e, halfDurations.h1), weight: weightOf(e.event_type), isOpponent: isOpponentEvent(e.event_type) }))
     .filter(e => e.weight !== 0);
 
-  const raw: number[] = [];
-  for (let m = 0; m <= lastMinute; m++) {
-    let net = 0;
-    for (const e of timedEvents) {
-      if (e.minute > m) continue; // causal : pas d'influence du futur
-      const decay = Math.exp(-DECAY_RATE * (m - e.minute));
-      net += (e.isOpponent ? -e.weight : e.weight) * decay;
-    }
-    raw.push(net);
+  // Grille d'échantillonnage : soit un point par minute entière (historique),
+  // soit `maxPointsPerHalf` points par mi-temps répartis sur sa durée réelle
+  // (temps coulé) — indépendant du nombre de minutes réellement jouées, pour
+  // qu'un match de 25 min et un match de 45 min produisent le même nombre de
+  // barres. `half2StartIndex` reste l'unique repère fiable pour positionner la
+  // mi-temps côté graphique quel que soit le mode.
+  let sampleMinutes: number[];
+  let half2StartIndex: number | undefined;
+
+  if (options?.maxPointsPerHalf && options.maxPointsPerHalf > 0) {
+    const n = options.maxPointsPerHalf;
+    const h1Cap = Math.min(lastMinute, halfDurations.h1);
+    const h1Minutes = Array.from({ length: n }, (_, i) => ((i + 0.5) / n) * halfDurations.h1)
+      .filter(m => m <= h1Cap + 1e-9);
+    half2StartIndex = half2Started ? h1Minutes.length : undefined;
+    const h2Minutes = half2Started
+      ? Array.from({ length: n }, (_, i) => halfDurations.h1 + ((i + 0.5) / n) * halfDurations.h2)
+          .filter(m => m <= lastMinute + 1e-9)
+      : [];
+    sampleMinutes = [...h1Minutes, ...h2Minutes];
+  } else {
+    sampleMinutes = Array.from({ length: lastMinute + 1 }, (_, m) => m);
+    half2StartIndex = half2Started ? Math.round(halfDurations.h1) : undefined;
   }
 
-  const scale = Math.max(1e-6, ...raw.map(v => Math.abs(v)));
-  const points: MomentumPoint[] = raw.map((v, minute) => ({ minute, value: v / scale }));
+  // Demi-largeur de tranche pour le mode sans décroissance (chaque point ne
+  // compte que les events tombant dans sa propre tranche) : la moitié du pas
+  // d'échantillonnage, quel que soit le mode.
+  const bucketHalfWidth = options?.maxPointsPerHalf
+    ? Math.max(halfDurations.h1, halfDurations.h2) / options.maxPointsPerHalf / 2
+    : 0.5;
 
-  return { points, dominantSpans: findDominantSpans(points), halfDurations };
+  const raw = sampleMinutes.map(m => {
+    let net = 0;
+    for (const e of timedEvents) {
+      if (decay) {
+        if (e.minute > m) continue; // causal : pas d'influence du futur
+        net += (e.isOpponent ? -e.weight : e.weight) * Math.exp(-DECAY_RATE * (m - e.minute));
+      } else if (Math.abs(e.minute - m) <= bucketHalfWidth) {
+        net += e.isOpponent ? -e.weight : e.weight;
+      }
+    }
+    return net;
+  });
+
+  const scale = Math.max(1e-6, ...raw.map(v => Math.abs(v)));
+  // `minute` reste non arrondi ici (entier de toute façon en mode historique,
+  // fractionnaire en mode échantillonné) : c'est la clé de catégorie utilisée
+  // par les graphiques pour positionner chaque barre, et deux buckets
+  // arrondis au même entier fusionneraient à tort sur un axe catégoriel.
+  // L'arrondi pour l'affichage (ticks, tooltip) est la responsabilité du
+  // composant de rendu.
+  const points: MomentumPoint[] = raw.map((v, i) => ({ minute: sampleMinutes[i], value: v / scale }));
+
+  return { points, dominantSpans: findDominantSpans(points), halfDurations, half2StartIndex };
 }
 
 // Seuil sous lequel une minute est considérée neutre (pas assez de signal pour

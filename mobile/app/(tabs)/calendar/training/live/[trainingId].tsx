@@ -1,586 +1,624 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Pressable, ScrollView, StyleSheet, type ViewStyle } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Alert, View, StyleSheet } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme, makeStyles } from '../../../../../contexts/ThemeContext';
 import { haptics } from '../../../../../lib/design/haptics';
+import { playPhaseTransitionSound } from '../../../../../lib/design/liveSessionSound';
 import { getUserClubId } from '../../../../../lib/services/clubs';
+import { getTrainingById } from '../../../../../lib/services/trainings';
+import { getSessionById, type SessionBlock } from '../../../../../lib/services/sessionsService';
 import {
   startTrainingGame,
   endTrainingGame,
   getGamesForTraining,
-  getGameSquads,
   getGameSquadsForGames,
-  type TimerMode,
   type TrainingGame,
   type TrainingGameSquad,
 } from '../../../../../lib/services/trainingGames';
 import { getProceduresByClub, type TrainingProcedureRecord } from '../../../../../lib/services/trainingProceduresService';
-import { enqueueTrainingGameScoreUpdate } from '../../../../../lib/offline/trainingGameOutbox';
-import { computeSquadStandings } from '../../../../../lib/liveSession/standings';
-import {
-  readLiveSessionSnapshot,
-  writeLiveSessionSnapshot,
-  clearLiveSessionSnapshot,
-  type LiveSessionSnapshot,
-} from '../../../../../lib/liveSession/liveSessionStorage';
+import { enqueueTrainingGameScoreUpdate, flushTrainingGameOutbox } from '../../../../../lib/offline/trainingGameOutbox';
+import { readLiveSessionSnapshot, writeLiveSessionSnapshot, type LiveSessionSnapshot } from '../../../../../lib/liveSession/liveSessionStorage';
+import { computeLiveLevels, formatClock, nextPartIndex, procedureKey, type LiveLevels, type SquadLevels } from '../../../../../lib/liveSession/levels';
+import { useLeaveGuard } from '../../../../../hooks/useLeaveGuard';
 import { useLiveGameTimer, type SeriesConfig } from '../../../../../hooks/useLiveGameTimer';
-import { Screen, Card, Text, Button, Input, EmptyState, SkeletonDetail } from '../../../../../components/ui';
+import { Screen, Text, Button, Badge, Sheet, EmptyState, SkeletonDetail } from '../../../../../components/ui';
 import { ProcedurePickerSheet } from '../../../../../components/training/ProcedurePickerSheet';
-import { FilterChip } from '../../../../../components/tactics/FilterChip';
-
-type ScreenState = 'loading' | 'noSquads' | 'config' | 'playing' | 'nextGame';
+import { ProcedureSheet, type PlannedBlock, type ProcedureDraft } from '../../../../../components/live/ProcedureSheet';
+import { squadColor } from '../../../../../lib/liveSession/bibColors';
+import { SquadToggle } from '../../../../../components/live/SquadToggle';
+import { SquadTile } from '../../../../../components/live/SquadTile';
 
 const DEFAULT_SERIES: SeriesConfig = { seriesCount: 4, seriesDurationSeconds: 180, restDurationSeconds: 60 };
-const SNAPSHOT_INTERVAL_MS = 5000;
 
-export default function LiveGameScreen() {
+const BLOCK_LABELS: Record<string, string> = {
+  Echauffement: 'Échauffement',
+  Problematisation: 'Problématisation',
+  Situation: 'Situation',
+  Analytique: 'Analytique',
+  JeuOriente: 'Jeu orienté',
+  MatchLibre: 'Match libre',
+};
+
+const seriesFromGame = (g: TrainingGame): SeriesConfig | null =>
+  g.timer_mode === 'series' && g.series_count && g.series_duration_seconds
+    ? { seriesCount: g.series_count, seriesDurationSeconds: g.series_duration_seconds, restDurationSeconds: g.rest_duration_seconds ?? 0 }
+    : null;
+
+/** Tick d'une seconde pour les chronos globaux ; l'heure est toujours recalculée depuis un timestamp, jamais incrémentée. */
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
+
+export default function LiveScreen() {
   const { trainingId } = useLocalSearchParams<{ trainingId: string }>();
   const router = useRouter();
   const { theme } = useTheme();
   const c = theme.colors;
   const s = useStyles();
+  const insets = useSafeAreaInsets();
 
-  const [screenState, setScreenState] = useState<ScreenState>('loading');
+  const [status, setStatus] = useState<'loading' | 'noSquads' | 'ready'>('loading');
   const [snapshot, setSnapshot] = useState<LiveSessionSnapshot | null>(null);
+  const [games, setGames] = useState<TrainingGame[]>([]);
+  const [gameSquads, setGameSquads] = useState<TrainingGameSquad[]>([]);
+  const [procedures, setProcedures] = useState<TrainingProcedureRecord[]>([]);
+  const [blocks, setBlocks] = useState<SessionBlock[]>([]);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [timerMode, setTimerMode] = useState<TimerMode>('continu');
-  const [seriesConfig, setSeriesConfig] = useState<SeriesConfig>(DEFAULT_SERIES);
-  const [starting, setStarting] = useState(false);
-  const [procedures, setProcedures] = useState<TrainingProcedureRecord[]>([]);
-  const [selectedProcedure, setSelectedProcedure] = useState<TrainingProcedureRecord | null>(null);
-  const [procedurePickerOpen, setProcedurePickerOpen] = useState(false);
-  const [pointsPerTap, setPointsPerTap] = useState(1);
-  /** Quelles équipes jouent ce jeu — 2 minimum, pas de maximum : certains jeux opposent 3 plateaux ou plus en même temps. */
-  const [selectedSquadIds, setSelectedSquadIds] = useState<string[]>([]);
-
-  const [game, setGame] = useState<TrainingGame | null>(null);
-  const [currentGameSquads, setCurrentGameSquads] = useState<TrainingGameSquad[]>([]);
-  const [ending, setEnding] = useState(false);
-  /** Jeux clos de la séance, tous plateaux confondus — alimente les bandeaux de classement live. */
-  const [finishedGames, setFinishedGames] = useState<TrainingGame[]>([]);
-  const [finishedGameSquads, setFinishedGameSquads] = useState<TrainingGameSquad[]>([]);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [draft, setDraft] = useState<ProcedureDraft>({ procedure: null, freeLabel: null, pointsPerTap: 1, seriesOn: false, series: DEFAULT_SERIES });
 
   const gameSquadsRef = useRef<TrainingGameSquad[]>([]);
-  gameSquadsRef.current = currentGameSquads;
+  gameSquadsRef.current = gameSquads;
+  const gamesRef = useRef<TrainingGame[]>([]);
+  gamesRef.current = games;
 
-  // ── Chargement : snapshot des plateaux, reprise d'un jeu non clos ─────────
+  // ── Chargement ─────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (!trainingId) return;
     (async () => {
       const snap = await readLiveSessionSnapshot(trainingId);
       if (!snap || Object.keys(snap.composition).length === 0) {
-        setScreenState('noSquads');
+        setStatus('noSquads');
         return;
       }
       setSnapshot(snap);
-      if (snap.lastSeriesConfig) setSeriesConfig(snap.lastSeriesConfig);
-      setSelectedSquadIds(snap.squads.map((sq) => sq.id));
-
-      const [allGames, clubId] = await Promise.all([getGamesForTraining(trainingId), getUserClubId()]);
-      const finished = allGames.filter((g) => g.ended_at);
-      setFinishedGames(finished);
-      setFinishedGameSquads(await getGameSquadsForGames(finished.map((g) => g.id)));
-
-      if (clubId) {
-        const procs = await getProceduresByClub(clubId);
-        setProcedures(procs);
-
-        const open = allGames.find((g) => !g.ended_at) ?? null;
-        if (open) {
-          setGame(open);
-          setCurrentGameSquads(await getGameSquads(open.id));
-          setTimerMode(open.timer_mode);
-          setPointsPerTap(open.points_per_tap);
-          setSelectedProcedure(open.procedure_id ? procs.find((p) => p.id === open.procedure_id) ?? null : null);
-          setScreenState('playing');
-        } else {
-          setScreenState('config');
+      if (snap.lastSeriesConfig) setDraft((d) => ({ ...d, series: snap.lastSeriesConfig as SeriesConfig }));
+      try {
+        const [allGames, clubId, training] = await Promise.all([getGamesForTraining(trainingId), getUserClubId(), getTrainingById(trainingId)]);
+        setGames(allGames);
+        setGameSquads(await getGameSquadsForGames(allGames.map((g) => g.id)));
+        if (clubId) setProcedures(await getProceduresByClub(clubId));
+        if (training?.session_id) {
+          const session = await getSessionById(training.session_id);
+          setBlocks(session?.blocks ?? []);
         }
-      } else {
-        setScreenState('config');
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Erreur de chargement');
       }
+      setStatus('ready');
     })();
   }, [trainingId]);
 
-  // ── Choix des équipes qui jouent ce jeu ────────────────────────────────────
-
-  const toggleSquadSelection = (squadId: string) => {
-    haptics.select();
-    setSelectedSquadIds((prev) => (prev.includes(squadId) ? prev.filter((id) => id !== squadId) : [...prev, squadId]));
-  };
-
-  // ── Démarrage d'un jeu ─────────────────────────────────────────────────────
-
-  const startGame = useCallback(async () => {
-    if (!trainingId || !snapshot) return;
-    const orderedSquadIds = snapshot.squads.map((sq) => sq.id).filter((id) => selectedSquadIds.includes(id));
-    if (orderedSquadIds.length < 2) {
-      setError('Choisis au moins deux équipes pour ce jeu.');
-      return;
-    }
-    setStarting(true);
-    setError(null);
-    try {
-      const composition = Object.entries(snapshot.composition).map(([playerId, squadId]) => ({ playerId, squadId }));
-      const newGame = await startTrainingGame({
-        trainingId,
-        squadIds: orderedSquadIds,
-        timerMode,
-        seriesCount: timerMode === 'series' ? seriesConfig.seriesCount : undefined,
-        seriesDurationSeconds: timerMode === 'series' ? seriesConfig.seriesDurationSeconds : undefined,
-        restDurationSeconds: timerMode === 'series' ? seriesConfig.restDurationSeconds : undefined,
-        procedureId: selectedProcedure?.id ?? null,
-        label: selectedProcedure?.title ?? null,
-        pointsPerTap,
-        composition,
+  // L'écran Équipes écrit dans le snapshot : on le relit au retour.
+  useFocusEffect(
+    useCallback(() => {
+      if (!trainingId || status === 'loading') return;
+      readLiveSessionSnapshot(trainingId).then((snap) => {
+        if (snap && Object.keys(snap.composition).length > 0) {
+          setSnapshot(snap);
+          setStatus('ready');
+        }
       });
-      setGame(newGame);
-      const freshGameSquads = orderedSquadIds.map((squadId, i) => ({
-        game_id: newGame.id,
-        squad_id: squadId,
-        club_id: newGame.club_id,
-        score: 0,
-        sort_order: i,
-      }));
-      setCurrentGameSquads(freshGameSquads);
-      await writeLiveSessionSnapshot({
-        ...snapshot,
-        activeGameId: newGame.id,
-        timerMode,
-        lastSeriesConfig: timerMode === 'series' ? seriesConfig : snapshot.lastSeriesConfig,
-        phaseStartedAtMs: Date.now(),
-        phaseKind: 'serie',
-        currentSeriesIndex: 0,
-        scores: Object.fromEntries(freshGameSquads.map((p) => [p.squad_id, 0])),
-      });
-      setScreenState('playing');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Erreur');
-    } finally {
-      setStarting(false);
-    }
-  }, [trainingId, snapshot, timerMode, seriesConfig, selectedProcedure, pointsPerTap, selectedSquadIds]);
+    }, [trainingId, status]),
+  );
 
-  // ── Chrono ───────────────────────────────────────────────────────────────
+  // ── État dérivé ────────────────────────────────────────────────────────────
 
-  const timer = useLiveGameTimer({
-    mode: timerMode,
-    seriesConfig: timerMode === 'series' ? seriesConfig : null,
-    gameStartedAtMs: game?.started_at ? new Date(game.started_at).getTime() : Date.now(),
-    initialPhaseStartedAtMs: snapshot?.phaseStartedAtMs ?? undefined,
-    initialPhaseKind: snapshot?.phaseKind ?? undefined,
-    initialSeriesIndex: snapshot?.currentSeriesIndex ?? undefined,
-    onPhaseChange: (phaseStartedAtMs, phaseKind, seriesIndex) => {
-      if (!snapshot) return;
-      void writeLiveSessionSnapshot({ ...snapshot, phaseStartedAtMs, phaseKind, currentSeriesIndex: seriesIndex });
-    },
+  const openGame = useMemo(() => games.filter((g) => !g.ended_at).sort((a, b) => b.sequence - a.sequence)[0] ?? null, [games]);
+  const lastGame = useMemo(() => games.slice().sort((a, b) => b.sequence - a.sequence)[0] ?? null, [games]);
+  const shownGame = openGame ?? lastGame;
+
+  const levels: LiveLevels | null = useMemo(() => {
+    if (!snapshot || !shownGame) return null;
+    return computeLiveLevels({ squads: snapshot.squads, games, gameSquads, current: shownGame, excludedGameIds: snapshot.resetGameIds });
+  }, [snapshot, shownGame, games, gameSquads]);
+
+  /** Avant tout jeu : les équipes en jeu, à zéro. */
+  const tiles: SquadLevels[] = useMemo(() => {
+    if (levels) return levels.squads;
+    if (!snapshot) return [];
+    const playing = snapshot.playingSquadIds ?? snapshot.squads.map((sq) => sq.id);
+    return snapshot.squads
+      .filter((sq) => playing.includes(sq.id))
+      .map((sq) => ({ squadId: sq.id, label: sq.label, colorToken: sq.color_token, sequence: 0, procedure: 0, wins: 0, draws: 0, losses: 0 }));
+  }, [levels, snapshot]);
+
+  const now = useNow(!!openGame);
+  const clockKey = openGame ? procedureKey(openGame) : null;
+  const storedClock = snapshot?.procedureClock && snapshot.procedureClock.key === clockKey ? snapshot.procedureClock : null;
+  /** Sans chrono enregistré (procédé jamais mis en pause), le temps court depuis la première séquence. */
+  const clockPaused = storedClock ? storedClock.runningSinceMs === null : false;
+  const procedureElapsedMs = !openGame
+    ? 0
+    : storedClock
+      ? storedClock.accumulatedMs + (storedClock.runningSinceMs !== null ? now - storedClock.runningSinceMs : 0)
+      : levels?.procedureStartedAtMs
+        ? now - levels.procedureStartedAtMs
+        : 0;
+  const procedureElapsed = Math.max(0, Math.floor(procedureElapsedMs / 1000));
+  const sessionElapsed = levels?.sessionStartedAtMs ? Math.floor((now - levels.sessionStartedAtMs) / 1000) : 0;
+
+  const procedureTitle = shownGame
+    ? procedures.find((p) => p.id === shownGame.procedure_id)?.title || shownGame.label || 'Jeu libre'
+    : 'Aucun procédé en cours';
+
+  /** Bloc suivant de la séance préparée : à la suite du procédé courant s'il en fait partie, sinon au rang du nombre de procédés déjà lancés. */
+  const plannedBlockRaw = useMemo(() => {
+    if (blocks.length === 0) return null;
+    let currentIdx = -1;
+    if (shownGame?.procedure_id) blocks.forEach((b, i) => { if (b.procedureId === shownGame.procedure_id) currentIdx = i; });
+    return blocks[currentIdx >= 0 ? currentIdx + 1 : new Set(games.map(procedureKey)).size] ?? null;
+  }, [blocks, games, shownGame]);
+
+  const planned: PlannedBlock | null = useMemo(() => {
+    if (!plannedBlockRaw) return null;
+    const proc = plannedBlockRaw.procedureId ? procedures.find((p) => p.id === plannedBlockRaw.procedureId) : null;
+    return { label: proc?.title || BLOCK_LABELS[plannedBlockRaw.type] || plannedBlockRaw.type, durationMin: plannedBlockRaw.duration };
+  }, [plannedBlockRaw, procedures]);
+
+  // ── Sortie : retour confirmé tant qu'un procédé tourne ──
+
+  useLeaveGuard(!!openGame, {
+    title: 'Quitter le mode live ?',
+    message: 'Le procédé, les scores et le chrono sont conservés sur ce téléphone : tu pourras reprendre en rouvrant le mode live.',
+    stay: 'Rester',
+    leave: 'Quitter',
   });
 
-  // ── Snapshot local toutes les 5s pendant le jeu ────────────────────────────
-
-  useEffect(() => {
-    if (screenState !== 'playing' || !snapshot) return;
-    const interval = setInterval(() => {
-      void writeLiveSessionSnapshot({
-        ...snapshot,
-        scores: Object.fromEntries(gameSquadsRef.current.map((p) => [p.squad_id, p.score])),
-      });
-    }, SNAPSHOT_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [screenState, snapshot]);
-
-  // ── Score ───────────────────────────────────────────────────────────────
+  // ── Actions ────────────────────────────────────────────────────────────────
 
   const applyScore = (squadId: string, delta: number) => {
-    setCurrentGameSquads((prev) => {
-      const next = prev.map((p) => (p.squad_id === squadId ? { ...p, score: Math.max(0, p.score + delta) } : p));
-      const updated = next.find((p) => p.squad_id === squadId);
-      if (game && updated) void enqueueTrainingGameScoreUpdate(game.id, squadId, updated.score);
-      return next;
-    });
+    if (!openGame) return;
+    const row = gameSquadsRef.current.find((r) => r.game_id === openGame.id && r.squad_id === squadId);
+    if (!row) return;
+    const score = Math.max(0, row.score + delta);
+    if (score === row.score) return;
+    const next = gameSquadsRef.current.map((r) => (r === row ? { ...r, score } : r));
+    gameSquadsRef.current = next;
+    setGameSquads(next);
+    void enqueueTrainingGameScoreUpdate(openGame.id, squadId, score);
   };
 
-  // ── Fin de jeu ──────────────────────────────────────────────────────────
+  /** Remet à zéro les scores d'une portée : la séquence en cours, tout le procédé, ou toute la séance. Les séquences closes concernées sont exclues du bilan V/N/D. */
+  const resetScores = (scope: 'sequence' | 'procedure' | 'session') => {
+    if (!openGame || !snapshot) return;
+    const key = procedureKey(openGame);
+    const targets = gamesRef.current.filter((g) => (scope === 'session' ? true : scope === 'procedure' ? procedureKey(g) === key : g.id === openGame.id));
+    const ids = new Set(targets.map((g) => g.id));
+    const rows = gameSquadsRef.current.filter((r) => ids.has(r.game_id) && r.score !== 0);
+    const next = gameSquadsRef.current.map((r) => (ids.has(r.game_id) ? { ...r, score: 0 } : r));
+    gameSquadsRef.current = next;
+    setGameSquads(next);
+    rows.forEach((r) => void enqueueTrainingGameScoreUpdate(r.game_id, r.squad_id, 0));
 
-  const finishGame = useCallback(async () => {
-    if (!game || !trainingId) return;
-    setEnding(true);
+    const closedIds = targets.filter((g) => g.id !== openGame.id).map((g) => g.id);
+    if (closedIds.length > 0) {
+      const updated = { ...snapshot, resetGameIds: Array.from(new Set([...(snapshot.resetGameIds ?? []), ...closedIds])) };
+      setSnapshot(updated);
+      void writeLiveSessionSnapshot(updated);
+    }
+    setResetOpen(false);
+    haptics.warning();
+  };
+
+  const confirmReset = (scope: 'sequence' | 'procedure' | 'session', message: string) => {
+    Alert.alert('Confirmer la remise à zéro', message, [
+      { text: 'Annuler', style: 'cancel' },
+      { text: 'Remettre à zéro', style: 'destructive', onPress: () => resetScores(scope) },
+    ]);
+  };
+
+  const saveClock = (accumulatedMs: number, running: boolean) => {
+    if (!snapshot || !clockKey) return;
+    const updated = { ...snapshot, procedureClock: { key: clockKey, accumulatedMs: Math.max(0, accumulatedMs), runningSinceMs: running ? Date.now() : null } };
+    setSnapshot(updated);
+    void writeLiveSessionSnapshot(updated);
+  };
+
+  const togglePause = () => {
+    if (!openGame) return;
+    haptics.tapMedium();
+    saveClock(procedureElapsedMs, clockPaused);
+  };
+
+  const confirmResetClock = () => {
+    if (!openGame) return;
+    haptics.warning();
+    Alert.alert('Remettre le chrono à zéro ?', 'Le temps du procédé repart de 0:00. Les scores ne changent pas.', [
+      { text: 'Annuler', style: 'cancel' },
+      { text: 'Remettre à zéro', style: 'destructive', onPress: () => saveClock(0, !clockPaused) },
+    ]);
+  };
+
+  const closeGame = async (game: TrainingGame) => {
+    await flushTrainingGameOutbox();
+    const durationSeconds = Math.floor((Date.now() - new Date(game.started_at ?? Date.now()).getTime()) / 1000);
+    await endTrainingGame(game.id, durationSeconds);
+    setGames((prev) => prev.map((g) => (g.id === game.id ? { ...g, ended_at: new Date().toISOString(), duration_seconds: durationSeconds } : g)));
+  };
+
+  const launchSequence = async (o: {
+    procedureId: string | null;
+    label: string | null;
+    partIndex: number | null;
+    pointsPerTap: number;
+    series: SeriesConfig | null;
+  }) => {
+    if (!trainingId || !snapshot) return;
+    const playing = snapshot.playingSquadIds ?? snapshot.squads.map((sq) => sq.id);
+    const squadIds = snapshot.squads.map((sq) => sq.id).filter((id) => playing.includes(id));
+    if (squadIds.length < 2) throw new Error('Il faut au moins deux équipes en jeu. Ouvre « Équipes » pour les choisir.');
+
+    const composition = Object.entries(snapshot.composition)
+      .filter(([, squadId]) => squadIds.includes(squadId))
+      .map(([playerId, squadId]) => ({ playerId, squadId }));
+
+    const game = await startTrainingGame({
+      trainingId,
+      squadIds,
+      timerMode: o.series ? 'series' : 'continu',
+      seriesCount: o.series?.seriesCount,
+      seriesDurationSeconds: o.series?.seriesDurationSeconds,
+      restDurationSeconds: o.series?.restDurationSeconds,
+      procedureId: o.procedureId,
+      partIndex: o.partIndex,
+      label: o.label,
+      pointsPerTap: o.pointsPerTap,
+      composition,
+    });
+    setGames((prev) => [...prev, game]);
+    setGameSquads((prev) => [
+      ...prev,
+      ...squadIds.map((squadId, i) => ({ game_id: game.id, squad_id: squadId, club_id: game.club_id, score: 0, sort_order: i })),
+    ]);
+  };
+
+  const run = async (fn: () => Promise<void>) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
     try {
-      const durationSeconds = Math.floor((Date.now() - new Date(game.started_at ?? Date.now()).getTime()) / 1000);
-      await endTrainingGame(game.id, durationSeconds);
-      const allGames = await getGamesForTraining(trainingId);
-      const finished = allGames.filter((g) => g.ended_at);
-      setFinishedGames(finished);
-      setFinishedGameSquads(await getGameSquadsForGames(finished.map((g) => g.id)));
-      setScreenState('nextGame');
+      await fn();
     } catch (e) {
+      haptics.error();
       setError(e instanceof Error ? e.message : 'Erreur');
     } finally {
-      setEnding(false);
+      setBusy(false);
     }
-  }, [game, trainingId]);
+  };
 
-  useEffect(() => {
-    if (timer.isFinished && screenState === 'playing') {
-      void finishGame();
-    }
-  }, [timer.isFinished, screenState, finishGame]);
+  /** Séquence suivante : même procédé, mêmes réglages, composition courante des équipes. */
+  const nextSequence = () =>
+    run(async () => {
+      if (!openGame) return;
+      await closeGame(openGame);
+      await launchSequence({
+        procedureId: openGame.procedure_id,
+        label: openGame.label,
+        partIndex: openGame.part_index,
+        pointsPerTap: openGame.points_per_tap,
+        series: seriesFromGame(openGame),
+      });
+      haptics.success();
+    });
+
+  const openProcedureSheet = () => {
+    haptics.tapLight();
+    const proc = plannedBlockRaw?.procedureId ? procedures.find((p) => p.id === plannedBlockRaw.procedureId) ?? null : null;
+    setDraft((d) => ({
+      ...d,
+      procedure: proc,
+      freeLabel: proc ? null : planned?.label ?? null,
+      pointsPerTap: openGame?.points_per_tap ?? d.pointsPerTap,
+      seriesOn: openGame ? openGame.timer_mode === 'series' : d.seriesOn,
+      series: (openGame && seriesFromGame(openGame)) || snapshot?.lastSeriesConfig || d.series,
+    }));
+    setSheetOpen(true);
+  };
+
+  const launchProcedure = () =>
+    run(async () => {
+      if (openGame) await closeGame(openGame);
+      await launchSequence({
+        procedureId: draft.procedure?.id ?? null,
+        label: draft.procedure?.title ?? draft.freeLabel,
+        partIndex: nextPartIndex(gamesRef.current),
+        pointsPerTap: draft.pointsPerTap,
+        series: draft.seriesOn ? draft.series : null,
+      });
+      setSheetOpen(false);
+      haptics.success();
+    });
+
+  const endSession = () =>
+    run(async () => {
+      if (openGame) await closeGame(openGame);
+      setSheetOpen(false);
+      router.push(`/(tabs)/calendar/training/recap/${trainingId}` as never);
+    });
+
+  /** Choix des équipes sur le terrain pour la prochaine séquence (la séquence en cours garde les siennes). */
+  const togglePlaying = (squadId: string) => {
+    if (!snapshot) return;
+    haptics.select();
+    const current = snapshot.playingSquadIds ?? snapshot.squads.map((sq) => sq.id);
+    const next = current.includes(squadId) ? current.filter((id) => id !== squadId) : [...current, squadId];
+    const updated = { ...snapshot, playingSquadIds: snapshot.squads.map((sq) => sq.id).filter((id) => next.includes(id)) };
+    setSnapshot(updated);
+    void writeLiveSessionSnapshot(updated);
+  };
 
   const goToSquads = () => router.push(`/(tabs)/calendar/training/squads/${trainingId}` as never);
 
-  const goToRecap = async () => {
-    if (trainingId) await clearLiveSessionSnapshot(trainingId);
-    router.push(`/(tabs)/calendar/training/recap/${trainingId}` as never);
-  };
+  // ── Rendu ──────────────────────────────────────────────────────────────────
 
-  const playAgainSameSquads = () => {
-    setGame(null);
-    setScreenState('config');
-  };
+  if (status === 'loading') return <SkeletonDetail />;
 
-  // ── Rendu ───────────────────────────────────────────────────────────────
-
-  if (screenState === 'loading') return <SkeletonDetail />;
-
-  if (screenState === 'noSquads') {
+  if (status === 'noSquads') {
     return (
       <Screen>
         <EmptyState
           icon="people-outline"
-          title="Aucune composition trouvée"
-          description="Compose d'abord les équipes de la séance."
-          action={{ label: 'Aller aux plateaux', onPress: goToSquads }}
+          title="Compose d'abord les équipes"
+          description="Répartis les joueurs présents en équipes, puis reviens ici pour lancer le premier procédé."
+          action={{ label: 'Composer les équipes', onPress: goToSquads }}
         />
       </Screen>
     );
   }
 
-  if (screenState === 'config') {
-    return (
-      <Screen contentContainerStyle={s.content}>
-        {error ? <Text tone="negative">{error}</Text> : null}
-
-        {snapshot && (
-          <Card variant="raised" padding="md" style={s.configCard}>
-            <Text variant="headline">Qui joue ce jeu ?</Text>
-            <View style={s.chipRow}>
-              {snapshot.squads.map((sq) => (
-                <FilterChip key={sq.id} label={sq.label} active={selectedSquadIds.includes(sq.id)} onPress={() => toggleSquadSelection(sq.id)} />
-              ))}
-            </View>
-            <Text variant="caption" tone="tertiary">
-              {selectedSquadIds.length} équipe{selectedSquadIds.length > 1 ? 's' : ''} sélectionnée{selectedSquadIds.length > 1 ? 's' : ''} — 2 minimum, pas de maximum si plusieurs jouent en même temps.
-            </Text>
-          </Card>
-        )}
-
-        <Card variant="raised" padding="md" style={s.configCard}>
-          <Text variant="headline">Procédé et score</Text>
-          <Button
-            label={selectedProcedure ? selectedProcedure.title || 'Sans titre' : 'Choisir un procédé (optionnel)'}
-            icon="document-text-outline"
-            variant="secondary"
-            block
-            onPress={() => setProcedurePickerOpen(true)}
-          />
-          {selectedProcedure && selectedProcedure.scoring.length > 0 && (
-            <Text variant="caption" tone="tertiary">
-              Rappel du procédé : {selectedProcedure.scoring.join(' · ')}
-            </Text>
-          )}
-          <Input
-            label="Valeur du point (par tap)"
-            numeric
-            keyboardType="number-pad"
-            value={String(pointsPerTap)}
-            onChangeText={(v) => setPointsPerTap(Math.max(1, parseInt(v, 10) || 1))}
-            containerStyle={s.seriesField}
-          />
-        </Card>
-
-        <Card variant="raised" padding="md" style={s.configCard}>
-          <Text variant="headline">Type de chrono</Text>
-          <View style={s.modeRow}>
-            <Button
-              label="Continu"
-              variant={timerMode === 'continu' ? 'primary' : 'secondary'}
-              onPress={() => setTimerMode('continu')}
-              style={s.modeBtn}
-            />
-            <Button
-              label="Séries"
-              variant={timerMode === 'series' ? 'primary' : 'secondary'}
-              onPress={() => setTimerMode('series')}
-              style={s.modeBtn}
-            />
-          </View>
-
-          {timerMode === 'series' && (
-            <View style={s.seriesInputs}>
-              <Input
-                label="Séries"
-                numeric
-                keyboardType="number-pad"
-                value={String(seriesConfig.seriesCount)}
-                onChangeText={(v) => setSeriesConfig((prev) => ({ ...prev, seriesCount: parseInt(v, 10) || 0 }))}
-                containerStyle={s.seriesField}
-              />
-              <Input
-                label="Durée série (s)"
-                numeric
-                keyboardType="number-pad"
-                value={String(seriesConfig.seriesDurationSeconds)}
-                onChangeText={(v) => setSeriesConfig((prev) => ({ ...prev, seriesDurationSeconds: parseInt(v, 10) || 0 }))}
-                containerStyle={s.seriesField}
-              />
-              <Input
-                label="Repos (s)"
-                numeric
-                keyboardType="number-pad"
-                value={String(seriesConfig.restDurationSeconds)}
-                onChangeText={(v) => setSeriesConfig((prev) => ({ ...prev, restDurationSeconds: parseInt(v, 10) || 0 }))}
-                containerStyle={s.seriesField}
-              />
-            </View>
-          )}
-        </Card>
-
-        <Button label="Démarrer le jeu" icon="play" variant="primary" block loading={starting} onPress={startGame} />
-        <Button label="Rebrasser les plateaux" variant="ghost" onPress={goToSquads} />
-
-        <ProcedurePickerSheet
-          visible={procedurePickerOpen}
-          onClose={() => setProcedurePickerOpen(false)}
-          procedures={procedures}
-          onSelect={(procedureId) => setSelectedProcedure(procedures.find((p) => p.id === procedureId) ?? null)}
-        />
-      </Screen>
-    );
-  }
-
-  if (screenState === 'nextGame') {
-    const rows = currentGameSquads
-      .slice()
-      .sort((a, b) => a.sort_order - b.sort_order)
-      .map((p) => ({ ...p, label: snapshot?.squads.find((sq) => sq.id === p.squad_id)?.label ?? '—' }));
-
-    return (
-      <Screen contentContainerStyle={s.content}>
-        <Card variant="raised" padding="md" style={s.configCard}>
-          <Text variant="headline">Jeu terminé</Text>
-          {rows.map((r) => (
-            <View key={r.squad_id} style={s.nextGameRow}>
-              <Text variant="title">{r.label}</Text>
-              <Text variant="title" numeric weight="700">{r.score}</Text>
-            </View>
-          ))}
-        </Card>
-        <Button label="Jeu suivant" icon="repeat" variant="primary" block onPress={playAgainSameSquads} />
-        <Button label="Rebrasser les plateaux" icon="shuffle-outline" variant="secondary" block onPress={goToSquads} />
-        <Button label="Terminer la séance" icon="flag-outline" variant="ghost" block onPress={goToRecap} />
-      </Screen>
-    );
-  }
-
-  // screenState === 'playing'
-  const participants = currentGameSquads
-    .slice()
-    .sort((a, b) => a.sort_order - b.sort_order)
-    .map((p) => {
-      const sq = snapshot?.squads.find((s2) => s2.id === p.squad_id);
-      return { ...p, label: sq?.label ?? '—', color: c.chartSeries[Number(sq?.color_token ?? 0) % c.chartSeries.length] };
-    });
-  const tapValue = game?.points_per_tap ?? 1;
-  const procedureGames = game?.procedure_id ? finishedGames.filter((g) => g.procedure_id === game.procedure_id) : [];
+  const compact = tiles.length >= 3;
+  const playingIds = snapshot?.playingSquadIds ?? snapshot?.squads.map((sq) => sq.id) ?? [];
+  const showPicker = (snapshot?.squads.length ?? 0) > 2;
 
   return (
-    <View style={s.playingRoot}>
-      <View style={[s.phaseBar, { backgroundColor: c.bg.surface, borderBottomColor: c.border.subtle }]}>
-        {timerMode === 'series' && timer.phaseKind ? (
-          <Text variant="headline" tone={timer.phaseKind === 'repos' ? 'warning' : 'primary'}>
-            {timer.phaseKind === 'repos' ? 'Repos' : `Série ${(timer.currentSeriesIndex ?? 0) + 1}/${seriesConfig.seriesCount}`}
-            {' · '}
-            {formatClock(timer.phaseRemainingSeconds ?? 0)}
-          </Text>
-        ) : (
-          <Text variant="headline" numeric>{formatClock(timer.elapsedSeconds)}</Text>
-        )}
-        <Pressable onPress={finishGame} disabled={ending} accessibilityRole="button" accessibilityLabel="Terminer le jeu">
-          <Text variant="callout" tone="accent">Terminer le jeu</Text>
-        </Pressable>
+    <View style={[s.root, { backgroundColor: c.bg.canvas }]}>
+      <View style={s.topRow}>
+        <View>
+          <Text variant="caption" tone="tertiary">Séance</Text>
+          <Text variant="headline" numeric>{levels?.sessionStartedAtMs ? formatClock(sessionElapsed) : '0:00'}</Text>
+        </View>
+        <View style={s.topActions}>
+          {openGame ? (
+            <Button label="Réinitialiser" icon="refresh" variant="secondary" size="sm" onPress={() => { haptics.tapLight(); setResetOpen(true); }} accessibilityHint="Choisir ce qui repasse à zéro" />
+          ) : null}
+          <Button label="Équipes" icon="people-outline" variant="secondary" size="sm" onPress={goToSquads} accessibilityHint="Composer ou modifier les équipes" />
+        </View>
       </View>
 
-      {snapshot && snapshot.squads.length > 2 && (
-        <StandingsBanner title="Séance" squads={snapshot.squads} games={finishedGames} gameSquads={finishedGameSquads} />
-      )}
-      {snapshot && procedureGames.length > 0 && (
-        <StandingsBanner
-          title={selectedProcedure?.title || 'Procédé'}
-          squads={snapshot.squads}
-          games={procedureGames}
-          gameSquads={finishedGameSquads}
-        />
-      )}
+      <View style={[s.chrono, { backgroundColor: c.bg.surface, borderColor: c.border.subtle, borderRadius: theme.radius.xl }]}>
+        <View style={s.chronoHead}>
+          <View style={s.chronoTitle}>
+            <Text variant="caption" tone={clockPaused ? 'warning' : 'tertiary'}>{!openGame ? 'PRÊT' : clockPaused ? 'PROCÉDÉ EN PAUSE' : 'PROCÉDÉ EN COURS'}</Text>
+            <Text variant="headline" numberOfLines={1}>{procedureTitle}</Text>
+          </View>
+          {openGame && levels ? (
+            <Badge
+              label={levels.sequenceCount > 1 ? `Séquence ${levels.sequenceIndex}/${levels.sequenceCount}` : 'Séquence 1'}
+              tone="accent"
+              solid
+            />
+          ) : null}
+        </View>
 
-      <FacesGrid participants={participants} tapValue={tapValue} onScore={applyScore} />
+        <Text
+          variant="hero"
+          numeric
+          tone={!openGame ? 'tertiary' : clockPaused ? 'warning' : 'primary'}
+          accessibilityLabel={`Temps du procédé ${formatClock(procedureElapsed)}`}
+          style={s.clock}
+        >
+          {formatClock(procedureElapsed)}
+        </Text>
+
+        {openGame ? (
+          <View style={s.clockActions}>
+            <Button
+              label={clockPaused ? 'Reprendre' : 'Pause'}
+              icon={clockPaused ? 'play' : 'pause'}
+              variant={clockPaused ? 'primary' : 'secondary'}
+              size="sm"
+              onPress={togglePause}
+              accessibilityHint="Met le chrono en pause ou le relance"
+            />
+            <Button label="Zéro" icon="refresh" variant="secondary" size="sm" onPress={confirmResetClock} accessibilityHint="Remet le chrono du procédé à 0:00" />
+          </View>
+        ) : null}
+
+        {openGame && openGame.timer_mode === 'series' ? <SequenceClock key={openGame.id} game={openGame} paused={clockPaused} /> : null}
+      </View>
+
+      {showPicker && snapshot ? (
+        <View style={s.picker}>
+          <Text variant="caption" tone="tertiary">{openGame ? 'Sur le terrain à la prochaine séquence' : 'Sur le terrain'}</Text>
+          <View style={s.pickerRow}>
+            {snapshot.squads.map((sq) => (
+              <SquadToggle
+                key={sq.id}
+                label={sq.label}
+                color={squadColor(sq.color_token, c.chartSeries)}
+                on={playingIds.includes(sq.id)}
+                onPress={() => togglePlaying(sq.id)}
+              />
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      {error ? (
+        <Text variant="callout" tone="negative" style={s.error} accessibilityRole="alert">{error}</Text>
+      ) : null}
+
+      <View style={[s.tiles, compact ? s.tilesColumn : s.tilesRow]}>
+        {tiles.map((level) => (
+          <SquadTile
+            key={level.squadId}
+            level={level}
+            color={squadColor(level.colorToken, c.chartSeries)}
+            tapValue={openGame?.points_per_tap ?? 1}
+            disabled={!openGame}
+            compact={compact}
+            onScore={() => applyScore(level.squadId, openGame?.points_per_tap ?? 1)}
+            onUndo={() => applyScore(level.squadId, -(openGame?.points_per_tap ?? 1))}
+          />
+        ))}
+      </View>
+
+      <View style={[s.bar, { backgroundColor: c.bg.surface, borderTopColor: c.border.subtle, paddingBottom: Math.max(insets.bottom, theme.space.md) }]}>
+        {openGame ? (
+          <>
+            <Button label="Procédé suivant" icon="albums-outline" variant="secondary" size="lg" disabled={busy} onPress={openProcedureSheet} style={s.barSecondary} />
+            <Button label="Séquence suivante" icon="play-skip-forward" iconAfter size="lg" loading={busy} onPress={nextSequence} style={s.barPrimary} />
+          </>
+        ) : (
+          <Button label="Démarrer un procédé" icon="play" size="lg" block onPress={openProcedureSheet} />
+        )}
+      </View>
+
+      <Sheet visible={resetOpen} onClose={() => setResetOpen(false)} title="Remettre les scores à zéro" subtitle="Choisis ce qui repasse à 0. Une confirmation te sera demandée.">
+        <View style={s.resetBody}>
+          <Button
+            label="La séquence en cours"
+            icon="refresh"
+            variant="secondary"
+            size="lg"
+            block
+            onPress={() => confirmReset('sequence', 'Le score de la séquence en cours repasse à 0. Les séquences précédentes ne changent pas.')}
+          />
+          <Button
+            label="Tout le procédé"
+            icon="albums-outline"
+            variant="secondary"
+            size="lg"
+            block
+            onPress={() => confirmReset('procedure', 'Les scores de toutes les séquences de ce procédé repassent à 0 et ne comptent plus dans le bilan.')}
+          />
+          <Button
+            label="Toute la séance"
+            icon="warning-outline"
+            variant="destructive"
+            size="lg"
+            block
+            onPress={() => confirmReset('session', 'Les scores de tous les procédés et séquences de la séance repassent à 0 et ne comptent plus dans le bilan. Cette action est définitive.')}
+          />
+        </View>
+      </Sheet>
+
+      <ProcedureSheet
+        visible={sheetOpen && !pickerOpen}
+        onClose={() => setSheetOpen(false)}
+        hasOpenGame={!!openGame}
+        hasGames={games.length > 0}
+        planned={planned}
+        draft={draft}
+        onChange={setDraft}
+        onPickProcedure={() => setPickerOpen(true)}
+        busy={busy}
+        onLaunch={launchProcedure}
+        onEndSession={endSession}
+      />
+      <ProcedurePickerSheet
+        visible={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        procedures={procedures}
+        onSelect={(procedureId) => {
+          setDraft((d) => ({ ...d, procedure: procedures.find((p) => p.id === procedureId) ?? null, freeLabel: null }));
+          setPickerOpen(false);
+        }}
+      />
     </View>
   );
 }
 
-/** Dispose les aplats de score : côte à côte pour 2, empilés plein largeur pour 3 (plus lisible qu'un tiers d'écran), grille à 2 colonnes au-delà. */
-function FacesGrid({
-  participants,
-  tapValue,
-  onScore,
-}: {
-  participants: { squad_id: string; label: string; color: string; score: number }[];
-  tapValue: number;
-  onScore: (squadId: string, delta: number) => void;
-}) {
-  const s = useStyles();
-  const n = participants.length;
-
-  const containerStyle = n <= 2 ? s.facesRow : n === 3 ? s.facesColumn : s.facesGrid;
-  const tileStyle: ViewStyle | undefined = n >= 4 ? s.gridTile : undefined;
-
-  return (
-    <View style={containerStyle}>
-      {participants.map((p) => (
-        <GameFace
-          key={p.squad_id}
-          squadLabel={p.label}
-          bg={p.color}
-          score={p.score}
-          style={tileStyle}
-          onScore={() => onScore(p.squad_id, tapValue)}
-          onUndo={() => onScore(p.squad_id, -tapValue)}
-        />
-      ))}
-    </View>
-  );
-}
-
-/**
- * Classement live d'un niveau (séance entière, ou un procédé donné) sur tous
- * les plateaux constitués, pas seulement les équipes qui jouent ce jeu. Ne
- * compte que les jeux clos ; le jeu en cours reste dans les aplats jusqu'à
- * "Terminer le jeu". Deux instances possibles côte à côte : séance (dès plus
- * de 2 plateaux) et procédé (dès qu'un 2e jeu du même procédé a été joué).
- */
-function StandingsBanner({
-  title,
-  squads,
-  games,
-  gameSquads,
-}: {
-  title: string;
-  squads: LiveSessionSnapshot['squads'];
-  games: TrainingGame[];
-  gameSquads: TrainingGameSquad[];
-}) {
+/** Décompte série/repos d'une séquence. Monté par jeu (`key`) : le hook repart d'un état propre à chaque séquence. */
+function SequenceClock({ game, paused }: { game: TrainingGame; paused: boolean }) {
   const { theme } = useTheme();
   const c = theme.colors;
   const s = useStyles();
-  const standings = useMemo(() => computeSquadStandings(squads, games, gameSquads), [squads, games, gameSquads]);
+  const config = seriesFromGame(game);
+  const timer = useLiveGameTimer({
+    mode: 'series',
+    seriesConfig: config,
+    gameStartedAtMs: game.started_at ? new Date(game.started_at).getTime() : Date.now(),
+    paused,
+  });
+
+  const announced = useRef(false);
+  useEffect(() => {
+    if (timer.isFinished && !announced.current) {
+      announced.current = true;
+      void playPhaseTransitionSound();
+    }
+  }, [timer.isFinished]);
+
+  if (!config) return null;
+
+  const rest = timer.phaseKind === 'repos';
+  const label = timer.isFinished
+    ? 'Séquence terminée'
+    : rest
+      ? `Repos · ${formatClock(timer.phaseRemainingSeconds ?? 0)}`
+      : `Série ${(timer.currentSeriesIndex ?? 0) + 1}/${config.seriesCount} · ${formatClock(timer.phaseRemainingSeconds ?? 0)}`;
+  const palette = timer.isFinished ? c.positive : rest ? c.warning : { default: c.accent.default, subtle: c.accent.subtle };
+  const icon = timer.isFinished ? 'checkmark-circle' : rest ? 'pause-circle' : 'timer-outline';
 
   return (
-    <View style={[s.standingsBar, { backgroundColor: c.bg.sunken, borderBottomColor: c.border.subtle }]}>
-      <Text variant="callout" tone="tertiary" weight="700" style={s.standingsTitle}>{title.toUpperCase()}</Text>
-      <View style={s.standingsWrap}>
-        {standings.map((sq) => (
-          <View key={sq.squadId} style={s.standingChip}>
-            <View style={[s.standingDot, { backgroundColor: c.chartSeries[sq.colorIndex % c.chartSeries.length] }]} />
-            <Text variant="callout" weight="700" numberOfLines={1}>{sq.label}</Text>
-            <Text variant="callout" tone="secondary" numeric>{sq.wins}V {sq.draws}N {sq.losses}D</Text>
-            <Text variant="callout" tone={sq.diff > 0 ? 'positive' : sq.diff < 0 ? 'negative' : 'tertiary'} numeric weight="700">
-              {sq.diff > 0 ? '+' : ''}{sq.diff}
-            </Text>
-          </View>
-        ))}
-      </View>
+    <View style={[s.seqPill, { backgroundColor: palette.subtle, borderRadius: theme.radius.pill }]} accessibilityRole="timer" accessibilityLabel={label}>
+      <Ionicons name={icon} size={22} color={palette.default} />
+      <Text variant="headline" numeric color={palette.default}>{label}</Text>
     </View>
-  );
-}
-
-function formatClock(totalSeconds: number): string {
-  const m = Math.floor(Math.max(0, totalSeconds) / 60);
-  const sec = Math.max(0, totalSeconds) % 60;
-  return `${m}:${String(sec).padStart(2, '0')}`;
-}
-
-function GameFace({
-  squadLabel,
-  bg,
-  score,
-  onScore,
-  onUndo,
-  style,
-}: {
-  squadLabel: string;
-  bg: string;
-  score: number;
-  onScore: () => void;
-  onUndo: () => void;
-  style?: ViewStyle;
-}) {
-  const { theme } = useTheme();
-
-  return (
-    <Pressable
-      onPress={() => {
-        haptics.success();
-        onScore();
-      }}
-      accessibilityRole="button"
-      accessibilityLabel={`+1 ${squadLabel}`}
-      style={[{ flex: 1, backgroundColor: bg, alignItems: 'center', justifyContent: 'center' }, style]}
-    >
-      <Text variant="title" tone="onFill" weight="700">{squadLabel}</Text>
-      <Text variant="hero" tone="onFill" numeric weight="700">{score}</Text>
-      <Pressable
-        onPress={(e) => {
-          e.stopPropagation();
-          haptics.tapLight();
-          onUndo();
-        }}
-        accessibilityRole="button"
-        accessibilityLabel={`Annuler le point ${squadLabel}`}
-        hitSlop={16}
-        style={{ marginTop: theme.space.lg, paddingHorizontal: theme.space.lg, paddingVertical: theme.space.sm, borderRadius: theme.radius.pill, backgroundColor: 'rgba(0,0,0,0.25)' }}
-      >
-        <Text variant="callout" tone="onFill">Annuler le point {squadLabel}</Text>
-      </Pressable>
-    </Pressable>
   );
 }
 
 const useStyles = makeStyles((t) => ({
-  content: { gap: t.space.lg, paddingBottom: t.space.huge },
-  configCard: { gap: t.space.md },
-  modeRow: { flexDirection: 'row', gap: t.space.sm },
-  modeBtn: { flex: 1 },
-  seriesInputs: { flexDirection: 'row', gap: t.space.sm },
-  seriesField: { flex: 1 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.xs },
-  nextGameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: t.space.xs },
-  playingRoot: { flex: 1 },
-  phaseBar: {
+  root: { flex: 1, paddingHorizontal: t.space.lg, paddingTop: t.space.sm, gap: t.space.md },
+  topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  resetBody: { gap: t.space.md, paddingBottom: t.space.lg },
+  topActions: { flexDirection: 'row', gap: t.space.sm },
+  chrono: { borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: t.space.lg, paddingVertical: t.space.md, gap: t.space.xs, alignItems: 'center' },
+  chronoHead: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, alignSelf: 'stretch' },
+  chronoTitle: { flex: 1 },
+  clock: { fontSize: 68, lineHeight: 72, letterSpacing: -2 },
+  clockActions: { flexDirection: 'row', gap: t.space.sm },
+  seqPill: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm, paddingHorizontal: t.space.lg, paddingVertical: t.space.sm },
+  picker: { gap: t.space.xs },
+  pickerRow: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.sm },
+  error: { paddingHorizontal: t.space.xs },
+  tiles: { flex: 1, gap: t.space.sm },
+  tilesRow: { flexDirection: 'row' },
+  tilesColumn: { flexDirection: 'column' },
+  bar: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: t.space.sm,
+    marginHorizontal: -t.space.lg,
     paddingHorizontal: t.space.lg,
-    paddingVertical: t.space.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingTop: t.space.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
-  facesRow: { flex: 1, flexDirection: 'row' },
-  facesColumn: { flex: 1, flexDirection: 'column' },
-  facesGrid: { flex: 1, flexDirection: 'row', flexWrap: 'wrap' },
-  gridTile: { width: '50%', minHeight: '50%' },
-  standingsBar: { borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: t.space.lg, paddingVertical: t.space.md, gap: t.space.sm },
-  standingsTitle: { letterSpacing: 0.5 },
-  standingsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.lg },
-  standingChip: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm },
-  standingDot: { width: 12, height: 12, borderRadius: 6 },
+  barSecondary: { flex: 1 },
+  barPrimary: { flex: 1.4 },
 }));
