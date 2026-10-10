@@ -43,7 +43,7 @@
   header .navlink{margin-left:auto;font-size:13px;color:var(--accent);text-decoration:none;position:relative;padding-bottom:2px}
   header .navlink::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:var(--accent);transform:scaleX(0);transform-origin:right;transition:transform .2s var(--ease)}
   header .navlink:hover::after{transform:scaleX(1);transform-origin:left}
-  .wrap{max-width:none;margin:0;padding:10px 14px;flex:1;min-height:0;display:flex;flex-direction:column;gap:8px}
+  .wrap{max-width:none;margin:0;padding:6px 8px;flex:1;min-height:0;display:flex;flex-direction:column;gap:6px}
   .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;margin-bottom:14px}
   .toolbar .group{display:flex;gap:6px;align-items:center;padding-right:10px;border-right:1px solid var(--line)}
   .toolbar .group:last-child{border-right:none}
@@ -95,9 +95,9 @@
   input:focus,select:focus,textarea:focus{border-color:var(--accent)}
   input[type=number]{width:64px;font-family:var(--font-mono)}
   input[type=color]{background:var(--surface-2);cursor:pointer}
-  .workspace{display:flex;gap:10px;align-items:stretch;flex:1;min-height:0;margin-bottom:0}
+  .workspace{display:flex;gap:6px;align-items:stretch;flex:1;min-height:0;margin-bottom:0}
   .canvas-card,.panel,.form-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px}
-  .canvas-card{position:relative;flex:1;min-width:0;min-height:0;order:1;display:flex;flex-direction:column;gap:8px}
+  .canvas-card{position:relative;flex:1;min-width:0;min-height:0;order:1;display:flex;flex-direction:column;gap:6px;padding:8px}
   /* Le terrain absorbe la hauteur restante ; preserveAspectRatio s'occupe du
      letterboxing, donc il reste centre quel que soit le format de la fenetre. */
   .canvas-card>svg#pitch{flex:1;min-height:0;height:100%}
@@ -179,8 +179,8 @@
   .dock-group{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .dock>*+*{border-left:1px solid var(--line);padding-left:14px}
   .dock>.seqbar{margin-top:0}
-  .dock #scrub{flex:1 1 140px;min-width:90px;accent-color:var(--accent)}
-  .dock-group:has(#scrub){flex:1 1 240px;min-width:170px}
+  .dock #scrub{flex:1 1 120px;min-width:90px;max-width:220px;accent-color:var(--accent)}
+  .dock-group:has(#scrub){flex:0 1 auto;min-width:170px}
   .dock #stepLabel{margin:0}
   .seqlabel{font-size:11px;color:var(--muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.03em}
   .seq-steps{display:flex;gap:6px;flex-wrap:wrap}
@@ -197,26 +197,29 @@
      largeur fixe, hauteur pleine (stretch de .workspace), et seule la liste
      des pistes (#advTracks) defile — l'entete/la regle restent visibles en
      repere pendant le scroll. Demande Robin 2026-09-25. */
-  #advTimeline{order:2;flex:none;width:360px;max-width:38vw;height:100%;min-height:0;margin-top:0;display:flex;flex-direction:column}
+  #advTimeline{order:2;flex:none;width:440px;max-width:40vw;height:100%;min-height:0;margin-top:0;display:flex;flex-direction:column}
   #advTimeline #advTracks{flex:1;min-height:0;overflow-y:auto}
   .tl-toprow{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;flex:none}
-  .tl-ruler{position:relative;height:18px;margin-left:106px;border-bottom:1px solid var(--line-strong);font-size:10px;color:var(--muted);font-family:var(--font-mono);cursor:pointer}
+  .tl-ruler{position:relative;height:18px;margin-left:72px;border-bottom:1px solid var(--line-strong);font-size:10px;color:var(--muted);font-family:var(--font-mono);cursor:pointer;overflow:hidden}
   .tl-ruler span{position:absolute;top:0}
   .tl-guide{position:absolute;top:0;bottom:0;width:1px;border-left:1px dashed var(--line-strong)}
+  .tl-end-shade{position:absolute;top:0;bottom:0;background:rgba(0,0,0,.45);pointer-events:none;z-index:3}
+  .tl-end{position:absolute;top:0;bottom:0;width:0;border-left:2px dashed #ff9f1a;pointer-events:none;z-index:5}
+  .tl-end-handle{position:absolute;width:16px;height:18px;margin-left:-8px;background:#ff9f1a;color:#1a1200;border-radius:3px 3px 8px 8px;font-size:10px;line-height:18px;text-align:center;cursor:ew-resize;touch-action:none;z-index:6;user-select:none}
   .tl-cursor{position:absolute;top:0;bottom:0;width:0;border-left:2px solid var(--accent);pointer-events:none;z-index:4}
   .tl-group{margin-top:4px}
   .tl-grouphead{display:flex;align-items:center;height:28px;background:var(--surface-2);border-radius:6px;padding:0 8px;font-size:11px;color:var(--text);cursor:pointer;user-select:none}
   .tl-grouphead:hover{border-color:var(--accent)}
   .tl-grouphead .car{color:var(--muted);margin-right:6px;font-size:9px;flex:none}
   .tl-grouphead .cnt{color:var(--muted);margin-left:4px}
-  .tl-mini{flex:1;height:12px;margin-left:106px;position:relative;background:var(--bg);border-radius:3px;overflow:hidden}
+  .tl-mini{flex:1;height:12px;margin-left:72px;position:relative;background:var(--bg);border-radius:3px;overflow:hidden}
   .tl-mini .blob{position:absolute;top:2px;height:8px;border-radius:2px;opacity:.85}
-  .tl-track{display:flex;align-items:center;height:30px;position:relative;border-top:1px solid var(--line);padding-left:14px}
+  .tl-track{display:flex;align-items:center;height:30px;position:relative;border-top:1px solid var(--line);padding-left:8px}
   /* Colonne d'etiquette reduite (92px, etait 136px) : la timeline avancee est
      desormais un panneau lateral etroit (cf #advTimeline plus haut), 136px y
      laissait trop peu de place a la piste elle-meme — retour de Robin
      2026-09-26. L'ellipsis existant absorbe les noms plus longs. */
-  .tl-label{width:92px;flex:none;font-size:11px;color:var(--text);padding-right:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tl-label{width:64px;flex:none;font-size:11px;color:var(--text);padding-right:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .tl-lane{flex:1;position:relative;height:100%}
   .tl-clip{position:absolute;top:5px;height:20px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;color:var(--accent-ink);box-shadow:0 1px 3px rgba(0,0,0,.4);white-space:nowrap;overflow:hidden;padding:0 4px;cursor:grab;touch-action:none}
   .tl-clip:active{cursor:grabbing}

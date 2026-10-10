@@ -217,13 +217,13 @@ window.DrillRender = (function () {
     ids.forEach(function (id) {
       var st = states[id];
       if (!st || (st.type !== "player" && st.type !== "support")) return;
-      var rec = tl.entities[id], ci = activeClipIndexAt(rec, t, tl.totalMs);
+      var rec = tl.entities[id], ci = activeClipIndexAt(rec, t, Infinity);
       if (ci < 0) return;
       var clip = rec.clips[ci], from = clipFromState(rec, ci);
       var d = Math.hypot(clip.toX - from.x, clip.toY - from.y);
       if (d < MOVED) return;
       var ballId = carriers[id], brec = ballId ? tl.entities[ballId] : null;
-      var bci = brec ? activeClipIndexAt(brec, t, tl.totalMs) : -1;
+      var bci = brec ? activeClipIndexAt(brec, t, Infinity) : -1;
       if (brec && bci >= 0) {
         var bclip = brec.clips[bci], bfrom = clipFromState(brec, bci);
         var bd = Math.hypot(bclip.toX - bfrom.x, bclip.toY - bfrom.y);
@@ -240,7 +240,7 @@ window.DrillRender = (function () {
       if (ballHandled[id]) return;
       var st = states[id];
       if (!st || st.type !== "ball") return;
-      var rec = tl.entities[id], ci = activeClipIndexAt(rec, t, tl.totalMs);
+      var rec = tl.entities[id], ci = activeClipIndexAt(rec, t, Infinity);
       if (ci < 0) return;
       var clip = rec.clips[ci], from = clipFromState(rec, ci);
       var d = Math.hypot(clip.toX - from.x, clip.toY - from.y);

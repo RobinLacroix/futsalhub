@@ -2902,6 +2902,7 @@
     var variantsOut = (drill.variants || []).map(function (v) {
       var o = { id: v.id, name: v.name, keyframes: v.keyframes };
       if (v.timeline) o.timeline = v.timeline;
+      if (v.exportEndMs > 0) o.exportEndMs = v.exportEndMs;
       return o;
     });
     var out = { meta: drill.meta, pitch: drill.pitch, zones: zones, keyframes: drill.keyframes, variants: variantsOut, activeVariantIndex: drill.activeVariantIndex, rules: drill.rules };
@@ -3632,10 +3633,20 @@
     document.getElementById("scrub").value = 0;
     renderVariants(); renderSteps(); render(); syncJSON();
   }
+  // Clone complet d'une variante : keyframes + timeline canonique + overlays
+  // globaux (lines/pulses/texts). Ne copier que les keyframes faisait
+  // reconstruire timeline/overlays depuis les etapes (ensureTimeline/
+  // ensureOverlays), ce qui perdait les clips desynchronises du mode avance.
+  function cloneVariant(src, name) {
+    var copy = JSON.parse(JSON.stringify(src));
+    copy.id = "var-" + (vid++);
+    copy.name = name;
+    return copy;
+  }
   function addVariant() {
     stopPlay(); commitEnts(); pushHistory();
     var src = drill.variants[drill.activeVariantIndex];
-    var copy = { id: "var-" + (vid++), name: "Variante " + (drill.variants.length + 1), keyframes: JSON.parse(JSON.stringify(src.keyframes)) };
+    var copy = cloneVariant(src, "Variante " + (drill.variants.length + 1));
     drill.variants.push(copy);
     drill.activeVariantIndex = drill.variants.length - 1;
     drill.keyframes = copy.keyframes;
@@ -3649,7 +3660,7 @@
   function duplicateVariant(idx) {
     stopPlay(); commitEnts(); pushHistory();
     var src = drill.variants[idx];
-    var copy = { id: "var-" + (vid++), name: src.name + " (copie)", keyframes: JSON.parse(JSON.stringify(src.keyframes)) };
+    var copy = cloneVariant(src, src.name + " (copie)");
     drill.variants.splice(idx + 1, 0, copy);
     drill.activeVariantIndex = idx + 1;
     drill.keyframes = copy.keyframes;
@@ -3798,10 +3809,22 @@
     // Reperes verticaux aux frontieres d'etapes du mode simple — purement
     // visuels : un clip glisse hors de ces reperes n'y "raccroche" plus, c'est
     // precisement ce qui le fait passer en desynchronise (mode avance).
+    var lastLblPx = -1;
     bm.forEach(function (ms) {
+      // Frontiere au-dela de la fin de la timeline (clips raccourcis en mode
+      // avance) : pct > 100 faisait deborder repere et etiquette du panneau.
+      if (ms > totalMs) return;
       var pct = (ms / totalMs) * 100;
       var gd = document.createElement("div"); gd.className = "tl-guide"; gd.style.left = pct + "%"; ruler.appendChild(gd);
-      var lbl = document.createElement("span"); lbl.style.left = "calc(" + pct + "% + 2px)"; lbl.textContent = (ms / 1000).toFixed(1) + "s"; ruler.appendChild(lbl);
+      // Etiquette masquee si trop proche de la precedente (chevauchement),
+      // et alignee a gauche du repere pour la derniere zone afin de ne pas
+      // deborder du panneau (ruler.clientWidth 0 = panneau pas encore mesure).
+      var rw = ruler.clientWidth || 300, px = rw * pct / 100;
+      if (px - lastLblPx < 34 && lastLblPx >= 0) return;
+      lastLblPx = px;
+      var lbl = document.createElement("span");
+      if (px > rw - 30) { lbl.style.right = "calc(" + (100 - pct) + "% + 2px)"; } else { lbl.style.left = "calc(" + pct + "% + 2px)"; }
+      lbl.textContent = (ms / 1000).toFixed(1) + "s"; ruler.appendChild(lbl);
     });
     var ids = Object.keys(tl.entities);
     if (selClip && !ids.some(function (id) { return tl.entities[id] === selClip.rec; })) selClip = null;
@@ -3857,6 +3880,7 @@
     // empilait un nouveau .tl-cursor sans jamais retirer le precedent —
     // des dizaines de barres accent s'accumulaient et se fondaient en un
     // bloc plein, exactement le bug rapporte par Robin.
+    renderExportEndMarker(wrap, ruler, totalMs);
     var oldCursor = wrap.querySelector(".tl-cursor");
     if (oldCursor) oldCursor.remove();
     if (advCursorMs != null) {
@@ -3869,6 +3893,39 @@
       cursor.style.left = ((rulerRect.left - wrapRect.left) + cursorPct / 100 * rulerRect.width) + "px";
       wrap.appendChild(cursor);
     }
+  }
+  // Marqueur "fin de video" : poignee orange sur la regle, glissable, qui fixe
+  // la duree exportee (GIF/MP4) de la variante active (variant.exportEndMs).
+  // Tout ce qui est apres est grise. Double-clic sur la poignee (ou glisser au
+  // bout de la regle) = retour a "auto" (fin du dernier deplacement).
+  function renderExportEndMarker(wrap, ruler, totalMs) {
+    wrap.querySelectorAll(".tl-end, .tl-end-handle, .tl-end-shade").forEach(function (n) { n.remove(); });
+    var v = drill.variants ? drill.variants[drill.activeVariantIndex] : null;
+    if (!v) return;
+    var endMs = v.exportEndMs > 0 ? Math.min(v.exportEndMs, totalMs) : (drill.timeline && drill.timeline.totalMs > 0 ? Math.min(drill.timeline.totalMs, totalMs) : totalMs);
+    var wr = wrap.getBoundingClientRect(), rr = ruler.getBoundingClientRect();
+    var x = (rr.left - wr.left) + endMs / totalMs * rr.width;
+    var line = document.createElement("div"); line.className = "tl-end"; line.style.left = x + "px"; wrap.appendChild(line);
+    var shadeW = (rr.left - wr.left) + rr.width - x;
+    if (shadeW > 1) { var sh = document.createElement("div"); sh.className = "tl-end-shade"; sh.style.left = x + "px"; sh.style.width = shadeW + "px"; wrap.appendChild(sh); }
+    var h = document.createElement("div"); h.className = "tl-end-handle"; h.textContent = "⏹";
+    h.title = (v.exportEndMs > 0 ? "Fin de la vidéo : " + (v.exportEndMs / 1000).toFixed(1) + " s" : "Fin de la vidéo : auto (fin du dernier déplacement)") + " — glisse pour couper, double-clic pour revenir à auto";
+    h.style.left = x + "px"; h.style.top = (rr.top - wr.top) + "px";
+    h.addEventListener("dblclick", function (ev) { ev.preventDefault(); if (!(v.exportEndMs > 0)) return; pushHistory(); delete v.exportEndMs; renderAdvancedTimeline(); syncJSON(); });
+    h.addEventListener("pointerdown", function (ev) {
+      ev.preventDefault(); ev.stopPropagation();
+      var pushed = false;
+      function move(mv) {
+        var r2 = ruler.getBoundingClientRect();
+        var ms = Math.round(Math.max(0, Math.min(1, (mv.clientX - r2.left) / r2.width)) * totalMs);
+        if (!pushed) { pushHistory(); pushed = true; }
+        if (ms >= totalMs - 20) delete v.exportEndMs; else v.exportEndMs = Math.max(200, ms);
+        renderAdvancedTimeline();
+      }
+      function up() { document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up); if (pushed) syncJSON(); }
+      document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
+    });
+    wrap.appendChild(h);
   }
   // En-tete de groupe cliquable (chevron + nom + compte) qui bascule
   // advGroupOpen[label] et redessine — replie par defaut (cf spec §4).
@@ -4833,6 +4890,15 @@
   function exportSpeedMult() {
     return parseFloat(document.getElementById("exportSpeed").value) || 1;
   }
+  // Duree exportee (ms) : marqueur "fin de video" pose sur la timeline avancee
+  // (variante.exportEndMs) ; sinon, en mode avance, la fin du dernier
+  // deplacement (au-dela, la sequence ne montre plus que l'image finale) ;
+  // sinon la sequence complete.
+  function exportDurationMs(fullTotal, tl, endMs) {
+    if (advancedMode && endMs > 0) return Math.max(1, Math.min(fullTotal, endMs));
+    if (advancedMode && tl && tl.totalMs > 0) return Math.max(1, Math.min(fullTotal, tl.totalMs));
+    return fullTotal;
+  }
   function exportPNG() {
     stopPlay();
     var sE = selEntity, sZ = selZone, sA = selAnno, sL = selLine, sT = selText, sP = selPulse, sM = multiSel; multiSel = [];
@@ -4858,6 +4924,7 @@
     selEntity = null; selZone = null; selAnno = null; selLine = null; selText = null; selPulse = null; multiSel = [];
     var fps = parseInt(document.getElementById("gifFps").value, 10) || 12;
     var total = 0; for (var i = 0; i < N - 1; i++) total += drill.keyframes[i].durationMs || 1500;
+    total = exportDurationMs(total, drill.timeline, drill.variants ? drill.variants[drill.activeVariantIndex].exportEndMs : 0);
     var frameCount = Math.max(2, Math.min(MAX_EXPORT_FRAMES, Math.round(total / 1000 * fps)));
     // Le delai par image se cale sur la duree reelle de la sequence, pas sur le
     // fps nominal choisi : sinon, des que le plafond de 150 images tronque le
@@ -4941,16 +5008,17 @@
     // dans l'ordre de leurs onglets, chacune jouant sa propre sequence de bout en
     // bout (pas de fondu ni d'interpolation entre variantes, coupe directe).
     var allVariants = !!(document.getElementById("mp4AllVariants") && document.getElementById("mp4AllVariants").checked && drill.variants && drill.variants.length > 1);
-    var originalKeyframes = drill.keyframes, originalTimeline = drill.timeline;
+    var originalKeyframes = drill.keyframes, originalTimeline = drill.timeline, originalVariantIdx = drill.activeVariantIndex;
     var segSrc = allVariants ? drill.variants.map(function (v) { return v.keyframes; }) : [drill.keyframes];
     // Timeline canonique par variante (SPEC_TIMELINE_AVANCEE) : chaque variante
     // porte la sienne (comme keyframes) — construite si jamais visitee (donc
     // jamais migree) depuis sa propre sequence, sans toucher aux autres.
     var segTl = allVariants ? drill.variants.map(function (v) { if (!v.timeline) v.timeline = R.buildEntityTimeline({ keyframes: v.keyframes }); return v.timeline; }) : [drill.timeline];
-    var totals = segSrc.map(function (kfs) {
+    var totals = segSrc.map(function (kfs, idx) {
       if (!kfs || kfs.length < 2) return 0;
       var t = 0; for (var i = 0; i < kfs.length - 1; i++) t += kfs[i].durationMs || 1500;
-      return t;
+      var vEnd = drill.variants ? drill.variants[allVariants ? idx : drill.activeVariantIndex].exportEndMs : 0;
+      return exportDurationMs(t, segTl[idx], vEnd);
     });
     var validIdx = []; for (var vi = 0; vi < segSrc.length; vi++) if (totals[vi] > 0) validIdx.push(vi);
     if (!validIdx.length) { flash("Ajoute une 2e étape pour une vidéo animée (sinon utilise PNG)", false); return; }
@@ -4968,7 +5036,7 @@
     var frames = [];
     validIdx.forEach(function (i, k) {
       var kfs = segSrc[i], tl = segTl[i], totalV = totals[i], fc = fcs[k];
-      for (var fi = 0; fi < fc; fi++) frames.push({ kf: kfs, tl: tl, t: totalV * fi / (fc - 1) });
+      for (var fi = 0; fi < fc; fi++) frames.push({ kf: kfs, tl: tl, vi: i, t: totalV * fi / (fc - 1) });
     });
     var frameCount = frames.length;
     // Framerate d'encodage cale sur la duree reelle plutot que sur le fps nominal :
@@ -4983,7 +5051,12 @@
     var g = geo();
     var EW = Math.round(g.W * exportScale(MP4_SCALE)), EH = Math.round(g.H * exportScale(MP4_SCALE));
     if (EW % 2) EW++; if (EH % 2) EH++; // h264/yuv420p exige des dimensions paires
-    function restore() { drill.keyframes = originalKeyframes; drill.timeline = originalTimeline; selEntity = sE; selZone = sZ; selAnno = sA; selLine = sL; selText = sT; selPulse = sP; multiSel = sM; render(); }
+    function restore() {
+      // Rebascule sur la variante d'origine : timeline ET overlays globaux
+      // (traits/pulses/textes) sont des alias de la variante active.
+      if (drill.variants) drill.activeVariantIndex = originalVariantIdx;
+      drill.keyframes = originalKeyframes; drill.timeline = originalTimeline;
+      ensureTimeline(); ensureOverlays(); invalidateEntsCache(); selEntity = sE; selZone = sZ; selAnno = sA; selLine = sL; selText = sT; selPulse = sP; multiSel = sM; render(); }
     var written = [];
     // Prefixe unique par export : le nettoyage en fin d'export precedent n'est
     // qu'une bonne pratique, pas une garantie de timing — sans prefixe, un
@@ -5010,7 +5083,13 @@
         function next(fi) { setTimeout(function () { loop(fi); }, 0); }
         function loop(fi) {
           if (fi >= frameCount) { resolve(); return; }
+          // Bascule la variante ACTIVE (pas seulement keyframes/timeline) : les
+          // fleches (computeArrows -> ensureTimeline) et les traits/pulses/textes
+          // (ensureOverlays) se resolvent depuis la variante active, sinon la
+          // variante 2 etait rendue avec les fleches et textes de celle visionnee.
+          if (drill.variants) drill.activeVariantIndex = frames[fi].vi;
           drill.keyframes = frames[fi].kf; drill.timeline = frames[fi].tl;
+          ensureTimeline(); ensureOverlays(); invalidateEntsCache();
           renderAnimated(pAtReal(frames[fi].t));
           rasterize(EW, EH, function (imgData, cv) {
             if (!cv) { next(fi + 1); return; }
