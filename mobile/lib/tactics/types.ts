@@ -171,6 +171,8 @@ export interface DrillVariant {
   keyframes: unknown;
   /** Présent dès que l'éditeur web a ouvert cette variante depuis l'ajout du mode avancé — absent sur les schémas plus anciens (cf lib/tactics/timeline.ts, qui le reconstruit alors depuis `keyframes`). */
   timeline?: DrillTimeline;
+  /** Zones propres à cette variante (absent sur les anciens schémas : `drill.zones` racine, partagé). */
+  zones?: DrillZone[];
 }
 
 export interface Drill {

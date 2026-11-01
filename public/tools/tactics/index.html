@@ -842,6 +842,7 @@
               <div class="row"><span class="swatch-label">Contour</span><input type="color" id="team_home_stroke" value="#ffffff" /></div>
               <div class="row"><span class="swatch-label">Numéro</span><input type="color" id="team_home_text" value="#ffffff" /></div>
               <div class="row"><span class="swatch-label">Jeton</span><select id="team_home_shape"><option value="circle">rond</option><option value="square">carré</option><option value="triangle">triangle</option><option value="diamond">losange</option><option value="body">corps orienté</option></select></div>
+              <div class="row"><span class="swatch-label">Flèches</span><select id="team_home_arrows" title="Flèches de déplacement des joueurs de cette équipe"><option value="on">afficher</option><option value="off">masquer</option></select></div>
               <div class="row"><span class="swatch-label">Taille</span><input type="range" id="team_home_size" min="0.7" max="1.6" step="0.1" value="0.9" style="flex:1" /><span id="team_home_sizeVal" style="min-width:32px">0.9×</span></div>
             </div>
             <div class="team-block" data-team="away">
@@ -850,6 +851,7 @@
               <div class="row"><span class="swatch-label">Contour</span><input type="color" id="team_away_stroke" value="#ffffff" /></div>
               <div class="row"><span class="swatch-label">Numéro</span><input type="color" id="team_away_text" value="#ffffff" /></div>
               <div class="row"><span class="swatch-label">Jeton</span><select id="team_away_shape"><option value="circle">rond</option><option value="square">carré</option><option value="triangle">triangle</option><option value="diamond">losange</option><option value="body">corps orienté</option></select></div>
+              <div class="row"><span class="swatch-label">Flèches</span><select id="team_away_arrows" title="Flèches de déplacement des joueurs de cette équipe"><option value="on">afficher</option><option value="off">masquer</option></select></div>
               <div class="row"><span class="swatch-label">Taille</span><input type="range" id="team_away_size" min="0.7" max="1.6" step="0.1" value="0.9" style="flex:1" /><span id="team_away_sizeVal" style="min-width:32px">0.9×</span></div>
             </div>
             <div class="team-block" data-team="support">
@@ -858,6 +860,7 @@
               <div class="row"><span class="swatch-label">Contour</span><input type="color" id="team_support_stroke" value="#ffffff" /></div>
               <div class="row"><span class="swatch-label">Numéro</span><input type="color" id="team_support_text" value="#ffffff" /></div>
               <div class="row"><span class="swatch-label">Jeton</span><select id="team_support_shape"><option value="square">carré</option><option value="circle">rond</option><option value="triangle">triangle</option><option value="diamond">losange</option><option value="body">corps orienté</option></select></div>
+              <div class="row"><span class="swatch-label">Flèches</span><select id="team_support_arrows" title="Flèches de déplacement des joueurs de cette équipe"><option value="on">afficher</option><option value="off">masquer</option></select></div>
               <div class="row"><span class="swatch-label">Taille</span><input type="range" id="team_support_size" min="0.7" max="1.6" step="0.1" value="0.9" style="flex:1" /><span id="team_support_sizeVal" style="min-width:32px">0.9×</span></div>
             </div>
             <div class="row" style="color:var(--muted);font-size:11px">Un jeton recoloré à la main garde sa couleur.</div>
@@ -889,7 +892,9 @@
           <select id="playSpeed">
             <option value="0.25">0.25×</option>
             <option value="0.5">0.5×</option>
+            <option value="0.75">0.75×</option>
             <option value="1" selected>1×</option>
+            <option value="1.25">1.25×</option>
             <option value="1.5">1.5×</option>
             <option value="2">2×</option>
           </select>
@@ -1051,7 +1056,10 @@
             <div class="row"><span class="swatch-label">Vitesse</span>
               <select id="exportSpeed" title="Vitesse de lecture de l'animation exportée (GIF, MP4)">
                 <option value="0.5">0.5×</option>
+                <option value="0.75">0.75×</option>
                 <option value="1" selected>1× (normal)</option>
+                <option value="1.25">1.25×</option>
+                <option value="1.5">1.5×</option>
                 <option value="2">2×</option>
                 <option value="4">4×</option>
               </select>

@@ -12,11 +12,12 @@ declare global {
   }
 }
 
-type DrillVariant = { id: string; name: string; keyframes: DrillKeyframe[] };
+type DrillVariant = { id: string; name: string; keyframes: DrillKeyframe[]; timeline?: unknown; exportEndMs?: number; zones?: unknown };
 type DrillKeyframe = { label?: string; durationMs?: number; [key: string]: unknown };
 type DrillLike = { keyframes?: DrillKeyframe[]; variants?: DrillVariant[]; activeVariantIndex?: number; [key: string]: unknown };
 
-const SPEEDS = [1, 1.5, 2] as const;
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+const DEFAULT_SPEED_INDEX = 2; // 1×
 
 // Petite reprise locale du thème "FM light" (même valeurs que app/webapp/library/page.tsx
 // et app/webapp/manager/performance/theme.ts) — chaque module garde sa propre copie dans
@@ -70,7 +71,7 @@ export function SchematicAnimatedPlayer({ drill, ready }: { drill: unknown; read
 
   const [step, setStep] = useState(0); // étape courante quand la lecture est arrêtée
   const [playing, setPlaying] = useState(false);
-  const [speedIndex, setSpeedIndex] = useState(0);
+  const [speedIndex, setSpeedIndex] = useState(DEFAULT_SPEED_INDEX);
   const rafRef = useRef<number | null>(null);
 
   // Changer de variante repart de zéro : durées et nombre d'étapes diffèrent.
@@ -81,6 +82,15 @@ export function SchematicAnimatedPlayer({ drill, ready }: { drill: unknown; read
     try {
       const copy = JSON.parse(JSON.stringify(d)) as DrillLike;
       copy.keyframes = JSON.parse(JSON.stringify(keyframes));
+      // Timeline canonique de la variante (mode avancé : clips désynchronisés
+      // des étapes). Sans elle, le moteur la reconstruit depuis les étapes et
+      // aplatit tout comme en mode simple.
+      const tl = variants.length > 0 ? (variants[variantIndex] ?? variants[0]).timeline : undefined;
+      if (tl) copy.timeline = JSON.parse(JSON.stringify(tl));
+      else delete copy.timeline;
+      // Zones propres à chaque variante (absentes des anciens schémas : zones racine).
+      const vz = variants.length > 0 ? (variants[variantIndex] ?? variants[0]).zones : undefined;
+      if (vz) copy.zones = JSON.parse(JSON.stringify(vz));
       const svg = svgRef.current;
       svg.innerHTML = '';
       const g = window.DrillRender.renderAnimated(svg, copy, p);
@@ -89,7 +99,7 @@ export function SchematicAnimatedPlayer({ drill, ready }: { drill: unknown; read
     } catch {
       setFailed(true);
     }
-  }, [ready, d, keyframes]);
+  }, [ready, d, keyframes, variants, variantIndex]);
 
   useEffect(() => { renderAt(step); }, [renderAt, step]);
 
@@ -98,6 +108,9 @@ export function SchematicAnimatedPlayer({ drill, ready }: { drill: unknown; read
     const speed = SPEEDS[speedIndex];
     let total = 0;
     for (let i = 0; i < N - 1; i++) total += (keyframes[i].durationMs || 1500) / speed;
+    // Fin de vidéo posée dans l'éditeur (marqueur de la timeline avancée).
+    const endMs = variants.length > 0 ? (variants[variantIndex] ?? variants[0]).exportEndMs : undefined;
+    if (endMs && endMs > 0) total = Math.min(total, endMs / speed);
     let t0: number | null = null;
     function pAt(elapsed: number) {
       let acc = 0;
@@ -122,7 +135,7 @@ export function SchematicAnimatedPlayer({ drill, ready }: { drill: unknown; read
     }
     rafRef.current = requestAnimationFrame(frame);
     return () => { if (rafRef.current != null) cancelAnimationFrame(rafRef.current); };
-  }, [playing, speedIndex, keyframes, N, renderAt]);
+  }, [playing, speedIndex, keyframes, N, renderAt, variants, variantIndex]);
 
   const togglePlay = useCallback(() => {
     if (!canPlay) return;

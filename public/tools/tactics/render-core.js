@@ -122,6 +122,13 @@ window.DrillRender = (function () {
   // propre fleche (passe ou conduite avec son porteur), independamment des
   // autres — carriers associe chaque joueur porteur AU ballon qu'il porte
   // (et non plus "le" ballon, unique avant).
+  // Fleches de deplacement masquees pour toute une equipe (drill.teams[key].arrows
+  // === "off", reglage du panneau Equipes). Ne concerne que les courses et
+  // conduites des joueurs : la fleche de passe/tir du ballon reste.
+  function arrowsOff(drill, e) {
+    var t = drill && drill.teams && drill.teams[teamKeyOf(e)];
+    return !!t && t.arrows === "off";
+  }
   function computeArrows(drill, N) {
     var out = [], A = drill.keyframes[N], B = drill.keyframes[N + 1];
     if (!B) return out;
@@ -134,6 +141,7 @@ window.DrillRender = (function () {
       if (ea.type !== "player" && ea.type !== "support") return;
       var eb = findById(B.entities, ea.id); if (!eb) return;
       var d = Math.hypot(eb.x - ea.x, eb.y - ea.y); if (d < MOVED) return;
+      if (arrowsOff(drill, ea)) return;
       var ballA = carriers[ea.id], ballB = ballA ? findById(B.entities, ballA.id) : null;
       if (ballA && ballB) {
         var bd = Math.hypot(ballB.x - ballA.x, ballB.y - ballA.y);
@@ -222,6 +230,7 @@ window.DrillRender = (function () {
       var clip = rec.clips[ci], from = clipFromState(rec, ci);
       var d = Math.hypot(clip.toX - from.x, clip.toY - from.y);
       if (d < MOVED) return;
+      if (arrowsOff(drill, st)) return;
       var ballId = carriers[id], brec = ballId ? tl.entities[ballId] : null;
       var bci = brec ? activeClipIndexAt(brec, t, Infinity) : -1;
       if (brec && bci >= 0) {

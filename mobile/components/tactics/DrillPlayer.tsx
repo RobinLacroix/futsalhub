@@ -16,7 +16,8 @@ import { FreeTextMarker } from './FreeTextMarker';
 import { PulseMarker } from './PulseMarker';
 import { FilterChip } from './FilterChip';
 
-const SPEEDS = [1, 1.5, 2] as const;
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+const DEFAULT_SPEED_INDEX = 2; // 1×
 
 /**
  * Lecteur d'animation en lecture seule — même mathématique que "Lecture" côté
@@ -84,7 +85,7 @@ export function DrillPlayer({ drill }: { drill: Drill }) {
 
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [speedIndex, setSpeedIndex] = useState(0);
+  const [speedIndex, setSpeedIndex] = useState(DEFAULT_SPEED_INDEX);
   const [width, setWidth] = useState(0);
 
   // Refs impératives vers chaque jeton animé — persistent tant que le composant
@@ -177,7 +178,12 @@ export function DrillPlayer({ drill }: { drill: Drill }) {
     if (playing && t >= totalMs) setPlaying(false);
   }, [playing, t, totalMs]);
 
-  const frame = useMemo(() => frameAt(drill, tl, overlays, Math.min(t, totalMs)), [drill, tl, overlays, t, totalMs]);
+  // Zones propres à la variante affichée (sinon zones racine, anciens schémas).
+  const variantDrill = useMemo(() => {
+    const zones = variants[variantIndex]?.zones;
+    return zones ? { ...drill, zones } : drill;
+  }, [drill, variants, variantIndex]);
+  const frame = useMemo(() => frameAt(variantDrill, tl, overlays, Math.min(t, totalMs)), [variantDrill, tl, overlays, t, totalMs]);
 
   const currentStep = useMemo(() => {
     let idx = 0;

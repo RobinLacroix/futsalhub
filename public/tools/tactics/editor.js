@@ -112,6 +112,16 @@
   var OVERLAY_KEYS = ["lines", "pulses", "texts"];
   function ensureOverlays() {
     var v = drill.variants ? drill.variants[drill.activeVariantIndex] : null;
+    // Zones : propres a chaque variante (v.zones), drill.zones en est l'alias
+    // — comme lines/pulses/texts ci-dessous. Une variante sans zones propres
+    // (ancien format : zones partagees a la racine) en recoit une copie
+    // independante ; la duplication d'une variante copie ses zones via
+    // cloneVariant. Reassigner drill.zones casserait cet alias : retrait en
+    // place (splice) partout.
+    if (v) {
+      drill.variants.forEach(function (vv) { if (!vv.zones) vv.zones = JSON.parse(JSON.stringify(drill.zones || [])); });
+      drill.zones = v.zones;
+    }
     OVERLAY_KEYS.forEach(function (key) {
       var gkey = key + "Global";
       if (v) { if (!v[gkey]) v[gkey] = R.buildOverlayGlobal(drill, key); drill[key] = v[gkey]; }
@@ -997,7 +1007,7 @@
     pushHistory();
     multiSel.forEach(function (s) {
       if (s.kind === "entity") removeEntityAllKf(s.ref.id);
-      else if (s.kind === "zone") drill.zones = drill.zones.filter(function (x) { return x !== s.ref; });
+      else if (s.kind === "zone") { var zi = drill.zones.indexOf(s.ref); if (zi >= 0) drill.zones.splice(zi, 1); }
       // Retrait en place (splice), pas reassignation d'un tableau filtre :
       // drill.lines/drill.pulses sont alias de v.linesGlobal/v.pulsesGlobal
       // (cf ensureOverlays) — les reassigner casserait cet alias.
@@ -2545,7 +2555,7 @@
     if (!selEntity && !selZone && !selAnno && !selLine && !selText && !selPulse) return;
     pushHistory();
     if (selEntity) { removeEntityAllKf(selEntity.id); selEntity = null; }
-    else if (selZone) { drill.zones = drill.zones.filter(function (x) { return x !== selZone; }); selZone = null; }
+    else if (selZone) { var zi2 = drill.zones.indexOf(selZone); if (zi2 >= 0) drill.zones.splice(zi2, 1); selZone = null; }
     else if (selAnno) { var kf = drill.keyframes[curKf]; kf.annotations = (kf.annotations || []).filter(function (x) { return x !== selAnno; }); selAnno = null; }
     else if (selLine) { var li2 = linesArr().indexOf(selLine); if (li2 >= 0) drill.lines.splice(li2, 1); selLine = null; }
     else if (selText) { var ti2 = textsArr().indexOf(selText); if (ti2 >= 0) drill.texts.splice(ti2, 1); selText = null; }
@@ -2852,7 +2862,7 @@
   // ---- io ----
   function syncJSON() { document.getElementById("json").value = JSON.stringify(cleanDrill(), null, 2); }
   function cleanDrill() {
-    var zones = drill.zones.map(function (z) {
+    function cleanZones(arr) { return arr.map(function (z) {
       var o = { id: z.id, kind: z.kind, label: z.label, shape: z.shape || "rect" };
       if (o.shape === "polygon") o.pts = z.pts; else { o.x = z.x; o.y = z.y; o.w = z.w; o.h = z.h; }
       if (z.color) o.color = z.color;
@@ -2866,7 +2876,8 @@
       if (z.visibleFrom != null) o.visibleFrom = z.visibleFrom;
       if (z.visibleTo != null) o.visibleTo = z.visibleTo;
       return o;
-    });
+    }); }
+    var zones = cleanZones(drill.zones);
     // computeArrows(i) resynchronise au passage keyframes[i]/[i+1].entities
     // depuis drill.timeline (cf sa definition) — parcourir tous les i "aplatit"
     // ainsi la timeline canonique dans keyframes[].entities pour toutes les
@@ -2903,6 +2914,7 @@
       var o = { id: v.id, name: v.name, keyframes: v.keyframes };
       if (v.timeline) o.timeline = v.timeline;
       if (v.exportEndMs > 0) o.exportEndMs = v.exportEndMs;
+      if (v.zones) o.zones = cleanZones(v.zones);
       return o;
     });
     var out = { meta: drill.meta, pitch: drill.pitch, zones: zones, keyframes: drill.keyframes, variants: variantsOut, activeVariantIndex: drill.activeVariantIndex, rules: drill.rules };
@@ -3361,7 +3373,7 @@
   // Regle par procede dans drill.teams, avec un preset reutilisable en
   // localStorage pour ne pas re-saisir les couleurs du club a chaque fois.
   var TEAM_KEYS = ["home", "away", "support"];
-  var TEAM_PROPS = ["name", "fill", "stroke", "text", "shape", "size"];
+  var TEAM_PROPS = ["name", "fill", "stroke", "text", "shape", "size", "arrows"];
   // "size" est le seul reglage numerique : sa valeur brute vient d'un input
   // range/texte (chaine), il faut la convertir avant de la comparer au defaut
   // ou de l'ecrire dans le procede — sinon "0.9" !== 0.9 empeche a jamais de
@@ -3369,6 +3381,7 @@
   function teamCoerce(prop, raw) { return prop === "size" ? parseFloat(raw) : raw; }
   function teamDefault(key, prop) {
     if (prop === "shape") return key === "support" ? "square" : "circle";
+    if (prop === "arrows") return "on";
     return R.TEAM_DEFAULTS[key][prop];
   }
   // N'ecrit que ce qui differe de l'usine : un procede aux couleurs par defaut
@@ -5222,7 +5235,7 @@
       }
     } catch (e) {}
   })();
-  document.getElementById("clearZones").addEventListener("click", function () { pushHistory(); drill.zones = []; selZone = null; hideInspectors(); render(); syncJSON(); closeFlyouts(); });
+  document.getElementById("clearZones").addEventListener("click", function () { pushHistory(); drill.zones.splice(0, drill.zones.length); selZone = null; hideInspectors(); render(); syncJSON(); closeFlyouts(); });
   document.getElementById("drawRect").addEventListener("click", function () { armZone(document.getElementById("drawKind").value, "rect", this); closeFlyouts(); });
   document.getElementById("drawEllipse").addEventListener("click", function () { armZone(document.getElementById("drawKind").value, "ellipse", this); closeFlyouts(); });
   document.getElementById("drawPoly").addEventListener("click", function () { armPolygon(document.getElementById("drawKind").value, this); closeFlyouts(); });

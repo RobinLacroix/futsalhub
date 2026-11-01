@@ -3,7 +3,6 @@
 import { useRef, useState } from 'react';
 import { motion, useScroll, useTransform, useInView, AnimatePresence, type Variants } from 'framer-motion';
 import Link from 'next/link';
-import { Syne, Inter } from 'next/font/google';
 import {
   Check,
   ChevronDown,
@@ -22,8 +21,10 @@ import {
   Linkedin,
 } from 'lucide-react';
 
-const syne = Syne({ subsets: ['latin'], weight: ['600', '700', '800'], variable: '--font-syne' });
-const inter = Inter({ subsets: ['latin'], weight: ['400', '500', '600'], variable: '--font-inter' });
+// Polices chargées une seule fois dans app/layout.tsx (variables CSS sur <body>) :
+// les redéclarer ici fait planter next/font/google sous Turbopack.
+const syne = { className: 'font-[family-name:var(--font-syne)]' };
+const inter = { className: 'font-[family-name:var(--font-inter)]' };
 
 /* ─── Design tokens ─────────────────────────────────────────── */
 const AMBER = '#FFB020';
@@ -1316,7 +1317,6 @@ function Footer() {
 export default function LandingPage() {
   return (
     <div
-      className={`${syne.variable} ${inter.variable}`}
       style={{ backgroundColor: BG, minHeight: '100vh' }}
     >
       <GrainOverlay />
