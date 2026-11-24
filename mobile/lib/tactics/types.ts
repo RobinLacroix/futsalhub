@@ -152,6 +152,8 @@ export interface DrillTimelineClip {
   to: DrillEntity;
   curve?: boolean;
   ctrls?: Array<{ x: number; y: number }>;
+  /** Pauses traversées par ce clip (mode avancé « figer l'image ») : le mouvement s'arrête à `atMs` pendant `durationMs`. */
+  freezes?: Array<{ atMs: number; durationMs: number }>;
 }
 
 export interface DrillEntityTimelineRecord {
@@ -173,6 +175,10 @@ export interface DrillVariant {
   timeline?: DrillTimeline;
   /** Zones propres à cette variante (absent sur les anciens schémas : `drill.zones` racine, partagé). */
   zones?: DrillZone[];
+  /** Traits/textes/pulses avec fenêtres de présence, écrits quand la variante a des pauses (cf `pauses`). */
+  overlays?: { lines: unknown[]; texts: unknown[]; pulses: unknown[] };
+  /** Pauses (image figée) du mode avancé : le temps s'arrête à `atMs` pendant `durationMs`. */
+  pauses?: Array<{ atMs: number; durationMs: number }>;
 }
 
 export interface Drill {

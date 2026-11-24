@@ -206,7 +206,23 @@
   .tl-end-shade{position:absolute;top:0;bottom:0;background:rgba(0,0,0,.45);pointer-events:none;z-index:3}
   .tl-end{position:absolute;top:0;bottom:0;width:0;border-left:2px dashed #ff9f1a;pointer-events:none;z-index:5}
   .tl-end-handle{position:absolute;width:16px;height:18px;margin-left:-8px;background:#ff9f1a;color:#1a1200;border-radius:3px 3px 8px 8px;font-size:10px;line-height:18px;text-align:center;cursor:ew-resize;touch-action:none;z-index:6;user-select:none}
+  #advErase.active{background:var(--danger,#e5484d);border-color:var(--danger,#e5484d);color:#fff}
+  #advTracks.erase-mode,#advTracks.erase-mode .tl-lane,#advTracks.erase-mode .tl-clip{cursor:crosshair}
+  .tl-clip.erase-hit{outline:2px solid #e5484d;outline-offset:1px;opacity:.55}
+  .tl-erase-box{position:fixed;z-index:9999;pointer-events:none;border:1.5px dashed #e5484d;background:rgba(229,72,77,.14)}
   .tl-cursor{position:absolute;top:0;bottom:0;width:0;border-left:2px solid var(--accent);pointer-events:none;z-index:4}
+  /* Pause (image figee) : bande hachuree sur toute la hauteur de la timeline,
+     onglet cliquable sur la regle, poignee de duree a son bord droit. */
+  .tl-pause{position:absolute;bottom:0;background:repeating-linear-gradient(135deg,rgba(76,201,240,.24) 0 6px,rgba(76,201,240,.08) 6px 12px);border-left:2px solid #4cc9f0;border-right:2px solid #4cc9f0;pointer-events:none;z-index:2}
+  .tl-pause.selected{background:repeating-linear-gradient(135deg,rgba(76,201,240,.38) 0 6px,rgba(76,201,240,.14) 6px 12px)}
+  .tl-pause-tab{position:absolute;height:18px;box-sizing:border-box;padding:0 5px;background:#4cc9f0;color:#06222b;border-radius:3px 3px 0 0;font-size:10px;font-weight:600;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;z-index:6;user-select:none}
+  .tl-pause-handle{position:absolute;width:10px;margin-left:-5px;bottom:0;cursor:ew-resize;touch-action:none;z-index:6}
+  .tl-pause-handle::after{content:"";position:absolute;left:3px;right:3px;top:calc(50% - 14px);height:28px;border-radius:3px;background:#4cc9f0;opacity:.9}
+  .tl-pausebar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:none;margin-bottom:8px;padding:6px 8px;border:1px solid #4cc9f0;border-radius:6px;background:rgba(76,201,240,.08)}
+  .tl-pausebar.hidden{display:none}
+  .tl-pausebar .pause-tag{font-size:11px;font-weight:600;color:#4cc9f0}
+  .tl-pausebar .pause-actions{display:flex;gap:6px;flex-basis:100%;flex-wrap:wrap}
+  .tl-pausebar .pause-hint{flex-basis:100%;font-size:11px;color:var(--muted);line-height:1.35}
   .tl-group{margin-top:4px}
   .tl-grouphead{display:flex;align-items:center;height:28px;background:var(--surface-2);border-radius:6px;padding:0 8px;font-size:11px;color:var(--text);cursor:pointer;user-select:none}
   .tl-grouphead:hover{border-color:var(--accent)}
@@ -244,6 +260,13 @@
   .variant-chip.active input{color:var(--accent-ink)}
   .variant-chip .vc-del{width:16px;height:16px;padding:0;line-height:1;font-size:11px;border:none;background:transparent;color:inherit;opacity:.6;flex:none}
   .variant-chip .vc-del:hover{opacity:1;background:transparent}
+  .variant-chip .vc-grip{cursor:grab;opacity:.45;font-size:11px;line-height:1;flex:none;user-select:none;margin-left:-4px}
+  .variant-chip:hover .vc-grip{opacity:.9}
+  .variant-chip .vc-keep{width:13px;height:13px;margin:0;flex:none;cursor:pointer;accent-color:var(--accent-ink,#06220f)}
+  .variant-chip.dragging{opacity:.4}
+  .variant-chip.drop-before{box-shadow:-3px 0 0 0 #ffd21f}
+  .variant-chip.drop-after{box-shadow:3px 0 0 0 #ffd21f}
+  .variant-chip.excluded input{text-decoration:line-through;opacity:.6}
   .playbar{display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap}
   .playbar input[type=range]{flex:1;min-width:80px;accent-color:var(--accent)}
   .panel h3{font-size:12px;margin:0 0 8px;font-weight:600;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
@@ -921,7 +944,20 @@
       <div class="tl-toprow">
         <span class="seqlabel">Timeline avancée</span>
         <details class="help-pop up"><summary title="Aide de la timeline" aria-label="Aide de la timeline">?</summary><div class="help-body"><div class="hint">Glisse un clip pour le décaler, sa poignée droite pour sa durée — ou clique une piste vide pour créer un déplacement. Clique un clip pour en régler les valeurs précises, Maj+clic pour en sélectionner plusieurs et les décaler ou les aligner ensemble.</div></div></details>
+        <button id="advErase" title="Rectangle de sélection : glisse sur la timeline pour supprimer tout ce qu'il touche (clips, zones, traits, textes, pulses)">⬚ Zone</button>
+        <button id="advFreeze" title="Figer l'image à l'instant du curseur (clique la règle pour le placer) : les joueurs s'arrêtent, tu peux y afficher plusieurs options">⏸ Figer ici</button>
         <button id="advToggleBack" class="icon-btn" title="Revenir au mode simple" aria-label="Revenir au mode simple" style="margin-left:auto"><svg viewBox="0 0 20 20"><path d="M5 3.5 L15.5 12 L11 12.8 L13.5 17.5 L11.3 18.6 L8.8 13.9 L5.8 16.8 Z" fill="currentColor" /></svg></button>
+      </div>
+      <div class="tl-pausebar hidden" id="advPauseBar">
+        <span class="pause-tag">⏸ Image figée</span>
+        <span class="seqlabel" id="advPauseAt"></span>
+        <label class="tl-num">Durée <input type="number" id="advPauseDur" min="0.5" max="30" step="0.5" style="width:60px" /> s</label>
+        <button id="advPauseDel" class="icon-btn danger" title="Supprimer la pause (le temps se resserre)" aria-label="Supprimer la pause" style="margin-left:auto"><svg viewBox="0 0 20 20"><line x1="5" y1="5" x2="15" y2="15" stroke="currentColor" stroke-width="2" /><line x1="15" y1="5" x2="5" y2="15" stroke="currentColor" stroke-width="2" /></svg></button>
+        <div class="pause-actions">
+          <button id="advPauseShow" title="Affiche la sélection (traits, zones, textes, pulses) uniquement pendant cette pause">Afficher la sélection ici</button>
+          <button id="advPauseStagger" title="Fait apparaître la sélection un élément après l'autre pendant la pause (ordre de sélection)">Un par un</button>
+        </div>
+        <span class="pause-hint" id="advPauseHint">Sélectionne des traits, zones ou textes puis « Afficher la sélection ici » : ils n'apparaissent que pendant la pause. « Un par un » les révèle à la suite.</span>
       </div>
       <div class="tl-clip-inspector hidden" id="advClipInspector">
         <span class="seqlabel" id="advClipInspectorLabel">Clip</span>
@@ -1064,7 +1100,19 @@
                 <option value="4">4×</option>
               </select>
             </div>
-            <div class="row" id="mp4AllVariantsWrap" style="display:none"><label><input type="checkbox" id="mp4AllVariants" /> MP4 : toutes les variantes</label></div>
+            <div class="row" id="exportScopeWrap" style="display:none"><span class="swatch-label">Variantes</span>
+              <select id="exportScope" title="Quelles variantes exporter (GIF et MP4) : seule celle affichée, ou toutes celles dont la case est cochée dans les onglets, dans l'ordre des onglets">
+                <option value="active" selected>Variante active</option>
+                <option value="kept">Variantes cochées</option>
+              </select>
+            </div>
+            <div class="row" id="exportTitlesWrap" style="display:none"><span class="swatch-label">Titres</span>
+              <select id="exportTitles" title="Nom de la variante incrusté dans la vidéo quand plusieurs variantes sont exportées">
+                <option value="start" selected>Au début (2 s)</option>
+                <option value="all">Toute la durée</option>
+                <option value="none">Aucun (joueurs)</option>
+              </select>
+            </div>
           </div>
         </div>
       </div>

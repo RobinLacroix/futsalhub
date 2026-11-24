@@ -187,6 +187,26 @@ export function quadChainPath(from: Pt, ctrls: Pt[] | undefined, to: Pt, stepsPe
 }
 
 /** Position d'une entité à l'instant absolu t (ms) — port exact de sampleEntityAt (web). */
+/** Avancement [0,1] d'un clip à t, en tenant compte des pauses qu'il traverse (`freezes`) — port de clipFraction (render-core.js). */
+function clipFraction(c: DrillTimelineClip, t: number): number {
+  const fz = c.freezes;
+  let tt = t;
+  let dur = c.durationMs;
+  if (fz && fz.length) {
+    let sub = 0;
+    let frozen = false;
+    dur = c.durationMs - fz.reduce((s, z) => s + z.durationMs, 0);
+    for (const z of fz) {
+      if (t >= z.atMs + z.durationMs) { sub += z.durationMs; continue; }
+      if (t >= z.atMs) { tt = z.atMs - sub; frozen = true; }
+      break;
+    }
+    if (!frozen) tt = t - sub;
+  }
+  if (!(dur > 0)) return 1;
+  return Math.max(0, Math.min(1, (tt - c.startMs) / dur));
+}
+
 export function sampleEntityAt(tl: DrillTimeline, id: string, t: number): Pt | null {
   const rec = tl.entities[id];
   if (!rec) return null;
@@ -196,7 +216,7 @@ export function sampleEntityAt(tl: DrillTimeline, id: string, t: number): Pt | n
     if (t < c.startMs) break;
     const end = c.startMs + c.durationMs;
     if (t >= end) { pos = { x: c.toX, y: c.toY }; continue; }
-    const f = c.durationMs > 0 ? (t - c.startMs) / c.durationMs : 1;
+    const f = clipFraction(c, t);
     const fromX = pos.x, fromY = pos.y;
     if (c.curve) {
       const p0 = i >= 2 ? { x: rec.clips[i - 2].toX, y: rec.clips[i - 2].toY } : { x: rec.spawn.x, y: rec.spawn.y };

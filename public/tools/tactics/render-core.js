@@ -1269,6 +1269,27 @@ window.DrillRender = (function () {
   // renderAnimated (curve : Catmull-Rom sur les voisins temporels ; ctrls :
   // meme bezier quadratique a point unique que drawAnnotation) — parite
   // verifiee point par point contre l'ancien moteur (cf ecran de test).
+  // Avancement f in [0,1] d'un clip a l'instant t. Un clip qui traverse une
+  // pause (c.freezes = [{atMs, durationMs}], croissants, en ms de la timeline)
+  // est etire d'autant : le mouvement s'arrete a atMs pendant durationMs puis
+  // reprend, sans toucher a sa trajectoire (courbes/ctrls inchangees).
+  function clipFraction(c, t) {
+    var fz = c.freezes, tt = t, dur = c.durationMs;
+    if (fz && fz.length) {
+      var sub = 0, total = 0, k;
+      for (k = 0; k < fz.length; k++) total += fz[k].durationMs;
+      dur = c.durationMs - total;
+      for (k = 0; k < fz.length; k++) {
+        var z = fz[k];
+        if (t >= z.atMs + z.durationMs) { sub += z.durationMs; continue; }
+        if (t >= z.atMs) { tt = z.atMs - sub; sub = null; }
+        break;
+      }
+      if (sub !== null) tt = t - sub;
+    }
+    if (!(dur > 0)) return 1;
+    return Math.max(0, Math.min(1, (tt - c.startMs) / dur));
+  }
   function sampleEntityAt(tl, id, t) {
     var rec = tl.entities[id];
     if (!rec) return null;
@@ -1278,7 +1299,7 @@ window.DrillRender = (function () {
       if (t < c.startMs) break;
       var end = c.startMs + c.durationMs;
       if (t >= end) { pos = { x: c.toX, y: c.toY }; continue; }
-      var f = c.durationMs > 0 ? (t - c.startMs) / c.durationMs : 1;
+      var f = clipFraction(c, t);
       var fromX = pos.x, fromY = pos.y;
       if (c.curve) {
         // Voisins de tangente au sens des ETAPES (comme l'ancien entityAt) :
@@ -1305,7 +1326,7 @@ window.DrillRender = (function () {
     zOf: zOf, Z_BASE: Z_BASE, WOOD_DEFAULT: WOOD_DEFAULT, WOOD_LINE_DEFAULT: WOOD_LINE_DEFAULT,
     TEAM_DEFAULTS: TEAM_DEFAULTS, teamKeyOf: teamKeyOf, teamStyle: teamStyle, carrierMap: carrierMap, EQUIP: EQUIP, BIB: BIB,
     renderStatic: renderStatic, renderAnimated: renderAnimated,
-    buildEntityTimeline: buildEntityTimeline, sampleEntityAt: sampleEntityAt, entityStateAt: entityStateAt,
+    buildEntityTimeline: buildEntityTimeline, sampleEntityAt: sampleEntityAt, clipFraction: clipFraction, entityStateAt: entityStateAt,
     stepBoundariesMs: stepBoundariesMs, commitEntityStateAt: commitEntityStateAt, addEntityToTimeline: addEntityToTimeline, entityStateAtMs: entityStateAtMs
   };
 })();

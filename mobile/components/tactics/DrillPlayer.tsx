@@ -6,7 +6,7 @@ import { useTheme, makeStyles } from '../../contexts/ThemeContext';
 import { Text } from '../ui';
 import type { Drill } from '../../lib/tactics/types';
 import { geo } from '../../lib/tactics/geometry';
-import { buildOverlays, buildEntityTimeline, collectBoundaryMs, frameAt, resolveVariant, stepBoundariesMs } from '../../lib/tactics/timeline';
+import { buildOverlays, buildEntityTimeline, collectBoundaryMs, frameAt, resolveVariant, stepBoundariesMs, type DrillOverlays } from '../../lib/tactics/timeline';
 import { PitchBackground } from './PitchBackground';
 import { AnimatedEntityToken, type AnimatedEntityTokenHandle } from './AnimatedEntityToken';
 import { ZoneShape } from './ZoneShape';
@@ -79,7 +79,11 @@ export function DrillPlayer({ drill }: { drill: Drill }) {
   const { keyframes, timeline: storedTimeline } = useMemo(() => resolveVariant(drill, variantIndex), [drill, variantIndex]);
   const boundaries = useMemo(() => stepBoundariesMs(keyframes), [keyframes]);
   const tl = useMemo(() => storedTimeline ?? buildEntityTimeline(keyframes), [storedTimeline, keyframes]);
-  const overlays = useMemo(() => buildOverlays(keyframes), [keyframes]);
+  // Variante à pauses : ses traits/textes/pulses portent leurs fenêtres (options affichées à l'arrêt).
+  const overlays = useMemo(
+    () => (variants[variantIndex]?.overlays as DrillOverlays | undefined) ?? buildOverlays(keyframes),
+    [keyframes, variants, variantIndex],
+  );
   const totalMs = tl.totalMs;
   const canPlay = totalMs > 0 && keyframes.length > 1;
 

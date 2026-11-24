@@ -13,7 +13,7 @@ declare global {
   }
 }
 
-type DrillVariant = { id: string; name: string; keyframes: DrillKeyframe[]; timeline?: unknown; exportEndMs?: number; zones?: unknown };
+type DrillVariant = { id: string; name: string; keyframes: DrillKeyframe[]; timeline?: unknown; exportEndMs?: number; zones?: unknown; overlays?: { lines?: unknown; texts?: unknown; pulses?: unknown } };
 type DrillKeyframe = { label?: string; durationMs?: number; [key: string]: unknown };
 type DrillLike = { keyframes?: DrillKeyframe[]; variants?: DrillVariant[]; activeVariantIndex?: number; [key: string]: unknown };
 
@@ -101,6 +101,13 @@ export function SchematicAnimatedPlayer({ drill, ready, led }: {
       // Zones propres à chaque variante (absentes des anciens schémas : zones racine).
       const vz = variants.length > 0 ? (variants[variantIndex] ?? variants[0]).zones : undefined;
       if (vz) copy.zones = JSON.parse(JSON.stringify(vz));
+      // Traits/textes/pulses avec leurs fenêtres (variantes à pauses : options affichées à l'arrêt).
+      const ov = variants.length > 0 ? (variants[variantIndex] ?? variants[0]).overlays : undefined;
+      if (ov) {
+        if (ov.lines) copy.lines = JSON.parse(JSON.stringify(ov.lines));
+        if (ov.texts) copy.texts = JSON.parse(JSON.stringify(ov.texts));
+        if (ov.pulses) copy.pulses = JSON.parse(JSON.stringify(ov.pulses));
+      }
       const svg = svgRef.current;
       svg.innerHTML = '';
       const g = window.DrillRender.renderAnimated(svg, copy, p);

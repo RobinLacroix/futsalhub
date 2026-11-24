@@ -2914,7 +2914,15 @@
       var o = { id: v.id, name: v.name, keyframes: v.keyframes };
       if (v.timeline) o.timeline = v.timeline;
       if (v.exportEndMs > 0) o.exportEndMs = v.exportEndMs;
+      if (v.exportInclude === false) o.exportInclude = false;
       if (v.zones) o.zones = cleanZones(v.zones);
+      if (v.pauses && v.pauses.length) {
+        o.pauses = v.pauses;
+        // Les lecteurs (web/mobile) rebatissent traits/textes/pulses depuis les
+        // etapes, ce qui perd les fenetres posees DANS une pause (les options a
+        // l'arret) : on leur donne les objets avec leurs fenetres.
+        o.overlays = { lines: v.linesGlobal || [], texts: v.textsGlobal || [], pulses: v.pulsesGlobal || [] };
+      }
       return o;
     });
     var out = { meta: drill.meta, pitch: drill.pitch, zones: zones, keyframes: drill.keyframes, variants: variantsOut, activeVariantIndex: drill.activeVariantIndex, rules: drill.rules };
@@ -3620,9 +3628,54 @@
           { label: "Renommer", onClick: function () { inp.readOnly = false; inp.focus(); inp.select(); } },
           { label: "Dupliquer", onClick: function () { duplicateVariant(i); } },
         ];
-        if (drill.variants.length > 1) items.push({ label: "Supprimer", onClick: function () { deleteVariant(i); } });
+        if (drill.variants.length > 1) {
+          if (i > 0) items.push({ label: "Déplacer à gauche", onClick: function () { reorderVariant(i, i - 1); } });
+          if (i < drill.variants.length - 1) items.push({ label: "Déplacer à droite", onClick: function () { reorderVariant(i, i + 2); } });
+          items.push({ label: v.exportInclude === false ? "Inclure dans l'export" : "Exclure de l'export", onClick: function () { pushHistory(); if (v.exportInclude === false) delete v.exportInclude; else v.exportInclude = false; renderVariants(); syncJSON(); } });
+          items.push({ label: "Supprimer", onClick: function () { deleteVariant(i); } });
+        }
         showContextMenu(ev.clientX, ev.clientY, items);
       });
+      if (drill.variants.length > 1) {
+        // Poignee de reordonnancement + case "inclure dans l'export" : l'ordre
+        // des onglets EST l'ordre d'export et de lecture (une seule source).
+        var grip = document.createElement("span");
+        grip.className = "vc-grip"; grip.textContent = "⋮⋮"; grip.draggable = true;
+        grip.title = "Glisser pour changer l'ordre des variantes (= ordre d'export)";
+        grip.addEventListener("dragstart", function (ev) {
+          ev.stopPropagation();
+          variantDragFrom = i; chip.classList.add("dragging");
+          ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", String(i));
+          if (ev.dataTransfer.setDragImage) ev.dataTransfer.setDragImage(chip, 10, 10);
+        });
+        grip.addEventListener("dragend", function () { variantDragFrom = null; clearVariantDropMarks(); });
+        chip.appendChild(grip);
+        chip.addEventListener("dragover", function (ev) {
+          if (variantDragFrom == null) return;
+          ev.preventDefault();
+          var r = chip.getBoundingClientRect(), after = ev.clientX > r.left + r.width / 2;
+          clearVariantDropMarks();
+          chip.classList.add(after ? "drop-after" : "drop-before");
+        });
+        chip.addEventListener("drop", function (ev) {
+          if (variantDragFrom == null) return;
+          ev.preventDefault();
+          var r = chip.getBoundingClientRect(), after = ev.clientX > r.left + r.width / 2;
+          var from = variantDragFrom; variantDragFrom = null; clearVariantDropMarks();
+          reorderVariant(from, after ? i + 1 : i);
+        });
+        var keep = document.createElement("input");
+        keep.type = "checkbox"; keep.className = "vc-keep"; keep.checked = v.exportInclude !== false;
+        keep.title = "Retenue : incluse à l'export quand « Variantes cochées » est choisi dans les réglages d'export";
+        keep.addEventListener("click", function (ev) { ev.stopPropagation(); });
+        keep.addEventListener("change", function () {
+          pushHistory();
+          if (keep.checked) delete v.exportInclude; else v.exportInclude = false;
+          renderVariants(); syncJSON();
+        });
+        chip.appendChild(keep);
+        if (v.exportInclude === false) chip.classList.add("excluded");
+      }
       chip.appendChild(inp);
       if (drill.variants.length > 1) {
         var del = document.createElement("button");
@@ -3632,8 +3685,30 @@
       }
       c.appendChild(chip);
     });
-    var mp4Wrap = document.getElementById("mp4AllVariantsWrap");
-    if (mp4Wrap) mp4Wrap.style.display = drill.variants.length > 1 ? "flex" : "none";
+    var multiV = drill.variants.length > 1;
+    ["exportScopeWrap", "exportTitlesWrap"].forEach(function (id) { var w = document.getElementById(id); if (w) w.style.display = multiV ? "flex" : "none"; });
+    var scopeSel = document.getElementById("exportScope");
+    if (scopeSel) {
+      var nKept = drill.variants.filter(function (vv) { return vv.exportInclude !== false; }).length;
+      scopeSel.options[1].textContent = "Variantes cochées (" + nKept + "/" + drill.variants.length + ")";
+    }
+  }
+  // Reordonnancement par glisser-deposer (cf poignee .vc-grip) : to est un index
+  // d'INSERTION dans la liste d'origine (0..n). La variante active reste la meme
+  // variante (son tableau keyframes/timeline est alias), seul son index change.
+  var variantDragFrom = null;
+  function clearVariantDropMarks() {
+    document.querySelectorAll(".variant-chip.drop-before, .variant-chip.drop-after, .variant-chip.dragging").forEach(function (c) { c.classList.remove("drop-before", "drop-after", "dragging"); });
+  }
+  function reorderVariant(from, to) {
+    var n = drill.variants.length;
+    if (from < 0 || from >= n || to < 0 || to > n || to === from || to === from + 1) return;
+    pushHistory();
+    var active = drill.variants[drill.activeVariantIndex];
+    var moved = drill.variants.splice(from, 1)[0];
+    drill.variants.splice(to > from ? to - 1 : to, 0, moved);
+    drill.activeVariantIndex = drill.variants.indexOf(active);
+    renderVariants(); syncJSON();
   }
   function switchVariant(idx) {
     if (idx === drill.activeVariantIndex || idx < 0 || idx >= drill.variants.length) return;
@@ -3743,6 +3818,8 @@
       tl.entities[id].clips.forEach(function (c) { max = Math.max(max, c.startMs + c.durationMs); });
     });
     drill.zones.concat(drill.lines).concat(drill.pulses).forEach(function (o) { if (o.visibleTo != null) max = Math.max(max, o.visibleTo); });
+    // Une pause en toute fin de sequence (image finale figee) compte dans la duree.
+    pausesArr().forEach(function (q) { max = Math.max(max, q.atMs + q.durationMs); });
     tl.totalMs = max;
     ensureKeyframeCapacity(tl);
   }
@@ -3771,6 +3848,246 @@
       kfs.push({ label: "Étape " + (kfs.length + 1), durationMs: 1500, annotations: [], lines: [], texts: [], pulses: [] });
     }
   }
+  // Deplace le debut d'un clip en emportant avec lui les pauses qu'il traverse
+  // (clip.freezes, cf insertPause) : elles sont en ms de timeline, pas relatives.
+  function setClipStart(clip, ms) {
+    var d = ms - clip.startMs;
+    if (d && clip.freezes) clip.freezes.forEach(function (z) { z.atMs += d; });
+    clip.startMs = ms;
+  }
+  // ---- selection rectangle sur la timeline : supprime tout ce qu'elle touche ----
+  // Mode a part (bouton "Zone") : en temps normal un glisser sur une piste vide
+  // cree un deplacement. Le rectangle couvre pistes ET temps ; touche = chevauche.
+  // Efface les clips de deplacement et les fenetres d'objets (zones, traits,
+  // textes, pulses — l'objet lui-meme), pas les joueurs. Une seule suppression
+  // puis retour au mode normal, annulable en un Ctrl+Z.
+  var eraseMode = false;
+  function setEraseMode(on) {
+    eraseMode = !!on;
+    var tr = document.getElementById("advTracks"), b = document.getElementById("advErase");
+    if (tr) tr.classList.toggle("erase-mode", eraseMode);
+    if (b) b.classList.toggle("active", eraseMode);
+    if (eraseMode) flash("Glisse un rectangle sur la timeline : tout ce qu'il touche est supprimé (Échap pour annuler)", true);
+  }
+  function eraseTargets(rect) {
+    var out = [];
+    document.querySelectorAll("#advTracks .tl-clip").forEach(function (el) {
+      if (!el._del) return;
+      var r = el.getBoundingClientRect();
+      if (r.right >= rect.left && r.left <= rect.right && r.bottom >= rect.top && r.top <= rect.bottom && out.indexOf(el) < 0) out.push(el);
+    });
+    return out;
+  }
+  function eraseDelete(els) {
+    var n = 0;
+    pushHistory();
+    els.forEach(function (el) {
+      var d = el._del;
+      if (d.kind === "clip") {
+        var ci = d.rec.clips.indexOf(d.c); if (ci < 0) return;
+        d.rec.clips.splice(ci, 1); n++;
+      } else {
+        [drill.zones, linesArr(), pulsesArr(), textsArr()].some(function (arr) {
+          var i = arr.indexOf(d.o); if (i < 0) return false;
+          arr.splice(i, 1); n++; return true;
+        });
+        if (selZone === d.o) selZone = null; if (selLine === d.o) selLine = null; if (selText === d.o) selText = null; if (selPulse === d.o) selPulse = null;
+      }
+    });
+    selClip = null; multiSelClips = []; multiSel = [];
+    recomputeTotalMs(drill.timeline); invalidateEntsCache(); hideInspectors(); render(); renderAdvancedTimeline(); syncJSON();
+    return n;
+  }
+  (function wireErase() {
+    var tracks = document.getElementById("advTracks");
+    document.getElementById("advErase").addEventListener("click", function () { setEraseMode(!eraseMode); });
+    document.addEventListener("keydown", function (e) { if (eraseMode && e.key === "Escape") { setEraseMode(false); } });
+    tracks.addEventListener("pointerdown", function (ev) {
+      if (!eraseMode || ev.button !== 0) return;
+      ev.preventDefault(); ev.stopPropagation();
+      var box = document.createElement("div"); box.className = "tl-erase-box"; document.body.appendChild(box);
+      var x0 = ev.clientX, y0 = ev.clientY, hits = [];
+      function rectOf(mv) { return { left: Math.min(x0, mv.clientX), right: Math.max(x0, mv.clientX), top: Math.min(y0, mv.clientY), bottom: Math.max(y0, mv.clientY) }; }
+      function move(mv) {
+        var r = rectOf(mv);
+        box.style.left = r.left + "px"; box.style.top = r.top + "px"; box.style.width = (r.right - r.left) + "px"; box.style.height = (r.bottom - r.top) + "px";
+        var now = eraseTargets(r);
+        hits.forEach(function (el) { if (now.indexOf(el) < 0) el.classList.remove("erase-hit"); });
+        now.forEach(function (el) { el.classList.add("erase-hit"); });
+        hits = now;
+      }
+      function up(mv) {
+        document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
+        box.remove();
+        var r = rectOf(mv);
+        // Un simple clic (rectangle quasi nul) ne supprime rien.
+        var els = (r.right - r.left < 4 && r.bottom - r.top < 4) ? [] : eraseTargets(r);
+        hits.forEach(function (el) { el.classList.remove("erase-hit"); });
+        if (!els.length) { flash("Rien dans la zone sélectionnée", false); return; }
+        var n = eraseDelete(els);
+        setEraseMode(false);
+        flash(n + (n > 1 ? " éléments supprimés" : " élément supprimé") + " (Ctrl/Cmd+Z pour annuler)", true);
+      }
+      document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
+    }, true);
+  })();
+
+  // ---- pauses (image figee) ----
+  // Une pause (variante.pauses[i] = {atMs, durationMs}) insere un trou dans la
+  // timeline a atMs : tout ce qui commence apres est decale de durationMs, un
+  // deplacement en cours de route s'etire (clip.freezes, cf R.clipFraction) et
+  // reprend ensuite. Les fenetres de presence (zones, traits, textes, pulses)
+  // qui tombent dans le trou servent a montrer plusieurs options a l'arret.
+  var selPause = null, lastPauseMs = 3000;
+  var PAUSE_MIN_MS = 500, PAUSE_MAX_MS = 30000;
+  function pausesArr() {
+    var v = drill.variants ? drill.variants[drill.activeVariantIndex] : null;
+    if (!v) return [];
+    if (!v.pauses) v.pauses = [];
+    return v.pauses;
+  }
+  // Recale toute la timeline pour que la pause (at, oldD) passe a newD (oldD
+  // = 0 : creation, newD = 0 : suppression). Ne touche pas aux etapes du mode
+  // simple : recomputeTotalMs rallonge si besoin leur capacite.
+  function shiftTimelineForPause(at, oldD, newD) {
+    var delta = newD - oldD, X = at + oldD, tl = drill.timeline;
+    if (!delta) return;
+    Object.keys(tl.entities).forEach(function (id) {
+      tl.entities[id].clips.forEach(function (c) {
+        var own = null;
+        if (c.freezes) c.freezes.forEach(function (z) {
+          if (oldD > 0 && z.atMs === at) own = z; else if (z.atMs >= X) z.atMs += delta;
+        });
+        if (own) { own.durationMs = newD; c.durationMs += delta; }
+        else if (oldD === 0 && c.startMs < at && at < c.startMs + c.durationMs) {
+          (c.freezes = c.freezes || []).push({ atMs: at, durationMs: newD });
+          c.freezes.sort(function (a, b) { return a.atMs - b.atMs; });
+          c.durationMs += delta;
+        } else if (c.startMs >= X) c.startMs += delta;
+        if (c.freezes) { c.freezes = c.freezes.filter(function (z) { return z.durationMs > 0; }); if (!c.freezes.length) delete c.freezes; }
+      });
+    });
+    function shiftOverlay(o) {
+      if (o.visibleFrom != null && o.visibleFrom >= X) o.visibleFrom += delta;
+      if (o.visibleTo != null && o.visibleTo >= X) o.visibleTo += delta;
+    }
+    drill.zones.forEach(shiftOverlay); linesArr().forEach(shiftOverlay); pulsesArr().forEach(shiftOverlay); textsArr().forEach(shiftOverlay);
+    var v = drill.variants[drill.activeVariantIndex];
+    if (v.exportEndMs > 0 && v.exportEndMs >= X) v.exportEndMs += delta;
+    pausesArr().forEach(function (q) { if (q.atMs >= X && !(q.atMs === at && oldD > 0)) q.atMs += delta; });
+    recomputeTotalMs(tl);
+  }
+  function pauseAtMs(ms) {
+    var list = pausesArr();
+    for (var i = 0; i < list.length; i++) if (ms >= list[i].atMs && ms <= list[i].atMs + list[i].durationMs) return list[i];
+    return null;
+  }
+  function insertPauseHere() {
+    var t = advEditTimeMs();
+    if (t == null) { flash("Place d'abord le curseur sur la règle, à l'instant à figer", false); return; }
+    var hit = pauseAtMs(t);
+    if (hit) { selPause = hit; renderAdvancedTimeline(); flash("Il y a déjà une pause ici", true); return; }
+    stopPlay(); pushHistory();
+    var p = { atMs: Math.round(t), durationMs: lastPauseMs };
+    shiftTimelineForPause(p.atMs, 0, p.durationMs);
+    pausesArr().push(p);
+    pausesArr().sort(function (a, b) { return a.atMs - b.atMs; });
+    selPause = p; advCursorMs = p.atMs;
+    invalidateEntsCache(); render(); renderAdvancedTimeline(); syncJSON();
+    flash("Image figée " + (p.durationMs / 1000).toFixed(1) + " s — sélectionne tes options puis « Afficher la sélection ici »", true);
+  }
+  function resizePause(p, ms, live) {
+    ms = Math.max(PAUSE_MIN_MS, Math.min(PAUSE_MAX_MS, Math.round(ms / 100) * 100));
+    if (ms === p.durationMs) return;
+    shiftTimelineForPause(p.atMs, p.durationMs, ms);
+    p.durationMs = ms; lastPauseMs = ms;
+    invalidateEntsCache(); render(); renderAdvancedTimeline();
+    if (!live) syncJSON();
+  }
+  function deletePause(p) {
+    pushHistory();
+    var list = pausesArr(); list.splice(list.indexOf(p), 1);
+    shiftTimelineForPause(p.atMs, p.durationMs, 0);
+    if (selPause === p) selPause = null;
+    invalidateEntsCache(); render(); renderAdvancedTimeline(); syncJSON();
+    flash("Pause supprimée", true);
+  }
+  // Objets "d'option" selectionnes : zones, traits, textes, pulses (les
+  // entites ne portent pas de fenetre de presence).
+  function selectedOverlayObjects() {
+    var out = [];
+    function add(o) { if (o && out.indexOf(o) < 0) out.push(o); }
+    multiSel.forEach(function (s) { if (s.kind === "zone" || s.kind === "line" || s.kind === "text" || s.kind === "pulse") add(s.ref); });
+    add(selZone); add(selLine); add(selText); add(selPulse);
+    return out;
+  }
+  function showSelectionDuringPause(p, oneByOne) {
+    var objs = selectedOverlayObjects();
+    if (!objs.length) { flash("Sélectionne d'abord un trait, une zone, un texte ou un pulse sur le terrain", false); return; }
+    pushHistory();
+    var step = oneByOne && objs.length > 1 ? p.durationMs / objs.length : 0;
+    objs.forEach(function (o, i) { o.visibleFrom = Math.round(p.atMs + i * step); o.visibleTo = p.atMs + p.durationMs; });
+    advCursorMs = p.atMs + p.durationMs - 1;
+    recomputeTotalMs(drill.timeline); invalidateEntsCache(); render(); renderAdvancedTimeline(); syncJSON();
+    flash(objs.length + (objs.length > 1 ? " éléments affichés" : " élément affiché") + (step ? " un par un" : "") + " pendant la pause ✓", true);
+  }
+  function renderPauseBands(wrap, ruler, totalMs) {
+    wrap.querySelectorAll(".tl-pause, .tl-pause-tab, .tl-pause-handle").forEach(function (n) { n.remove(); });
+    var list = pausesArr();
+    if (selPause && list.indexOf(selPause) < 0) selPause = null;
+    var wr = wrap.getBoundingClientRect(), rr = ruler.getBoundingClientRect(), left0 = rr.left - wr.left, top0 = rr.top - wr.top;
+    list.forEach(function (p) {
+      var x1 = left0 + p.atMs / totalMs * rr.width, x2 = left0 + Math.min(totalMs, p.atMs + p.durationMs) / totalMs * rr.width;
+      var band = document.createElement("div"); band.className = "tl-pause" + (p === selPause ? " selected" : "");
+      band.style.left = x1 + "px"; band.style.width = Math.max(2, x2 - x1) + "px"; band.style.top = top0 + "px";
+      wrap.appendChild(band);
+      var tab = document.createElement("div"); tab.className = "tl-pause-tab";
+      tab.textContent = "⏸ " + (p.durationMs / 1000).toFixed(1) + " s";
+      tab.title = "Image figée — clique pour régler, glisse le bord droit pour la durée";
+      tab.style.left = x1 + "px"; tab.style.top = top0 + "px"; tab.style.maxWidth = Math.max(18, x2 - x1) + "px";
+      tab.addEventListener("pointerdown", function (ev) { ev.preventDefault(); ev.stopPropagation(); selPause = p; advCursorMs = p.atMs; render(); renderAdvancedTimeline(); });
+      wrap.appendChild(tab);
+      var h = document.createElement("div"); h.className = "tl-pause-handle"; h.title = "Glisse pour changer la durée de la pause";
+      h.style.left = x2 + "px"; h.style.top = top0 + "px";
+      h.addEventListener("pointerdown", function (ev) {
+        ev.preventDefault(); ev.stopPropagation();
+        selPause = p; pushHistory();
+        var startX = ev.clientX, startD = p.durationMs, moved = false;
+        function move(mv) {
+          moved = true;
+          var r2 = ruler.getBoundingClientRect();
+          resizePause(p, startD + (mv.clientX - startX) / r2.width * advTimelineTotalMs, true);
+        }
+        function up() {
+          document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
+          if (!moved) { undoStack.pop(); updateHistoryBtns(); renderAdvancedTimeline(); return; }
+          syncJSON();
+        }
+        document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
+      });
+      wrap.appendChild(h);
+    });
+  }
+  function updatePauseBar() {
+    var bar = document.getElementById("advPauseBar"); if (!bar) return;
+    var p = selPause && pausesArr().indexOf(selPause) >= 0 ? selPause : null;
+    bar.classList.toggle("hidden", !p);
+    if (!p) return;
+    document.getElementById("advPauseAt").textContent = "à " + (p.atMs / 1000).toFixed(1) + " s";
+    var inp = document.getElementById("advPauseDur");
+    if (document.activeElement !== inp) inp.value = (p.durationMs / 1000).toFixed(1);
+  }
+  document.getElementById("advFreeze").addEventListener("click", insertPauseHere);
+  document.getElementById("advPauseShow").addEventListener("click", function () { if (selPause) showSelectionDuringPause(selPause, false); });
+  document.getElementById("advPauseStagger").addEventListener("click", function () { if (selPause) showSelectionDuringPause(selPause, true); });
+  document.getElementById("advPauseDel").addEventListener("click", function () { if (selPause) deletePause(selPause); });
+  document.getElementById("advPauseDur").addEventListener("change", function () {
+    if (!selPause) return;
+    var ms = parseFloat(this.value) * 1000;
+    if (isNaN(ms)) { updatePauseBar(); return; }
+    pushHistory(); resizePause(selPause, ms, false);
+  });
+
   var MIN_CLIP_MS = 150, DEFAULT_CLIP_MS = 1500;
   // Clip selectionne dans le panneau avance : {rec, ci} (rec = entree
   // tl.entities[id], ci = index dans rec.clips). Survit aux re-rendus du
@@ -3804,7 +4121,14 @@
     var wrap = document.getElementById("advTimeline");
     if (!advancedMode) { if (wrap) wrap.classList.add("hidden"); return; }
     wrap.classList.remove("hidden");
+    // Avant toute mesure (regle, marqueurs) : la barre de pause change la
+    // hauteur au-dessus de la regle, donc la position verticale des bandes.
+    updatePauseBar();
     var ruler = document.getElementById("advRuler"), tracks = document.getElementById("advTracks");
+    // Le panneau est reconstruit en entier a chaque rendu (y compris a chaque
+    // pointermove d'un glisser) : sans cette sauvegarde, vider les pistes remet
+    // le defilement en haut et fait sauter la liste sous le doigt.
+    var keepTracksTop = tracks.scrollTop, keepWrapTop = wrap.scrollTop;
     ruler.innerHTML = ""; tracks.innerHTML = "";
     // drill.timeline (canonique) plutot qu'une reconstruction depuis
     // drill.keyframes : ce dernier n'est a jour qu'au voisinage de curKf (cf
@@ -3863,7 +4187,7 @@
         var mini = [];
         list.forEach(function (item) {
           var color = entityTlColor(item.e);
-          item.rec.clips.forEach(function (c) { mini.push({ start: c.startMs, dur: c.durationMs, color: color }); });
+          item.rec.clips.forEach(function (c) { mini.push({ start: c.startMs, dur: c.durationMs, color: color, del: { kind: "clip", rec: item.rec, c: c } }); });
         });
         renderGroupSummaryRow(tracks, totalMs, mini, function () { advGroupOpen[key] = true; renderAdvancedTimeline(); });
       }
@@ -3893,7 +4217,10 @@
     // empilait un nouveau .tl-cursor sans jamais retirer le precedent —
     // des dizaines de barres accent s'accumulaient et se fondaient en un
     // bloc plein, exactement le bug rapporte par Robin.
+    // Defilement restaure AVANT de mesurer la regle (marqueurs/pause/curseur) : un wrap deja defile bougerait la regle.
+    tracks.scrollTop = keepTracksTop; wrap.scrollTop = keepWrapTop;
     renderExportEndMarker(wrap, ruler, totalMs);
+    renderPauseBands(wrap, ruler, totalMs);
     var oldCursor = wrap.querySelector(".tl-cursor");
     if (oldCursor) oldCursor.remove();
     if (advCursorMs != null) {
@@ -3906,6 +4233,7 @@
       cursor.style.left = ((rulerRect.left - wrapRect.left) + cursorPct / 100 * rulerRect.width) + "px";
       wrap.appendChild(cursor);
     }
+    tracks.scrollTop = keepTracksTop; wrap.scrollTop = keepWrapTop;
   }
   // Marqueur "fin de video" : poignee orange sur la regle, glissable, qui fixe
   // la duree exportee (GIF/MP4) de la variante active (variant.exportEndMs).
@@ -3972,6 +4300,7 @@
       clip.style.left = (c.start / totalMs * 100) + "%";
       clip.style.width = Math.max(1, c.dur / totalMs * 100) + "%";
       clip.style.background = c.color;
+      clip._del = c.del;
       lane.appendChild(clip);
     });
     row.appendChild(lane);
@@ -3991,6 +4320,7 @@
       clip.style.left = (c.startMs / totalMs * 100) + "%";
       clip.style.width = Math.max(1.5, c.durationMs / totalMs * 100) + "%";
       clip.style.background = color;
+      clip._del = { kind: "clip", rec: rec, c: c };
       clip.title = round1(c.durationMs / 1000) + "s — glisser pour decaler, poignee droite pour la duree, clic pour regler precisement, Maj+clic pour multi-selection";
       var handle = document.createElement("div"); handle.className = "tl-clip-handle";
       clip.appendChild(handle);
@@ -4020,7 +4350,7 @@
     } else {
       var mini = items.map(function (o) {
         var oStart = o.visibleFrom != null ? o.visibleFrom : 0, oEnd = o.visibleTo != null ? o.visibleTo : totalMs;
-        return { start: oStart, dur: oEnd - oStart, color: getColor(o) };
+        return { start: oStart, dur: oEnd - oStart, color: getColor(o), del: { kind: "overlay", o: o } };
       });
       renderGroupSummaryRow(tracks, totalMs, mini, function () { advGroupOpen[label] = true; renderAdvancedTimeline(); });
     }
@@ -4036,6 +4366,7 @@
     clip.style.left = (oStart / totalMs * 100) + "%";
     clip.style.width = Math.max(1.5, (oEnd - oStart) / totalMs * 100) + "%";
     clip.style.background = getColor(o);
+    clip._del = { kind: "overlay", o: o };
     clip.title = round1((oEnd - oStart) / 1000) + "s de visibilite — glisser pour decaler, poignees pour le debut/la fin, clic pour l'inspecteur";
     var handleL = document.createElement("div"); handleL.className = "tl-clip-handle-left";
     var handleR = document.createElement("div"); handleR.className = "tl-clip-handle";
@@ -4440,7 +4771,7 @@
         hi = Math.min(hi, it.maxStart - it.origStart);
       });
       deltaMs = Math.max(lo, Math.min(hi, deltaMs));
-      items.forEach(function (it) { it.clip.startMs = Math.round(it.origStart + deltaMs); });
+      items.forEach(function (it) { setClipStart(it.clip, Math.round(it.origStart + deltaMs)); });
       renderAdvancedTimeline();
     }
     function up() {
@@ -4476,7 +4807,7 @@
       var ci = s.rec.clips.indexOf(s.clip);
       var minStart = ci > 0 ? (s.rec.clips[ci - 1].startMs + s.rec.clips[ci - 1].durationMs) : 0;
       var maxStart = ci < s.rec.clips.length - 1 ? (s.rec.clips[ci + 1].startMs - s.clip.durationMs) : Infinity;
-      s.clip.startMs = Math.max(minStart, Math.min(maxStart, target));
+      setClipStart(s.clip, Math.max(minStart, Math.min(maxStart, target)));
     });
     recomputeTotalMs(drill.timeline); invalidateEntsCache();
     render(); renderAdvancedTimeline(); syncJSON();
@@ -4519,7 +4850,7 @@
     var minStart = ci > 0 ? (rec.clips[ci - 1].startMs + rec.clips[ci - 1].durationMs) : 0;
     var maxStart = ci < rec.clips.length - 1 ? (rec.clips[ci + 1].startMs - clip.durationMs) : Infinity;
     var v = Math.round((parseFloat(e.target.value) || 0) * 1000);
-    clip.startMs = Math.max(minStart, Math.min(maxStart, v));
+    setClipStart(clip, Math.max(minStart, Math.min(maxStart, v)));
     recomputeTotalMs(drill.timeline); invalidateEntsCache(); render(); renderAdvancedTimeline(); syncJSON();
   });
   document.getElementById("advClipDur").addEventListener("input", function (e) {
@@ -4597,7 +4928,7 @@
     function move(mv) {
       moved = true;
       var deltaMs = (mv.clientX - startX) / laneW * totalMs;
-      clip.startMs = Math.max(minStart, Math.min(maxStart, Math.round(origStart + deltaMs)));
+      setClipStart(clip, Math.max(minStart, Math.min(maxStart, Math.round(origStart + deltaMs))));
       renderAdvancedTimeline();
     }
     function up() {
@@ -4929,36 +5260,101 @@
   // A ce nombre d'images, une sequence de plusieurs minutes passe sans etre
   // degradee — au-dela, le fps effectif redescend plutot que d'echouer.
   var MAX_EXPORT_FRAMES = 3000;
+  // Variantes a exporter, dans l'ordre des onglets : la variante active, ou
+  // (portee "retenues") celles dont la case n'est pas decochee. Aucune retenue =
+  // la variante active, pour ne jamais produire un fichier vide.
+  function exportVariantIdxs() {
+    var vs = drill.variants || [], scope = document.getElementById("exportScope");
+    if (vs.length < 2 || !scope || scope.value !== "kept") return [drill.activeVariantIndex];
+    var idxs = [];
+    vs.forEach(function (v, i) { if (v.exportInclude !== false) idxs.push(i); });
+    return idxs.length ? idxs : [drill.activeVariantIndex];
+  }
+  // Plan d'images partage GIF/MP4 : budget d'images reparti entre variantes au
+  // prorata de leur duree (2 mini chacune), arrondi absorbe par la derniere.
+  // Une variante sans 2e etape est ignoree (plan.skipped).
+  function planExport(idxs, fps) {
+    var vs = drill.variants, segs = [];
+    idxs.forEach(function (i) {
+      var v = vs[i];
+      if (!v.timeline) v.timeline = R.buildEntityTimeline({ keyframes: v.keyframes });
+      if (v.keyframes.length < 2) return;
+      var t = 0; for (var k = 0; k < v.keyframes.length - 1; k++) t += v.keyframes[k].durationMs || 1500;
+      var total = exportDurationMs(t, v.timeline, v.exportEndMs);
+      if (total > 0) segs.push({ vi: i, kf: v.keyframes, tl: v.timeline, total: total, name: v.name || ("Variante " + (i + 1)) });
+    });
+    var out = { segs: segs, frames: [], grandTotal: 0, skipped: idxs.length - segs.length };
+    if (!segs.length) return out;
+    out.grandTotal = segs.reduce(function (sum, sg) { return sum + sg.total; }, 0);
+    var budget = Math.max(2 * segs.length, Math.min(MAX_EXPORT_FRAMES, Math.round(out.grandTotal / 1000 * fps)));
+    var fcs = segs.map(function (sg) { return Math.max(2, Math.round(budget * sg.total / out.grandTotal)); });
+    var allocated = fcs.reduce(function (a, b) { return a + b; }, 0);
+    fcs[fcs.length - 1] = Math.max(2, fcs[fcs.length - 1] + (budget - allocated));
+    segs.forEach(function (sg, k) {
+      for (var fi = 0; fi < fcs[k]; fi++) out.frames.push({ kf: sg.kf, tl: sg.tl, vi: sg.vi, name: sg.name, t: sg.total * fi / (fcs[k] - 1), last: fi === fcs[k] - 1 });
+    });
+    return out;
+  }
+  // Titre de variante incruste (reglage "Titres") : seulement quand l'export
+  // enchaine plusieurs variantes. "start" = les 2 premieres secondes, fondu final.
+  var TITLE_START_MS = 2000, TITLE_FADE_MS = 400;
+  function drawExportTitle(fr, multi) {
+    var sel = document.getElementById("exportTitles"), mode = sel ? sel.value : "start";
+    if (!multi || mode === "none") return;
+    var op = 1;
+    if (mode === "start") {
+      if (fr.t >= TITLE_START_MS) return;
+      if (fr.t > TITLE_START_MS - TITLE_FADE_MS) op = (TITLE_START_MS - fr.t) / TITLE_FADE_MS;
+    }
+    var g = geo(), size = Math.round(g.W * 0.03), padX = size * 0.7, w = fr.name.length * size * 0.6 + padX * 2, h = size * 1.7;
+    var x = g.W * 0.03, y = g.H * 0.04;
+    var grp = R.el("g", { opacity: op });
+    grp.appendChild(R.el("rect", { x: x, y: y, width: w, height: h, rx: size * 0.4, fill: "#0e120d", "fill-opacity": 0.78 }));
+    grp.appendChild(R.textNode(x + padX, y + h * 0.68, fr.name, size, "#ffffff", { anchor: "start", bold: true }));
+    svg.appendChild(grp);
+  }
   function exportGIF() {
-    var N = drill.keyframes.length;
-    if (N < 2) { flash("Ajoute une 2e étape pour un GIF animé (sinon utilise PNG)", false); return; }
+    var fps = parseInt(document.getElementById("gifFps").value, 10) || 12;
+    var plan = planExport(exportVariantIdxs(), fps);
+    if (!plan.frames.length) { flash("Ajoute une 2e étape pour un GIF animé (sinon utilise PNG)", false); return; }
     stopPlay(); syncCast();
+    var originalKeyframes = drill.keyframes, originalTimeline = drill.timeline, originalVariantIdx = drill.activeVariantIndex;
     var sE = selEntity, sZ = selZone, sA = selAnno, sL = selLine, sT = selText, sP = selPulse, sM = multiSel; multiSel = [];
     selEntity = null; selZone = null; selAnno = null; selLine = null; selText = null; selPulse = null; multiSel = [];
-    var fps = parseInt(document.getElementById("gifFps").value, 10) || 12;
-    var total = 0; for (var i = 0; i < N - 1; i++) total += drill.keyframes[i].durationMs || 1500;
-    total = exportDurationMs(total, drill.timeline, drill.variants ? drill.variants[drill.activeVariantIndex].exportEndMs : 0);
-    var frameCount = Math.max(2, Math.min(MAX_EXPORT_FRAMES, Math.round(total / 1000 * fps)));
+    var src = plan.frames, frameCount = src.length, total = plan.grandTotal, multi = plan.segs.length > 1;
     // Le delai par image se cale sur la duree reelle de la sequence, pas sur le
-    // fps nominal choisi : sinon, des que le plafond de 150 images tronque le
+    // fps nominal choisi : sinon, des que le plafond d'images tronque le
     // nombre d'images necessaires (sequence longue et/ou fps eleve), le GIF
     // s'accelere au lieu de rester fluide-mais-a-fps-reduit sur la bonne duree.
     // Vitesse : rejoue les memes images captures plus vite/lentement, sans
-    // en capturer plus ou moins (cf exportSpeedMult) — s'applique donc apres
-    // le calcul de effFps ci-dessus, jamais avant (frameCount/total restent
+    // en capturer plus ou moins (cf exportSpeedMult) — s'applique donc apres le
+    // calcul de effFps ci-dessous, jamais avant (frameCount/total restent
     // fondes sur la duree REELLE de la sequence).
     var speedMult = exportSpeedMult();
     var effFps = (frameCount / (total / 1000)) * speedMult;
     var delayCs = Math.max(2, Math.round(100 / effFps));
     var g = geo(), EW = Math.round(g.W * exportScale(0.9)), EH = Math.round(g.H * exportScale(0.9));
     var frames = [];
+    function restore() {
+      if (drill.variants) drill.activeVariantIndex = originalVariantIdx;
+      drill.keyframes = originalKeyframes; drill.timeline = originalTimeline;
+      ensureTimeline(); ensureOverlays(); invalidateEntsCache();
+      selEntity = sE; selZone = sZ; selAnno = sA; selLine = sL; selText = sT; selPulse = sP; multiSel = sM; render();
+    }
     flash("Génération du GIF… 0/" + frameCount, true);
     (function loop(fi) {
       if (fi >= frameCount) { encode(); return; }
-      var t = total * fi / (frameCount - 1);
-      renderAnimated(pAtReal(t));
+      var fr = src[fi];
+      // Bascule la variante ACTIVE (cf boucle MP4) : fleches et traits/textes
+      // se resolvent depuis elle.
+      if (drill.variants) drill.activeVariantIndex = fr.vi;
+      drill.keyframes = fr.kf; drill.timeline = fr.tl;
+      ensureTimeline(); ensureOverlays(); invalidateEntsCache();
+      renderAnimated(pAtReal(fr.t));
+      drawExportTitle(fr, multi);
       rasterize(EW, EH, function (imgData) {
-        if (imgData) frames.push({ data: imgData.data, delayCs: (fi === frameCount - 1) ? delayCs + 60 : delayCs });
+        // Dernier image de chaque variante tenue 0,6 s : sert aussi de separation entre variantes.
+        if (imgData) frames.push({ data: imgData.data, delayCs: fr.last ? delayCs + 60 : delayCs });
         if (fi % 4 === 0 || fi === frameCount - 1) flash("Génération du GIF… " + (fi + 1) + "/" + frameCount, true);
         loop(fi + 1);
       });
@@ -4968,7 +5364,7 @@
       setTimeout(function () {
         try {
           var bytes = window.GIFEncoder.fromFrames(frames, { width: EW, height: EH, maxColors: 64, loop: 0 });
-          downloadBlob(new Blob([bytes], { type: "image/gif" }), fileBase() + ".gif");
+          downloadBlob(new Blob([bytes], { type: "image/gif" }), fileBase() + (multi ? "-variantes" : "") + ".gif");
           // Compare a fps*vitesse (l'effFps attendu quand le budget d'images n'a
           // pas ete tronque), pas au fps brut : sinon la vitesse choisie serait
           // a tort signalee comme une degradation "plafond atteint".
@@ -4976,9 +5372,9 @@
           var fpsNote = Math.round(effFps) === Math.round(expectedFps)
             ? (fps + " fps" + (speedMult !== 1 ? " × " + speedMult : ""))
             : (Math.round(effFps * 10) / 10 + " fps effectif, " + fps + " fps demandé — séquence longue, plafond d'images atteint");
-          flash("GIF exporté ✓ (" + frames.length + " images, " + EW + "×" + EH + ", " + fpsNote + ")", true);
+          flash("GIF exporté ✓ (" + frames.length + " images, " + EW + "×" + EH + ", " + fpsNote + (multi ? ", " + plan.segs.length + " variantes" : "") + ")", true);
         } catch (e) { flash("Échec de l'encodage GIF : " + e.message, false); }
-        selEntity = sE; selZone = sZ; selAnno = sA; selLine = sL; selText = sT; selPulse = sP; multiSel = sM; render();
+        restore();
       }, 40);
     }
   }
@@ -5017,41 +5413,17 @@
   var MP4_SCALE = 2.75;
   var mp4ExportSeq = 0;
   function exportMP4() {
-    // Mode "toutes les variantes" : concatene les variantes dans une seule video,
+    // Plusieurs variantes (portee "retenues") : concatenees dans une seule video,
     // dans l'ordre de leurs onglets, chacune jouant sa propre sequence de bout en
-    // bout (pas de fondu ni d'interpolation entre variantes, coupe directe).
-    var allVariants = !!(document.getElementById("mp4AllVariants") && document.getElementById("mp4AllVariants").checked && drill.variants && drill.variants.length > 1);
+    // bout (coupe directe, titre incruste au debut selon le reglage "Titres").
     var originalKeyframes = drill.keyframes, originalTimeline = drill.timeline, originalVariantIdx = drill.activeVariantIndex;
-    var segSrc = allVariants ? drill.variants.map(function (v) { return v.keyframes; }) : [drill.keyframes];
-    // Timeline canonique par variante (SPEC_TIMELINE_AVANCEE) : chaque variante
-    // porte la sienne (comme keyframes) — construite si jamais visitee (donc
-    // jamais migree) depuis sa propre sequence, sans toucher aux autres.
-    var segTl = allVariants ? drill.variants.map(function (v) { if (!v.timeline) v.timeline = R.buildEntityTimeline({ keyframes: v.keyframes }); return v.timeline; }) : [drill.timeline];
-    var totals = segSrc.map(function (kfs, idx) {
-      if (!kfs || kfs.length < 2) return 0;
-      var t = 0; for (var i = 0; i < kfs.length - 1; i++) t += kfs[i].durationMs || 1500;
-      var vEnd = drill.variants ? drill.variants[allVariants ? idx : drill.activeVariantIndex].exportEndMs : 0;
-      return exportDurationMs(t, segTl[idx], vEnd);
-    });
-    var validIdx = []; for (var vi = 0; vi < segSrc.length; vi++) if (totals[vi] > 0) validIdx.push(vi);
-    if (!validIdx.length) { flash("Ajoute une 2e étape pour une vidéo animée (sinon utilise PNG)", false); return; }
+    var fps = parseInt(document.getElementById("gifFps").value, 10) || 12;
+    var plan = planExport(exportVariantIdxs(), fps);
+    var frames = plan.frames, frameCount = frames.length, grandTotal = plan.grandTotal, validIdx = plan.segs;
+    if (!frameCount) { flash("Ajoute une 2e étape pour une vidéo animée (sinon utilise PNG)", false); return; }
     stopPlay(); syncCast();
     var sE = selEntity, sZ = selZone, sA = selAnno, sL = selLine, sT = selText, sP = selPulse, sM = multiSel; multiSel = [];
     selEntity = null; selZone = null; selAnno = null; selLine = null; selText = null; selPulse = null; multiSel = [];
-    var fps = parseInt(document.getElementById("gifFps").value, 10) || 12;
-    var grandTotal = validIdx.reduce(function (s, i) { return s + totals[i]; }, 0);
-    var budget = Math.max(2 * validIdx.length, Math.min(MAX_EXPORT_FRAMES, Math.round(grandTotal / 1000 * fps)));
-    // Repartit le budget d'images entre variantes au prorata de leur duree (2 mini
-    // chacune), puis absorbe l'arrondi sur la derniere pour retomber pile sur le budget.
-    var fcs = validIdx.map(function (i) { return Math.max(2, Math.round(budget * totals[i] / grandTotal)); });
-    var allocated = fcs.reduce(function (a, b) { return a + b; }, 0);
-    fcs[fcs.length - 1] = Math.max(2, fcs[fcs.length - 1] + (budget - allocated));
-    var frames = [];
-    validIdx.forEach(function (i, k) {
-      var kfs = segSrc[i], tl = segTl[i], totalV = totals[i], fc = fcs[k];
-      for (var fi = 0; fi < fc; fi++) frames.push({ kf: kfs, tl: tl, vi: i, t: totalV * fi / (fc - 1) });
-    });
-    var frameCount = frames.length;
     // Framerate d'encodage cale sur la duree reelle plutot que sur le fps nominal :
     // sinon, quand le plafond d'images tronque le compte necessaire (sequence
     // longue et/ou fps eleve), la video déclarée à `fps` joue ses images bien plus
@@ -5104,6 +5476,7 @@
           drill.keyframes = frames[fi].kf; drill.timeline = frames[fi].tl;
           ensureTimeline(); ensureOverlays(); invalidateEntsCache();
           renderAnimated(pAtReal(frames[fi].t));
+          drawExportTitle(frames[fi], validIdx.length > 1);
           rasterize(EW, EH, function (imgData, cv) {
             if (!cv) { next(fi + 1); return; }
             cv.toBlob(function (blob) {
@@ -5127,12 +5500,12 @@
           .then(function () { return ffmpeg.readFile(outName); })
           .then(function (data) {
             var multi = validIdx.length > 1;
-            downloadBlob(new Blob([data.buffer], { type: "video/mp4" }), fileBase() + (multi ? "-toutes-variantes" : "") + ".mp4");
+            downloadBlob(new Blob([data.buffer], { type: "video/mp4" }), fileBase() + (multi ? "-variantes" : "") + ".mp4");
             var expectedFps = fps * speedMult;
             var fpsNote = Math.round(effFps) === Math.round(expectedFps)
               ? (fps + " fps" + (speedMult !== 1 ? " × " + speedMult : ""))
               : (Math.round(effFps * 10) / 10 + " fps effectif, " + fps + " fps demandé — séquence longue, plafond d'images atteint");
-            var variantNote = multi ? (" — " + validIdx.length + " variantes" + (validIdx.length < segSrc.length ? " (" + (segSrc.length - validIdx.length) + " ignorée(s), 1 seule étape)" : "")) : "";
+            var variantNote = multi ? (" — " + validIdx.length + " variantes" + (plan.skipped ? " (" + plan.skipped + " ignorée(s), 1 seule étape)" : "")) : "";
             flash("Vidéo MP4 exportée ✓ (" + frameCount + " images " + EW + "×" + EH + ", " + fpsNote + variantNote + ")", true);
             written.push(outName);
           });
@@ -5170,6 +5543,13 @@
   document.getElementById("gifBtn").addEventListener("click", exportGIF);
   document.getElementById("mp4Btn").addEventListener("click", exportMP4);
   document.getElementById("addVariant").addEventListener("click", addVariant);
+  // Portee et titres d'export : memorises d'une session a l'autre (profil "staff"
+  // vs "joueurs"), meme en cas de stockage indisponible.
+  ["exportScope", "exportTitles"].forEach(function (id) {
+    var el = document.getElementById(id); if (!el) return;
+    try { var saved = localStorage.getItem("futsalhub.tactics." + id); if (saved && el.querySelector('option[value="' + saved + '"]')) el.value = saved; } catch (e) {}
+    el.addEventListener("change", function () { try { localStorage.setItem("futsalhub.tactics." + id, el.value); } catch (e) {} });
+  });
   document.getElementById("addStep").addEventListener("click", addStep);
   document.getElementById("dupStepEnd").addEventListener("click", duplicateStepToEnd);
   document.getElementById("delStep").addEventListener("click", delStep);
