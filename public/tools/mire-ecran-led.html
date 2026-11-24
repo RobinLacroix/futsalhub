@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><title>Mire ecran LED</title>
+<style>
+html,body{margin:0;background:#000;color:#fff;font:12px/1 monospace;overflow:hidden}
+#c{position:absolute;left:0;top:0}
+#info{position:absolute;left:8px;top:8px;background:#000a;padding:4px 6px;font-size:14px}
+</style></head><body>
+<canvas id="c"></canvas><div id="info"></div>
+<script>
+const c=document.getElementById('c'),W=screen.width,H=screen.height;
+// canvas = taille totale de l'ecran, 1 px CSS = 1 unite
+c.width=innerWidth;c.height=innerHeight;c.style.width=innerWidth+'px';
+const g=c.getContext('2d');
+g.fillStyle='#000';g.fillRect(0,0,c.width,c.height);
+for(let x=0;x<=c.width;x+=20){
+  g.strokeStyle=x%100===0?'#0f0':'#244';g.beginPath();g.moveTo(x,0);g.lineTo(x,c.height);g.stroke();
+  if(x%100===0){g.fillStyle='#0f0';g.fillText(x,x+2,c.height/2-20)}
+}
+for(let y=0;y<=c.height;y+=20){
+  g.strokeStyle=y%100===0?'#f0f':'#424';g.beginPath();g.moveTo(0,y);g.lineTo(c.width,y);g.stroke();
+  if(y%100===0){g.fillStyle='#f0f';g.fillText(y,2,y-2)}
+}
+g.strokeStyle='#fff';g.lineWidth=3;g.strokeRect(1.5,1.5,c.width-3,c.height-3);
+document.getElementById('info').textContent='Ecran Mac : '+W+' x '+H+' | fenetre : '+innerWidth+' x '+innerHeight+' | ratio : '+devicePixelRatio;
+</script></body></html>

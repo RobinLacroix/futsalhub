@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useActiveTeam } from '../../hooks/useActiveTeam';
 import type { SharedContent, SharedFolder } from '@/types';
 import { sharedContentService, clubsService, type ContentAnalyticsRow } from '@/lib/services';
+import { LedMediaButton } from '@/components/led/LedMediaButton';
 import {
   BarChart2, BookOpen, CheckCircle2, ChevronDown, ChevronRight, ChevronUp,
   Download, ExternalLink, Eye, File as FileIcon, FileText, Folder, FolderOpen,
@@ -1168,6 +1169,7 @@ export function ContentCard({ item, folders, onDelete, canDelete = false, onEdit
       </div>
     </div>
   );
+          {isFile && <LedMediaButton title={item.title} filePath={item.file_path} mime={item.file_mime_type} />}
 }
 
 /** Pill "Toutes les équipes" pour un contenu/dossier partagé au niveau du club (team_id null). */

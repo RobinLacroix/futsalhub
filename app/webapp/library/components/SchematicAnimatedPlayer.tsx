@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pause, Play, SkipBack, SkipForward } from 'lucide-react';
+import { Monitor, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
+import { LedFrame, ledBtn } from '@/components/led/LedFrame';
 
 declare global {
   interface Window {
@@ -59,8 +60,17 @@ function activeKeyframesOf(drill: DrillLike, variantIndex: number): DrillKeyfram
  * lui-même (`<Script src="/tools/tactics/render-core.js" onReady={...} />`)
  * et passer `ready` en conséquence, exactement comme app/webapp/library/page.tsx.
  */
-export function SchematicAnimatedPlayer({ drill, ready }: { drill: unknown; ready: boolean }) {
+export function SchematicAnimatedPlayer({ drill, ready, led }: {
+  drill: unknown;
+  ready: boolean;
+  /**
+   * Mode projection écran LED (cf components/led/LedFrame.tsx) : le schéma remplit la zone LED, les
+   * commandes passent autour. Instancié par le bouton "Projeter" du lecteur normal, pas par les pages.
+   */
+  led?: { onClose: () => void; title?: string };
+}) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const [ledOpen, setLedOpen] = useState(false);
   const [failed, setFailed] = useState(false);
   const d = drill as DrillLike | null;
   const variants = d?.variants ?? [];
@@ -163,6 +173,41 @@ export function SchematicAnimatedPlayer({ drill, ready }: { drill: unknown; read
     );
   }
 
+  if (led) {
+    const stepLabel = canPlay ? `Étape ${step + 1}/${N}` : 'Schéma fixe';
+    return (
+      <LedFrame
+        title={led.title ?? 'Schéma tactique'}
+        onClose={led.onClose}
+        stage={<svg ref={svgRef} style={{ width: '100%', height: '100%', display: 'block' }} preserveAspectRatio="xMidYMid meet" />}
+        controls={(
+          <div style={{ display: 'grid', gap: 10 }}>
+            {variants.length > 1 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {variants.map((v, i) => (
+                  <button key={v.id || i} type="button" onClick={() => setVariantIndex(i)} aria-pressed={i === variantIndex} style={ledBtn(i === variantIndex)}>
+                    {v.name || `Variante ${i + 1}`}
+                  </button>
+                ))}
+              </div>
+            )}
+            {canPlay && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <button type="button" onClick={() => stepTo(step - 1)} disabled={step === 0} aria-label="Étape précédente" style={ledBtn()}><SkipBack size={18} /></button>
+                <button type="button" onClick={() => stepTo(step + 1)} disabled={step >= N - 1} aria-label="Étape suivante" style={ledBtn()}><SkipForward size={18} /></button>
+                <button type="button" onClick={togglePlay} aria-label={playing ? 'Pause' : 'Lecture'} style={{ ...ledBtn(true), gridColumn: '1 / -1' }}>
+                  {playing ? <Pause size={18} /> : <Play size={18} />}{playing ? 'Pause' : 'Lecture'}
+                </button>
+                <button type="button" onClick={() => setSpeedIndex((i) => (i + 1) % SPEEDS.length)} style={ledBtn()}>{SPEEDS[speedIndex]}×</button>
+                <span style={{ alignSelf: 'center', textAlign: 'center', fontSize: 12, color: '#94a3b8' }}>{stepLabel}</span>
+              </div>
+            )}
+          </div>
+        )}
+      />
+    );
+  }
+
   return (
     <div className="flex flex-col gap-2">
       {variants.length > 1 && (
@@ -235,6 +280,16 @@ export function SchematicAnimatedPlayer({ drill, ready }: { drill: unknown; read
           </span>
         </div>
       )}
+
+      <button
+        type="button"
+        onClick={() => { setPlaying(false); setLedOpen(true); }}
+        style={{ color: T.accent, border: `1px solid ${T.accent}` }}
+        className="self-start inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold"
+      >
+        <Monitor className="h-3.5 w-3.5" />Projeter sur l&apos;écran LED
+      </button>
+      {ledOpen && <SchematicAnimatedPlayer drill={drill} ready={ready} led={{ onClose: () => setLedOpen(false) }} />}
     </div>
   );
 }
