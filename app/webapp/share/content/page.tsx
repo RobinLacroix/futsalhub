@@ -1146,6 +1146,7 @@ export function ContentCard({ item, folders, onDelete, canDelete = false, onEdit
         <span style={{ fontSize: 11, color: T.textFaint }}>{new Date(item.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}</span>
         <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
           {openError && <span style={{ fontSize: 10, color: T.red }}>{openError}</span>}
+          {isFile && <LedMediaButton title={item.title} filePath={item.file_path} mime={item.file_mime_type} />}
           {isFile ? (
             <button onClick={handleOpenFile} disabled={opening} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 6, border: `1px solid ${T.border}`, background: T.cardBg, fontSize: 11, fontWeight: 600, color: T.navy, cursor: opening ? 'default' : 'pointer' }}>
               {opening ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <ExternalLink size={11} />}Ouvrir
@@ -1169,7 +1170,6 @@ export function ContentCard({ item, folders, onDelete, canDelete = false, onEdit
       </div>
     </div>
   );
-          {isFile && <LedMediaButton title={item.title} filePath={item.file_path} mime={item.file_mime_type} />}
 }
 
 /** Pill "Toutes les équipes" pour un contenu/dossier partagé au niveau du club (team_id null). */
