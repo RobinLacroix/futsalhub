@@ -61,6 +61,24 @@ function enterFullscreen(node: HTMLElement | null) {
   } catch { /* idem */ }
 }
 
+function exitFullscreen() {
+  if (!document.fullscreenElement) return;
+  try {
+    const p = document.exitFullscreen();
+    if (p && typeof p.catch === 'function') p.catch(() => { /* déjà sorti */ });
+  } catch { /* idem */ }
+}
+
+/**
+ * À appeler SYNCHRONIQUEMENT dans le clic qui ouvre la projection, avant tout `await` : Safari n'accorde
+ * le plein écran qu'à l'intérieur du geste de l'utilisateur. Demandé plus tard (useEffect après le
+ * chargement d'une URL signée), il est refusé et la barre du navigateur part sur la LED.
+ * On passe en plein écran la page entière : le cadre est un `position: fixed` qui la recouvre.
+ */
+export function requestLedFullscreen() { enterFullscreen(document.documentElement); }
+/** Sort du plein écran (échec d'ouverture avant l'affichage du cadre). */
+export function exitLedFullscreen() { exitFullscreen(); }
+
 const C = { bg: '#05080c', panel: '#0b0f14', line: '#1f2937', text: '#e5e7eb', muted: '#94a3b8', accent: '#3B82F6' };
 
 export const ledBtn = (on = false): CSSProperties => ({
@@ -83,17 +101,20 @@ export function LedFrame({ title, onClose, stage, timeline, controls }: {
   const [blank, setBlank] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // Plein écran dès l'ouverture : sans lui, la barre du navigateur est envoyée sur la LED.
+  // Filet de sécurité : le plein écran est normalement déjà demandé par le clic d'ouverture (requestLedFullscreen).
+  // Sans lui, la barre du navigateur est envoyée sur la LED. No-op si on est déjà en plein écran.
   useEffect(() => { enterFullscreen(rootRef.current); }, []);
+
+  const close = useCallback(() => { exitFullscreen(); onClose(); }, [onClose]);
 
   useEffect(() => {
     // Phase de capture + stopPropagation : Échap ferme la projection seule, pas le dialogue parent qui l'a ouverte.
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
     window.addEventListener('keydown', onKey, true);
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => { window.removeEventListener('keydown', onKey, true); document.body.style.overflow = prev; };
-  }, [onClose]);
+  }, [close]);
 
   const field = (label: string, key: keyof Zone) => (
     <label style={{ display: 'grid', gap: 2, fontSize: 11, color: C.muted }}>
@@ -129,7 +150,7 @@ export function LedFrame({ title, onClose, stage, timeline, controls }: {
       <div style={{ gridColumn: 1, gridRow: 2, padding: '12px 12px 6px', minWidth: 0 }}>{timeline}</div>
 
       <div style={{ gridColumn: 1, gridRow: 3, padding: '8px 12px', display: 'flex', alignItems: 'flex-start', gap: 10, minWidth: 0 }}>
-        <button type="button" onClick={onClose} aria-label="Fermer la projection" style={ledBtn()}><X size={18} /></button>
+        <button type="button" onClick={close} aria-label="Fermer la projection" style={ledBtn()}><X size={18} /></button>
         <strong style={{ fontSize: 13, lineHeight: '44px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</strong>
       </div>
 

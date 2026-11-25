@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Loader2, Monitor } from 'lucide-react';
 import { sharedContentService } from '@/lib/services';
 import { LedMediaScreen } from './LedMediaScreen';
+import { exitLedFullscreen, requestLedFullscreen } from './LedFrame';
 
 /** Types projetables : vidéos et images (les PDF n'ont aucun intérêt sur 500x280). */
 export const isLedProjectable = (mime: string | null | undefined): boolean =>
@@ -21,10 +22,12 @@ export function LedMediaButton({ title, filePath, mime }: { title: string; fileP
   if (!filePath || !isLedProjectable(mime)) return null;
 
   const open = async () => {
+    requestLedFullscreen(); // dans le geste du clic, avant le chargement de l'URL : sinon Safari refuse
     setLoading(true); setError(null);
     try {
       setUrl(await sharedContentService.getSharedFileUrl(filePath));
     } catch {
+      exitLedFullscreen();
       setError('Projection impossible');
     }
     setLoading(false);

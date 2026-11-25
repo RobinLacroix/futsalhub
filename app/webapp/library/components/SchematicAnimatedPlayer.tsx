@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Monitor, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
-import { LedFrame, ledBtn } from '@/components/led/LedFrame';
+import { LedFrame, ledBtn, requestLedFullscreen } from '@/components/led/LedFrame';
 
 declare global {
   interface Window {
@@ -290,7 +290,7 @@ export function SchematicAnimatedPlayer({ drill, ready, led }: {
 
       <button
         type="button"
-        onClick={() => { setPlaying(false); setLedOpen(true); }}
+        onClick={() => { setPlaying(false); requestLedFullscreen(); setLedOpen(true); }}
         style={{ color: T.accent, border: `1px solid ${T.accent}` }}
         className="self-start inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold"
       >
