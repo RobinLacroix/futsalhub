@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { Maximize2, Monitor, MonitorOff, X } from 'lucide-react';
 
 /**
- * Mode "Écran LED" : projection sur l'écran LED du gymnase (500x280 pixels, sans mise à l'échelle,
+ * Mode "Écran LED" : projection sur l'écran LED du gymnase (750x420 pixels, sans mise à l'échelle,
  * qui n'affiche que le coin haut gauche de l'image reçue sur son entrée vidéo).
  *
  * Principe : la scène (vidéo, schéma...) occupe un rectangle W x H collé au pixel (0,0) de la page,
@@ -17,7 +17,11 @@ import { Maximize2, Monitor, MonitorOff, X } from 'lucide-react';
  */
 
 const LED_KEY = 'fh.led';
-const DEFAULT_ZONE = { w: 500, h: 280 };
+// Mesuré avec la mire sur l'écran du gymnase : 750 de large, hauteur proportionnelle (même rapport que 500x280).
+const DEFAULT_ZONE = { w: 750, h: 420 };
+// Ancienne valeur par défaut (première estimation, erronée) : si elle est mémorisée sur un appareil, on la
+// traite comme "non réglé" pour ne pas figer ce mauvais réglage.
+const LEGACY_ZONE = { w: 500, h: 280 };
 const MIN = 100;
 const MAX = 1920;
 
@@ -29,7 +33,7 @@ function readZone(): Zone {
   if (typeof window === 'undefined') return DEFAULT_ZONE;
   try {
     const p = JSON.parse(window.localStorage.getItem(LED_KEY) ?? 'null') as Partial<Zone> | null;
-    if (p && validDim(p.w) && validDim(p.h)) return { w: p.w, h: p.h };
+    if (p && validDim(p.w) && validDim(p.h) && !(p.w === LEGACY_ZONE.w && p.h === LEGACY_ZONE.h)) return { w: p.w, h: p.h };
   } catch { /* stockage indisponible ou corrompu : valeurs par défaut */ }
   return DEFAULT_ZONE;
 }

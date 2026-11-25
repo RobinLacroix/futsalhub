@@ -6,7 +6,7 @@ import { sharedContentService } from '@/lib/services';
 import { LedMediaScreen } from './LedMediaScreen';
 import { exitLedFullscreen, requestLedFullscreen } from './LedFrame';
 
-/** Types projetables : vidéos et images (les PDF n'ont aucun intérêt sur 500x280). */
+/** Types projetables : vidéos et images (les PDF n'ont aucun intérêt sur l'écran LED). */
 export const isLedProjectable = (mime: string | null | undefined): boolean =>
   !!mime && (mime.startsWith('video/') || mime.startsWith('image/'));
 
